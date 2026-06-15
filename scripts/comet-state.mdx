@@ -1,0 +1,219 @@
+---
+title: "comet-state.sh — Unified State Management for .comet.yaml"
+sidebarTitle: "comet-state.sh"
+description: "comet-state.sh is the sole interface for .comet.yaml — use it to init, get, set, transition, check entry conditions, or run a scale assessment."
+---
+
+`comet-state.sh` is the single source of truth for all `.comet.yaml` operations. AI agents use this script exclusively to read and write workflow state — never editing `.comet.yaml` directly. All other scripts (`comet-guard.sh`, `comet-archive.sh`, `comet-handoff.sh`) call `comet-state.sh` internally for their own state operations.
+
+## Usage
+
+```bash
+"$COMET_BASH" "$COMET_STATE" <operation> [args...]
+```
+
+## Operations
+
+| Operation | Syntax | Description |
+|-----------|--------|-------------|
+| `init` | `init <change-name> <workflow>` | Initialize a new `.comet.yaml` for a change |
+| `get` | `get <change-name> <field>` | Read a single field value |
+| `set` | `set <change-name> <field> <value>` | Set a single field value |
+| `transition` | `transition <change-name> <event>` | Apply a named state transition with enforced preconditions |
+| `check` | `check <change-name> <phase> [--recover]` | Validate phase entry conditions; with `--recover`, output structured recovery context |
+| `scale` | `scale <change-name>` | Assess change scope and set `verify_mode` accordingly |
+
+## init
+
+Creates a new `.comet.yaml` in `openspec/changes/<name>/` with workflow-appropriate defaults. Fails if the file already exists.
+
+```bash
+"$COMET_BASH" "$COMET_STATE" init my-feature full
+```
+
+**Workflows:** `full`, `hotfix`, `tweak`
+
+Defaults set per workflow:
+
+| Field | `full` | `hotfix` / `tweak` |
+|-------|--------|---------------------|
+| `phase` | `open` | `open` |
+| `build_mode` | `null` | `direct` |
+| `isolation` | `null` | `branch` |
+| `verify_mode` | `null` | `light` |
+
+`base_ref` is automatically set to the current `HEAD` commit SHA for use in later scale assessment.
+
+## get
+
+Reads and prints a single field value from `.comet.yaml`. Returns an empty string if the field is empty or absent.
+
+```bash
+"$COMET_BASH" "$COMET_STATE" get my-feature phase
+# build
+```
+
+## set
+
+Updates a single field value in `.comet.yaml`. Validates both field name and enum value before writing.
+
+```bash
+"$COMET_BASH" "$COMET_STATE" set my-feature isolation branch
+```
+
+<Warning>
+Setting `phase` directly bypasses state machine constraints. Use `transition` instead whenever possible to ensure preconditions are enforced.
+</Warning>
+
+**Valid enum values by field:**
+
+| Field | Valid Values |
+|-------|-------------|
+| `workflow` | `full`, `hotfix`, `tweak` |
+| `phase` | `open`, `design`, `build`, `verify`, `archive` |
+| `build_mode` | `subagent-driven-development`, `executing-plans`, `direct` |
+| `build_pause` | `null`, `plan-ready` |
+| `isolation` | `branch`, `worktree` |
+| `verify_mode` | `light`, `full` |
+| `verify_result` | `pending`, `pass`, `fail` |
+| `branch_status` | `pending`, `handled` |
+| `archived` | `true`, `false` |
+| `direct_override` | `true`, `false` |
+
+Path fields (`design_doc`, `plan`, `verification_report`, `handoff_context`, `handoff_hash`, `build_command`, `verify_command`) accept any string value without validation.
+
+## transition
+
+Applies a named semantic transition with enforced preconditions. This is the preferred way to advance phase — it checks that the current phase matches expectations and validates required fields before writing any state.
+
+```bash
+"$COMET_BASH" "$COMET_STATE" transition my-feature build-complete
+```
+
+### Transition Events
+
+| Event | Effect |
+|-------|--------|
+| `open-complete` | Requires `phase: open`. Sets `phase: design` (full workflow) or `phase: build` (hotfix/tweak) |
+| `design-complete` | Requires `phase: design`. Sets `phase: build` |
+| `build-complete` | Requires `phase: build`, `isolation` set, `build_mode` set, and `direct_override` rules satisfied. Sets `phase: verify`, `verify_result: pending`, `verification_report: null`, `branch_status: pending` |
+| `verify-pass` | Requires `phase: verify`, `verification_report` pointing to an existing file, and `branch_status: handled`. Sets `verify_result: pass`, `phase: archive`, `verified_at` |
+| `verify-fail` | Requires `phase: verify`. Sets `verify_result: fail`, `phase: build`, `branch_status: pending` |
+| `archived` | Requires `phase: archive`. Sets `archived: true` |
+
+## check
+
+Validates entry conditions for a given phase. Use this at the start of a phase to confirm the change is in the expected state before doing any work.
+
+```bash
+"$COMET_BASH" "$COMET_STATE" check my-feature build
+```
+
+Example output:
+
+```
+=== Entry Check: comet-build ===
+  [PASS] .comet.yaml exists
+  [PASS] phase=build (expected: build)
+  [PASS] design_doc=docs/superpowers/specs/2026-06-01-my-feature-design.md (file exists)
+  [PASS] proposal.md non-empty
+  [PASS] tasks.md non-empty
+
+ALL CHECKS PASSED — ready to proceed
+```
+
+### --recover Flag
+
+The `--recover` flag outputs structured recovery context instead of a pass/fail check. This is particularly useful after AI context compaction — it summarizes current phase, field status, task progress, and the recommended recovery action:
+
+```bash
+"$COMET_BASH" "$COMET_STATE" check my-feature build --recover
+```
+
+Example output:
+
+```
+=== Recovery Context: my-feature ===
+Phase: build
+Workflow: full
+
+State fields:
+  Build decisions:
+  - isolation: DONE (branch)
+  - build_mode: DONE (subagent-driven-development)
+  - build_pause: PENDING
+
+  Plan:
+  - plan: DONE (docs/superpowers/plans/2026-06-01-my-feature.md)
+
+  Tasks: 3/7 done, 4 pending
+
+Recovery action: Read tasks.md and continue from first unchecked task.
+
+=== End Recovery Context ===
+```
+
+Recovery actions are phase-specific:
+
+| Phase | Typical recovery actions |
+|-------|--------------------------|
+| `open` | Create or complete missing artifacts, then use `AskUserQuestion` for user confirmation |
+| `design` | Regenerate handoff if missing, or resume from brainstorming confirmation if handoff exists |
+| `build` | Continue from first unchecked task, or ask user for isolation/build mode if not yet selected |
+| `verify` | Complete verification or branch handling steps |
+| `archive` | Run `/comet-archive` to complete archiving |
+
+## scale
+
+Assesses the scope of a change and writes `verify_mode` (`light` or `full`) to `.comet.yaml`. Scale is determined by three metrics:
+
+| Metric | Light threshold | Full threshold |
+|--------|----------------|----------------|
+| Task count | ≤ 3 | > 3 |
+| Delta spec count | ≤ 1 capability | > 1 capability |
+| Changed files (vs `base_ref`) | ≤ 4 | > 4 |
+
+If any metric exceeds its threshold, `verify_mode` is set to `full`.
+
+```bash
+"$COMET_BASH" "$COMET_STATE" scale my-feature
+# === Scale Assessment: my-feature ===
+#   Tasks: 5 (threshold: 3)
+#   Delta specs: 1 capabilities (threshold: 1)
+#   Changed files: 6 (threshold: 4)
+#   → Result: full
+```
+
+## Examples
+
+```bash
+# Initialize state for a new full-workflow change
+"$COMET_BASH" "$COMET_STATE" init my-feature full
+
+# Set isolation after the user chooses branch
+"$COMET_BASH" "$COMET_STATE" set my-feature isolation branch
+
+# Set build mode after the user chooses execution method
+"$COMET_BASH" "$COMET_STATE" set my-feature build_mode subagent-driven-development
+
+# Read the current phase
+"$COMET_BASH" "$COMET_STATE" get my-feature phase
+
+# Record the verification report path
+"$COMET_BASH" "$COMET_STATE" set my-feature verification_report docs/superpowers/specs/2026-06-01-my-feature-verify.md
+
+# Mark branch as handled
+"$COMET_BASH" "$COMET_STATE" set my-feature branch_status handled
+
+# Apply a transition after guard passes
+"$COMET_BASH" "$COMET_STATE" transition my-feature build-complete
+
+# Run scale assessment before verify
+"$COMET_BASH" "$COMET_STATE" scale my-feature
+
+# Check entry conditions for a phase
+"$COMET_BASH" "$COMET_STATE" check my-feature verify
+
+# Get structured recovery context after context compaction
+"$COMET_BASH" "$COMET_STATE" check my-feature build --recover
+```

@@ -1,0 +1,99 @@
+---
+title: "Comet Project Structure: Skills, OpenSpec, and State Files"
+sidebarTitle: "Project Structure"
+description: "Learn how Comet organizes skills, OpenSpec change artifacts, Superpowers design documents, and state files within your project directory."
+---
+
+After running `comet init`, Comet establishes a clear directory structure that separates **WHAT** (OpenSpec artifacts) from **HOW** (Superpowers documents), with skills installed to your AI platform's skills directory. Everything Comet needs to track, resume, and archive a change lives on disk — not in conversation history.
+
+## Directory Tree
+
+```
+your-project/
+├── .claude/skills/              # Platform skills dir (Comet + OpenSpec + Superpowers)
+│   ├── comet/SKILL.md
+│   │   └── scripts/
+│   │       ├── comet-guard.sh       # Phase transition guard (--apply auto-updates state)
+│   │       ├── comet-env.sh         # Script discovery helper
+│   │       ├── comet-handoff.sh     # Design handoff (OpenSpec → Superpowers context tracing)
+│   │       ├── comet-archive.sh     # One-command archive automation
+│   │       ├── comet-yaml-validate.sh # Schema validator
+│   │       └── comet-state.sh       # Unified state management (init/set/get/check/scale)
+│   ├── comet-*/SKILL.md
+│   ├── openspec-*/SKILL.md
+│   └── brainstorming/SKILL.md
+├── openspec/                    # OpenSpec — WHAT
+│   ├── config.yaml
+│   └── changes/
+│       └── <name>/
+│           ├── .openspec.yaml       # OpenSpec state
+│           ├── .comet.yaml          # Comet workflow state (decoupled)
+│           ├── proposal.md
+│           ├── design.md
+│           ├── specs/<capability>/spec.md
+│           └── tasks.md
+└── docs/superpowers/            # Superpowers — HOW
+    ├── specs/                   # Design documents
+    └── plans/                   # Implementation plans
+```
+
+## Skills Directory
+
+The platform skills directory (shown as `.claude/skills/` above) varies by AI coding platform. Comet supports 28 platforms — each has its own directory convention:
+
+| Platform | Skills Directory |
+|----------|----------------|
+| Claude Code | `.claude/` |
+| Cursor | `.cursor/` |
+| Gemini CLI | `.gemini/` |
+| Windsurf | `.windsurf/` |
+| GitHub Copilot | `.github/` |
+| Codex | `.codex/` |
+
+During `comet init`, you select one or more platforms and Comet installs the skills to the appropriate directory for each. See the [Supported Platforms](/platforms) page for the full list of 28 platforms and their directory mappings.
+
+All Comet automation scripts live under `<platform-skills-dir>/comet/scripts/` and are located at runtime via `comet-env.sh` — paths are never hardcoded.
+
+## OpenSpec Directory
+
+The `openspec/` directory is managed by OpenSpec and contains everything that defines **WHAT** is being built:
+
+- **`config.yaml`** — Project-level OpenSpec configuration
+- **`changes/<name>/`** — One subdirectory per active change, containing:
+  - `proposal.md` — Problem description, motivation, goals, and scope
+  - `design.md` — Architecture decisions and solution design
+  - `tasks.md` — Task checklist (each task is checked off as it completes)
+  - `specs/<capability>/spec.md` — Delta spec for the affected capability (created when existing acceptance scenarios are modified)
+  - `.openspec.yaml` — OpenSpec's own state file for this change
+  - `.comet.yaml` — Comet's decoupled workflow state for this change
+- **`changes/archive/YYYY-MM-DD-<name>/`** — Completed changes moved here at archive
+- **`specs/<capability>/spec.md`** — Main specs (delta specs are merged in at archive time)
+
+## Superpowers Directory
+
+The `docs/superpowers/` directory is managed by Superpowers and contains everything that defines **HOW** the change is built:
+
+- **`docs/superpowers/specs/`** — Design documents. Each Design Doc is a technical RFC created during the design phase, named `YYYY-MM-DD-<topic>-design.md`. At archive, the doc's frontmatter is annotated with `archived-with` status.
+- **`docs/superpowers/plans/`** — Implementation plans. Each plan is generated during the build phase, named `YYYY-MM-DD-<feature>.md`. Plan file headers contain `change:` and `design-doc:` metadata linking them to their associated OpenSpec change.
+
+## State Files
+
+Two state files live inside each active change directory and serve distinct purposes:
+
+| File | Owner | Purpose |
+|------|-------|---------|
+| `.openspec.yaml` | OpenSpec | Spec lifecycle and change metadata — tracks the change's identity, creation date, and OpenSpec-level status |
+| `.comet.yaml` | Comet | Workflow phase, execution mode, verification status, archive flag, and links to Design Doc and Plan |
+
+This decoupled design means OpenSpec and Comet each own their own state without coupling their internals. Comet reads and writes `.comet.yaml` exclusively through `comet-state.sh` — agents should never edit it directly.
+
+See the [State Management](/concepts/state-management) concept page for full field-by-field documentation of both files.
+
+## Project-Level vs. Global Install
+
+The `docs/superpowers/` working directories are only created for **project-level** installs:
+
+- **Project-level** (`comet init` in your project directory): Creates `docs/superpowers/specs/` and `docs/superpowers/plans/` in the project. Skills are installed to the platform's project-scoped skills directory.
+- **Global** (`comet init --scope global`): Skills are installed to the platform's home-directory-level skills directory. The `docs/superpowers/` working directories are **not** created — they are expected to exist in each project you work in.
+
+For most users, project-level install is the right choice: it keeps all Comet artifacts inside the repository where the AI agent can find them.

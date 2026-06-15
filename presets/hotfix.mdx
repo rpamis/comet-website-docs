@@ -1,0 +1,100 @@
+---
+title: "Comet Hotfix Preset: Quick Bug Fixes Without Brainstorming"
+sidebarTitle: "Hotfix"
+description: "The hotfix preset skips brainstorming and deep design, going straight from open to build, verify, and archive — for small, well-understood bug fixes."
+---
+
+The hotfix preset is designed for small, focused bug fixes where the solution is already clear. It skips the brainstorming phase to move faster, delivering a streamlined path from problem description to archived fix without the overhead of full workflow design.
+
+## When to Use Hotfix
+
+Use `/comet-hotfix` only when **all** of the following conditions are met:
+
+- The fix targets existing functionality — no new capability is introduced
+- The change scope is predictable: **fewer than 3 files** typically affected
+- **No interface changes** or architecture adjustments are required
+- **No new public API** is introduced by the fix
+- The fix scope is contained within a **single function or module**
+- **No database schema changes** are involved
+
+When these conditions hold, hotfix gives you the fastest path from bug description to archive.
+
+## Hotfix Workflow
+
+```
+/comet-hotfix
+  open → build → verify → archive
+  (brainstorming skipped)
+```
+
+The hotfix execution chain is a streamlined subset of the full five-phase workflow:
+
+| Phase | What Happens |
+|-------|-------------|
+| **Open** | Streamlined artifact creation — `proposal.md`, `design.md`, `tasks.md` (no multi-solution comparison, no delta spec unless existing acceptance scenarios are affected) |
+| **Build** | Direct build (`build_mode: direct`) — tasks executed one by one, formatter and tests run per task, commits use `fix:` prefix |
+| **Verify** | Root cause elimination check, then `comet-verify` scale assessment (small hotfixes typically qualify for lightweight verification: ≤ 3 tasks, ≤ 2 files) |
+| **Archive** | Reuses `/comet-archive` after `verify_result: pass` is confirmed |
+
+## Starting a Hotfix
+
+In your AI coding tool, describe the bug you want to fix. Comet evaluates your description automatically:
+
+- If it meets hotfix conditions, `/comet` **auto-routes** to `/comet-hotfix` — you don't need to invoke it directly.
+- You can also invoke `/comet-hotfix` directly to explicitly use the preset.
+
+Once invoked, the hotfix workflow runs **continuously** without pausing for input — except at defined decision points (upgrade conditions and verification failures).
+
+## Build Mode
+
+Hotfix uses `direct` build mode by default. This means a single agent executes all tasks sequentially without spinning up sub-agents or generating a full implementation plan. If the task count exceeds 3, the agent transfers to `/comet-build`'s plan and execution method selection instead.
+
+## Upgrade Conditions
+
+<Warning>
+If any of the following conditions are discovered during a hotfix, Comet will pause and ask you to confirm an upgrade to the full workflow. The agent **cannot** continue the hotfix automatically — your explicit confirmation is required.
+
+| Condition | Why It Triggers an Upgrade |
+|-----------|---------------------------|
+| Change involves **3 or more files** | Exceeds single-point fix scope |
+| Architecture changes needed (new modules, interfaces, or dependencies) | Requires deep design |
+| Database schema changes required | Structural adjustments need full planning |
+| Fix introduces a **new public API** | Creates external interface, needs design review |
+| Fix scope exceeds a **single function or module** | Requires coordinated changes |
+
+Upgrade is confirmed interactively. If you decline, the hotfix stops and Comet reports that the change has exceeded hotfix scope.
+</Warning>
+
+## Upgrading to Full Workflow
+
+When a hotfix is confirmed to need upgrading, Comet follows this path:
+
+```
+hotfix → full (upgrade)
+  open → [supplement Design Doc] → design → build → verify → archive
+```
+
+After your confirmation, Comet:
+
+1. Updates the `workflow` field in `.comet.yaml` to `full`
+2. Loads the `comet-design` skill to supplement a full Design Doc on top of the existing hotfix artifacts
+3. Proceeds normally through the full workflow from the design phase onward
+
+This means your hotfix's `proposal.md`, `design.md`, and `tasks.md` are preserved and built upon — you don't start from scratch.
+
+## Phase Guards
+
+Hotfix enforces the same phase guard transitions as the full workflow:
+
+```bash
+# Transition open → build
+"$COMET_BASH" "$COMET_GUARD" <change-name> open --apply
+
+# Transition build → verify (after root cause elimination check)
+"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
+
+# Transition verify → archive (handled by /comet-verify)
+"$COMET_BASH" "$COMET_GUARD" <change-name> verify --apply
+```
+
+Guards validate exit conditions before advancing — a hotfix cannot enter `verify` without `isolation` and `build_mode` set, and cannot archive without `verify_result: pass`.
