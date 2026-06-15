@@ -1,0 +1,98 @@
+---
+title: "comet-handoff.sh — Design Context Handoff for Comet"
+sidebarTitle: "comet-handoff.sh"
+description: "comet-handoff.sh creates a SHA256-traced context package from OpenSpec artifacts and writes handoff_context and handoff_hash to .comet.yaml for guard validation."
+---
+
+`comet-handoff.sh` bridges the Design and Build phases by generating a compact, traceable context package from OpenSpec artifacts. The SHA256 hash ensures the AI agent in Phase 3 works from exactly the same source material that was used in design — any post-design edits to OpenSpec artifacts are detected by `comet-guard.sh` before the phase can advance.
+
+## Usage
+
+```bash
+"$COMET_BASH" "$COMET_HANDOFF" <change-name> design --write [--full]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<change-name>` | The name of the active change |
+| `design --write` | Required positional arguments; the only supported mode |
+| `--full` | Include full artifact content instead of compact excerpts (default: compact, truncated at 80 lines per file) |
+
+## What It Generates
+
+Handoff creates two files inside the change directory:
+
+```
+openspec/changes/<name>/.comet/handoff/
+├── design-context.json   ← machine-readable index with file paths and SHA256 hashes
+└── design-context.md     ← human/agent-readable excerpts with traceability markers
+```
+
+**Source files** included in the handoff package:
+
+- `openspec/changes/<name>/proposal.md`
+- `openspec/changes/<name>/design.md`
+- `openspec/changes/<name>/tasks.md`
+- `openspec/changes/<name>/specs/<capability>/spec.md` (all delta specs, sorted)
+
+The `design-context.md` file includes these traceability markers required by `comet-guard.sh`:
+
+- `Generated-by: comet-handoff.sh`
+- `Mode: compact` or `Mode: full`
+- Per file: `Source: <path>` and `SHA256: <hash>`
+
+## Fields Written to .comet.yaml
+
+After generating the context package, handoff calls `comet-state.sh set` to record:
+
+| Field | Value |
+|-------|-------|
+| `handoff_context` | Path to the generated `design-context.json` |
+| `handoff_hash` | SHA256 of the combined source material (paths + per-file hashes, hashed together) |
+
+## Guard Validation
+
+`comet-guard.sh design --apply` enforces all of the following before the design phase can complete:
+
+1. `handoff_context` is set and points to a non-empty file
+2. `handoff_hash` is a valid 64-character hex SHA256
+3. The recorded `handoff_hash` matches the current SHA256 of the source material — if any OpenSpec artifact was edited after the handoff was generated, this check fails
+4. `design-context.md` exists alongside `design-context.json`
+5. The markdown contains all required traceability markers (`Generated-by`, `Mode`, per-file `Source:` and `SHA256:`)
+
+If OpenSpec artifacts are edited after running handoff, you must re-run `comet-handoff.sh` to regenerate the package and update `handoff_hash`.
+
+## Compact vs. Full Mode
+
+In **compact mode** (default), each source file is included as a truncated excerpt — up to 80 lines — with the full file path available for the agent to read directly. This keeps the handoff package small for large proposals or specs.
+
+In **full mode** (`--full`), the complete content of every source file is embedded in the markdown. Use this when the agent needs full artifact visibility without making additional file reads.
+
+```bash
+# Compact mode (default) — truncates files over 80 lines
+"$COMET_BASH" "$COMET_HANDOFF" my-feature design --write
+
+# Full mode — embeds complete file content
+"$COMET_BASH" "$COMET_HANDOFF" my-feature design --write --full
+```
+
+## When to Run
+
+Handoff is run automatically by the AI agent at the end of Phase 2 (deep design), immediately before invoking `comet-guard.sh design --apply`. You typically do not need to run this manually unless:
+
+- OpenSpec artifacts were edited after design and you need to refresh the hash
+- The handoff files were deleted or corrupted
+- You are running handoff with `--full` for a downstream agent that needs complete artifact content
+
+<Note>
+The OpenSpec artifacts (`proposal.md`, `design.md`, `tasks.md`, delta specs) remain the canonical source of truth. The handoff package is a deterministic snapshot — a read-only context pack for Phase 3 agents, not an agent-authored summary.
+</Note>
+
+## Prerequisites
+
+- `phase: design` must be set in `.comet.yaml` — handoff refuses to run outside the design phase
+- `proposal.md`, `design.md`, and `tasks.md` must all exist and be non-empty
+- `comet-state.sh` must be present alongside `comet-handoff.sh` (used to write `handoff_context` and `handoff_hash`)
+- `sha256sum` or `shasum` must be available in the shell environment

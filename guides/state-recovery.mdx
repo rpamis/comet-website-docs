@@ -1,0 +1,115 @@
+---
+title: "Recover from Comet State Errors and Inconsistencies"
+sidebarTitle: "State Recovery"
+description: "Learn how to diagnose and fix .comet.yaml state inconsistencies using comet doctor, comet status, and the comet-state.sh check --recover command."
+---
+
+Sometimes `.comet.yaml` can become inconsistent with your project's file state — for example if an AI agent crashed mid-phase, a manual edit was made, or context compaction interrupted a workflow. Comet provides tools to diagnose and recover these situations without starting your change from scratch.
+
+## 1. Check Current Status
+
+Start with a quick status snapshot to see which changes are active and what phase Comet believes each one is in:
+
+```bash
+comet status
+```
+
+This displays active changes, task progress, and the recommended next Comet workflow command for each change. Use `--json` for structured output:
+
+```bash
+comet status --json
+```
+
+See the [CLI reference](/cli/status) for full option details.
+
+## 2. Run a Health Check
+
+For a deeper diagnostic of your Comet installation, state files, and working directories:
+
+```bash
+comet doctor
+```
+
+`comet doctor` checks:
+
+- Project and global installation health
+- Required working directories (`docs/superpowers/specs/`, `docs/superpowers/plans/`)
+- Installed skills and automation scripts
+- `.comet.yaml` state files for active changes
+
+Use `--json` for machine-readable output, or `--scope project|global` to narrow the check:
+
+```bash
+comet doctor --json --scope project
+```
+
+See the [CLI reference](/cli/doctor) for full option details.
+
+## 3. Context Compaction Recovery
+
+If an AI agent's context was compacted mid-phase, the `comet-state.sh check` command with `--recover` generates structured recovery context that a fresh agent session can use to reconstruct what was happening:
+
+```bash
+"$COMET_BASH" "$COMET_STATE" check my-feature build --recover
+```
+
+The structured output includes:
+
+- **Phase status** — current phase and whether entry conditions are satisfied
+- **Field progress** — which `.comet.yaml` fields are set, missing, or invalid
+- **Task count** — how many tasks are complete vs. remaining in `tasks.md`
+- **Recovery actions** — specific steps the agent should take to resume correctly
+
+Run this whenever a fresh agent session needs to understand the state of a change that was interrupted mid-execution.
+
+## 4. Schema Validation Errors
+
+If `.comet.yaml` has been manually edited or written incorrectly by an agent, use the schema validator to find problems:
+
+```bash
+"$COMET_BASH" "$COMET_YAML_VALIDATE" <change-name>
+```
+
+Common issues the validator catches:
+
+| Issue | Example |
+|-------|---------|
+| **Unknown fields** (typos) | `verfiy_result` instead of `verify_result` |
+| **Invalid enum values** | `build_mode: auto` (not a valid mode) |
+| **Missing required fields** | `phase` absent entirely |
+| **Invalid path references** | `design_doc` pointing to a file that doesn't exist |
+| **Malformed `handoff_hash`** | Wrong format for SHA256 value |
+
+Fix identified fields before continuing the workflow. The validator outputs `[HARD STOP]` with actionable suggestions when it finds blocking issues.
+
+## 5. Manual State Correction
+
+When you need to correct a specific field directly, use `comet-state.sh set`:
+
+```bash
+"$COMET_BASH" "$COMET_STATE" set <change-name> phase build
+"$COMET_BASH" "$COMET_STATE" set <change-name> verify_result pending
+```
+
+You can also use semantic transition events for phase changes, which trigger all the associated field updates at once:
+
+```bash
+"$COMET_BASH" "$COMET_STATE" transition <change-name> open-complete
+"$COMET_BASH" "$COMET_STATE" transition <change-name> build-complete
+"$COMET_BASH" "$COMET_STATE" transition <change-name> verify-pass
+```
+
+<Warning>
+Prefer using guard transitions (`comet-guard.sh <name> <phase> --apply`) or semantic `comet-state.sh transition` events over raw `set` operations. Guard transitions validate exit conditions before writing state — a raw `set` skips those checks and can put `.comet.yaml` into an inconsistent state that blocks later phases. Use `set` only when recovering from a confirmed corruption where the guard itself cannot run.
+</Warning>
+
+## 6. Error Scenario Reference
+
+| Scenario | Recovery Steps |
+|----------|---------------|
+| **`openspec list` fails** | Check that OpenSpec is installed (`openspec --version`); if missing, run `openspec init` in the project root |
+| **`.comet.yaml` malformed or missing** | Use verifiable file state (proposal, tasks, design doc) as source of truth; recreate or correct `.comet.yaml` with `comet-state set` or re-run `comet-state init` |
+| **Sub-skill unavailable** | Stop the workflow; install or enable the missing skill (run `comet update` or check platform skill directory), then resume |
+| **Build or test fails** | Return to the build phase for fixes — do not attempt to enter verify with failing tests |
+| **Missing change directory structure** | Fill missing files according to `comet-open` artifact requirements: `proposal.md`, `design.md`, `tasks.md`, and `.openspec.yaml` must all be present |
+| **`openspec list --json` returns unexpected format** | Confirm OpenSpec version compatibility with your Comet install; update both if mismatched |

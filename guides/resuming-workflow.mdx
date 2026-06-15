@@ -1,0 +1,61 @@
+---
+title: "Resuming an Interrupted Comet Workflow Mid-Session"
+sidebarTitle: "Resuming Workflow"
+description: "When your AI coding session closes mid-workflow, run /comet to automatically detect the current phase and continue from exactly where you left off."
+---
+
+One of Comet's key features is the ability to resume an interrupted workflow without losing progress. Every phase transition is recorded in `.comet.yaml`, so the AI agent can reconstruct the current state from disk rather than conversation history. You never need to remember where you were — Comet reads the files.
+
+## How Resume Works
+
+1. **Open your AI coding tool** in the same project directory where you were working.
+2. **Type `/comet`** — no arguments needed.
+3. Comet runs `openspec list --json` to discover all active changes in the project.
+4. For each active change found, Comet reads its `.comet.yaml` to determine phase, build mode, verification status, and other workflow state.
+5. **If exactly one change is active**: Comet auto-selects it and proceeds directly to phase detection.
+6. **If multiple changes are active**: Comet lists them so you can choose which one to resume.
+7. Comet resumes execution from the detected phase, auto-advancing through subsequent phases until it reaches a decision point or the workflow completes.
+
+## Phase Detection Logic
+
+Comet checks `.comet.yaml` fields in order. The **first matching condition** determines the resumption point:
+
+| Condition in `.comet.yaml` | Action Taken |
+|---------------------------|--------------|
+| `archived: true` (or change moved to archive directory) | Workflow complete — nothing to resume |
+| `verify_result: pass` and `archived` is not `true` | Resume at → `/comet-archive` |
+| `verify_result: fail` | **Pause** — ask you to choose: fix the issue or accept the deviation |
+| `phase: verify` **or** all tasks in `tasks.md` are checked | Resume at → `/comet-verify` |
+| `phase: build` **or** Design Doc exists but plan/execution is incomplete | Resume at → `/comet-hotfix`, `/comet-tweak`, or `/comet-build` depending on the `workflow` field |
+| `phase: design` **or** active change exists but no Design Doc yet | Resume at → `/comet-design` |
+| `phase: open` **or** active change exists but `.comet.yaml` is missing | Resume at → `/comet-open` |
+| No active change found | Start fresh → `/comet-open` |
+
+If `.comet.yaml` metadata conflicts with what the files actually show, Comet uses the verifiable **file state as the source of truth** and corrects `.comet.yaml` before continuing.
+
+## Dirty Worktree Handling
+
+If you have uncommitted changes in your working directory when resuming, Comet checks where those changes came from and handles them according to the dirty-worktree protocol. This determines whether the uncommitted work belongs to the current change, whether it needs to be stashed, or whether it indicates an out-of-scope expansion that should be addressed before continuing.
+
+## Special Case: `build_pause: plan-ready` Resume
+
+When you pause after plan generation to switch AI models (for example, moving from a planning model to a coding model), Comet records `build_pause: plan-ready` in `.comet.yaml`.
+
+On resume, Comet handles this specially:
+
+- Detects `build_pause: plan-ready` in `.comet.yaml`
+- **Reuses your existing plan** — it does not regenerate it
+- Verifies the plan file still exists on disk; if missing, it handles corrupted state or offers to regenerate
+- Returns you to the step where you choose **isolation method** (`branch` or `worktree`) and **execution mode** (`direct`, `subagent-driven-development`, etc.)
+
+This means your planning work is never lost, even if you deliberately interrupted the workflow at that checkpoint.
+
+## What Comet Does Not Do on Resume
+
+- It does **not** rely on conversation history to determine your current phase
+- It does **not** ask you to describe what you were doing
+- It does **not** re-examine all project files from scratch (it reads `.comet.yaml` and file state directly)
+
+<Tip>
+Comet never trusts conversation history for phase detection — it always re-reads `.comet.yaml` and file state on every context resume. This makes resumption reliable regardless of how long ago the session was interrupted or how many unrelated conversations happened in between.
+</Tip>

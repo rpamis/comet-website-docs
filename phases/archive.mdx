@@ -1,0 +1,69 @@
+---
+title: "Phase 5: Archive — Sync Specs and Close the Change"
+sidebarTitle: "Archive"
+description: "The Archive phase syncs delta specs to main specs, annotates design doc and plan frontmatter, moves the change to archive, and marks the workflow complete."
+---
+
+The Archive phase closes the loop. After verification passes and the branch is handled, `/comet-archive` runs a single script that syncs your delta specs into the canonical main specs, annotates the Design Doc and plan with their final status, moves the change directory to a dated archive folder, and marks the workflow complete. One command, fully automated — no manual document syncing required.
+
+## Trigger
+
+Run `/comet-archive` directly, or let `/comet` auto-dispatch after Phase 4 completes.
+
+## Owner
+
+**OpenSpec** — the archive phase is handled entirely by `comet-archive.sh`, which operates on OpenSpec's change and spec directory structure.
+
+## Prerequisites
+
+Both conditions must be true before the archive phase can begin. The entry check enforces these as hard prerequisites:
+
+- `verify_result: pass` in `.comet.yaml`
+- `branch_status: handled` in `.comet.yaml`
+
+If either condition is not met, the entry check reports the specific failure and stops.
+
+## What `comet-archive.sh` Does
+
+<Steps>
+  <Step title="Validates entry state">
+    The script checks that `phase: archive`, `verify_result: pass`, and `archived: false` are all set in `.comet.yaml`. If validation fails, it reports the specific field mismatch and exits with a non-zero code.
+  </Step>
+  <Step title="Syncs delta specs to main specs">
+    Each delta spec at `openspec/changes/<name>/specs/<capability>/spec.md` is copied to (overwrites) the canonical main spec at `openspec/specs/<capability>/spec.md`. Before overwriting, the script prints a unified diff preview so you can confirm exactly what will change. This is the moment delta specs graduate to become the project's canonical specifications.
+  </Step>
+  <Step title="Annotates design doc frontmatter">
+    The Design Doc at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` receives `archived-with` and `status` annotations in its frontmatter, recording that this design was completed and archived as part of this change.
+  </Step>
+  <Step title="Annotates plan frontmatter">
+    Similarly, the implementation plan at `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` receives `archived-with` frontmatter annotations, closing the link between the plan and the archived change.
+  </Step>
+  <Step title="Moves the change to the archive directory">
+    The active change directory at `openspec/changes/<name>/` is moved to `openspec/changes/archive/YYYY-MM-DD-<name>/`. The date prefix makes the archive chronologically browsable.
+  </Step>
+  <Step title="Marks the change as archived">
+    The script updates `archived: true` in the moved `.comet.yaml` via `comet-state transition <archive-name> archived`. The workflow is now complete.
+  </Step>
+</Steps>
+
+## Dry Run
+
+Before executing the archive, you can preview exactly what the script will do — diffs, paths to be moved, frontmatter changes — without writing anything:
+
+```bash
+"$COMET_BASH" "$COMET_ARCHIVE" "<change-name>" --dry-run
+```
+
+Dry run is especially useful when multiple delta specs are being synced and you want to review the diffs before committing to the overwrite.
+
+## After Archive
+
+The change is complete. The active `openspec/changes/<name>/` directory no longer exists — it has moved to `openspec/changes/archive/YYYY-MM-DD-<name>/`. To start new work, run `/comet` or `/comet-open`.
+
+<Note>
+After the archive script runs successfully, do **not** run the phase guard (`comet-guard.sh archive`) against the old change name — the active directory no longer exists. Archive completeness is determined by the script's exit code and the presence of the dated archive directory.
+</Note>
+
+<Tip>
+**Delta specs are living documents.** During Phase 3 (Build), you're encouraged to freely edit delta specs as the implementation evolves — add acceptance scenarios, adjust interfaces, capture edge cases as you discover them. None of those edits touch the main specs. Only at archive, when the change is fully verified, do delta specs get promoted to the canonical main specs. This keeps your canonical specs clean and change-complete.
+</Tip>
