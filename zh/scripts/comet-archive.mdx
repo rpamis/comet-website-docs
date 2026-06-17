@@ -1,0 +1,117 @@
+---
+title: "comet-archive.sh — Comet 的自动化 Change Archive"
+sidebarTitle: "comet-archive.sh"
+description: "comet-archive.sh 用一个命令完成 Comet workflow：验证 state、同步 specs、标注 docs、移动 change，并设置 archived: true。"
+---
+
+`comet-archive.sh` 是 Comet workflow 的最后一步。它会在单个 atomic command 中执行所有 archive operations，确保 delta specs 被正确同步，且不会遗漏 cleanup steps。对不满足 prerequisites 的 change 运行它，会产生清晰的 fatal error，而不是 partial archive。
+
+## 用法
+
+```bash
+"$COMET_BASH" "$COMET_ARCHIVE" <change-name> [--dry-run]
+```
+
+**参数：**
+
+| Argument | 说明 |
+|----------|-------------|
+| `<change-name>` | 要 archive 的 change 名称 |
+| `--dry-run` | 预览所有步骤而不做任何变更 |
+
+## 前置条件
+
+Archive 会强制三个 hard entry conditions；任一不满足都会立即退出：
+
+| Condition | Required value |
+|-----------|---------------|
+| `phase` | `archive` |
+| `verify_result` | `pass` |
+| `archived` | 不是 `true`（change 尚未 archived） |
+
+`phase: archive` 和 `verify_result: pass` 由 `comet-state.sh transition <name> verify-pass` 设置；`comet-guard.sh verify --apply` 会在所有 verify-phase checks 通过后调用它。该 transition 本身要求 `verification_report` 指向现有文件，并且 `branch_status: handled`，因此当到达 `phase: archive` 时，这些条件已经得到保证。
+
+<Warning>
+如果 change 已经 archived（`archived: true`），或 archive destination（`openspec/changes/archive/YYYY-MM-DD-<name>/`）已经存在，Archive 也会失败。
+</Warning>
+
+## Archive 会执行什么
+
+Archive 会按顺序执行以下步骤：
+
+<Steps>
+  <Step title="验证 entry state">
+    从 `.comet.yaml` 读取 `phase`、`verify_result` 和 `archived`。如果任一条件不满足，会以 fatal error 退出。
+  </Step>
+  <Step title="检查 archive target">
+    验证 `openspec/changes/archive/YYYY-MM-DD-<name>/` 尚不存在，以防意外覆盖。
+  </Step>
+  <Step title="同步 delta specs → main specs">
+    对每个 `openspec/changes/<name>/specs/<capability>/spec.md`，将 delta spec 复制到 `openspec/specs/<capability>/spec.md`。如果需要，会创建 target directory。如果 main spec 已存在且内容不同，覆盖前会将 diff 打印到 stderr。
+  </Step>
+  <Step title="标注 Design Doc frontmatter">
+    如果设置了 `design_doc` 且文件存在，会向 YAML frontmatter 插入 `archived-with: YYYY-MM-DD-<name>` 和 `status: final`。
+  </Step>
+  <Step title="标注 Plan frontmatter">
+    如果设置了 `plan` 且文件存在，会向 YAML frontmatter 插入 `archived-with: YYYY-MM-DD-<name>`。
+  </Step>
+  <Step title="将 change 移动到 archive">
+    移动 `openspec/changes/<name>/` → `openspec/changes/archive/YYYY-MM-DD-<name>/`。
+  </Step>
+  <Step title="设置 archived: true">
+    调用 `comet-state.sh transition YYYY-MM-DD-<name> archived`，在移动后的 `.comet.yaml` 中设置 `archived: true`。
+  </Step>
+</Steps>
+
+## 试运行
+
+使用 `--dry-run` 预览所有步骤，不做任何 file system changes：
+
+```bash
+"$COMET_BASH" "$COMET_ARCHIVE" my-feature --dry-run
+```
+
+示例输出：
+
+```
+=== Comet Archive: my-feature ===
+  [OK] Entry state verified
+  [OK] Archive target available
+  [DRY-RUN] Would sync: auth → openspec/specs/auth/spec.md
+  [DRY-RUN] Would sync: payments → openspec/specs/payments/spec.md
+  [DRY-RUN] Would annotate: docs/superpowers/specs/2026-06-01-my-feature-design.md
+  [DRY-RUN] Would annotate: docs/superpowers/plans/2026-06-01-my-feature.md
+  [DRY-RUN] Would move: openspec/changes/my-feature → openspec/changes/archive/2026-06-02-my-feature
+  [DRY-RUN] Would set archived: true in openspec/changes/archive/2026-06-02-my-feature/.comet.yaml
+
+Dry run complete. 7/7 steps would succeed.
+```
+
+即使在 dry-run mode 下，也会运行 entry state validation。如果 prerequisites 不满足，命令会在打印任何 dry-run steps 前以 fatal error 退出。
+
+## 生成后的文件布局
+
+Archive 完成后，change 及其关联 documents 会最终定稿：
+
+```
+openspec/
+├── changes/
+│   └── archive/
+│       └── 2026-06-02-my-feature/     ← moved from openspec/changes/my-feature/
+│           ├── .comet.yaml            ← archived: true
+│           ├── proposal.md
+│           ├── design.md
+│           ├── tasks.md
+│           └── specs/<capability>/spec.md
+└── specs/
+    └── <capability>/
+        └── spec.md                    ← overwritten from delta spec
+
+docs/superpowers/
+├── specs/2026-06-01-my-feature-design.md   ← archived-with: 2026-06-02-my-feature, status: final
+└── plans/2026-06-01-my-feature.md          ← archived-with: 2026-06-02-my-feature
+```
+
+<Note>
+Archive 通常会在 `/comet-verify` 通过后由 AI agent 自动调用。你也可以在 AI 工具中运行 `/comet-archive` 手动触发，或如上所示直接调用脚本。
+</Note>
