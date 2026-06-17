@@ -1,0 +1,219 @@
+---
+title: "comet-state.sh — .comet.yaml 的统一 State Management"
+sidebarTitle: "comet-state.sh"
+description: "comet-state.sh 是 .comet.yaml 的唯一接口，用于 init、get、set、transition、检查 entry conditions，或运行 scale assessment。"
+---
+
+`comet-state.sh` 是所有 `.comet.yaml` operations 的 single source of truth。AI agents 只能使用此脚本读取和写入 workflow state，不能直接编辑 `.comet.yaml`。其他 scripts（`comet-guard.sh`、`comet-archive.sh`、`comet-handoff.sh`）也会在内部调用 `comet-state.sh` 执行各自的 state operations。
+
+## 用法
+
+```bash
+"$COMET_BASH" "$COMET_STATE" <operation> [args...]
+```
+
+## Operations
+
+| Operation | Syntax | 说明 |
+|-----------|--------|-------------|
+| `init` | `init <change-name> <workflow>` | 为 change 初始化新的 `.comet.yaml` |
+| `get` | `get <change-name> <field>` | 读取单个 field value |
+| `set` | `set <change-name> <field> <value>` | 设置单个 field value |
+| `transition` | `transition <change-name> <event>` | 应用命名 state transition，并强制 preconditions |
+| `check` | `check <change-name> <phase> [--recover]` | 验证 phase entry conditions；带 `--recover` 时输出 structured recovery context |
+| `scale` | `scale <change-name>` | 评估 change scope，并据此设置 `verify_mode` |
+
+## init
+
+在 `openspec/changes/<name>/` 中创建新的 `.comet.yaml`，并写入适合该 workflow 的 defaults。如果文件已存在，则失败。
+
+```bash
+"$COMET_BASH" "$COMET_STATE" init my-feature full
+```
+
+**Workflows:** `full`, `hotfix`, `tweak`
+
+每种 workflow 设置的 defaults：
+
+| Field | `full` | `hotfix` / `tweak` |
+|-------|--------|---------------------|
+| `phase` | `open` | `open` |
+| `build_mode` | `null` | `direct` |
+| `isolation` | `null` | `branch` |
+| `verify_mode` | `null` | `light` |
+
+`base_ref` 会自动设置为当前 `HEAD` commit SHA，供后续 scale assessment 使用。
+
+## get
+
+从 `.comet.yaml` 读取并打印单个 field value。如果该 field 为空或不存在，则返回空字符串。
+
+```bash
+"$COMET_BASH" "$COMET_STATE" get my-feature phase
+# build
+```
+
+## set
+
+更新 `.comet.yaml` 中的单个 field value。写入前会同时验证 field name 和 enum value。
+
+```bash
+"$COMET_BASH" "$COMET_STATE" set my-feature isolation branch
+```
+
+<Warning>
+直接设置 `phase` 会绕过 state machine constraints。尽可能使用 `transition`，确保 preconditions 被强制执行。
+</Warning>
+
+**各字段的有效 enum values：**
+
+| Field | 有效值 |
+|-------|-------------|
+| `workflow` | `full`, `hotfix`, `tweak` |
+| `phase` | `open`, `design`, `build`, `verify`, `archive` |
+| `build_mode` | `subagent-driven-development`, `executing-plans`, `direct` |
+| `build_pause` | `null`, `plan-ready` |
+| `isolation` | `branch`, `worktree` |
+| `verify_mode` | `light`, `full` |
+| `verify_result` | `pending`, `pass`, `fail` |
+| `branch_status` | `pending`, `handled` |
+| `archived` | `true`, `false` |
+| `direct_override` | `true`, `false` |
+
+Path fields（`design_doc`、`plan`、`verification_report`、`handoff_context`、`handoff_hash`、`build_command`、`verify_command`）接受任意 string value，不做 validation。
+
+## transition
+
+应用带有 enforced preconditions 的命名 semantic transition。这是推进 phase 的首选方式：写入任何 state 前，它会检查当前 phase 是否符合预期，并验证 required fields。
+
+```bash
+"$COMET_BASH" "$COMET_STATE" transition my-feature build-complete
+```
+
+### Transition Events
+
+| Event | Effect |
+|-------|--------|
+| `open-complete` | 要求 `phase: open`。设置 `phase: design`（full workflow）或 `phase: build`（hotfix/tweak） |
+| `design-complete` | 要求 `phase: design`。设置 `phase: build` |
+| `build-complete` | 要求 `phase: build`，且已设置 `isolation`、`build_mode`，并满足 `direct_override` rules。设置 `phase: verify`、`verify_result: pending`、`verification_report: null`、`branch_status: pending` |
+| `verify-pass` | 要求 `phase: verify`，`verification_report` 指向现有文件，且 `branch_status: handled`。设置 `verify_result: pass`、`phase: archive`、`verified_at` |
+| `verify-fail` | 要求 `phase: verify`。设置 `verify_result: fail`、`phase: build`、`branch_status: pending` |
+| `archived` | 要求 `phase: archive`。设置 `archived: true` |
+
+## check
+
+验证给定 phase 的 entry conditions。在某个 phase 开始时使用它，确认 change 处于预期 state 后再开始工作。
+
+```bash
+"$COMET_BASH" "$COMET_STATE" check my-feature build
+```
+
+示例输出：
+
+```
+=== Entry Check: comet-build ===
+  [PASS] .comet.yaml exists
+  [PASS] phase=build (expected: build)
+  [PASS] design_doc=docs/superpowers/specs/2026-06-01-my-feature-design.md (file exists)
+  [PASS] proposal.md non-empty
+  [PASS] tasks.md non-empty
+
+ALL CHECKS PASSED — ready to proceed
+```
+
+### --recover Flag
+
+`--recover` flag 会输出 structured recovery context，而不是 pass/fail check。这在 AI context compaction 后尤其有用：它会汇总当前 phase、field status、task progress 和推荐的 recovery action：
+
+```bash
+"$COMET_BASH" "$COMET_STATE" check my-feature build --recover
+```
+
+示例输出：
+
+```
+=== Recovery Context: my-feature ===
+Phase: build
+Workflow: full
+
+State fields:
+  Build decisions:
+  - isolation: DONE (branch)
+  - build_mode: DONE (subagent-driven-development)
+  - build_pause: PENDING
+
+  Plan:
+  - plan: DONE (docs/superpowers/plans/2026-06-01-my-feature.md)
+
+  Tasks: 3/7 done, 4 pending
+
+Recovery action: Read tasks.md and continue from first unchecked task.
+
+=== End Recovery Context ===
+```
+
+Recovery actions 会随 phase 变化：
+
+| Phase | 常见 recovery actions |
+|-------|--------------------------|
+| `open` | 创建或补全 missing artifacts，然后使用 `AskUserQuestion` 获取用户确认 |
+| `design` | 如果缺失 handoff，则重新生成；如果 handoff 已存在，则从 brainstorming confirmation 处恢复 |
+| `build` | 从第一个未勾选 task 继续；如果尚未选择 isolation/build mode，则询问用户 |
+| `verify` | 完成 verification 或 branch handling steps |
+| `archive` | 运行 `/comet-archive` 完成 archiving |
+
+## scale
+
+评估 change scope，并将 `verify_mode`（`light` 或 `full`）写入 `.comet.yaml`。Scale 由三个 metrics 决定：
+
+| Metric | Light threshold | Full threshold |
+|--------|----------------|----------------|
+| Task count | ≤ 3 | > 3 |
+| Delta spec count | ≤ 1 capability | > 1 capability |
+| Changed files (vs `base_ref`) | ≤ 4 | > 4 |
+
+如果任一 metric 超过 threshold，`verify_mode` 会设置为 `full`。
+
+```bash
+"$COMET_BASH" "$COMET_STATE" scale my-feature
+# === Scale Assessment: my-feature ===
+#   Tasks: 5 (threshold: 3)
+#   Delta specs: 1 capabilities (threshold: 1)
+#   Changed files: 6 (threshold: 4)
+#   → Result: full
+```
+
+## 示例
+
+```bash
+# Initialize state for a new full-workflow change
+"$COMET_BASH" "$COMET_STATE" init my-feature full
+
+# Set isolation after the user chooses branch
+"$COMET_BASH" "$COMET_STATE" set my-feature isolation branch
+
+# Set build mode after the user chooses execution method
+"$COMET_BASH" "$COMET_STATE" set my-feature build_mode subagent-driven-development
+
+# Read the current phase
+"$COMET_BASH" "$COMET_STATE" get my-feature phase
+
+# Record the verification report path
+"$COMET_BASH" "$COMET_STATE" set my-feature verification_report docs/superpowers/specs/2026-06-01-my-feature-verify.md
+
+# Mark branch as handled
+"$COMET_BASH" "$COMET_STATE" set my-feature branch_status handled
+
+# Apply a transition after guard passes
+"$COMET_BASH" "$COMET_STATE" transition my-feature build-complete
+
+# Run scale assessment before verify
+"$COMET_BASH" "$COMET_STATE" scale my-feature
+
+# Check entry conditions for a phase
+"$COMET_BASH" "$COMET_STATE" check my-feature verify
+
+# Get structured recovery context after context compaction
+"$COMET_BASH" "$COMET_STATE" check my-feature build --recover
+```

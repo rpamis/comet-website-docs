@@ -1,0 +1,141 @@
+---
+title: "comet-guard.sh — Comet 的 Phase Transition Guard"
+sidebarTitle: "comet-guard.sh"
+description: "comet-guard.sh 会验证每个 workflow phase 的 exit conditions。传入 --apply 后，如果所有检查通过，会自动更新 .comet.yaml；否则输出 BLOCKED report。"
+---
+
+`comet-guard.sh` 是 Comet phase transitions 的 enforcement layer。在从一个 phase 推进到下一个 phase 之前，它会检查所有 exit conditions 是否满足，例如 tasks 已完成、verification report 已存在、branch status 已处理。检查失败时，guard 会输出 `BLOCKED` message，包含每项检查的 `[FAIL]` 行和可执行的 `Next:` 建议，而不是静默阻止进度。
+
+## 用法
+
+```bash
+"$COMET_BASH" "$COMET_GUARD" <change-name> <phase> [--apply]
+```
+
+**参数：**
+
+| Argument | 说明 |
+|----------|-------------|
+| `<change-name>` | active change 的名称（字母数字、hyphens、underscores） |
+| `<phase>` | 要验证 exit conditions 的当前 phase |
+| `--apply` | 所有检查通过后自动更新 `.comet.yaml` |
+
+**有效 phases：** `open`、`design`、`build`、`verify`、`archive`
+
+## Guard 按 Phase 检查什么
+
+Guard 会根据当前 phase 运行不同检查。只有所有检查通过后，`--apply` 才会写入 state。
+
+<AccordionGroup>
+  <Accordion title="open — exit to design">
+    | Check | Condition |
+    |-------|-----------|
+    | `proposal.md` | File exists and is non-empty |
+    | `design.md` | File exists and is non-empty |
+    | `tasks.md` | File exists and is non-empty |
+    | Task list | `tasks.md` contains at least one task entry |
+
+    当所有检查在 `--apply` 下通过时，guard 会调用 `comet-state.sh transition <name> open-complete`，将 `phase` 从 `open` 推进到 `design`（full workflow），或直接推进到 `build`（hotfix/tweak）。
+  </Accordion>
+  <Accordion title="design — exit to build">
+    | Check | Condition |
+    |-------|-----------|
+    | `proposal.md` | File exists and is non-empty |
+    | `design.md` | File exists and is non-empty |
+    | `tasks.md` | File exists and is non-empty |
+    | `handoff_context` | Points to a non-empty file in `.comet/handoff/` |
+    | `handoff_hash` | Valid 64-character hex SHA256, matches current source material |
+    | Handoff markdown | `design-context.md` exists alongside `design-context.json` |
+    | Handoff traceability | Markdown contains `Generated-by`, `Mode`, per-file `Source:` and `SHA256:` markers |
+    | Design Doc (if set) | File exists, frontmatter links current change (`comet_change`), declares `role: technical-design` and `canonical_spec: openspec` |
+
+    当所有检查在 `--apply` 下通过时，guard 会调用 `comet-state.sh transition <name> design-complete`，设置 `phase: build`。
+  </Accordion>
+  <Accordion title="build — exit to verify">
+    | Check | Condition |
+    |-------|-----------|
+    | `isolation` | Set to `branch` or `worktree` |
+    | `build_mode` | Set to `subagent-driven-development`, `executing-plans`, or `direct` |
+    | `build_mode` authorization | `direct` is only allowed for `hotfix`/`tweak` workflows, or when `direct_override: true` is set |
+    | `tasks.md` | All tasks marked `[x]`; no remaining `[ ]` tasks |
+    | `proposal.md` | File exists and is non-empty |
+    | Build command | If `build_command` is configured, it must exit 0 |
+
+    当所有检查在 `--apply` 下通过时，guard 会调用 `comet-state.sh transition <name> build-complete`，设置 `phase: verify`、`verify_result: pending`、`verification_report: null` 和 `branch_status: pending`。
+  </Accordion>
+  <Accordion title="verify — exit to archive">
+    | Check | Condition |
+    |-------|-----------|
+    | `tasks.md` | All tasks marked `[x]` |
+    | Verify command | If `verify_command` is configured, it must exit 0; otherwise falls back to `build_command` |
+    | `verification_report` | Set and points to an existing file |
+    | `branch_status` | Equal to `handled` |
+
+    当所有检查在 `--apply` 下通过时，guard 会调用 `comet-state.sh transition <name> verify-pass`，设置 `verify_result: pass`、`phase: archive` 和 `verified_at`。
+  </Accordion>
+  <Accordion title="archive — completeness check">
+    | Check | Condition |
+    |-------|-----------| 
+    | `archived` | Equal to `true` |
+    | `proposal.md` | File exists and is non-empty |
+    | `tasks.md` | All tasks marked `[x]` |
+
+    archive phase 是只读 completeness verification。当 phase 为 `archive` 时，`--apply` 不会产生效果，也不会触发 state transition。
+  </Accordion>
+</AccordionGroup>
+
+## --apply Flag
+
+不带 `--apply` 时，guard 会以 code `0`（全部通过）或 `1`（blocked）退出并打印结果，但不会修改 `.comet.yaml`。
+
+带 `--apply` 时，所有检查通过后，guard 会在内部把 state update 委托给 `comet-state.sh transition`：
+
+```bash
+"$COMET_BASH" "$COMET_GUARD" my-feature build --apply
+# If all conditions pass:
+# → runs task, isolation, build_mode, and build checks
+# → calls: comet-state.sh transition my-feature build-complete
+# → .comet.yaml updated: phase=verify, verify_result=pending
+```
+
+如果任何检查失败，`--apply` 不会产生效果。guard 会以 `1` 退出，state file 不会被修改。
+
+## Blocked Output
+
+验证失败时，guard 会输出 `BLOCKED`，包含每项检查的 `[PASS]`/`[FAIL]` 结果，并为每个失败检查提供 `Next:` 建议。以下是 blocked build phase 示例：
+
+```
+=== Guard: build → verify ===
+  [PASS] isolation selected
+  [PASS] build_mode selected
+  [PASS] build_mode allowed for workflow
+  [FAIL] tasks.md all tasks checked
+    Unfinished tasks:
+    42: - [ ] Add unit tests for auth module
+    Next: complete or explicitly remove unfinished tasks, then mark tasks.md with '- [x]'.
+  [PASS] proposal.md exists
+  [FAIL] Build passes
+
+BLOCKED — fix failing checks before proceeding to next phase
+```
+
+每个 `[FAIL]` 行都会包含失败的具体条件，以及用于解决问题的具体 `Next:` action。
+
+## Project Build 和 Verify Commands
+
+如果 `.comet.yaml` 包含 `build_command` 或 `verify_command` 字段，guard 会把它作为 phase check 的一部分运行：
+
+- **`build` phase**：如果配置了 `build_command` 则运行它；否则自动检测 `package.json`、`pom.xml` 或 `Cargo.toml`
+- **`verify` phase**：如果配置了 `verify_command` 则运行它；否则 fallback 到 `build_command` 或相同的自动检测
+
+Commands 会通过 `"$COMET_BASH" -lc "<command>"` 运行；如果失败，会打印其输出。测试期间可设置 `COMET_SKIP_BUILD=1` 来跳过 build/verify command execution。
+
+```yaml
+# In openspec/changes/my-feature/.comet.yaml or project-root .comet.yaml
+build_command: npm run build
+verify_command: npm test
+```
+
+## Schema Validation
+
+在运行任何 phase checks 之前，guard 会调用 `comet-yaml-validate.sh` 验证 `.comet.yaml` schema。如果 validation 失败，guard 会立即以 fatal error 退出，不会运行 phase checks。

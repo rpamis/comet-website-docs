@@ -1,0 +1,69 @@
+---
+title: "Phase 5: Archive — 同步 Specs 并关闭 Change"
+sidebarTitle: "Archive"
+description: "Archive phase 将 delta specs 同步到 main specs，标注 design doc 和 plan frontmatter，将 change 移动到 archive，并标记 workflow 完成。"
+---
+
+Archive phase 用来闭环。Verification 通过且 branch 已处理后，`/comet-archive` 会运行单个脚本，将 delta specs 同步到 canonical main specs，给 Design Doc 和 plan 标注最终 status，把 change directory 移动到带日期的 archive folder，并标记 workflow complete。一个命令，全自动完成，无需手动同步文档。
+
+## Trigger
+
+直接运行 `/comet-archive`，或在 Phase 4 完成后让 `/comet` 自动分发。
+
+## Owner
+
+**OpenSpec** — archive phase 完全由 `comet-archive.sh` 处理，该脚本操作 OpenSpec 的 change 和 spec directory structure。
+
+## 前置条件
+
+Archive phase 开始前，以下两个条件都必须为真。Entry check 会将它们作为 hard prerequisites 强制执行：
+
+- `verify_result: pass` in `.comet.yaml`
+- `branch_status: handled` in `.comet.yaml`
+
+如果任一条件不满足，entry check 会报告具体 failure 并停止。
+
+## `comet-archive.sh` 会做什么
+
+<Steps>
+  <Step title="验证 entry state">
+    脚本会检查 `.comet.yaml` 中是否已设置 `phase: archive`、`verify_result: pass` 和 `archived: false`。如果 validation 失败，它会报告具体 field mismatch，并以非零 code 退出。
+  </Step>
+  <Step title="将 delta specs 同步到 main specs">
+    位于 `openspec/changes/<name>/specs/<capability>/spec.md` 的每个 delta spec 都会复制到（覆盖）`openspec/specs/<capability>/spec.md` 中的 canonical main spec。覆盖前，脚本会打印 unified diff preview，让你确认具体变化。这是 delta specs 升级为项目 canonical specifications 的时刻。
+  </Step>
+  <Step title="标注 design doc frontmatter">
+    位于 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` 的 Design Doc 会在 frontmatter 中获得 `archived-with` 和 `status` annotations，记录此 design 已作为该 change 的一部分完成并 archived。
+  </Step>
+  <Step title="标注 plan frontmatter">
+    类似地，位于 `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` 的 implementation plan 会获得 `archived-with` frontmatter annotations，关闭 plan 与 archived change 之间的链接。
+  </Step>
+  <Step title="将 change 移动到 archive directory">
+    位于 `openspec/changes/<name>/` 的 active change directory 会移动到 `openspec/changes/archive/YYYY-MM-DD-<name>/`。日期前缀让 archive 可以按时间浏览。
+  </Step>
+  <Step title="将 change 标记为 archived">
+    脚本会通过 `comet-state transition <archive-name> archived` 更新移动后 `.comet.yaml` 中的 `archived: true`。Workflow 到此完成。
+  </Step>
+</Steps>
+
+## 试运行
+
+执行 archive 前，你可以预览脚本将要做什么，包括 diffs、要移动的路径、frontmatter changes，而不写入任何内容：
+
+```bash
+"$COMET_BASH" "$COMET_ARCHIVE" "<change-name>" --dry-run
+```
+
+当需要同步多个 delta specs，并且你想在确认覆盖前 review diffs 时，dry run 尤其有用。
+
+## After Archive
+
+Change 已完成。Active `openspec/changes/<name>/` 目录不再存在，它已经移动到 `openspec/changes/archive/YYYY-MM-DD-<name>/`。若要开始新工作，请运行 `/comet` 或 `/comet-open`。
+
+<Note>
+Archive script 成功运行后，**不要**针对旧 change name 运行 phase guard（`comet-guard.sh archive`），因为 active directory 已不再存在。Archive completeness 由脚本 exit code 和带日期 archive directory 是否存在来判断。
+</Note>
+
+<Tip>
+**Delta specs 是 living documents。** 在 Phase 3（Build）期间，鼓励你随着 implementation 演进自由编辑 delta specs：添加 acceptance scenarios、调整 interfaces、记录发现的 edge cases。这些 edits 都不会触碰 main specs。只有到 archive 阶段，当 change 完全 verified 后，delta specs 才会提升为 canonical main specs。这能让 canonical specs 保持干净且 change-complete。
+</Tip>

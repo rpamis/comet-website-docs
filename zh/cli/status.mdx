@@ -1,0 +1,96 @@
+---
+title: "comet status — 查看 Active Changes 和下一条命令"
+sidebarTitle: "comet status"
+description: "comet status 显示 active OpenSpec changes、task progress 和推荐的下一条 workflow command。使用 --json 获取 machine-readable output。"
+---
+
+`comet status` 会给出项目 Comet workflow state 的快照，显示 active changes、已完成 tasks 数量，以及下一步应运行哪条命令。
+
+## 用法
+
+```bash
+comet status [path]
+```
+
+省略 `path` 时，默认值为 `.`（当前目录）。该命令会从目标目录内的 `openspec/changes/` 读取 change state。
+
+## 示例输出
+
+```
+Active Changes:
+
+  1. my-feature [phase: build [3/7 tasks]]
+     workflow: full | build_mode: subagent-driven-development
+     plan:   docs/superpowers/plans/2024-06-01-my-feature.md
+     next: /comet-build
+
+  2. quick-fix [phase: verify [5/5 tasks]]
+     workflow: full | build_mode: direct
+     verify_result: pending
+     next: /comet-verify
+```
+
+每个 entry 会显示：
+
+| 字段 | 说明 |
+|---|---|
+| `phase` | 当前 workflow phase（`open`、`design`、`build`、`verify`、`archive`）。 |
+| `tasks` | 来自 `tasks.md` 的已完成 / 总 task 数，例如 `[3/7 tasks]`。 |
+| `workflow` | Workflow preset（`full`、`hotfix`、`tweak`）。 |
+| `build_mode` | Build execution mode（例如 `subagent-driven-development`、`direct`）。 |
+| `design` | 如果已生成，显示 Superpowers Design Doc 的路径。 |
+| `plan` | 如果已生成，显示 implementation plan 的路径。 |
+| `verify_result` | Verification outcome（`pending`、`pass`、`fail`），只在 `verify` 阶段显示。 |
+| `next` | 下一步要运行的 Comet skill command。 |
+
+只会显示未归档的 changes。缺少 `.comet.yaml` 或 `archived: true` 的 changes 会被排除。
+
+## Flags
+
+<ParamField query="--json" type="boolean">
+  将 active changes 输出为 structured JSON，并为每个 change 包含 `nextCommand` 字段。适合 scripting 和 automation。
+</ParamField>
+
+## JSON Output
+
+```bash
+comet status --json
+```
+
+```json
+{
+  "changes": [
+    {
+      "name": "my-feature",
+      "workflow": "full",
+      "phase": "build",
+      "buildMode": "subagent-driven-development",
+      "isolation": "branch",
+      "verifyMode": "null",
+      "verifyResult": "pending",
+      "designDoc": null,
+      "plan": "docs/superpowers/plans/2024-06-01-my-feature.md",
+      "tasksCompleted": 3,
+      "tasksTotal": 7,
+      "nextCommand": "/comet-build"
+    }
+  ]
+}
+```
+
+`nextCommand` 字段会把每个 phase 映射到对应的 Comet entry point：
+
+| Phase | Next command |
+|---|---|
+| `open` | `/comet-open` |
+| `design` | `/comet-design` |
+| `build` | `/comet-build` |
+| `verify` | `/comet-verify` |
+| `archive` | `/comet-archive` |
+
+## 使用场景
+
+- **快速 workflow check** — 一眼查看所有进行中的 changes 以及各自状态。
+- **知道下一步运行什么** — `next` 字段会明确告诉你要调用哪条 Comet command 继续。
+- **Scripting 和 automation** — 将 `--json` output pipe 到 CI scripts 或 shell tooling，根据 phase 或 task completion 条件触发 workflow commands。
+- **中断后恢复** — 关闭 AI 编程会话后，先运行 `comet status` 定位状态，再在 AI 平台中输入 `/comet`。
