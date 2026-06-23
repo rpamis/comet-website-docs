@@ -1,100 +1,39 @@
 ---
-title: "Comet Hotfix Preset：无需 Brainstorming 的快速 Bug Fix"
-sidebarTitle: "Hotfix"
-description: "hotfix preset 会跳过 brainstorming 和 deep design，直接从 open 进入 build、verify 和 archive，适合小型且已充分理解的 bug fixes。"
+title: "hotfix 预设"
+description: "使用 hotfix 轻量路径处理范围明确、风险可控的缺陷修复。"
 ---
 
-hotfix preset 面向小型、聚焦且解决方案已经清晰的 bug fixes。它会跳过 brainstorming phase 以更快推进，提供一条从问题描述到 archived fix 的精简路径，避免 full workflow design 的开销。
+hotfix 适合修复明确 bug。它跳过完整 brainstorming 和完整 plan，但仍保留 OpenSpec 状态、验证和归档。
 
-## 何时使用 Hotfix
+## 适合使用
 
-仅当满足以下**所有**条件时，才使用 `/comet-hotfix`：
+- 复现路径明确。
+- 修改范围小。
+- 不新增 public API。
+- 不改变架构或数据模型。
+- 能用测试或命令证明修复。
 
-- fix 面向现有 functionality，不引入 new capability
-- change scope 可预测：通常影响 **少于 3 个文件**
-- 不需要 **interface changes** 或 architecture adjustments
-- fix 不引入 **new public API**
-- fix scope 限定在 **single function or module** 内
-- 不涉及 **database schema changes**
+## 不适合使用
 
-当这些条件都成立时，hotfix 会提供从 bug description 到 archive 的最快路径。
+- 需要跨模块重新设计。
+- 需要数据库 schema 变更。
+- 引入新的 capability。
+- 需要产品方案讨论。
+- 修复过程中发现需求不清晰。
 
-## Hotfix workflow
+## 流程
 
-```
-/comet-hotfix
-  open → build → verify → archive
-  (brainstorming skipped)
-```
-
-hotfix execution chain 是完整五阶段 workflow 的精简子集：
-
-| Phase | 会发生什么 |
-|-------|-------------|
-| **Open** | 精简 artifact creation：`proposal.md`、`design.md`、`tasks.md`（无 multi-solution comparison；除非影响现有 acceptance scenarios，否则无 delta spec） |
-| **Build** | Direct build（`build_mode: direct`）：tasks 逐个执行，每个 task 运行 formatter 和 tests，commits 使用 `fix:` prefix |
-| **Verify** | Root cause elimination check，然后进行 `comet-verify` scale assessment（小型 hotfix 通常符合 lightweight verification：≤ 3 tasks、≤ 2 files） |
-| **Archive** | 确认 `verify_result: pass` 后复用 `/comet-archive` |
-
-## 启动 Hotfix
-
-在你的 AI 编程工具中，描述你想修复的 bug。Comet 会自动评估你的描述：
-
-- 如果满足 hotfix conditions，`/comet` 会 **auto-route** 到 `/comet-hotfix`，无需你直接调用。
-- 你也可以直接调用 `/comet-hotfix`，明确使用该 preset。
-
-调用后，hotfix workflow 会**连续**运行，不会暂停等待输入，除非到达定义好的 decision points（upgrade conditions 和 verification failures）。
-
-## Build mode
-
-Hotfix 默认使用 `direct` build mode。这意味着单个 agent 会顺序执行所有 tasks，不启动 sub-agents，也不生成完整 implementation plan。如果 task count 超过 3，agent 会转入 `/comet-build` 的 plan 和 execution method selection。
-
-## 升级条件
-
-<Warning>
-如果在 hotfix 期间发现以下任一条件，Comet 会暂停并要求你确认是否升级到 full workflow。Agent **不能**自动继续 hotfix，必须得到你的明确确认。
-
-| 条件 | 为什么触发升级 |
-|-----------|---------------------------|
-| Change 涉及 **3 个或更多文件** | 超出 single-point fix scope |
-| 需要 architecture changes（new modules、interfaces 或 dependencies） | 需要 deep design |
-| 需要 database schema changes | 结构调整需要完整 planning |
-| Fix 引入 **new public API** | 创建外部 interface，需要 design review |
-| Fix scope 超出 **single function or module** | 需要协调式 changes |
-
-Upgrade 需要交互式确认。如果你拒绝，hotfix 会停止，Comet 会报告该 change 已超出 hotfix scope。
-</Warning>
-
-## 升级到 Full Workflow
-
-当确认 hotfix 需要升级时，Comet 会遵循以下路径：
-
-```
-hotfix → full (upgrade)
-  open → [supplement Design Doc] → design → build → verify → archive
+```mermaid
+flowchart LR
+  A["bug 描述"] --> B["/comet-hotfix open"]
+  B --> C["定位并修复"]
+  C --> D["验证"]
+  D --> E["归档"]
+  C --> F{"命中升级信号?"}
+  F -->|是| G["用户选择升级 full"]
+  G --> H["preset-escalate 到 design"]
 ```
 
-你确认后，Comet 会：
-
-1. 将 `.comet.yaml` 中的 `workflow` 字段更新为 `full`
-2. 加载 `comet-design` skill，在现有 hotfix artifacts 基础上补充完整 Design Doc
-3. 从 design phase 起正常进入 full workflow
-
-这意味着 hotfix 的 `proposal.md`、`design.md` 和 `tasks.md` 会被保留并继续扩展，你不需要从头开始。
-
-## Phase guards
-
-Hotfix 会强制执行与 full workflow 相同的 phase guard transitions：
-
-```bash
-# Transition open → build
-"$COMET_BASH" "$COMET_GUARD" <change-name> open --apply
-
-# Transition build → verify (after root cause elimination check)
-"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
-
-# Transition verify → archive (handled by /comet-verify)
-"$COMET_BASH" "$COMET_GUARD" <change-name> verify --apply
-```
-
-Guards 会在推进前验证 exit conditions。没有设置 `isolation` 和 `build_mode` 时，hotfix 不能进入 `verify`；没有 `verify_result: pass` 时，不能 archive。
+<Tip>
+  hotfix 不是“无流程”。它只是减少前期设计成本，同时保留恢复、验证和归档。
+</Tip>

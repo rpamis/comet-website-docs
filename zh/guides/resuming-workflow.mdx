@@ -1,61 +1,59 @@
 ---
-title: "恢复中断的 Comet Workflow"
-sidebarTitle: "跨设备断点恢复"
-description: "当 AI 编程会话在 workflow 中途关闭时，运行 /comet 自动检测当前 phase，并从准确中断点继续。"
+title: "恢复中断的工作"
+description: "学习会话中断、上下文压缩或换平台后，如何让 Comet 从正确阶段继续。"
 ---
 
-Comet 的关键功能之一，是能够在不丢失进度的情况下恢复中断的 workflow。每个 phase transition 都记录在 `.comet.yaml` 中，因此 AI agent 可以从磁盘而不是 conversation history 重建当前 state。你不需要记住自己停在哪里，Comet 会读取文件。
+恢复时先不要让 Agent 猜。让 Comet 重新读取文件化状态。
 
-## Resume 如何工作
+## 最短路径
 
-1. 在之前工作的同一项目目录中**打开你的 AI 编程工具**。
-2. **输入 `/comet`**，无需参数。
-3. Comet 运行 `openspec list --json`，发现项目中的所有 active changes。
-4. 对找到的每个 active change，Comet 会读取其 `.comet.yaml`，判断 phase、build mode、verification status 和其他 workflow state。
-5. **如果只有一个 active change**：Comet 会自动选择它，并直接进入 phase detection。
-6. **如果有多个 active changes**：Comet 会列出它们，让你选择要恢复哪一个。
-7. Comet 会从检测到的 phase 恢复执行，并自动推进后续 phases，直到到达 decision point 或 workflow 完成。
+```bash
+comet status
+```
 
-## Phase detection 逻辑
+然后在 Agent 平台里输入：
 
-Comet 会按顺序检查 `.comet.yaml` fields。**第一个匹配条件**决定恢复点：
+```text
+/comet
+```
 
-| `.comet.yaml` 中的条件 | 采取的操作 |
-|---------------------------|--------------|
-| `archived: true`（或 change 已移动到 archive directory） | Workflow complete，没有需要恢复的内容 |
-| `verify_result: pass` 且 `archived` 不是 `true` | 恢复到 → `/comet-archive` |
-| `verify_result: fail` | **Pause**，请你选择修复问题还是接受 deviation |
-| `phase: verify` **或** `tasks.md` 中所有 tasks 已勾选 | 恢复到 → `/comet-verify` |
-| `phase: build` **或** Design Doc 存在但 plan/execution 未完成 | 根据 `workflow` 字段恢复到 → `/comet-hotfix`、`/comet-tweak` 或 `/comet-build` |
-| `phase: design` **或** active change 存在但尚无 Design Doc | 恢复到 → `/comet-design` |
-| `phase: open` **或** active change 存在但 `.comet.yaml` 缺失 | 恢复到 → `/comet-open` |
-| 未找到 active change | 重新开始 → `/comet-open` |
+如果 `status` 显示诊断问题，再运行：
 
-如果 `.comet.yaml` metadata 与文件实际状态冲突，Comet 会使用可验证的 **file state as the source of truth**，并在继续前修正 `.comet.yaml`。
+```bash
+comet doctor
+```
 
-## Dirty Worktree Handling
+## 恢复判定顺序
 
-如果恢复时 working directory 中有 uncommitted changes，Comet 会检查这些 changes 的来源，并根据 dirty-worktree protocol 处理。它会判断未提交工作是否属于当前 change、是否需要 stash，或是否表示继续前应处理的 out-of-scope expansion。
+```mermaid
+flowchart TD
+  A["重新打开项目"] --> B["comet status"]
+  B --> C{"有活跃 change?"}
+  C -->|没有| D["创建新 change"]
+  C -->|有| E["检查 phase 和 evidence"]
+  E --> F{"状态有效?"}
+  F -->|有效| G["/comet 路由到当前阶段"]
+  F -->|异常| H["comet doctor 诊断"]
+  H --> I["按提示修复或恢复证据"]
+```
 
-## Special Case: `build_pause: plan-ready` Resume
+## build 阶段恢复
 
-当你在 plan generation 后暂停以切换 AI models（例如从 planning model 切到 coding model）时，Comet 会在 `.comet.yaml` 中记录 `build_pause: plan-ready`。
+如果 `phase: build`，重点看：
 
-恢复时，Comet 会对此进行特殊处理：
+- `build_pause`
+- `plan`
+- `build_mode`
+- `isolation`
+- `subagent_dispatch`
+- 未完成的 `tasks.md` 项
 
-- 检测 `.comet.yaml` 中的 `build_pause: plan-ready`
-- **复用你的现有 plan**，不会重新生成
-- 验证 plan file 是否仍存在于磁盘上；如果缺失，则处理 corrupted state 或提供重新生成选项
-- 返回到你选择 **isolation method**（`branch` 或 `worktree`）和 **execution mode**（`direct`、`subagent-driven-development` 等）的步骤
+`build_pause: plan-ready` 表示计划已生成，下一步是选择隔离方式和执行方式。
 
-这意味着即使你故意在该 checkpoint 中断 workflow，planning work 也不会丢失。
+## verify 失败恢复
 
-## Comet 在 Resume 时不会做什么
+如果 `verify_result: fail`，不要直接归档。先决定修复还是接受偏差。选择修复后回到 build。
 
-- 它**不会**依赖 conversation history 来判断当前 phase
-- 它**不会**要求你描述之前在做什么
-- 它**不会**从头重新检查所有项目文件（而是直接读取 `.comet.yaml` 和 file state）
+## 有未提交改动时
 
-<Tip>
-Comet 从不信任 conversation history 来进行 phase detection。每次 context resume 时，它都会重新读取 `.comet.yaml` 和 file state。无论 session 中断了多久，期间发生了多少无关对话，恢复都能保持可靠。
-</Tip>
+Comet 会把未提交改动当作恢复风险。先检查这些改动属于当前 change、用户改动还是无关改动，再继续。

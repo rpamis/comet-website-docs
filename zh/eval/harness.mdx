@@ -1,194 +1,39 @@
 ---
-title: "共享评估框架"
-sidebarTitle: "评估框架"
-description: "了解 Comet 共享评估框架的架构、评估任务和运行方式。支持本地 Skill 和 eval manifest 两种评估目标。"
+title: "Eval harness"
+description: "理解 Comet 如何封装本地 eval harness，让用户从项目根目录运行 Skill 评估。"
 ---
 
-`comet eval` 是 Comet 的共享评估框架，用于评估 Skill 包的质量和正确性。它基于 Python pytest 构建，支持多种评估任务和报告格式。
+Comet 的 eval harness 真实位于 Comet 仓库的 `eval/` 目录。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke。
 
-## 架构概览
+## collect 和 run
 
-```
-eval/
-├── scaffold/           # 共享 Python runner、Docker helpers
-│   ├── task.py         # Task/Treatment 抽象
-│   ├── validators.py   # 验证器
-│   ├── docker.py       # Docker 执行支持
-│   └── report.py       # 报告生成
-├── local/              # 本地评估套件
-│   ├── tasks/
-│   │   └── index.yaml  # 任务索引
-│   ├── tests/
-│   │   └── test_tasks.py
-│   └── logs/           # 评估结果日志
-└── langsmith/          # LangSmith 评估入口（可选）
-```
+| 命令 | 是否执行模型任务 | 用途 |
+| --- | --- | --- |
+| `collect` | 否 | 验证 manifest、task、profile 和路径 |
+| `run` | 是 | 执行真实评估并生成报告 |
 
-## 评估目标
-
-`comet eval run` 支持两种评估目标：
-
-### 1. 本地 Skill（`--skill-path`）
-
-评估任意本地 Skill 目录或 `SKILL.md` 文件：
+## manifest 模式
 
 ```bash
-comet eval run --skill-path ./my-skill --skill-name my-skill
+comet eval collect --manifest ./generated-skill/comet/eval.yaml
+comet eval run --manifest ./generated-skill/comet/eval.yaml --html
 ```
 
-### 2. Eval Manifest（`--manifest`）
+manifest 通常由 `/comet-any` 生成，包含目标 Skill、profile、推荐任务、预期产物和交互配置。
 
-评估通过 `/comet-any` 生成的 Skill 包的 `comet/eval.yaml`：
+## skill-path 模式
 
 ```bash
-comet eval run --manifest ./comet/eval.yaml
+comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 ```
 
-<Note>
-  必须提供 `--manifest` 或 `--skill-path` 中的恰好一个。
-</Note>
+它适合早期冒烟。默认 quick smoke 是 `generic-skill-smoke`。
 
-## 评估任务
+## 失败归因
 
-### generic-skill-smoke
+报告会帮助区分：
 
-最简单的评估任务，适用于任意 Skill：
-
-- **难度**: 简单
-- **期望产物**: `result.md`
-- **验证**: 产物存在且非空
-
-```bash
-comet eval run --skill-path ./my-skill --task generic-skill-smoke
-```
-
-### authoring-skill-smoke
-
-用于评估 `/comet-any` 生成的 Skill 包：
-
-- **难度**: 简单
-- **验证**: Engine 包完整性、Skill 定义合法性
-
-```bash
-comet eval run --manifest ./comet/eval.yaml --task authoring-skill-smoke
-```
-
-### comet-full-workflow
-
-完整的五阶段工作流评估：
-
-- **难度**: 困难
-- **验证**: open→design→build→verify→archive 全流程
-- **Treatments**: CONTROL, COMET_FULL, COMET_FULL_039
-
-```bash
-comet eval run --manifest ./comet/eval.yaml --task comet-full-workflow
-```
-
-## 评估模式
-
-### 快速模式（`--quick`）
-
-使用默认的快速冒烟测试任务，适合开发过程中的快速验证：
-
-```bash
-comet eval run --skill-path ./my-skill --quick
-```
-
-### 完整模式
-
-运行完整的评估套件，适合发布前的全面验证：
-
-```bash
-comet eval run --manifest ./comet/eval.yaml
-```
-
-### 自定义任务
-
-指定特定的评估任务：
-
-```bash
-comet eval run --manifest ./comet/eval.yaml --task comet-fix-median
-```
-
-## 预检查（collect）
-
-在运行完整评估前，可以先发现评估目标：
-
-```bash
-comet eval collect --manifest ./comet/eval.yaml
-```
-
-输出会显示发现的任务列表和复杂度，不会执行任何工作负载。
-
-## 评估配置
-
-### Profile
-
-评估配置文件控制评估行为：
-
-```bash
-comet eval run --skill-path ./my-skill --profile generic
-```
-
-### 报告配置
-
-通过 JSON 文件控制报告输出格式：
-
-```json
-{
-  "report_outputs": {
-    "markdown": true,
-    "html": true
-  }
-}
-```
-
-```bash
-comet eval run --manifest ./comet/eval.yaml --report-config ./report-config.json
-```
-
-或使用 `--html` 快捷方式：
-
-```bash
-comet eval run --manifest ./comet/eval.yaml --html
-```
-
-## Eval Manifest
-
-`comet/eval.yaml` 是 `/comet-any` 生成的评估 manifest，定义了评估目标和配置：
-
-```yaml
-apiVersion: comet/v1alpha1
-kind: EvalManifest
-metadata:
-  name: my-workflow
-  version: 1.0.0
-target:
-  skillPath: ./SKILL.md
-  skillName: my-workflow
-profile: generic
-tasks:
-  - authoring-skill-smoke
-  - generic-skill-smoke
-```
-
-## 最佳实践
-
-<AccordionGroup>
-  <Accordion title="开发时用快速模式">
-    在开发过程中使用 `--quick` 进行快速验证，节省时间和 token。
-  </Accordion>
-
-  <Accordion title="发布前用完整模式">
-    发布前运行完整评估，确保 Skill 质量。
-  </Accordion>
-
-  <Accordion title="先 collect 再 run">
-    对于复杂评估，先用 `collect` 发现目标，确认无误后再运行。
-  </Accordion>
-
-  <Accordion title="保存评估证据">
-    评估报告会自动保存，发布时需要引用这些证据。
-  </Accordion>
-</AccordionGroup>
+- `harness`: 环境、依赖、Docker、路径或 harness 问题。
+- `workflow`: Skill 流程没达到预期。
+- `task`: 任务定义或 fixture 问题。
+- `model`: 模型行为不稳定或工具使用问题。

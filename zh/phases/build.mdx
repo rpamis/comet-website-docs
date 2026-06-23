@@ -1,128 +1,45 @@
 ---
-title: "Phase 3: Plan and Build — 规划、隔离并执行"
-sidebarTitle: "Build"
-description: "Build phase 创建 implementation plan，然后通过你选择的 isolation method 和 build mode 执行它，每次提交一个 task。"
+title: "build 阶段"
+description: "了解 build 阶段如何选择隔离方式、执行方式、TDD 模式和 review 模式。"
 ---
 
-Build phase 会把 Design Doc 转化为可运行代码。`/comet-build` 首先创建结构化 implementation plan，然后暂停，让你选择如何隔离和执行工作，最后按顺序完成每个 task：逐项勾选 `tasks.md`，并在每项完成后提交。结果是一段可追踪的 commit history，可直接映射回你的 design intent。
+build 阶段把设计变成代码。它先写实施计划，然后选择如何执行。
 
-## Trigger
+## 关键选择
 
-直接运行 `/comet-build`，或在 Phase 2 完成后让 `/comet` 自动分发。如果你暂停在 `build_pause: plan-ready`，再次运行 `/comet` 或 `/comet-build` 会从中断处恢复，而不会重新生成 plan。
+| 选择 | 常见值 | 说明 |
+| --- | --- | --- |
+| 隔离方式 | `branch`、`worktree` | 控制改动放在当前分支还是独立 worktree |
+| 执行方式 | `subagent-driven-development`、`executing-plans` | 控制任务执行模式 |
+| TDD 模式 | `tdd`、`direct` | full workflow 离开 build 前必须选择 |
+| review 模式 | `off`、`standard`、`thorough` | 控制自动代码审查强度 |
 
-## 会发生什么
+## build_pause
 
-<Steps>
-  <Step title="创建 implementation plan">
-    AI 会加载 Superpowers `writing-plans` skill，并产出 implementation plan，保存到 `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`。该 plan 会引用 Design Doc，并将工作拆分为可执行 tasks。它的 frontmatter 会捕获 `base-ref`（当前 git commit SHA），方便 verify phase 后续衡量完整变更范围：
+`build_pause: plan-ready` 表示计划已经写好，但还没有选择隔离方式和执行方式。它是可恢复暂停点，不是执行方式。
 
-    ```yaml
-    ---
-    change: <openspec-change-name>
-    design-doc: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-    base-ref: <git rev-parse HEAD before implementation>
-    ---
-    ```
-  </Step>
-  <Step title="Plan-ready pause：你选择 isolation method 和 build mode">
-    Plan 记录到 `.comet.yaml` 后，workflow 会在用户决策点暂停。你有两个选项：
+## 推荐路径
 
-    - **Continue now** — 留在当前 model，并立即选择 workspace isolation method 和 execution mode
-    - **Pause to switch model** — 记录 `build_pause: plan-ready` 并停止本次调用；之后用 `/comet` 或 `/comet-build` 恢复时，Comet 会复用现有 plan，不会重新生成
-
-    如果你继续，AI 会在一次交互中要求你同时选择 **workspace isolation method** 和 **build mode**（见下方表格）。这些选择会在写入任何代码前记录到 `.comet.yaml`。
-  </Step>
-  <Step title="隔离 workspace">
-    根据你的选择，AI 要么创建新的 git branch（`git checkout -b <change-name>`），要么加载 Superpowers `using-git-worktrees` skill 来设置完全隔离的 worktree。不能用普通 shell commands 绕过 worktree 路径，必须加载该 skill。
-  </Step>
-  <Step title="Execution skill 按 task 运行 plan">
-    AI 会加载你选择的 Superpowers execution skill（`subagent-driven-development` 或 `executing-plans`），并逐项完成 plan 中的 tasks。每个 task 完成后：
-    - `tasks.md` 中对应 checkbox 会标记为 `[x]`
-    - 代码会以反映 design intent 的 message 提交
-
-    如果 `build_mode` 是 `executing-plans`，build phase 关闭前需要进行 code review（`requesting-code-review` skill）。CRITICAL review findings 必须修复；non-CRITICAL findings 可以在记录 rationale 后接受。
-  </Step>
-  <Step title="Guard 验证 exit conditions 并推进 state">
-    当所有 tasks 都已勾选并提交后，phase guard 会运行 project-specific build 和 verify commands（来自 `.comet.yaml` 或 repo root config），确认 `isolation` 和 `build_mode` 都已设置，并自动将 `.comet.yaml` transition 到 `phase: verify`。
-  </Step>
-</Steps>
-
-## Workspace Isolation Methods
-
-选择适合你情况的方法。你的选择会作为 `isolation` 记录在 `.comet.yaml` 中。
-
-| Method | 说明 | 适合 |
-|--------|-------------|----------|
-| `branch` | 在当前 repo 中创建新的 git branch（`git checkout -b <change-name>`） | 触及 ≤ 3 个文件的 changes、简单线性工作 |
-| `worktree` | 通过 Superpowers `using-git-worktrees` skill 创建完全隔离的 git worktree | 并行开发，或当前 branch 有 uncommitted work 的情况 |
-
-## Build modes
-
-你选择的 build mode 决定 AI 如何执行 plan。它会作为 `build_mode` 记录在 `.comet.yaml` 中。
-
-| Mode | 加载的 Skill | 说明 |
-|------|-------------|-------------|
-| `subagent-driven-development` | Superpowers `subagent-driven-development` | AI 生成 subagents 并行执行 tasks，最适合独立 tasks、高复杂度或需要 two-phase review 的 changes |
-| `executing-plans` | Superpowers `executing-plans` | Single-agent 顺序执行，轻量且快速；phase 关闭前需要 code review gate |
-| `direct` | *(none — bypass)* | 不使用 plan skill 的 single-agent direct execution；**仅作为 hotfix/tweak presets 的默认值**。Full-workflow changes 需要显式 `direct_override: true` flag，否则 guard 会阻止 transition |
-
-<Note>
-**Full workflow 中的 `direct` mode**：若要在 hotfix 或 tweak preset 之外使用 `direct` mode，你必须明确选择。AI 会在 `.comet.yaml` 中记录 `direct_override: true`；没有它，guard 和 build→verify state transition 都会阻塞。这是有意设计：full-workflow changes 应该通过合适的 plan execution skill。
-</Note>
-
-## Plan File
-
-Plan 会保存到 `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`，并在 `.comet.yaml` 中作为 `plan` 字段链接。它包含：
-
-- 对 Design Doc 的引用
-- 所有 implementation tasks 的 breakdown
-- verify phase 用于衡量 change scope 的 `base-ref` git commit SHA
-
-## The `plan-ready` Pause
-
-`build_pause: plan-ready` 是 **recoverable pause point**，不是 build mode。它记录 plan 已生成且 AI 已停止，等待你恢复，可能是在另一个 model 或 session 中恢复。当你再次运行 `/comet` 或 `/comet-build` 时，Comet 会读取现有 plan，并从 isolation/execution-mode selection step 继续。Resume 时绝不会重新生成 plan。
-
-<Tip>
-**频繁 commit。** 每个 task 一个 commit 是 Comet convention。它会创建可追踪 history，让每个 commit 映射到特定 task 和 design decision。这也会让 verify phase 更可靠：`base-ref` + commit range 能准确呈现所有变更。
-</Tip>
-
-## Spec Incremental Updates
-
-Specs 会在 implementation 期间演进。当你在 build 中途发现初始 spec 不完整时，请根据 scale 处理：
-
-| Scale | 何时 | 处理方式 |
-|-------|------|------------|
-| **Small** | 缺失 acceptance scenarios、edge cases | 直接编辑 delta spec 和 `design.md`；向 `tasks.md` 追加 tasks |
-| **Medium** | Interface changes、new components、data flow changes | AI 暂停等待你确认，然后加载 Superpowers `brainstorming` skill，一起更新 Design Doc 和 delta spec |
-| **Large** | Brand-new capability requirements | AI 暂停并请求你确认是否拆分为新的独立 change，通过 `/comet-open` 启动 |
-
-**50% threshold rule**：如果新增 tasks 将超过 `tasks.md` 中原始 task 数的一半，则认为该 change 超出原始 scope。AI 必须暂停并询问你是否要把工作拆分成新的 change，不能自动继续扩大当前 change。
-
-从 build 内部创建 new change 时，始终调用 `/comet-open`（不要直接调用任何 OpenSpec command），以确保 new change 拥有自己的 `.comet.yaml` 并正确进入 state machine。
-
-**保持 specs 最新的原则：**
-- Delta spec 是 living document。只要 implementation 演进，就可以在 build 期间自由编辑
-- 每次 spec edit 都用说明变更原因的 message 提交，方便 archive 期间评估 design doc drift
-- 永远不要在 build 期间将 delta specs 同步到 main specs；这只会在 change 完全 verified 后的 archive 阶段发生
-
-## Guard enforcement
-
-Build phase 推进到 verify 前，guard 会强制执行两个 hard requirements：
-
-- `isolation` 必须设置为 `branch` 或 `worktree`
-- `build_mode` 必须设置为有效值（`subagent-driven-development`、`executing-plans`，或带 `direct_override: true` 的 `direct`）
-
-如果任一字段为 `null`，guard 会阻止 transition 并报告缺失字段。
-
-## Context Compaction and Recovery
-
-Build phase 是 workflow 中最长的阶段，可能跨多个 sessions 覆盖许多 tasks。Comet 的设计可以承受 context compaction：
-
-- **每个 task 之后**：AI 会在 `tasks.md` 中标记 checkbox，并立即提交代码，让 `.comet.yaml` 和 file state 能跨任意 session boundary 保持持久。
-- **context compaction 之后**：运行 recovery command，获取 isolation method、build mode、plan path、task progress 和推荐 next action 的结构化摘要：
-
-```bash
-"$COMET_BASH" "$COMET_STATE" check <change-name> build --recover
+```mermaid
+flowchart TD
+  A["Design Doc"] --> B["写实施计划"]
+  B --> C["build_pause: plan-ready"]
+  C --> D["选择 branch/worktree"]
+  D --> E["选择执行方式"]
+  E --> F["选择 TDD 和 review_mode"]
+  F --> G["逐任务执行"]
+  G --> H["guard build --apply"]
 ```
 
-- **单个 task 过大**：如果一个 task 会超过约 200 行代码变更，请拆分为 subtasks 并分别提交，保持 history 粒度清晰。
+## 离开 build 前必须满足
+
+- `isolation` 已选择。
+- `build_mode` 已选择。
+- full workflow 的 `tdd_mode` 已选择。
+- full workflow 的 `review_mode` 已选择。
+- 如果使用 `subagent-driven-development`，`subagent_dispatch` 必须是 `confirmed`。
+- full workflow 使用 direct 模式时，需要 `direct_override: true`。
+
+<Tip>
+  对多人协作或高风险改动，优先用 worktree 和 `review_mode: thorough`。对小型明确改动，可以用 branch 和 `standard`。
+</Tip>

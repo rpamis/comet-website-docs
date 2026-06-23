@@ -1,148 +1,60 @@
 ---
-title: "Comet Skills：工作流指令文件说明"
-sidebarTitle: "Skills"
-description: "comet init 安装的三组 skill：Comet orchestration、OpenSpec spec lifecycle 和 Superpowers methodology，共同驱动五阶段工作流。"
+title: "Skill 与 Engine"
+description: "理解 Comet Skill、项目 Skill 池、Engine Run，以及 /comet-any 生成物之间的关系。"
 ---
 
-Skills 是 AI 编程工具读取的指令文件，用于执行结构化工作流。当你在 AI editor 中输入 `/comet-build` 时，工具会查找 `comet-build` Skill 文件，并遵循其中的指令。Comet 会安装三组 Skills：它自己的 orchestration layer、OpenSpec spec-lifecycle skills，以及 Superpowers development-methodology skills。因此，一个 `comet init` 命令就能让你的 AI 工具获得运行完整五阶段工作流所需的一切。
+Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 开始，Comet 同时提供 Skill 包管理、确定性 Run、运行证据和 runtime eval。
 
-## 三组 Skills
+## 三类 Skill
 
-运行 `comet init` 会把全部三组 Skills 部署到你所选平台的 skills 目录。
+| 类型 | 用途 | 常见入口 |
+| --- | --- | --- |
+| 内置工作流 Skill | 驱动 `/comet` 五阶段流程 | `/comet`、`/comet-open`、`/comet-build` |
+| 项目 Skill | 安装到 `.comet/skills/<name>` 的本地能力 | `comet skill install` |
+| Factory 生成 Skill | `/comet-any` 创建、优化或组合后的可分发能力 | `/comet-any`、`comet publish` |
 
-### Comet Skills
+## Skill Engine 解决什么
 
-Orchestration layer。这些 Skills 实现 phase detection、state transitions、guard validation，以及 OpenSpec 与 Superpowers 之间的 handoff。它们是你在开发会话中交互的主要入口。
+Engine 为多步骤 Skill 提供：
 
-### OpenSpec Skills
+- 稳定内容 hash 和不可变快照。
+- `.comet/run-state.json` 或 `.comet/runs/<run-id>` 运行状态。
+- pending action、trajectory、artifact、checkpoint。
+- guardrails 和 runtime eval。
 
-Spec lifecycle management。这些 Skills 处理正式的 change record：创建 proposals、探索 requirements、将 delta specs 同步到 main spec tree、验证 spec consistency，以及归档已关闭的 changes。Comet 的 Skills 会在内部调用 OpenSpec Skills，而不是要求你直接调用它们。
-
-### Superpowers Skills
-
-Development methodology。这些 Skills 实现工作流的技术侧：structured brainstorming、test-driven development、subagent-driven implementation、code review 和 plan writing。Comet 的 Skills 会在 design 和 build 阶段内部调用 Superpowers Skills。
-
-## Comet Skills Reference
-
-| Skill | 说明 |
-|-------|-------------|
-| `/comet` | 主入口。读取 `.comet.yaml` 和 `openspec list --json` 来自动检测当前 phase，然后分发到适当的 sub-command |
-| `/comet-open` | **Phase 1:** 通过调用 OpenSpec 打开一个新 change，创建 `proposal.md`、`design.md` 和 `tasks.md`，并初始化 `.comet.yaml` |
-| `/comet-design` | **Phase 2:** 运行 Superpowers brainstorming，产出 Design Doc，并写入或更新 delta capability spec |
-| `/comet-build` | **Phase 3:** 生成 implementation plan，配置 workspace isolation 和 execution mode，然后一次一个 commit 地执行 tasks |
-| `/comet-verify` | **Phase 4:** 运行项目 tests，写入 verification report，并在推进到 archive 前处理 branch operations |
-| `/comet-archive` | **Phase 5:** 将 delta specs 同步到 main spec tree，标注 Design Doc 和 plan，并把 change 移动到 archive directory |
-| `/comet-hotfix` | **Preset:** 快速 bug-fix 路径。跳过 deep design brainstorming；如果满足复杂度条件，则触发升级到 full workflow |
-| `/comet-tweak` | **Preset:** 小变更路径。跳过 brainstorming 和完整 implementation plan；如果 scope 增长，则触发升级 |
-
-## OpenSpec Skills
-
-OpenSpec Skills 管理一个 change 从初始 proposal 到最终 archiving 的正式生命周期。关键能力包括：
-
-- **Propose** — 使用结构化 proposal document 搭建新 change
-- **Explore** — 在承诺 design 前，通过引导式 Q&A 深化 requirements
-- **Sync** — 将 delta spec changes 应用回 main capability spec tree
-- **Verify** — 在推进阶段前检查 spec consistency 和 task completion
-- **Archive** — 关闭已完成的 change，并移动到 archive directory
-
-Comet 会在 `/comet-open` 和 `/comet-archive` 期间以程序方式调用这些 Skills。你也可以在 Comet 工作流之外独立调用它们，用于仅涉及 spec 的操作。
-
-## Superpowers Skills
-
-Superpowers Skills 实现将 proposal 转化为可运行、已审查代码的技术方法论。关键能力包括：
-
-- **Brainstorming** — 结构化 deep-design session，用于探索 tradeoffs 并产出 Design Doc（technical RFC）
-- **TDD** — 在 implementation 之前先写 tests 的 test-driven development flow
-- **Subagent-driven development** — 面向大型 implementation plans，使用多个 AI subagents 并行执行 tasks
-- **Code review** — 根据 Design Doc 和 spec 自动审查已完成工作
-- **Plan writing** — 生成与特定 change 和 Design Doc 绑定的结构化 implementation plan
-
-Comet 会在 `/comet-design` 和 `/comet-build` 期间调用 Superpowers Skills。`.comet.yaml` 中的 `build_mode` 字段会记录给定 change 选择了哪种 Superpowers execution method。
-
-## Skill 安装位置
-
-运行 `comet init` 时，它会把 Skill files 写入每个所选平台配置文件夹的 `skills/` 子目录。对于中文语言安装，文件会改写入 `skills-zh/`。
-
-```
-<platform-dir>/
-├── skills/          # English skills (default)
-│   ├── comet/SKILL.md
-│   ├── comet-open/SKILL.md
-│   ├── comet-design/SKILL.md
-│   ├── comet-build/SKILL.md
-│   ├── comet-verify/SKILL.md
-│   ├── comet-archive/SKILL.md
-│   ├── comet-hotfix/SKILL.md
-│   ├── comet-tweak/SKILL.md
-│   ├── openspec-*/SKILL.md   # OpenSpec skills
-│   └── brainstorming/SKILL.md  # Superpowers skills
-└── skills-zh/       # Chinese skills (if zh selected at init)
-    └── ...
+```mermaid
+flowchart LR
+  A["Skill 包"] --> B["validate / inspect"]
+  B --> C["run 创建快照"]
+  C --> D["pending action"]
+  D --> E["Agent 执行动作"]
+  E --> F["resume 写入结果"]
+  F --> G["skill eval 检查完成度"]
 ```
 
-**示例 — Claude Code（project-level install）：**
+## 什么时候用 `comet skill`
 
-```
-your-project/
-└── .claude/
-    └── skills/
-        ├── comet/SKILL.md
-        │   └── scripts/
-        │       ├── comet-guard.sh
-        │       ├── comet-state.sh
-        │       ├── comet-handoff.sh
-        │       ├── comet-archive.sh
-        │       ├── comet-yaml-validate.sh
-        │       └── comet-env.sh
-        ├── comet-open/SKILL.md
-        ├── comet-design/SKILL.md
-        ├── comet-build/SKILL.md
-        ├── comet-verify/SKILL.md
-        ├── comet-archive/SKILL.md
-        ├── comet-hotfix/SKILL.md
-        ├── comet-tweak/SKILL.md
-        └── brainstorming/SKILL.md
-```
-
-Automation scripts（`comet-guard.sh`、`comet-state.sh` 等）会与主 Skill 文件一起分发在 `comet/scripts/` 文件夹中。其他 Skill files 会在运行时通过 `comet-env.sh` 引用这些 scripts；`comet-env.sh` 会把解析后的路径导出为环境变量。
-
-### Platform Skills Directories
-
-`comet init` 支持 28 个 AI 编程平台。每个平台都有自己的 configuration root：
-
-| Platform | Skills Dir | Platform | Skills Dir |
-|----------|-----------|----------|-----------|
-| Claude Code | `.claude/` | Cursor | `.cursor/` |
-| Codex | `.codex/` | OpenCode | `.opencode/` |
-| Windsurf | `.windsurf/` | Cline | `.cline/` |
-| RooCode | `.roo/` | Continue | `.continue/` |
-| GitHub Copilot | `.github/` | Gemini CLI | `.gemini/` |
-| Amazon Q Developer | `.amazonq/` | Qwen Code | `.qwen/` |
-| Kilo Code | `.kilocode/` | Auggie | `.augment/` |
-| Kiro | `.kiro/` | Lingma | `.lingma/` |
-| Junie | `.junie/` | CodeBuddy | `.codebuddy/` |
-| CoStrict | `.cospec/` | Crush | `.crush/` |
-| Factory Droid | `.factory/` | iFlow | `.iflow/` |
-| Pi | `.pi/` | Qoder | `.qoder/` |
-| Antigravity | `.agents/` | Bob Shell | `.bob/` |
-| ForgeCode | `.forge/` | Trae | `.trae/` |
-
-有些平台在 project-level 和 global installs 中使用不同目录。例如，OpenCode global installs 使用 `.config/opencode`，Antigravity global installs 使用 `.gemini/antigravity`。
-
-## 语言支持
-
-`comet init` 为 Comet Skills 提供两种语言选择：
-
-| Language | Skill directory | Trigger |
-|----------|----------------|---------| 
-| English (default) | `<platform-dir>/skills/` | Selected at `comet init` prompt |
-| Chinese (中文) | `<platform-dir>/skills-zh/` | Selected at `comet init` prompt |
-
-语言选择只适用于 Comet 自己的 Skills。OpenSpec 和 Superpowers Skills 会按各自项目分发时的默认语言安装。
-
-初始安装后，如需更新或切换已安装 Skills 的语言：
+`comet skill` 是本地 Skill 包和 deterministic Run 的低层工具。它适合调试、集成和 Engine Run。
 
 ```bash
-comet update --language en   # switch to English
-comet update --language zh   # switch to Chinese
+comet skill install ./my-skill --project .
+comet skill validate my-skill --project .
+comet skill inspect my-skill --json
+comet skill run my-skill --run-id demo-run --project .
+comet skill resume --run-id demo-run --status succeeded --summary "完成"
+comet skill eval --run-id demo-run --scope completion
+```
+
+<Warning>
+  `comet skill eval` 不是通用 Skill 评估。通用评估请使用 `comet eval run`。
+</Warning>
+
+## 什么时候用 `/comet-any`
+
+如果你想把一个工作流变成团队可复用 Skill，不要从手写 Engine 文件开始。用 `/comet-any` 让它读取真实 Skill、生成结构化证据、评估并进入发布门禁。
+
+正常用户路径是：
+
+```text
+/comet-any -> comet eval -> comet publish
 ```

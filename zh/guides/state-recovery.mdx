@@ -1,115 +1,44 @@
 ---
-title: "从 Comet State Errors 和不一致中恢复"
-sidebarTitle: "状态恢复"
-description: "了解如何使用 comet doctor、comet status 和 comet-state.sh check --recover 命令诊断并修复 .comet.yaml state inconsistencies。"
+title: "状态损坏与恢复"
+description: "处理 .comet.yaml 缺失、格式异常、证据缺失和阶段冲突。"
 ---
 
-有时 `.comet.yaml` 可能会与项目的 file state 不一致，例如 AI agent 在 phase 中途崩溃、发生了手动编辑，或 context compaction 中断了 workflow。Comet 提供工具来诊断并恢复这些情况，无需从头开始你的 change。
+状态损坏时，目标是恢复真实事实，而不是强行改字段让流程继续。
 
-## 1. 检查当前状态
+## 常见症状
 
-先获取一个快速 status snapshot，查看哪些 changes 处于 active 状态，以及 Comet 认为它们分别处于哪个 phase：
+| 症状 | 可能原因 | 先做什么 |
+| --- | --- | --- |
+| `comet status` 没有下一步 | `.comet.yaml` 缺失或格式异常 | 运行 `comet doctor` |
+| build 无法进入 verify | 缺少 `build_mode`、`isolation` 或 `tdd_mode` | 回到 build 选择 |
+| verify 通过但不能 archive | 缺验证报告或分支状态未处理 | 补验证报告 |
+| archive 后仍显示 active | 手工移动目录或状态没同步 | 用 OpenSpec 状态核对 |
 
-```bash
-comet status
-```
-
-这会显示 active changes、task progress，以及每个 change 推荐的下一条 Comet workflow command。使用 `--json` 可获得 structured output：
+## 诊断命令
 
 ```bash
 comet status --json
+comet doctor --json
 ```
 
-完整选项细节请参阅 [CLI reference](/cli/status)。
+JSON 输出适合给 Agent 或自动化工具读取。普通用户可以先看文本输出。
 
-## 2. 运行 Health Check
+## 恢复原则
 
-若要更深入诊断 Comet installation、state files 和 working directories：
+- 以 OpenSpec 文件、Design Doc、Plan、测试结果和实际工作树为证据。
+- 不要手工写 machine-owned Run 字段。
+- 不要把 `build_pause` 当成 `build_mode`。
+- 不要跳过 verify 失败决策点。
+- 不要手工伪造 archive 状态。
 
-```bash
-comet doctor
+## 推荐处理流程
+
+```mermaid
+flowchart TD
+  A["发现状态异常"] --> B["读取 comet status"]
+  B --> C["运行 comet doctor"]
+  C --> D["核对 OpenSpec artifacts"]
+  D --> E["核对 Superpowers design/plan"]
+  E --> F["核对工作树和验证证据"]
+  F --> G["用 Comet 命令恢复"]
 ```
-
-`comet doctor` 会检查：
-
-- Project 和 global installation health
-- 必需的 working directories（`docs/superpowers/specs/`、`docs/superpowers/plans/`）
-- 已安装的 skills 和 automation scripts
-- active changes 的 `.comet.yaml` state files
-
-使用 `--json` 获取 machine-readable output，或使用 `--scope project|global` 缩小检查范围：
-
-```bash
-comet doctor --json --scope project
-```
-
-完整选项细节请参阅 [CLI reference](/cli/doctor)。
-
-## 3. Context Compaction Recovery
-
-如果 AI agent 的 context 在 phase 中途被 compacted，带 `--recover` 的 `comet-state.sh check` 命令会生成 structured recovery context，让新的 agent session 可以重建当时发生了什么：
-
-```bash
-"$COMET_BASH" "$COMET_STATE" check my-feature build --recover
-```
-
-structured output 包括：
-
-- **Phase status** — 当前 phase，以及 entry conditions 是否满足
-- **Field progress** — 哪些 `.comet.yaml` fields 已设置、缺失或无效
-- **Task count** — `tasks.md` 中已完成和剩余 tasks 数量
-- **Recovery actions** — agent 为正确恢复应采取的具体步骤
-
-当新的 agent session 需要理解某个执行中途被中断的 change 状态时，运行此命令。
-
-## 4. Schema Validation Errors
-
-如果 `.comet.yaml` 被手动编辑，或被 agent 错误写入，请使用 schema validator 查找问题：
-
-```bash
-"$COMET_BASH" "$COMET_YAML_VALIDATE" <change-name>
-```
-
-validator 常见可捕获的问题：
-
-| 问题 | 示例 |
-|-------|---------|
-| **Unknown fields**（typos） | 使用 `verfiy_result` 而不是 `verify_result` |
-| **Invalid enum values** | `build_mode: auto`（不是有效 mode） |
-| **Missing required fields** | 完全缺少 `phase` |
-| **Invalid path references** | `design_doc` 指向不存在的文件 |
-| **Malformed `handoff_hash`** | SHA256 value 格式错误 |
-
-继续 workflow 前，请修复识别出的 fields。当 validator 发现 blocking issues 时，会输出带可执行建议的 `[HARD STOP]`。
-
-## 5. Manual State Correction
-
-当你需要直接修正某个特定 field 时，使用 `comet-state.sh set`：
-
-```bash
-"$COMET_BASH" "$COMET_STATE" set <change-name> phase build
-"$COMET_BASH" "$COMET_STATE" set <change-name> verify_result pending
-```
-
-对于 phase changes，你也可以使用 semantic transition events，它们会一次性触发所有关联字段更新：
-
-```bash
-"$COMET_BASH" "$COMET_STATE" transition <change-name> open-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> build-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> verify-pass
-```
-
-<Warning>
-优先使用 guard transitions（`comet-guard.sh <name> <phase> --apply`）或 semantic `comet-state.sh transition` events，而不是原始 `set` operations。Guard transitions 会在写入 state 前验证 exit conditions；原始 `set` 会跳过这些检查，可能让 `.comet.yaml` 进入阻塞后续 phases 的不一致状态。只有在确认 corruption 且 guard 本身无法运行时，才使用 `set`。
-</Warning>
-
-## 6. Error Scenario Reference
-
-| Scenario | Recovery Steps |
-|----------|---------------|
-| **`openspec list` fails** | 检查 OpenSpec 是否已安装（`openspec --version`）；如果缺失，在项目根目录运行 `openspec init` |
-| **`.comet.yaml` malformed or missing** | 使用可验证的 file state（proposal、tasks、design doc）作为 source of truth；用 `comet-state set` 重建或修正 `.comet.yaml`，或重新运行 `comet-state init` |
-| **Sub-skill unavailable** | 停止 workflow；安装或启用缺失 skill（运行 `comet update` 或检查 platform skill directory），然后恢复 |
-| **Build or test fails** | 返回 build phase 修复，不要在 tests 失败时尝试进入 verify |
-| **Missing change directory structure** | 按 `comet-open` artifact requirements 补齐缺失文件：`proposal.md`、`design.md`、`tasks.md` 和 `.openspec.yaml` 都必须存在 |
-| **`openspec list --json` returns unexpected format** | 确认 OpenSpec version 与你的 Comet install 兼容；如果不匹配，二者都更新 |

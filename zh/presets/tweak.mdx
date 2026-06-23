@@ -1,102 +1,32 @@
 ---
-title: "Comet Tweak Preset：无需完整 Planning 的小变更"
-sidebarTitle: "Tweak"
-description: "tweak preset 会跳过 brainstorming 和 full plan，使用 lightweight build 和 verification，适合 copy、config、docs 和 prompt edits。"
+title: "tweak 预设"
+description: "使用 tweak 处理文案、配置、文档和 prompt 等中等轻量改动。"
 ---
 
-tweak preset 用于处理小型、低风险 changes，例如 copy edits、configuration tweaks、documentation updates 和 prompt adjustments。它复用 Comet 的 open、build、verify 和 archive 能力，但跳过 brainstorming 和完整 implementation plan，让流程保持轻量快速。
+tweak 是串联 OpenSpec 的轻量路径。它适合小到中等的调整，并把 delta spec 当作一等产物。
 
-## 何时使用 Tweak
+## 适合使用
 
-仅当满足以下**所有**条件时，才使用 `/comet-tweak`：
+- 文案、配置、文档或 prompt 调整。
+- 需求明确，不需要完整技术设计。
+- 可以用轻量验证证明结果。
+- 可能触及多个文件，但没有架构质变。
 
-- change 是本地、非 capability 调整：**copy、configuration、documentation 或 prompt** edits
-- 影响 **少于 5 个文件**（通常不超过 4 个）
-- 不需要 **cross-module coordination**
-- 需要 **少于 5 个 new test cases**
-- Configuration changes 只涉及 **value modifications**，不添加或删除 config items
-- 不引入 **new capability、architecture changes 或 interface changes**
-- 不需要 **delta spec**（如果影响现有 spec acceptance scenario，请升级到 full）
+## 与 hotfix 的区别
 
-当所有条件都成立时，tweak 会提供通过 Comet workflow 的最轻量路径。
+| 预设 | 目标 | 常见验证 |
+| --- | --- | --- |
+| hotfix | 修 bug | 复现失败转为通过 |
+| tweak | 调整行为或内容 | 快照、文档检查、配置检查、目标命令 |
 
-## Tweak workflow
+## 升级规则
 
-```
-/comet-tweak
-  open → lightweight build → light verify → archive
-  (brainstorming and full plan skipped)
-```
+文件数量只是提示，不是自动升级条件。真正需要升级的是质变信号：
 
-| Phase | 会发生什么 |
-|-------|-------------|
-| **Open** | 精简 artifacts：`proposal.md`（motivation + goals + scope）、`design.md`（brief description，无 solution comparison）、`tasks.md`（不超过 3 tasks） |
-| **Lightweight Build** | Direct build（`build_mode: direct`）：tasks 逐个执行，每个 task 运行 formatter 和 tests，commits 使用 `tweak:` prefix |
-| **Light Verify** | `comet-verify` scale assessment 确认 lightweight path（≤ 3 tasks、≤ 4 files、无 delta spec、无 new capability） |
-| **Archive** | 确认 `verify_result: pass` 后复用 `/comet-archive` |
+- 跨模块协调。
+- 新 capability。
+- schema 变更。
+- 新 public API。
+- 深层架构问题。
 
-## 启动 Tweak
-
-在你的 AI 编程工具中，描述你想做的小变更。Comet 会自动评估你的描述：
-
-- 如果满足 tweak conditions，`/comet` 会 **auto-route** 到 `/comet-tweak`，无需你直接调用。
-- 你也可以直接调用 `/comet-tweak`，明确使用该 preset。
-
-调用后，tweak workflow 会**连续**运行，不会暂停等待输入，除非到达定义好的 decision points（upgrade conditions 和 verification failures）。
-
-## 升级条件
-
-<Warning>
-如果 tweak 期间出现以下任一条件，Comet 会暂停并要求你确认是否升级到 full workflow。Agent 继续前需要你的明确确认。
-
-| 条件 | 为什么触发升级 |
-|-----------|---------------------------|
-| Change 涉及 **5 个或更多文件** | 超出 small change scope |
-| 需要 **Cross-module coordination** | 需要 cross-component coordination |
-| 需要 **5 个或更多 new test cases** | Change complexity 正在上升 |
-| Config item **additions or deletions**（不只是 value changes） | 超出 local optimization |
-| 需要 **New capability** | 超出 local optimization |
-| 需要 **Delta spec**（影响现有 spec acceptance scenarios） | 必须进入 full workflow |
-
-Upgrade 需要交互式确认。如果你拒绝，tweak 会停止，Comet 会报告该 change 已超出 tweak scope。
-</Warning>
-
-## Preset 对比
-
-| Aspect | Tweak | Hotfix | Full |
-|--------|-------|--------|------|
-| **Brainstorming** | Skipped | Skipped | Required |
-| **Full Implementation Plan** | Skipped | Skipped (transfers to `/comet-build` if tasks > 3) | Included |
-| **Verify Mode** | Light (5 quick checks) | Scale-assessed (light or full) | Full |
-| **Build Mode** | `direct` (default) | `direct` (default) | Chosen by user |
-| **Delta Spec** | Not allowed (triggers upgrade) | Optional (triggers full verify) | Supported |
-| **Typical Use** | Docs / copy / config / prompt | Bug fixes | Features / new capabilities |
-| **Max Files** | < 5 | < 3 | Unrestricted |
-| **Max Tasks** | ≤ 3 | ≤ 3 (else transfers to `/comet-build`) | Unrestricted |
-
-## 升级到 Full Workflow
-
-当确认 tweak 需要升级时，Comet 会遵循以下路径：
-
-1. 将 `.comet.yaml` 中的 `workflow` 字段更新为 `full`
-2. 加载 `comet-design` skill，在现有 tweak artifacts 基础上补充完整 Design Doc
-3. 从 design phase 起正常进入 full workflow
-
-现有的 `proposal.md`、`design.md` 和 `tasks.md` 会被保留，你不需要重新开始。
-
-## Phase guards
-
-Tweak 会强制执行与 full workflow 相同的 guard transitions：
-
-```bash
-# Transition open → build
-"$COMET_BASH" "$COMET_GUARD" <change-name> open --apply
-
-# Transition build → verify
-"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
-
-# Transition verify → archive (handled by /comet-verify)
-"$COMET_BASH" "$COMET_GUARD" <change-name> verify --apply
-```
-
-Guards 会在推进前验证 exit conditions。没有设置 `isolation` 和 `build_mode` 时，tweak 不能进入 `verify`；没有 `verify_result: pass` 时，不能 archive。
+命中后 Comet 会让用户选择继续 tweak，还是用 `preset-escalate` 回到 full workflow 的 design 阶段。
