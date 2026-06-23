@@ -1,0 +1,193 @@
+---
+title: "评估报告和归因"
+sidebarTitle: "报告归因"
+description: "了解评估报告的格式、内容和失败归因机制。支持 Markdown 和 HTML 两种输出格式。"
+---
+
+评估完成后，Comet 会生成结构化的评估报告，包含通过/失败统计、耗时、failure attribution 等信息。
+
+## 报告格式
+
+### Markdown（默认）
+
+评估结果默认以 Markdown 格式写入 `eval/local/logs/experiments/` 目录：
+
+| 文件 | 内容 |
+|---|---|
+| `summary.md` | 单次评估的摘要 |
+| `comparison_report.md` | 基线对比报告（多个 treatment 时生成） |
+
+### HTML
+
+启用 HTML 输出后，会额外生成可视化的 HTML 报告：
+
+```bash
+comet eval run --manifest ./comet/eval.yaml --html
+```
+
+或通过报告配置文件：
+
+```json
+{
+  "report_outputs": {
+    "markdown": true,
+    "html": true
+  }
+}
+```
+
+## 报告内容
+
+### summary.md
+
+```markdown
+# Eval Summary
+
+## Target
+- Skill: my-workflow
+- Hash: a1b2c3d4
+- Source: ./my-skill
+
+## Results
+- Task: generic-skill-smoke
+- Profile: generic
+- Passed: 1
+- Failed: 0
+- Duration: 45s
+
+## Failure Attribution
+- harness: 0
+- workflow: 0
+- task: 0
+- model: 0
+
+## Artifacts
+- result.md: present (1.2KB)
+```
+
+### comparison_report.md
+
+当运行多个 treatment 时生成对比报告：
+
+```markdown
+# Comparison Report
+
+## Treatments
+| Treatment | Passed | Failed | Duration |
+|---|---|---|---|
+| CONTROL | 0/1 | 1/1 | 120s |
+| COMET_FULL | 1/1 | 0/1 | 45s |
+
+## Analysis
+COMET_FULL treatment significantly outperformed CONTROL,
+completing the task in 37% of the time with 100% success rate.
+```
+
+## Failure Attribution
+
+评估失败会被归类到四个桶中，帮助定位问题根源：
+
+### 桶定义
+
+| 桶 | 含义 | 常见原因 |
+|---|---|---|
+| `harness` | 评估框架本身的问题 | 配置错误、依赖缺失、Docker 问题 |
+| `workflow` | Comet 工作流执行问题 | 状态转换错误、脚本执行失败 |
+| `task` | 任务定义或期望值问题 | 期望产物不匹配、验证逻辑错误 |
+| `model` | AI 模型行为问题 | 输出不符合预期、幻觉、超时 |
+
+### 归因逻辑
+
+```
+评估失败
+├── 框架报错？ → harness
+├── 工作流中断？ → workflow
+├── 产物不符合期望？ → task
+└── 模型输出异常？ → model
+```
+
+### 查看归因
+
+评估报告末尾会显示归因统计：
+
+```
+Failure attribution: harness=0, workflow=1, task=0, model=0
+```
+
+## 评估证据
+
+评估证据是发布流程的必要组成部分。证据包括：
+
+| 证据类型 | 说明 |
+|---|---|
+| 评估结果 | 通过/失败状态 |
+| 评估 hash | 评估时的内容 hash |
+| 评估级别 | quick / full |
+| 报告路径 | 报告文件位置 |
+
+### 证据记录
+
+评估证据通过 `comet bundle eval-record` 记录到 Bundle 编辑状态中：
+
+```bash
+comet bundle eval-record my-workflow --result ./eval-result.json
+```
+
+### 证据验证
+
+发布时会验证评估证据：
+
+- 评估 hash 必须与当前内容 hash 匹配
+- 评估必须通过
+- 评估级别必须符合要求
+
+如果 hash 不匹配（内容已变更），需要重新运行评估。
+
+## 评估结果 JSON
+
+评估结果以 JSON 格式记录：
+
+```json
+{
+  "taskId": "generic-skill-smoke",
+  "profile": "generic",
+  "skillName": "my-workflow",
+  "skillHash": "a1b2c3d4",
+  "passed": true,
+  "duration": 45000,
+  "artifacts": [
+    {
+      "name": "result.md",
+      "path": "./result.md",
+      "size": 1234
+    }
+  ],
+  "failureAttribution": {
+    "harness": 0,
+    "workflow": 0,
+    "task": 0,
+    "model": 0
+  },
+  "reportPath": "eval/local/logs/experiments/exp-20240601-001/summary.md"
+}
+```
+
+## 最佳实践
+
+<AccordionGroup>
+  <Accordion title="保留评估报告">
+    评估报告是发布证据的一部分，不要手动删除。
+  </Accordion>
+
+  <Accordion title="分析失败归因">
+    遇到评估失败时，先查看归因桶，快速定位问题根源。
+  </Accordion>
+
+  <Accordion title="对比不同版本">
+    使用对比报告分析 Skill 改进效果。
+  </Accordion>
+
+  <Accordion title="HTML 报告用于分享">
+    HTML 报告更适合分享给团队成员查看。
+  </Accordion>
+</AccordionGroup>
