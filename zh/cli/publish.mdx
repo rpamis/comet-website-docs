@@ -1,286 +1,49 @@
 ---
-title: "comet publish — 发布和分发 Skill"
-sidebarTitle: "comet publish"
-description: "审查、批准、发布和分发 /comet-any 生成的 Skill 包。支持多平台分发和 locale 配置。"
+title: "comet publish"
+description: "审核、批准、发布和分发 /comet-any 生成的 Skill publish candidate。"
 ---
 
-`comet publish` 用于管理 `/comet-any` Skill Factory 生成的 Skill 包的发布生命周期。所有 publish 子命令都是对应 `comet bundle` 子命令的便捷封装。
+`comet publish` 是普通用户面对 `/comet-any` 产物的发布入口。它复用 Bundle 后端，但把命令组织成 readiness、review、approval、publish 和 distribute。
 
-<Note>
-  如果你需要更细粒度的 Bundle 操作（如 draft 管理、factory 元数据），请使用 [`comet bundle`](/zh/cli/bundle) 命令。
-</Note>
+## 子命令
 
-## 子命令一览
+| 命令 | 用途 |
+| --- | --- |
+| `list` | 列出可恢复的 publish candidate |
+| `status <name>` | 查看 readiness 和 next action |
+| `review <name>` | 生成发布前评审摘要 |
+| `approve <name>` | 批准当前 hash 的 candidate |
+| `run <name>` | 发布已批准 candidate |
+| `distribute <name>` | 分发已发布 candidate 到平台 |
 
-| 子命令 | 用途 |
-|---|---|
-| [`comet publish list`](#list) | 列出可恢复的发布候选 |
-| [`comet publish status`](#status) | 查看发布就绪状态和下一步操作 |
-| [`comet publish review`](#review) | 构建发布审查摘要 |
-| [`comet publish approve`](#approve) | 批准发布候选 |
-| [`comet publish run`](#run) | 将已批准的候选发布到 `.comet/bundles` |
-| [`comet publish distribute`](#distribute) | 分发到选中的 AI 编程平台 |
+## 推荐流程
 
----
+```mermaid
+flowchart LR
+  A["/comet-any 生成"] --> B["comet eval run --html"]
+  B --> C["comet publish status"]
+  C --> D["comet publish review"]
+  D --> E["comet publish approve"]
+  E --> F["comet publish run"]
+  F --> G["comet publish distribute"]
+```
 
-## list
-
-列出所有可恢复的发布候选。
+## 示例
 
 ```bash
-comet publish list
+comet publish list --project . --json
+comet publish status review-helper --project .
+comet publish review review-helper --platform claude --json
+comet publish approve review-helper --reviewer alice
+comet publish run review-helper --platform claude
+comet publish distribute review-helper --platform claude --scope project --confirm-executables
 ```
 
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet publish list
-```
-
-```
-Publish candidates:
-
-  1. my-workflow
-     Status: draft
-     Next: request-review
-     Reason: eval not yet recorded
-
-  2. data-pipeline
-     Status: eval-passed
-     Next: publish
-     Reason: ready for publishing
-```
-
----
-
-## status
-
-查看单个发布候选的就绪状态和下一步操作。
-
-```bash
-comet publish status <name>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet publish status my-workflow
-```
-
-```
-Bundle: my-workflow
-Status: eval-passed
-Hash: a1b2c3d4
-Draft: .comet/bundle-authoring/my-workflow.json
-
-Eval: passed (quick)
-Review: not started
-
-Next: publish
-Reason: eval passed, ready for publishing
-Command: comet publish run my-workflow --platform claude-code
-```
-
----
-
-## review
-
-构建发布审查摘要，展示完整的发布就绪状态。
-
-```bash
-comet publish review <name>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--platform" type="string" required>
-  参考平台 ID（如 `claude-code`、`cursor`）。
-</ParamField>
-
-<ParamField query="--scope" type="string">
-  安装范围。可接受值：`project` 或 `global`。
-</ParamField>
-
-<ParamField query="--locale" type="string">
-  编译的 locale。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 审查摘要内容
-
-审查摘要包含以下信息：
-
-- **Entry Skills** — 入口 Skill 列表
-- **Internal Skills** — 内部 Skill 列表
-- **Plan Hash** — 工厂计划哈希
-- **Evidence** — 评估证据
-- **Call Order** — 调用链顺序
-- **Deviations** — 顺序偏差及原因
-- **Gaps** — 平台能力差距
-- **Disclosures** — 可执行文件披露
-- **Eval Results** — 评估结果
-- **Readiness** — 就绪状态（Ready / Blocked / Warning）
-
----
-
-## approve
-
-在审查后批准一个发布候选。
-
-```bash
-comet publish approve <name>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--reviewer" type="string" required>
-  审查者名称。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet publish approve my-workflow --reviewer "benym"
-```
-
-```
-Review approved: my-workflow
-Reviewer: benym
-Status: review-approved
-Next: comet publish run my-workflow --platform claude-code
-```
-
----
-
-## run
-
-将已批准的发布候选发布到 `.comet/bundles` 目录。
-
-```bash
-comet publish run <name>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--platform" type="string" required>
-  参考平台 ID。
-</ParamField>
-
-<ParamField query="--overwrite" type="boolean">
-  覆盖已存在的已发布 Bundle。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet publish run my-workflow --platform claude-code
-```
-
-```
-Published my-workflow: .comet/bundles/my-workflow
-Next: comet publish distribute my-workflow --platform claude-code
-```
-
----
-
-## distribute
-
-将已发布的 Bundle 分发到选中的 AI 编程平台。
-
-```bash
-comet publish distribute <name>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--platform" type="string[]" required>
-  目标平台 ID。可重复使用以分发到多个平台。
-</ParamField>
-
-<ParamField query="--scope" type="string">
-  安装范围。可接受值：`project` 或 `global`。
-</ParamField>
-
-<ParamField query="--locale" type="string">
-  分发的 locale。
-</ParamField>
-
-<ParamField query="--overwrite" type="boolean">
-  覆盖已存在的目标文件。
-</ParamField>
-
-<ParamField query="--skip-capability" type="string[]">
-  显式跳过不支持的可选能力。可重复使用。
-</ParamField>
-
-<ParamField query="--confirm-executables" type="boolean">
-  确认可执行 hook/script 的披露。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet publish distribute my-workflow --platform claude-code --platform cursor
-```
-
-```
-Claude Code: installed (12 files)
-Cursor: installed (12 files)
-
-Distribution complete: 2 platforms, 24 files
-```
-
-<Note>
-  分发前请确保已通过 `comet publish review` 确认所有 capabilities 和 executables 的披露。使用 `--confirm-executables` 明确确认可执行文件的安全性。
-</Note>
+## readiness 阻塞项
+
+- unresolved candidates。
+- 缺少当前 hash 的 eval 证据。
+- 缺少当前 hash 的人工 approval。
+- required capability gap。
+- executable disclosure 未确认。
+- review summary 不是 publishable。

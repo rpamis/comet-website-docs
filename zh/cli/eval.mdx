@@ -1,178 +1,45 @@
 ---
-title: "comet eval — 评估任意 Skill"
-sidebarTitle: "comet eval"
-description: "通过共享评估框架运行 Comet Skill 评估。支持 manifest 和本地 Skill 两种评估目标，生成结构化报告。"
+title: "comet eval"
+description: "通过共享 eval harness 评估本地 Skill 或 comet/eval.yaml，并生成报告。"
 ---
 
-`comet eval` 是 Comet 的共享评估框架入口，用于评估 Comet Skill 或任意本地 Skill 包。它基于 Python pytest 构建，支持快速冒烟测试和完整基准测试。
+`comet eval` 是通用 Skill 评估入口。它封装 eval harness，让用户不需要手工切到 `eval/` 或拼 pytest 参数。
 
-<Note>
-  `comet eval` 是通用 Skill 评估命令。如果你需要评估特定 Engine Run 的运行时检查，请使用 [`comet skill eval`](/zh/cli/skill#eval)。
-</Note>
+## 子命令
 
-## 子命令一览
+| 命令 | 用途 |
+| --- | --- |
+| `collect` | 只做发现和预检查，不执行模型或 Docker 任务 |
+| `run` | 执行本地 eval，可生成 HTML 报告 |
 
-| 子命令 | 用途 |
-|---|---|
-| [`comet eval run`](#run) | 执行评估并生成报告 |
-| [`comet eval collect`](#collect) | 发现评估目标（不执行） |
+## 推荐路径
 
----
-
-## run
-
-执行一个本地 Skill 或 eval manifest 的评估。
+有 `comet/eval.yaml` 时：
 
 ```bash
-comet eval run [flags]
+comet eval collect --manifest ./generated-skill/comet/eval.yaml
+comet eval run --manifest ./generated-skill/comet/eval.yaml --html
 ```
 
-<Note>
-  必须提供 `--manifest` 或 `--skill-path` 中的恰好一个。
-</Note>
-
-### Flags
-
-<ParamField query="--manifest" type="string">
-  指向 `comet/eval.yaml` manifest 文件的路径。用于评估通过 `/comet-any` 生成的 Skill 包。
-</ParamField>
-
-<ParamField query="--skill-path" type="string">
-  本地 Skill 目录或 `SKILL.md` 文件路径。用于评估任意本地 Skill。
-</ParamField>
-
-<ParamField query="--skill-name" type="string">
-  与 `--skill-path` 配合使用的 Skill 名称。
-</ParamField>
-
-<ParamField query="--profile" type="string" default="generic">
-  评估配置文件。可接受值：`generic`、`comet` 等。
-</ParamField>
-
-<ParamField query="--task" type="string">
-  显式指定评估任务。不设置时根据目标类型自动选择。
-</ParamField>
-
-<ParamField query="--quick" type="boolean">
-  使用默认的快速冒烟测试任务。
-</ParamField>
-
-<ParamField query="--html" type="boolean">
-  启用 HTML 报告输出（默认只生成 Markdown）。
-</ParamField>
-
-<ParamField query="--report-config" type="string">
-  JSON 或 YAML 报告输出配置文件路径。
-</ParamField>
-
-<ParamField query="--project" type="string" default=".">
-  包含 `eval/` 目录的仓库根目录。
-</ParamField>
-
-### 示例
-
-#### 评估本地 Skill
+只有本地 Skill 目录时：
 
 ```bash
 comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 ```
 
-#### 评估生成的 Skill manifest
+## 常用选项
 
-```bash
-comet eval run --manifest ./comet/eval.yaml
-```
+| 选项 | 说明 |
+| --- | --- |
+| `--project <dir>` | 包含 `eval/` 的仓库根目录 |
+| `--manifest <path>` | `comet/eval.yaml` 路径 |
+| `--skill-path <path>` | 本地 Skill 目录或 `SKILL.md` |
+| `--skill-name <name>` | `--skill-path` 的 Skill 名 |
+| `--profile <name>` | 覆盖 eval profile |
+| `--task <task>` | 指定 eval task |
+| `--html` | 生成 HTML 报告 |
+| `--quick` | 使用默认 quick smoke task |
 
-#### 生成 HTML 报告
-
-```bash
-comet eval run --manifest ./comet/eval.yaml --html
-```
-
-### 输出
-
-```
-Eval root: ./eval
-Mode: run
-Target: ./my-skill
-Experiment ID: exp-20240601-001
-Profile: generic
-Task: generic-skill-smoke
-Report path: eval/local/logs/experiments/exp-20240601-001/summary.md
-Report config: markdown=true, html=true
-
-Running eval...
-  1 passed, 0 failed
-
-Failure attribution: harness=0, workflow=0, task=0, model=0
-```
-
----
-
-## collect
-
-发现评估目标但不执行实际工作负载。适合在运行完整评估前进行预检查。
-
-```bash
-comet eval collect [flags]
-```
-
-### Flags
-
-与 `comet eval run` 相同，但不支持 `--quick`、`--html` 和 `--report-config`。
-
-### 示例
-
-```bash
-comet eval collect --manifest ./comet/eval.yaml
-```
-
-```
-Eval root: ./eval
-Mode: collect
-Target: ./comet/eval.yaml
-Tasks found: 3
-  - authoring-skill-smoke (easy)
-  - generic-skill-smoke (easy)
-  - comet-full-workflow (hard)
-
-Ready to run: comet eval run --manifest ./comet/eval.yaml
-```
-
----
-
-## 评估报告
-
-评估结果默认以 Markdown 格式写入 `eval/local/logs/experiments/` 目录：
-
-| 文件 | 内容 |
-|---|---|
-| `summary.md` | 单次评估的摘要，包括通过/失败数、耗时、failure attribution |
-| `comparison_report.md` | 基线对比报告（当有多个 treatment 时生成） |
-
-启用 HTML 输出后，会额外生成可视化的 HTML 报告。
-
-### Failure Attribution
-
-评估失败会被归类到以下四个桶中：
-
-| 桶 | 含义 |
-|---|---|
-| `harness` | 评估框架本身的问题 |
-| `workflow` | Comet 工作流执行问题 |
-| `task` | 任务定义或期望值问题 |
-| `model` | AI 模型行为问题 |
-
-## 环境要求
-
-运行评估需要以下环境：
-
-- Python 3.11+
-- `uv` 或等效的 Python 环境管理器
-- Docker
-- Claude Code CLI（`claude`）
-- `ANTHROPIC_API_KEY` 环境变量
-
-<Note>
-  首次运行前，请确保已安装所有依赖：`cd eval && uv sync`
-</Note>
+<Tip>
+  发布 readiness 优先使用 manifest 路径。`--skill-path --quick` 适合早期冒烟。
+</Tip>

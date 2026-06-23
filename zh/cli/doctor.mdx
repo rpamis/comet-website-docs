@@ -1,127 +1,37 @@
 ---
-title: "comet doctor — 诊断你的 Comet 安装"
-sidebarTitle: "comet doctor"
-description: "comet doctor 检查安装健康状态，包括 working dirs、已安装的 skills、bundled scripts 和 .comet.yaml files。每个结果都是 pass、warn 或 fail。"
+title: "comet doctor"
+description: "诊断 Comet 安装健康、平台目录、脚本、Skill 和活跃 change 状态。"
 ---
 
-`comet doctor` 会对你的 Comet 安装运行一组 health checks，帮助你诊断缺失的 skills、配置错误的 state files 或损坏的 script paths。
+`comet doctor` 是健康检查入口。它覆盖安装和工作流状态两个层面。
 
-## 用法
+## 基本用法
 
 ```bash
 comet doctor [path]
 ```
 
-省略 `path` 时，默认值为 `.`（当前目录）。
+| 选项 | 说明 |
+| --- | --- |
+| `--json` | 输出结构化诊断 |
+| `--scope <scope>` | 诊断 `auto`、`project` 或 `global` |
 
-## 执行的检查
+## 检查内容
 
-`comet doctor` 会按顺序运行以下检查：
+- 项目级和全局安装。
+- 目标平台 Skill 目录。
+- Comet Skill、规则、脚本和 hooks。
+- 活跃 change 的 `.comet.yaml`。
+- 当前 step、runtime mode 和缺失证据。
 
-| 检查项 | 验证内容 |
-|---|---|
-| **openspec CLI** | `openspec` 命令是否可在 `PATH` 上使用；如果可用，还会显示已安装版本。 |
-| **Working directories** | 项目中是否存在 `docs/superpowers/specs/` 和 `docs/superpowers/plans/`（`--scope global` 会跳过）。 |
-| **Skills per platform** | 对每个检测到的平台（project 和/或 global），检查 Comet skill manifest 中列出的所有文件是否存在。如果有缺失文件，会报告数量。 |
-| **Scripts present** | bundled Comet shell scripts（例如 `comet-guard.sh`、`comet-state.sh`）是否可从已安装 package assets 访问。 |
-| **`.comet.yaml` validity** | 对 `openspec/changes/` 下的每个 change directory，检查 `.comet.yaml` 的顶层 keys 是否都是已识别字段名。未知或拼写错误的 keys 会报告为 `fail`。 |
+## 排障顺序
 
-## 检查结果级别
-
-| Status | Icon | 含义 |
-|---|---|---|
-| `pass` | `✓` | 检查成功完成，无需操作。 |
-| `warn` | `⚠` | 不致命，但值得处理（例如未安装 `openspec` CLI）。 |
-| `fail` | `✗` | 有内容损坏，应在继续前修复（例如 `.comet.yaml` 中存在未知字段）。 |
-
-## 示例输出
-
+```mermaid
+flowchart TD
+  A["comet status 异常"] --> B["comet doctor"]
+  B --> C{"安装问题?"}
+  C -->|是| D["comet update 或重新 init"]
+  C -->|否| E{"change 状态问题?"}
+  E -->|是| F["按 diagnostic 恢复证据"]
+  E -->|否| G["回到 /comet"]
 ```
-Comet Doctor (scope: auto)
-
-  ✓ openspec CLI: installed (1.2.0)
-  ✓ working directories: present
-  ✓ skills: Claude Code (project): complete (8 files)
-  ⚠ skills: Cursor (project): missing 2: comet-build/SKILL.md, comet-verify/SKILL.md
-  ✓ scripts executable: OK (6 scripts)
-  ✓ .comet.yaml: my-feature: valid
-  ✗ .comet.yaml: old-change: unknown field(s): custom_flag
-```
-
-如果未安装 `openspec`，CLI 检查会产生一个带安装提示的 `warn` 结果：
-
-```
-  ⚠ openspec CLI: not installed — install with: npm install -g @fission-ai/openspec@latest
-```
-
-## Flags
-
-<ParamField query="--json" type="boolean">
-  将所有检查结果输出为 structured JSON，而不是格式化文本。请参阅下方的 [JSON output](#json-output)。
-</ParamField>
-
-<ParamField query="--scope" type="string">
-  要诊断的 scope。可接受值：`auto`（默认）、`project` 或 `global`。
-
-  - `auto` — 同时检查 project 和 global scopes（如果项目路径等于 home 目录，则跳过 global）。
-  - `project` — 只检查项目目录；包含 working-directories 检查。
-  - `global` — 只检查 global（home）目录；跳过 working-directories 检查。
-</ParamField>
-
-## JSON Output
-
-```bash
-comet doctor --json
-```
-
-```json
-{
-  "scope": "auto",
-  "results": [
-    {
-      "check": "openspec CLI",
-      "status": "warn",
-      "message": "not installed — install with: npm install -g @fission-ai/openspec@latest"
-    },
-    {
-      "check": "working directories",
-      "status": "pass",
-      "message": "present"
-    },
-    {
-      "check": "skills: Claude Code (project)",
-      "status": "pass",
-      "message": "complete (8 files)"
-    },
-    {
-      "check": "skills: Cursor (project)",
-      "status": "warn",
-      "message": "missing 2: comet-build/SKILL.md, comet-verify/SKILL.md"
-    },
-    {
-      "check": "scripts executable",
-      "status": "pass",
-      "message": "OK (6 scripts)"
-    },
-    {
-      "check": ".comet.yaml: my-feature",
-      "status": "pass",
-      "message": "valid"
-    }
-  ]
-}
-```
-
-## 有效的 `.comet.yaml` 字段
-
-`comet doctor` 会验证每个 `.comet.yaml` state file 中的以下顶层 keys。不在此列表中的任何 key 都会标记为 `fail`：
-
-```
-workflow          phase             build_mode        isolation
-verify_mode       verify_result     design_doc        plan
-verification_report  branch_status  archived          verified_at
-```
-
-<Tip>
-  如果 `comet doctor` 报告某个平台缺少 skills，请重新运行 [`comet init`](/cli/init) 来恢复。使用 `--overwrite` 可以强制替换现有文件。
-</Tip>

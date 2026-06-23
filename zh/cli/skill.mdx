@@ -1,304 +1,37 @@
 ---
-title: "comet skill — 管理 Comet Skill 包"
-sidebarTitle: "comet skill"
-description: "安装、验证、检查、运行和评估 Comet Skill 包。支持确定性 Skill Run、恢复和运行时评估。"
+title: "comet skill"
+description: "管理本地 Comet Skill 包，并运行 deterministic Skill Run。"
 ---
 
-`comet skill` 是管理 Comet Skill 包的命令组，包含安装、验证、运行和评估等子命令。
+`comet skill` 是低层 Skill 包和 Engine Run 工具。普通用户创建可复用 Skill 时优先用 `/comet-any`。
 
-## 子命令一览
+## 子命令
 
-| 子命令 | 用途 |
-|---|---|
-| [`comet skill install`](#install) | 安装 Skill 到项目 Skill pool |
-| [`comet skill validate`](#validate) | 验证 Skill 包结构 |
-| [`comet skill inspect`](#inspect) | 检查 Skill 包内容 |
-| [`comet skill run`](#run) | 启动确定性 Skill Run |
-| [`comet skill resume`](#resume) | 恢复 Run 或提交 pending action 结果 |
-| [`comet skill eval`](#eval) | 运行时评估 Engine Run |
+| 命令 | 用途 |
+| --- | --- |
+| `install <path>` | 安装本地 Skill 到项目 Skill 池 |
+| `validate <skill>` | 校验 Skill 包结构 |
+| `inspect <skill>` | 查看 Skill 内容和元数据 |
+| `run <skill>` | 启动 deterministic Skill Run |
+| `resume` | 提交 pending action 的结果或恢复 Run |
+| `eval` | 检查当前 Run 的 runtime eval |
 
----
-
-## install
-
-将一个 Comet Skill 安装到项目的 Skill pool 中。
+## 包管理示例
 
 ```bash
-comet skill install <path>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  项目根目录。
-</ParamField>
-
-<ParamField query="--overwrite" type="boolean">
-  覆盖已存在的同名项目 Skill。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet skill install ./my-custom-skill
-```
-
-```
-Installed my-skill@1.0.0
-Hash: a1b2c3d4
-Destination: .comet/skills/my-skill
-```
-
----
-
-## validate
-
-验证一个 Comet Skill 包的结构是否合法。
-
-```bash
-comet skill validate <skill>
-```
-
-`<skill>` 可以是 Skill 名称、目录路径或 `SKILL.md` 文件路径。
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  用于 Skill 发现的项目根目录。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet skill validate my-skill
-```
-
-```
-Valid Comet Skill: my-skill@1.0.0 (project)
-Hash: a1b2c3d4
-Root: .comet/skills/my-skill
-```
-
----
-
-## inspect
-
-检查一个 Comet Skill 包的详细内容，包括定义、编排模式和资源。
-
-```bash
-comet skill inspect <skill>
-```
-
-### Flags
-
-<ParamField query="--project" type="string" default=".">
-  用于 Skill 发现的项目根目录。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出完整的 Skill 定义 JSON，包括 goal、orchestration、skills、agents、tools、guardrails、evals。
-</ParamField>
-
-### 示例
-
-```bash
+comet skill install ./my-skill --project .
+comet skill validate my-skill --project .
 comet skill inspect my-skill --json
 ```
 
-```json
-{
-  "name": "my-skill",
-  "version": "1.0.0",
-  "origin": "project",
-  "root": ".comet/skills/my-skill",
-  "hash": "a1b2c3d4",
-  "description": "A multi-step workflow skill",
-  "goal": { "statement": "...", "inputs": [], "outputs": [] },
-  "orchestration": { "mode": "deterministic", "entry": "start", "steps": [...] },
-  "skills": [],
-  "agents": [],
-  "tools": [],
-  "guardrails": { "maxIterations": 10 },
-  "evals": []
-}
-```
-
----
-
-## run
-
-启动一个确定性 Skill Run。Run 会持久化不可变快照和 pending action，支持中断后恢复。
+## Run 示例
 
 ```bash
-comet skill run <skill>
+comet skill run my-skill --run-id demo-run --project .
+comet skill resume --run-id demo-run --status succeeded --summary "完成"
+comet skill eval --run-id demo-run --scope completion
 ```
 
-### Flags
-
-<ParamField query="--change" type="string">
-  拥有该 Run 的 change 目录。与 `--run-id` 互斥。
-</ParamField>
-
-<ParamField query="--run-id" type="string">
-  独立 Run ID，存储在 `.comet/runs/<id>` 下。与 `--change` 互斥。
-</ParamField>
-
-<ParamField query="--project" type="string" default=".">
-  用于 Skill 发现的项目根目录。
-</ParamField>
-
-<ParamField query="--confirm" type="string[]">
-  确认一个受保护的引用。可重复使用。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-<Note>
-  必须提供 `--change` 或 `--run-id` 中的恰好一个。`--change` 创建 manual run；`--run-id` 创建 standalone run。
-</Note>
-
-### 示例
-
-```bash
-comet skill run my-skill --run-id run-001
-```
-
-```
-Run: run-001
-Status: waiting
-Current step: analyze
-Pending action: invoke-skill-abc (invoke_skill, step analyze)
-Runtime evals: 2
-Next: complete the pending action, then run comet skill resume
-```
-
----
-
-## resume
-
-恢复一个 Skill Run，或提交 pending action 的执行结果。
-
-```bash
-comet skill resume
-```
-
-### Flags
-
-<ParamField query="--change" type="string">
-  拥有该 Run 的 change 目录。与 `--run-id` 互斥。
-</ParamField>
-
-<ParamField query="--run-id" type="string">
-  独立 Run ID。与 `--change` 互斥。
-</ParamField>
-
-<ParamField query="--project" type="string" default=".">
-  用于 Skill 发现的项目根目录。
-</ParamField>
-
-<ParamField query="--status" type="string">
-  pending action 的结果状态。可接受值：`succeeded` 或 `failed`。提交结果时必须提供。
-</ParamField>
-
-<ParamField query="--summary" type="string">
-  结果摘要文本。提交结果时必须提供。
-</ParamField>
-
-<ParamField query="--artifact" type="string[]">
-  合并一个 artifact 引用，格式为 `key=value`。可重复使用。
-</ParamField>
-
-<ParamField query="--state" type="string[]">
-  记录结果状态证据，格式为 `key=value`。可重复使用。
-</ParamField>
-
-<ParamField query="--confirm" type="string[]">
-  确认一个受保护的引用。可重复使用。
-</ParamField>
-
-<ParamField query="--upgrade" type="string">
-  将 Run 升级到兼容的 Skill 快照版本。不能与结果选项（`--status`、`--summary`、`--artifact`、`--state`）同时使用。
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 提交结果
-
-```bash
-comet skill resume --run-id run-001 \
-  --status succeeded \
-  --summary "Analysis complete" \
-  --artifact report=./output/report.md
-```
-
-### 升级 Skill 版本
-
-```bash
-comet skill resume --run-id run-001 --upgrade my-skill@1.1.0
-```
-
----
-
-## eval
-
-运行 Engine Run 的运行时评估检查。这是针对特定 Run 的轻量级评估，不同于 [`comet eval run`](/zh/cli/eval) 的通用 Skill 评估。
-
-```bash
-comet skill eval
-```
-
-### Flags
-
-<ParamField query="--change" type="string">
-  拥有该 Run 的 change 目录。与 `--run-id` 互斥。
-</ParamField>
-
-<ParamField query="--run-id" type="string">
-  独立 Run ID。与 `--change` 互斥。
-</ParamField>
-
-<ParamField query="--project" type="string" default=".">
-  用于 standalone Run 查找的项目根目录。
-</ParamField>
-
-<ParamField query="--scope" type="string" default="progress">
-  运行时评估范围。可接受值：
-  - `progress` — 检查当前步骤的进度
-  - `step` — 检查当前步骤是否完成
-  - `completion` — 检查整个 Run 是否完成
-</ParamField>
-
-<ParamField query="--json" type="boolean">
-  输出 structured JSON。
-</ParamField>
-
-### 示例
-
-```bash
-comet skill eval --run-id run-001 --scope completion
-```
-
-```
-Run: run-001
-Scope: completion
-PASS eval-artifact-report: artifact exists at report.md
-PASS eval-state-done: state.status equals "completed"
-
-All runtime evals passed.
-```
-
-<Note>
-  如果有评估失败，输出会包含 `Next: record the missing artifact/state and rerun comet skill eval` 提示。
-</Note>
+<Warning>
+  `comet skill eval` 只检查某次 Engine Run 的完成度。评估一个 Skill 产品能力，请用 [comet eval](/zh/cli/eval)。
+</Warning>

@@ -1,186 +1,44 @@
 ---
-title: "Skill 偏好配置"
-sidebarTitle: "偏好配置"
-description: "通过 .comet/skills.txt 定义 Skill 偏好和调用顺序，控制 /comet-any 的组合行为。"
+title: "Skill 偏好与真实来源"
+description: "使用 .comet/skills.txt 表达组合偏好，并理解 /comet-any 如何处理缺失和歧义。"
 ---
 
-`.comet/skills.txt` 是 Skill Factory 的偏好配置文件，定义了你希望组合的 Skill 列表和调用顺序。
+`.comet/skills.txt` 是 Skill Factory 的偏好文件。它不是严格白名单，而是告诉 `/comet-any` 你希望优先考虑哪些 Skill，以及默认顺序是什么。
 
 ## 文件格式
 
-`.comet/skills.txt` 是一个纯文本文件，每行一个 Skill 名称：
-
-```
-data-reader
-data-transformer
-data-writer
-```
-
-### 格式规则
-
-- 每行一个 Skill 名称
-- **行顺序 = 推荐调用顺序**
-- 空行和 `#` 开头的注释行会被忽略
-- Skill 名称区分大小写
-
-```
-# 数据处理工作流
-data-reader
-
-# 转换层
-data-transformer
-data-validator
-
-# 输出层
-data-writer
+```text
+brainstorming
+writing-plans
+requesting-code-review
+verification-before-completion
 ```
 
-## 文件位置
+## 规则
 
-| 位置 | 用途 |
-|---|---|
-| `.comet/skills.txt`（项目级） | 项目特定的 Skill 偏好 |
-| `~/.comet/skills.txt`（全局级） | 跨项目的默认偏好 |
+- 一行一个 Skill。
+- 行顺序进入推荐调用链。
+- 可以偏离顺序，但必须解释原因。
+- 缺失候选必须让用户决定忽略、替换或安装。
+- 歧义候选必须让用户选择真实来源。
 
-项目级优先于全局级。
+## resolved-skills.json
 
-## 如何使用
+生成物应包含：
 
-### 1. 手动创建
-
-在项目根目录创建 `.comet/skills.txt`：
-
-```bash
-mkdir -p .comet
-cat > .comet/skills.txt << 'EOF'
-my-data-reader
-my-transformer
-my-writer
-EOF
+```text
+reference/resolved-skills.json
 ```
 
-### 2. 通过 `/comet-any` 创建
+它记录：
 
-当你调用 `/comet-any` 时，如果文件不存在，Skill Factory 会引导你创建。
+- resolved Skill 名称。
+- 来源路径或来源标识。
+- 描述。
+- hash。
+- reference、rules、scripts、hooks 摘要。
+- `sourceSummaries`。
 
-### 3. 更新偏好
-
-直接编辑 `.comet/skills.txt`，添加、删除或重新排序 Skill。下次调用 `/comet-any` 时会自动读取新配置。
-
-## 调用链偏差
-
-Skill Factory 以 `.comet/skills.txt` 的行顺序为基准提议调用链。如果实际调用顺序与偏好不同，必须在审查摘要中解释原因。
-
-### 偏差类型
-
-| 类型 | 说明 |
-|---|---|
-| `missing` | 偏好中的 Skill 未找到 |
-| `ambiguous` | 偏好中的 Skill 有多个匹配 |
-| `reordered` | 调用顺序与偏好不同 |
-| `ignored` | 用户选择忽略缺失的偏好 |
-
-### 偏差记录
-
-偏差会被记录在 factory 元数据中：
-
-```json
-{
-  "deviations": [
-    {
-      "skill": "data-validator",
-      "expectedIndex": 2,
-      "actualIndex": 3,
-      "reason": "moved after transformer to validate transformed data"
-    }
-  ]
-}
-```
-
-## Skill 解析
-
-Skill Factory 使用 `find-skill` 解析 `.comet/skills.txt` 中的每个名称，找到真实的 `SKILL.md` 内容。
-
-### 解析状态
-
-| 状态 | 说明 |
-|---|---|
-| `available` | 找到唯一匹配，可直接使用 |
-| `missing` | 未找到任何匹配 |
-| `ambiguous` | 找到多个匹配，需要用户选择 |
-
-### 解析证据
-
-每个解析结果都会记录在 `reference/resolved-skills.json` 中：
-
-```json
-{
-  "sourceSummaries": [
-    {
-      "query": "data-reader",
-      "preferenceIndex": 0,
-      "status": "available",
-      "sources": [
-        {
-          "root": ".claude/skills/data-reader",
-          "hash": "a1b2c3d4",
-          "version": "1.0.0"
-        }
-      ]
-    }
-  ]
-}
-```
-
-## 最佳实践
-
-<AccordionGroup>
-  <Accordion title="保持列表精简">
-    只包含真正需要组合的 Skill。过多的 Skill 会增加组合复杂度和评估成本。
-  </Accordion>
-
-  <Accordion title="按逻辑顺序排列">
-    将数据流的上游 Skill 放在前面，下游 Skill 放在后面。例如：读取 → 处理 → 写入。
-  </Accordion>
-
-  <Accordion title="使用明确的名称">
-    Skill 名称应该清晰表达其功能，避免使用过于泛化或容易混淆的名称。
-  </Accordion>
-
-  <Accordion title="定期更新">
-    当项目中新增或删除 Skill 时，及时更新 `.comet/skills.txt`。
-  </Accordion>
-</AccordionGroup>
-
-## 示例
-
-### 数据处理工作流
-
-```
-# 数据处理管道
-csv-reader
-data-cleaner
-data-transformer
-data-validator
-csv-writer
-```
-
-### API 集成工作流
-
-```
-# API 集成
-auth-handler
-api-client
-response-parser
-error-handler
-```
-
-### 代码生成工作流
-
-```
-# 代码生成
-spec-parser
-code-generator
-test-generator
-doc-generator
-```
+<Tip>
+  这个文件是“不是按名字猜的”证据。准备发布或审查时优先看它。
+</Tip>
