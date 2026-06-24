@@ -1,60 +1,88 @@
 ---
-title: "Skill 与 Engine"
-description: "理解 Comet Skill、项目 Skill 池、Engine Run，以及 /comet-any 生成物之间的关系。"
+title: "Skill 的类型与用途"
+description: "理解 Comet Skill 的三类来源，以及经典 Spec 模式用户需要知道的 Skill 边界。"
 ---
 
-Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 开始，Comet 同时提供 Skill 包管理、确定性 Run、运行证据和 runtime eval。
+Comet 的核心能力通过 Skill 组织。经典 Spec 模式的 `/comet` 用户不需要深入理解 Skill 的底层机制——你只需要知道有哪几类 Skill、它们各自的作用、以及它们安装在哪里。
 
-## 三类 Skill
+## Skill 存放在哪里
 
-| 类型 | 用途 | 常见入口 |
-| --- | --- | --- |
-| 内置工作流 Skill | 驱动 `/comet` 五阶段流程 | `/comet`、`/comet-open`、`/comet-build` |
-| 项目 Skill | 安装到 `.comet/skills/<name>` 的本地能力 | `comet skill install` |
-| Factory 生成 Skill | `/comet-any` 创建、优化或组合后的可分发能力 | `/comet-any`、`comet publish` |
+理解 Skill 的关键，是知道它们安装到哪个目录、由谁发现：
 
-## Skill Engine 解决什么
+| 安装方式 | 目标目录 | 谁发现它 | 说明 |
+| --- | --- | --- | --- |
+| `comet init` | 平台目录（如 `.claude/skills/`） | AI 平台直接发现，显示为斜杠命令 | 内置工作流 Skill 装在这里 |
+| `comet skill install` | `.comet/skills/<name>` | **Comet Engine** 发现，不直接进平台 | 这就是"项目 Skill" |
+| `/comet-any` 生成 | Bundle draft 目录 | 评估发布后由 `comet publish distribute` 分发 | Factory 生成 Skill |
 
-Engine 为多步骤 Skill 提供：
+<Note>
+  <strong>平台 Skill</strong>和<strong>项目 Skill</strong>的区别：平台 Skill（<code>comet init</code> 装到 <code>.claude/skills/</code> 等）由 AI 平台直接发现并变成斜杠命令；项目 Skill（<code>comet skill install</code> 装到 <code>.comet/skills/</code>）是 Comet Engine 自己的 Skill 池，不直接暴露给平台，而是由 Engine 在运行时按名称解析。
+</Note>
 
-- 稳定内容 hash 和不可变快照。
-- `.comet/run-state.json` 或 `.comet/runs/<run-id>` 运行状态。
-- pending action、trajectory、artifact、checkpoint。
-- guardrails 和 runtime eval。
+## 项目 Skill 是什么
 
-```mermaid
-flowchart LR
-  A["Skill 包"] --> B["validate / inspect"]
-  B --> C["run 创建快照"]
-  C --> D["pending action"]
-  D --> E["Agent 执行动作"]
-  E --> F["resume 写入结果"]
-  F --> G["skill eval 检查完成度"]
-```
+项目 Skill 是安装到 **项目内** `.comet/skills/<name>/` 目录的 Skill 包。它们和平台 Skill 不是一回事：
 
-## 什么时候用 `comet skill`
+- **位置**：`.comet/skills/<name>/`，和 `.comet/config.yaml` 同级，属于项目本身（可以提交到 Git）。
+- **谁发现**：Comet Engine 的 `resolveSkill`，发现顺序是 项目 Skill 优先于内置 Skill。
+- **不直接进平台**：它们不会自动变成 `.claude/skills/` 里的斜杠命令，而是由 Engine 在 `/comet` 调用时按名称解析。
 
-`comet skill` 是本地 Skill 包和 deterministic Run 的低层工具。它适合调试、集成和 Engine Run。
+### 为什么要用项目 Skill
+
+| 用途 | 说明 |
+| --- | --- |
+| 覆盖内置 Skill | 在 `.comet/skills/comet-build/` 放一个自定义 `comet-build`，Engine 优先用它而不是内置版本。团队统一流程时有用。 |
+| 安装 Engine Skill | `/comet-any` 生成的 Skill 或社区 Skill 可以装到这里，让 Engine 运行它们。 |
+| 项目内可复用 | 提交到 Git 后，团队成员 clone 仓库就有同一套 Skill。 |
+
+### 怎么安装项目 Skill
 
 ```bash
 comet skill install ./my-skill --project .
-comet skill validate my-skill --project .
-comet skill inspect my-skill --json
-comet skill run my-skill --run-id demo-run --project .
-comet skill resume --run-id demo-run --status succeeded --summary "完成"
-comet skill eval --run-id demo-run --scope completion
 ```
 
+这会把 `./my-skill` 目录校验、计算 hash 后复制到 `.comet/skills/<metadata.name>/`。已存在时需要 `--overwrite`。安装拒绝符号链接，保证 Skill 包内容是真实的。
+
 <Warning>
-  `comet skill eval` 不是通用 Skill 评估。通用评估请使用 `comet eval run`。
+  项目 Skill 按名称覆盖内置 Skill 时，如果项目 Skill 无效（校验失败），Engine 会<strong>直接失败</strong>而不是回退到内置。这避免"你以为在用自定义版本，实际静默用了内置"的问题。
 </Warning>
 
-## 什么时候用 `/comet-any`
+## 经典模式用到的 Skill
 
-如果你想把一个工作流变成团队可复用 Skill，不要从手写 Engine 文件开始。用 `/comet-any` 让它读取真实 Skill、生成结构化证据、评估并进入发布门禁。
+经典 Spec 模式的五阶段流程由这些内置 Skill 驱动（`comet init` 安装到平台目录）：
+
+| Skill | 作用 |
+| --- | --- |
+| `/comet` | 主入口，检测状态并路由到当前阶段 |
+| `/comet-open` | open 阶段：创建 OpenSpec change |
+| `/comet-design` | design 阶段：深度技术设计 |
+| `/comet-build` | build 阶段：计划并执行 |
+| `/comet-verify` | verify 阶段：验证实现 |
+| `/comet-archive` | archive 阶段：归档 |
+| `/comet-hotfix` / `/comet-tweak` | 轻量预设 |
+
+这些 Skill 随 Comet 包分发，`comet init` 安装到你的平台目录。你只需要用 `/comet` 调用，不需要手动加载它们。
+
+## Engine：进阶内容
+
+如果你用 `/comet-any` 创建可复用 Skill，或用 `comet skill` 做本地调试和 Engine Run，你需要理解 Skill Engine——Comet 的确定性运行时。Engine 涉及 Skill 包结构、pending action/resume 循环、不可变快照、guardrails 和 runtime evals。
+
+经典 `/comet` 用户**不需要理解 Engine**就能使用五阶段工作流。想深入了解时，看[Skill 与 Engine（进阶）](/zh/skill-factory/engine)——完整的 Engine 机制详解，位于组合任意 Skill tab。
+
+## 想创建可复用 Skill
+
+如果你想把一个工作流变成团队可复用 Skill，不要从手写文件开始。用 `/comet-any` 让它读取真实 Skill、生成结构化证据、评估并进入发布门禁。
 
 正常用户路径是：
 
 ```text
 /comet-any -> comet eval -> comet publish
 ```
+
+详见[组合任意 Skill 快速上手](/zh/skill-factory/getting-started)。
+
+## 下一步
+
+- [工作流概念](/zh/concepts/workflow) — `/comet` 如何串联五阶段
+- [状态与配置](/zh/concepts/state-management) — `.comet.yaml` 字段和配置
+- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 深入理解 Engine 运行时

@@ -1,32 +1,95 @@
 ---
-title: "Runtime eval"
+title: "Runtime eval（进阶）"
 description: "区分 comet eval 和 comet skill eval，并理解 Engine Run 的本地完成度检查。"
 ---
 
-Comet 有两类 eval。名字相似，但用途不同。
+<Info>
+  这是进阶内容，主要面向使用 Engine Run 的进阶用户。如果你只做 `comet eval`，可以跳过本页。
+</Info>
+
+Comet 有两类 eval。名字相似，但用途不同，不要混用。
 
 ## 对比
 
-| 命令 | 评估对象 | 适合问题 |
-| --- | --- | --- |
-| `comet eval run` | Skill 包或 `comet/eval.yaml` | 这个 Skill 能不能通过产品级评估 |
-| `comet skill eval` | 某次 deterministic Engine Run | 这个 Run 是否缺 artifact 或状态 |
+| 命令 | 评估对象 | 适合的问题 | 是否是发布证据 |
+| --- | --- | --- | --- |
+| `comet eval run` | Skill 包或 `comet/eval.yaml` | 这个 Skill 能不能通过产品级评估 | 是 |
+| `comet skill eval` | 某次 deterministic Engine Run | 这个 Run 是否缺 artifact 或状态 | 否 |
+
+## 为什么有两类
+
+`comet eval` 面向"这个 Skill 作为产品能力能不能通过评估"，它通过共享 eval harness 执行真实模型任务，产出发布前证据。
+
+`comet skill eval` 面向"这个正在运行的 deterministic Skill Run 是否完整"，它只检查某次 Run 是否满足 `comet/checks.yaml` 里的 runtime checks，不执行模型任务，也不产出发布证据。
+
+两者服务于不同阶段：`comet skill eval` 在 Skill 运行中检查完成度，`comet eval` 在发布前验证产品能力。
 
 ## `comet skill eval` 示例
 
+runtime eval 通常配合 `comet skill run` 和 `comet skill resume` 使用：
+
 ```bash
-comet skill run my-skill --run-id demo-run
+# 启动一次 deterministic Skill Run
+comet skill run my-skill --run-id demo-run --project .
+
+# Agent 执行 pending action，然后用 resume 提交结果
 comet skill resume --run-id demo-run --status succeeded --summary "完成"
-comet skill eval --run-id demo-run --scope completion
+
+# 检查这次 Run 的完成度
+comet skill eval --run-id demo-run --scope completion --json
 ```
 
+也可以绑定 OpenSpec change 目录：
+
+```bash
+comet skill run my-skill --change ./changes/demo
+comet skill resume --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
+comet skill eval --change ./changes/demo --scope completion
+```
+
+Run 可以绑定 `--change` 目录，也可以用 `--run-id` 放到 `.comet/runs/<run-id>` 下。`run` 支持 deterministic Skills；adaptive 执行需要 Agent 候选。
+
 ## 什么时候需要 runtime eval
+
+Engine Run 通常出现在这些场景：
 
 - Skill 有多步骤状态。
 - 需要 pending action 和 resume。
 - 需要检查 artifact 是否存在。
 - 需要 guardrails 或恢复语义。
+- Skill 是 Engine-enabled（`/comet-any` 为多步骤或高风险生成物生成的 Skill 默认开启 Engine）。
+
+Engine-enabled 生成物会写入 `comet/checks.yaml` 和 `comet/eval.yaml`：
+
+- `comet/checks.yaml`：runtime checks，由 `comet skill eval` 使用。
+- `comet/eval.yaml`：eval manifest，由 `comet eval` 使用。
+
+## 文本模式的恢复提示
+
+`comet skill` 在文本模式下也会直接打印 `Pending action` 和 `Next:` 恢复提示，让你不需要在暂停的 Run 或失败的 eval 后自己猜下一步该做什么。
+
+例如 `comet skill eval` 失败后，输出会直接告诉你缺哪个 artifact 或哪个 check 没过。
+
+## 怎么选
+
+- 你的问题是"这个 Skill 作为产品能力能不能通过评估"：
+
+  ```bash
+  comet eval run --manifest ./generated-skill/comet/eval.yaml --html
+  ```
+
+- 你的问题是"这个正在运行的 deterministic Skill Run 是否缺 artifact 或状态"：
+
+  ```bash
+  comet skill eval --run-id <run-id> --scope completion
+  ```
 
 <Warning>
   准备发布 Skill 时，不要只跑 `comet skill eval`。发布 readiness 需要通用 `comet eval` 证据。
 </Warning>
+
+## 下一步
+
+- [comet skill 命令](/zh/cli/skill) — 完整 Skill 包和 Run 工具参考
+- [comet eval 命令](/zh/cli/eval) — 完整评估选项
+- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 理解 Engine Run 的运行语义

@@ -1,9 +1,9 @@
 ---
 title: "comet-archive"
-description: "完成 OpenSpec archive、主规格检查和归档收尾。"
+description: "完成 OpenSpec archive、主 spec 校验、frontmatter 标注和归档收尾。"
 ---
 
-`comet-archive.mjs` 是归档阶段的确定性入口。它负责把通过验证的 change 移入 OpenSpec archive。
+`comet-archive.mjs` 是归档阶段的确定性入口。它把通过验证的 change 合并 delta spec 到主 spec 并移入 OpenSpec archive 目录，自己做前后校验。
 
 ## 基本形式
 
@@ -11,13 +11,48 @@ description: "完成 OpenSpec archive、主规格检查和归档收尾。"
 node "$COMET_ARCHIVE" <change-name>
 ```
 
+预览（不真正执行 OpenSpec）：
+
+```bash
+node "$COMET_ARCHIVE" <change-name> --dry-run
+```
+
 ## 它会做什么
 
-- 调用 `openspec archive <change> --yes`。
-- 检查主 specs 中是否残留 delta requirement 标题。
-- 标注相关设计文档状态。
-- 更新归档结果。
+按顺序执行：
+
+1. **校验 change 名**（kebab-case）。
+2. **定位 change 目录**，如果已被之前的归档移走，扫描 archive 目录恢复。
+3. **校验入口状态**：`phase` 必须是 `archive`，`verify_result` 必须是 `pass`。
+4. **检查归档目标可用**：`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在。
+5. **写 pending action checkpoint**，支持归档中断后恢复。
+6. **调用 OpenSpec archive**：`openspec archive <change> --yes`，执行 delta→主 spec 合并（按 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 语义）并移动 change 目录。
+7. **解析归档目录**：重新定位 OpenSpec 实际放的位置（日期前缀可能变化）。
+8. **校验主 spec 干净**：扫描 `openspec/specs/*/spec.md`，残留 delta-only 标题就 FATAL。
+9. **标注 frontmatter**：design doc 加 `archived-with` 和 `status: final`，plan 加 `archived-with`。幂等设计。
+10. **更新归档状态**：设置 `archived: true`，Run 状态转为 `completed`，清除 pending action。
+
+## 归档目录结构
+
+```text
+openspec/changes/archive/YYYY-MM-DD-<change-name>/
+```
+
+日期取 UTC，保证跨时区一致。
+
+## delta spec 合并语义
+
+delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 OpenSpec 原生概念。实际的 delta→主 spec 合并由 OpenSpec CLI 执行，Comet 只负责：
+
+- 调用 `openspec archive --yes`
+- 事后检查主 spec 里没有残留 delta-only 标题（防止 `## ADDED/MODIFIED/REMOVED/RENAMED Requirements` 泄漏到稳定 spec）
 
 ## 重要边界
 
-不要手工把 change 标记为 archived。OpenSpec archive 会创建带日期前缀的归档目录，手工 transition 容易造成状态和文件位置不一致。
+- 不要手工把 change 标记为 archived。手工 transition 容易造成状态和文件位置不一致。
+- 归档成功后不要再跑 `comet-guard <name> archive`——活跃目录已不存在，guard 会报错。归档完整性由退出码和归档目录状态判断。
+
+## 下一步
+
+- [工作流概念](/zh/concepts/workflow) — 归档在五阶段中的位置和完整生命周期
+- [状态与配置](/zh/concepts/state-management) — `archived` 字段和归档状态

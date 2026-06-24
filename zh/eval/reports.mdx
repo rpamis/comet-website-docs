@@ -1,36 +1,86 @@
 ---
-title: "读取评估报告"
-description: "了解 comet eval run --html 生成的报告位置、重点字段和下一步判断。"
+title: "读取评估报告（进阶）"
+description: "深入了解 comet eval run --html 生成的报告位置、重点字段、失败归因和下一步判断。"
 ---
 
-`comet eval run --html` 会生成可浏览报告。用户不需要逐行读底层日志，先看结果、归因和产物。
+<Info>
+  这是进阶内容。报告没通过时再来这里查失败归因。日常评估看[快速上手](/zh/eval/quickstart)里的"看报告只需要关注三点"即可。
+</Info>
+
+`comet eval run --html` 会生成可浏览报告。用户不需要逐行读底层日志，先看结果、归因和产物，再决定下一步。
 
 ## 报告位置
 
-CLI 输出会包含 experiment id 和 report path。常见位置：
+`--html` 会要求报告同时产出 markdown 和 HTML。CLI 输出里会包含 `Experiment` 和 `Report path`，常见位置：
 
 ```text
 eval/local/logs/experiments/<experiment-id>/summary.html
 ```
 
+如果 CLI 输出里显示的是 `<experiment-id>` 占位符，用同一段输出里的 `Experiment` 值对应查找即可。到下面目录查也能找到对应实验：
+
+```text
+eval/local/logs/experiments/
+```
+
 ## 优先看什么
 
-- 总体是否通过。
-- 失败归因。
-- 缺失的 expected artifacts。
-- token、cost、duration 是否异常。
-- 是否和当前 Skill 目标相关。
+打开报告后，优先看这几类信息，而不是逐行读底层日志：
+
+- 评估是否通过
+- 失败归因是 harness、workflow、task 还是 model
+- 失败用例是否和 Skill 目标相关
+- 是否缺少预期 artifact
+- 是否是路径、manifest 或环境问题
+- token / cost / duration 是否异常
+
+## 失败归因
+
+`comet eval run` 的输出会提示 failure attribution：报告会把失败归到 harness、workflow、task、model 四个桶里。这个归因用于判断下一步应该修 Skill、修 eval 配置，还是重跑环境。
 
 ## 如何决定下一步
 
-| 报告信号 | 下一步 |
-| --- | --- |
-| manifest 读取失败 | 修 `comet/eval.yaml` 或路径 |
-| harness 失败 | 检查依赖、Docker、网络或本地环境 |
-| workflow 失败 | 回到 `/comet-any` 优化 Skill |
-| task 失败 | 检查 eval 任务定义和 fixture |
-| model 不稳定 | 重跑或降低对非确定行为的依赖 |
+| 报告信号 | 含义 | 下一步 |
+| --- | --- | --- |
+| manifest 读取失败 | 路径或文件不存在 | 修 `comet/eval.yaml` 或路径 |
+| harness 失败 | 环境、依赖、Docker、网络 | 检查依赖、Docker、网络或本地环境 |
+| workflow 失败 | Skill 执行流程没达到预期 | 回到 `/comet-any` 优化 Skill |
+| task 失败 | 任务定义、验证条件或 fixture 问题 | 检查 eval 任务定义和 fixture |
+| model 不稳定 | 模型行为或工具使用不稳定 | 重跑或降低对非确定行为的依赖 |
+| 缺少 expected artifact | 任务没产出预期文件 | 检查任务定义或 Skill 产出逻辑 |
+
+## 失败时怎么判断是哪个环节
+
+### collect 失败
+
+优先检查：
+
+- manifest 路径是否正确
+- `comet/eval.yaml` 是否存在
+- manifest 里推荐的 task 是否存在
+- 当前是否在 Comet 仓库根目录或传了正确 `--project`
+
+### run 失败
+
+优先看报告里的 failure attribution，按上面的桶定位。
+
+### HTML 报告没找到
+
+先看 CLI 输出的 `Experiment` 和 `Report path`。如果路径里有 `<experiment-id>`，用实际 experiment id 到 `eval/local/logs/experiments/` 目录查。
 
 ## 报告如何进入发布
 
-不要手工编辑 Bundle 状态。让 `/comet-any` 或 Bundle 后端记录 eval 结果，并让 `comet publish status` 读取 readiness。
+不要手工编辑 Bundle 状态，也不要手工把报告路径写进内部 JSON。让 `/comet-any` 或 Bundle 后端记录 eval 结果，并让 `comet publish status` 读取 readiness。
+
+Eval 证据进入 readiness 的规则：
+
+- 没有 eval 证据：不能 publish
+- eval 失败：不能 publish
+- eval 证据对应旧 hash：不能 publish
+- eval 通过且 hash 匹配：可以进入 review / publish 判断
+
+## 下一步
+
+- [Runtime eval](/zh/eval/runtime) — 区分 `comet eval` 和 `comet skill eval`
+- [comet eval 命令](/zh/cli/eval) — 完整选项和子命令参考
+- [发布和分发 Skill](/zh/skill-factory/publishing) — eval 证据如何驱动 readiness

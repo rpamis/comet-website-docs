@@ -1,0 +1,82 @@
+---
+title: "经典 Spec 模式常见问题"
+description: "解答 /comet 五阶段工作流、状态恢复、阶段守卫和轻量预设的常见疑问。"
+---
+
+关于经典 Spec 模式的 `/comet` 五阶段工作流、状态、守卫和预设的常见问题。
+
+## 基础概念
+
+<AccordionGroup>
+  <Accordion title="Comet 和 OpenSpec、Superpowers 是什么关系">
+    Comet 不替代任何一方。OpenSpec 负责 WHAT（需求、提案、spec 生命周期、归档），Superpowers 负责 HOW（brainstorming、技术设计、计划、执行、验证）。Comet 把两者串成一条可恢复的五阶段工作流，并用状态机和守卫保证交接可靠。详见[工作流概念](/zh/concepts/workflow)。
+  </Accordion>
+
+  <Accordion title="/comet 和 /comet-any 有什么区别">
+    `/comet` 是经典 Spec 模式入口，驱动 open/design/build/verify/archive 五阶段流程，适合项目变更。`/comet-any` 是 Skill Factory，用来创建、优化、组合可复用的 Skill。两者是不同入口，互不冲突。
+  </Accordion>
+
+  <Accordion title="我必须用 OpenSpec 和 Superpowers 吗">
+    经典 Spec 模式依赖两者——OpenSpec 记录需求规格，Superpowers 提供设计/执行方法论。`comet init` 会帮你安装两者。如果你只想用 Comet 的 Skill 平台能力（创建/评估/发布 Skill），可以从[组合任意 Skill 快速上手](/zh/skill-factory/getting-started)开始，不强制走五阶段。
+  </Accordion>
+
+  <Accordion title="什么是双星模型">
+    OpenSpec（WHAT）和 Superpowers（HOW）如双星系统围绕同一目标运转。Comet 负责阶段判定、自动推进、状态守卫和恢复，把两者的产物对齐到同一个 change。
+  </Accordion>
+</AccordionGroup>
+
+## 状态与恢复
+
+<AccordionGroup>
+  <Accordion title="中断后再回来，Agent 怎么知道做到哪了">
+    Comet 不依赖聊天历史。每次调用 `/comet` 都会重新读取活跃 change 的 `.comet.yaml` 和 OpenSpec artifacts，判断当前阶段和证据是否一致，然后路由到正确的阶段 Skill。详见[工作流概念](/zh/concepts/workflow)的"自动检测怎么工作"。
+  </Accordion>
+
+  <Accordion title="comet status 看不到我的 change">
+    这个 change 可能是用原始 `/opsx:new` 创建的，缺少 `.comet.yaml`，会被 `comet status` 静默跳过。在 Agent 平台调用 `/comet` 让它接管补上状态文件。详见[存量项目接入](/zh/guides/existing-project)的"孤儿 change"。
+  </Accordion>
+
+  <Accordion title=".comet.yaml 能手工编辑吗">
+    用户可见字段（workflow、phase、build_mode 等）原则上通过 `/comet` 和阶段守卫流转，不要手工改 `phase`。machine-owned Run 字段（在 `.comet/run-state.json` 或 `.comet/runs/<run-id>`）绝对不要手工改。排障时可以用 `comet-state` 命令，详见[状态与配置](/zh/concepts/state-management)。
+  </Accordion>
+
+  <Accordion title="上下文压缩后丢了上下文怎么办">
+    design 阶段写了 `brainstorm-summary.md` 作为恢复检查点，build 阶段的子代理有持久化 checkpoint。恢复时调用 `/comet`，它会从文件状态恢复而不是靠记忆。详见[恢复中断的工作](/zh/guides/resuming-workflow)。
+  </Accordion>
+</AccordionGroup>
+
+## 阶段与守卫
+
+<AccordionGroup>
+  <Accordion title="为什么不能跳过 design 直接 build">
+    Comet 的核心原则是 brainstorming 不可跳过（hotfix/tweak preset 除外）。完整工作流的 guard 会检查 `design_doc` 是否存在，缺失会 FATAL。跳过设计会导致后续阶段缺乏技术依据。
+  </Accordion>
+
+  <Accordion title="verify 失败了怎么办">
+    不要直接归档。Comet 会让你选择：修复后回 build、接受偏差（在 design doc 追加说明）或退回重新 brainstorming。`verify_result: fail` 时归档会被 guard 阻止。
+  </Accordion>
+
+  <Accordion title="阶段是怎么推进的，我需要手动操作吗">
+    阶段推进由 guard 脚本 `comet-guard.mjs --apply` 完成。`auto_transition: true`（默认）时，一个阶段完成后自动调用下一个阶段 Skill；`auto_transition: false` 时暂停，按 HINT 手动运行。阶段推进本身一定发生，这个设置只影响是否自动调用下一个 Skill。
+  </Accordion>
+
+  <Accordion title="handoff hash 不匹配报错是什么意思">
+    说明 design 阶段生成 handoff 后，OpenSpec artifacts（proposal/design/tasks/spec）被修改了。解决方法是重新运行 `comet-handoff` 让 Superpowers 拿到当前 OpenSpec 上下文。详见[工作流概念](/zh/concepts/workflow)的"产物如何交接"。
+  </Accordion>
+</AccordionGroup>
+
+## 轻量预设与大需求
+
+<AccordionGroup>
+  <Accordion title="hotfix 和 tweak 有什么区别">
+    两者都跳过完整 brainstorming，保留 OpenSpec 状态、验证和归档。hotfix 适合复现路径明确的 bug 修复；tweak 适合范围明确的小改动。出现跨模块协调、新 public API、schema 变更时应升级 full。详见[hotfix 预设](/zh/presets/hotfix)。
+  </Accordion>
+
+  <Accordion title="大需求要怎么处理">
+    `/comet-open` 会在创建 artifacts 前触发 PRD 拆分预检，把大需求拆成多个可独立设计、交付、归档的 change。详见[大型 PRD 拆分](/zh/guides/prd-splitting)。
+  </Accordion>
+
+  <Accordion title="review_mode 有什么用">
+    `review_mode`（off/standard/thorough）控制 build 和 verify 阶段的自动代码审查强度。full workflow 必须在离开 build 前选择；hotfix 默认 off。可在 `.comet/config.yaml` 设置项目默认值。
+  </Accordion>
+</AccordionGroup>
