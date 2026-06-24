@@ -1,0 +1,126 @@
+---
+title: '0.4.0-beta.1'
+description: '2026-06-15'
+---
+
+这是 master（`0.3.9`）之后的主要产品跃迁。Comet 现在是纯 Node 运行时，而不是依赖 Bash/WSL 的工作流层；新增稳定的 `comet skill` 和 `comet eval` 用户路径；并把 `/comet-any` 变成真正的 Skill Factory，带 next-action 指导、readiness 门禁、生成的 `comet/eval.yaml` 和更清晰的发布证据链。
+
+## 重点变化
+
+### 纯 Node 运行时
+
+所有 Comet 脚本都通过 Node.js 运行，macOS、Linux、Windows 用同一套命令，不再需要 Bash、Git Bash 或 WSL。原来的 `.sh` 脚本变为 `.mjs` 入口，背后由共享 TypeScript 运行时支撑。
+
+- `comet-guard.mjs`、`comet-state.mjs`、`comet-handoff.mjs`、`comet-archive.mjs`、`comet-env.mjs`、`comet-yaml-validate.mjs`、`comet-hook-guard.mjs` 全部迁移到 Node。
+- Classic 运行时存储拆分：machine-owned Run state 从 `.comet.yaml` 移到 `.comet/run-state.json` 或 `.comet/runs/<run-id>`。
+- `.comet.yaml` 现在保留用户可理解的工作流投影，并增加 `run_id` 链接。
+
+### Comet Skill 平台
+
+新增内部 Skill Engine 和面向用户的 `comet skill` 命令：
+
+```bash
+comet skill install ./my-skill --project .
+comet skill validate my-skill --project .
+comet skill inspect my-skill --json
+comet skill run my-skill --change ./changes/demo
+comet skill run my-skill --run-id demo-run --project .
+comet skill resume --run-id demo-run --status succeeded --summary "Done"
+comet skill eval --run-id demo-run --scope completion
+```
+
+- 项目 Skill 发现、不可变 Run 快照、runtime evals、独立 `.comet/runs/<run-id>` 执行。
+- 项目 Skill 按名称覆盖内置 Skill；无效覆盖 fail closed 而不是静默回退。
+- 文本模式直接打印 `Pending action` 和 `Next:` 恢复提示。
+
+### `/comet-any` Skill Factory
+
+`/comet-any` 现在生成稳定组合 Skill Bundle，而不是只产出一个 `SKILL.md`。普通用户路径是：
+
+```text
+/comet-any -> comet eval -> comet publish review/approve/run -> comet publish distribute --preview -> comet publish distribute
+```
+
+- 三种起点：改一版 `/comet`、做一个新 Skill、整理已有 Skill。
+- 项目级偏好文件从 `.comet/skills.txt` 升级为 `.comet/skill-preferences.yaml`，支持 `advisory`/`strict` 模式。
+- 生成前必须展示组合方案确认页，用户确认后才写 Bundle draft。
+- 生成物包含 `reference/resolved-skills.json` 真实来源证据、Engine Package（`comet/skill.yaml`、`comet/guardrails.yaml`、`comet/checks.yaml`、`comet/eval.yaml`）和 required control plane（`scripts/rules/hooks`）。
+- next-action 指导、readiness 门禁、生成的 `comet/eval.yaml`、分布预览和恢复摘要。
+
+### 共享 eval 系统
+
+新增可复用 eval harness，通过 `comet eval` 提供：
+
+```bash
+comet eval collect --manifest ./comet/eval.yaml
+comet eval run --manifest ./comet/eval.yaml --html
+comet eval run --skill-path ./my-skill --skill-name my-skill --quick
+```
+
+- profiles、生成的 Skill manifest、通用 smoke task（`generic-skill-smoke`）、HTML 报告。
+- 失败归因（harness/workflow/task/model）、token/cost/duration 报告。
+- `collect` 做发现预检查，`run` 执行真实评估。
+
+### `comet publish` 发布门面
+
+新增 `comet publish` 作为 `/comet-any` 产物的常规 readiness、approval、publish 和 distribute 路径，同时保留 `comet bundle` 作为高级后端。
+
+- review 输出现在包含面向用户的 readiness 结论和下一步，而不是只暴露原始 blocker 证据。
+- 分发前强制 preview，展示 planned files、unsupported capability、executable disclosures。
+- readiness 门禁：未解决候选、旧 hash 的 eval 证据、缺失人工 approval、required capability gap、executable disclosure 未确认都会阻塞发布。
+
+## 文档变化
+
+本版文档围绕三个主模块重组，每个模块都分为"快速上手（基础）"和"深入掌握（进阶）"：
+
+| 模块 | 基础 | 进阶 |
+| --- | --- | --- |
+| CLI | [CLI 快速上手](/zh/cli/quickstart) | [comet skill](/zh/cli/skill)、[comet eval](/zh/cli/eval)、[comet publish](/zh/cli/publish)、[comet bundle](/zh/cli/bundle) |
+| 组合任意 Skill | [快速上手](/zh/skill-factory/getting-started) | [概览](/zh/skill-factory/overview)、[完整流程](/zh/skill-factory/workflow)、[偏好](/zh/skill-factory/preferences)、[发布](/zh/skill-factory/publishing) |
+| 评估任意 Skill | [快速上手](/zh/eval/quickstart) | [概览](/zh/eval/overview)、[harness](/zh/eval/harness)、[报告](/zh/eval/reports)、[runtime](/zh/eval/runtime) |
+
+## 平台扩展
+
+- 新增 ZCode 支持。
+- 新增 MimoCode 原生平台支持（项目级 `.mimocode/`，全局 `.config/mimocode/`）。
+- 跨平台 install/distribute 层继续扩展。
+
+## 关键修复
+
+- 修复仓库/运行时重组后打包命令（`comet doctor`、`status`、`init`、`update`）的 asset 查找问题。
+- 畸形 `.comet.yaml` 不再导致整个扫描崩溃，`status`/`doctor`/`guard --json` 走统一证据路径。
+- `comet doctor` 新增 Comet 和 Superpowers 环境状态，不再把无关平台 Skill 目录当作不完整的 Comet 安装。
+- `/comet-any` 发布门禁收紧：缺失候选、过期 eval、缺失评审 approval、不支持的 required 能力、可执行披露都会在发布/分发前明确暴露。
+- `/comet-any` proposal 确认门禁：确认 Factory proposal metadata 后才能生成、评审或发布 Skill Bundle。
+- Windows 和路径可靠性：修复含空格目录的 OpenSpec init/update 路径引用，加固 eval/task harness 的 Windows UTF-8、Docker 和报告输出。
+- 子模块 hook 执行：用绝对脚本路径和显式项目根安装 hook 命令，子模块里的 Agent 仍使用父工作区的 Comet 脚本和阶段状态。
+
+## 详细变更
+
+### Added
+
+- **Node-only runtime foundation**: Classic workflow launchers 迁移到薄 `.mjs` 入口，背后由共享 TypeScript 运行时支撑，不再依赖 Bash、Git Bash 或 WSL。
+- **Comet Skill platform**: 内部 Skill Engine 加面向用户的 `comet skill install|validate|inspect|run|resume|eval`、项目 Skill 发现、不可变 Run 快照、runtime evals、独立 `.comet/runs/<run-id>` 执行。
+- **`/comet-any` Skill Factory backend**: 确定性 Bundle 创作后端，`/comet-any` 内部使用：`factory-init`、`factory-resolve`、`factory-generate`、生成的 `resolved-skills.json`、生成的 `comet/eval.yaml`、review summary、ready-state publish/distribute。
+- **Bundle authoring recovery list**: `comet bundle list` 发现可恢复的 Skill Factory 创作会话。
+- **Shared eval system**: 可复用 eval harness，含 profiles、生成的 Skill manifest、通用 smoke task、HTML 报告、失败归因、token/cost 报告，通过 `comet eval run|collect` 暴露。
+- **Platform expansion**: ZCode 支持和 MimoCode 原生支持。
+- **Stable composed Skill control plane**: 生成的 `/comet-any` Skill Bundle 包含 required scripts、rules、hooks、runtime checks、Eval manifest 和组合证据。
+- **Factory Skill composition**: 创作时展开 source Skill 的 `comet/flow.yaml`，含 choice resolution 和 cycle detection。
+- **Comet Any user guidance**: 首次使用 Factory guide、可确认的组合 proposal、resume summary、distribution preview。
+
+### Changed
+
+- **Publish facade path**: `comet publish` 作为常规 readiness/approval/publish/distribute 路径，`comet bundle` 作为高级后端。
+- **Comet product model**: 围绕纯 Node 运行时、可恢复工作流诊断、可复用 Skill 平台和 `/comet-any` 作为主 Skill 创建路径重新定位。
+- **Repository and runtime layout**: 仓库重组为 `app/`、`domains/`、`platform/`、`scripts/` 和对应测试。
+- **Classic runtime storage**: machine-owned Run state 从 `.comet.yaml` 拆出，更多 workflow facts 走共享 diagnostics/runtime-eval 路径。
+- **Runtime checks naming**: 新 Engine-native 包使用 `comet/checks.yaml`，迁移期保留 legacy `comet/evals.yaml` 加载。
+- **Bundle distribution disclosure**: publish distribute 输出现在暴露 planned files 和 executable hook disclosures。
+- **Comet Any preferences**: 用项目级 `.comet/skill-preferences.yaml` 替代未发布的 `.comet/skills.txt`，含 inventory-backed 偏好设置、proposal preview、preference-aware review readiness。
+- **Publish readiness**: review 输出现在包含面向用户的 readiness 结论和下一步，在原始 blocker 证据之前。
+- **Comet Any Skill Maker language**: 围绕定制 `/comet`、创建新 Skill、升级已有 Skill 重构语言，Bundle 和 Factory 概念保留在内部审计层。
+
+### Removed
+
+- **Bash-first runtime assumptions**: 移除旧的 shell-script 运行时/测试假设；Node launcher 和跨平台 runtime check 成为默认契约。

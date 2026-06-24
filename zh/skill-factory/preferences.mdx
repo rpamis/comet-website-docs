@@ -1,30 +1,152 @@
 ---
-title: "Skill 偏好与真实来源"
-description: "使用 .comet/skills.txt 表达组合偏好，并理解 /comet-any 如何处理缺失和歧义。"
+title: "Skill 偏好与真实来源（进阶）"
+description: "配置 .comet/skill-preferences.yaml 表达组合偏好，理解 advisory/strict 模式、策略和真实来源证据。"
 ---
 
-`.comet/skills.txt` 是 Skill Factory 的偏好文件。它不是严格白名单，而是告诉 `/comet-any` 你希望优先考虑哪些 Skill，以及默认顺序是什么。
+<Info>
+  这是进阶配置内容。首次使用时 `/comet-any` 会自动推荐默认偏好，你不需要立刻看懂这里。只有想手写偏好或排查组合问题时才需要。
+</Info>
 
-## 文件格式
+`.comet/skill-preferences.yaml` 是项目级偏好文件。它表达这个项目希望 `/comet-any` 优先复用哪些 Skill，以及遇到缺失、歧义、偏离和 scripts/hooks 时怎么处理。
+
+它不是严格白名单，也不是内部状态文件——你可以手写、提交到项目，也可以由 `/comet-any` 首次扫描后生成。
+
+## 文件位置
 
 ```text
-brainstorming
-writing-plans
-requesting-code-review
-verification-before-completion
+.comet/skill-preferences.yaml
 ```
 
-## 规则
+它和 `.comet/config.yaml` 同级。
 
-- 一行一个 Skill。
-- 行顺序进入推荐调用链。
-- 可以偏离顺序，但必须解释原因。
-- 缺失候选必须让用户决定忽略、替换或安装。
-- 歧义候选必须让用户选择真实来源。
+## 完整字段
+
+```yaml
+version: 1
+mode: advisory
+
+prefer:
+  - brainstorming
+  - writing-plans
+  - systematic-debugging
+  - test-driven-development
+  - requesting-code-review
+  - verification-before-completion
+
+require:
+  - verification-before-completion
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: disclose
+  hooks: disclose
+```
+
+### `mode`
+
+| 模式 | 行为 |
+| --- | --- |
+| `advisory` | 默认模式。可以补充目标需要的 Skill，但必须解释偏离原因 |
+| `strict` | 团队标准化模式。required Skill 缺失、歧义或禁止 scripts/hooks 时阻塞 |
+
+### `prefer`
+
+希望优先复用的 Skill 列表。顺序代表偏好优先级——`/comet-any` 会尽量按这个顺序构建调用链。
+
+### `require`
+
+生成组合 Skill 时必须满足的 Skill。这些 Skill 缺失或歧义时，组合方案不能通过。
+
+### `policies`
+
+| 策略 | 作用 |
+| --- | --- |
+| `missing` | 偏好 Skill 缺失时 `ask`（询问）或 `fail`（失败） |
+| `ambiguous` | 同名 Skill 有多个不同来源时 `ask` 或 `fail` |
+| `deviation` | 偏离偏好顺序时 `explain`（解释原因）或 `fail` |
+| `scripts` | 生成或分发 scripts 时 `allow`、`disclose`（披露）或 `deny` |
+| `hooks` | 生成或分发 hooks 时 `allow`、`disclose` 或 `deny` |
+
+## 推荐起点
+
+如果你不确定怎么写，可以从这个配置开始：
+
+```yaml
+version: 1
+mode: advisory
+
+prefer:
+  - brainstorming
+  - writing-plans
+  - systematic-debugging
+  - test-driven-development
+  - requesting-code-review
+  - verification-before-completion
+
+require:
+  - verification-before-completion
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: disclose
+  hooks: disclose
+```
+
+`/comet-any` 也会在偏好不存在时主动扫描平台 Skill inventory，按能力分组推荐默认偏好，并询问你是否保存为项目级偏好。
+
+## 手写示例：偏严谨的 PR 评审 Skill
+
+```yaml
+version: 1
+mode: advisory
+
+prefer:
+  - brainstorming
+  - writing-plans
+  - requesting-code-review
+  - verification-before-completion
+
+require:
+  - requesting-code-review
+  - verification-before-completion
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: disclose
+  hooks: disclose
+```
+
+保存后直接调用 `/comet-any`，描述目标即可。`/comet-any` 会读取这个偏好并按 `prefer`/`require` 运行。
+
+## 偏好如何影响生成
+
+`/comet-any` 会按以下规则使用偏好：
+
+- 优先读取项目级偏好 `.comet/skill-preferences.yaml`。
+- 偏好不存在时，扫描平台 Skill inventory，按能力分组推荐默认偏好，并询问是否保存。
+- 用 `find-skill` 解析真实本地 Skill 来源与内容。
+- `advisory` 可在说明原因后补充目标需要的 Skill。
+- `strict` 遇到 required 缺失、歧义或禁止的 scripts/hooks 必须阻塞。
+
+<Warning>
+  不得只按名字推测能力；`/comet-any` 必须读取最终候选的真实 `SKILL.md`、直接 reference、rules、scripts 和 hooks。
+</Warning>
+
+## 缺失和歧义候选
+
+`/comet-any` 必须暂停并询问你如何处理 `missing` 和 `ambiguous` 项。它不能静默忽略缺失候选，也不能在多个来源中替你选择。
+
+你明确选择来源后，`/comet-any` 会更新 Factory metadata。你明确同意忽略缺失偏好时，它会记录原因，这个原因会进入评审摘要。
 
 ## resolved-skills.json
 
-生成物应包含：
+生成物应包含真实来源证据：
 
 ```text
 reference/resolved-skills.json
@@ -37,8 +159,22 @@ reference/resolved-skills.json
 - 描述。
 - hash。
 - reference、rules、scripts、hooks 摘要。
-- `sourceSummaries`。
+- `sourceSummaries`：从真实 `SKILL.md` 正文提炼出的内容摘要。
 
 <Tip>
-  这个文件是“不是按名字猜的”证据。准备发布或审查时优先看它。
+  这个文件是"不是按名字猜的"的证据。准备发布或审查时优先看它——它证明组合基于本地真实内容。
 </Tip>
+
+## 偏好漂移
+
+`.comet/skill-preferences.yaml` 在 Factory 初始化后发生变化时（`preferenceHash` 变化）：
+
+- `advisory` 模式：给出 warning，提示你选择继续旧组合方案或重新生成。
+- `strict` 模式：阻塞，要求你确认继续或重新生成。
+
+生成物会记录 `preferenceHash`、模式、策略和 required Skill 作为项目级偏好证据。
+
+## 下一步
+
+- [创建 Skill 的完整流程](/zh/skill-factory/workflow) — 完整 `/comet-any` 流程
+- [发布和分发 Skill](/zh/skill-factory/publishing) — readiness 如何使用偏好和 eval 证据

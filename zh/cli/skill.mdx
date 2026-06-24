@@ -3,35 +3,144 @@ title: "comet skill"
 description: "管理本地 Comet Skill 包，并运行 deterministic Skill Run。"
 ---
 
-`comet skill` 是低层 Skill 包和 Engine Run 工具。普通用户创建可复用 Skill 时优先用 `/comet-any`。
+`comet skill` 是低层 Skill 包和 Engine Run 工具。它发现显式 Skill 目录、`.comet/skills/` 下的项目覆盖和内置 Skill，并提供本地 Skill 包管理和 deterministic Run。
+
+普通用户创建可复用 Skill 时优先用 [`/comet-any`](/zh/skill-factory/overview)。
 
 ## 子命令
 
 | 命令 | 用途 |
 | --- | --- |
-| `install <path>` | 安装本地 Skill 到项目 Skill 池 |
-| `validate <skill>` | 校验 Skill 包结构 |
-| `inspect <skill>` | 查看 Skill 内容和元数据 |
-| `run <skill>` | 启动 deterministic Skill Run |
-| `resume` | 提交 pending action 的结果或恢复 Run |
-| `eval` | 检查当前 Run 的 runtime eval |
+| `comet skill install <path>` | 安装本地 Skill 到项目 Skill 池 |
+| `comet skill validate <skill>` | 校验 Skill 包结构 |
+| `comet skill inspect <skill>` | 查看 Skill 内容和元数据 |
+| `comet skill run <skill>` | 启动 deterministic Skill Run |
+| `comet skill resume` | 提交 pending action 的结果或恢复 Run |
+| `comet skill eval` | 检查当前 Run 的 runtime eval |
+
+所有子命令都支持 `--json`。
+
+## 通用选项
+
+| 选项 | 说明 | 适用命令 |
+| --- | --- | --- |
+| `--project <dir>` | 项目根目录（默认 `.`） | 所有 |
+| `--json` | 输出结构化 JSON | 所有 |
+| `--overwrite` | 覆盖已存在的项目 Skill | `install` |
+| `--change <dir>` | 绑定 OpenSpec change 目录（与 `--run-id` 互斥） | `run`、`resume`、`eval` |
+| `--run-id <id>` | 用 `.comet/runs/<run-id>` 存放 Run state（与 `--change` 互斥） | `run`、`resume`、`eval` |
+| `--confirm <key=value>` | 传入确认参数 | `run`、`resume` |
+| `--status <succeeded\|failed>` | 提交 action 结果状态 | `resume` |
+| `--summary <text>` | 结果摘要（`--status` 时必需） | `resume` |
+| `--artifact <key=value>` | 提交 artifact（`--status` 时使用） | `resume` |
+| `--state <key=value>` | 提交 state（`--status` 时使用） | `resume` |
+| `--upgrade <skill>` | 用新 Skill 版本升级当前 Run | `resume` |
+| `--scope <progress\|step\|completion>` | runtime eval 范围（默认 `progress`） | `eval` |
+
+<Info>
+  `--change` 和 `--run-id` 互斥：一次 Run 只能绑定其中一个。`--change` 绑定 OpenSpec change 目录，`--run-id` 用 `.comet/runs/<run-id>` 存放独立 Run state。
+</Info>
 
 ## 包管理示例
 
 ```bash
 comet skill install ./my-skill --project .
+comet skill install ./my-skill --project . --overwrite
 comet skill validate my-skill --project .
 comet skill inspect my-skill --json
 ```
 
+`validate` 会解析 Skill 并返回名称、版本、来源、根目录和内容 hash。`inspect` 会额外返回 goal、orchestration、steps、skills、agents、tools、guardrails 和 evals。
+
+项目 Skill 会按名称覆盖内置 Skill；无效覆盖会 fail closed，而不是静默回退。
+
 ## Run 示例
 
+启动一次 deterministic Skill Run：
+
 ```bash
+# 绑定 OpenSpec change 目录
+comet skill run my-skill --change ./changes/demo
+
+# 或用独立 run-id
 comet skill run my-skill --run-id demo-run --project .
-comet skill resume --run-id demo-run --status succeeded --summary "完成"
-comet skill eval --run-id demo-run --scope completion
+```
+
+`run` 支持 deterministic Skills；adaptive 执行需要 Agent 候选。
+
+## Resume 示例
+
+Agent 执行完 pending action 后，用 `resume` 提交结果：
+
+```bash
+comet skill resume --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
+```
+
+或：
+
+```bash
+comet skill resume --run-id demo-run --project . --status succeeded --summary "完成"
+```
+
+只恢复（不提交结果）时省略 `--status`：
+
+```bash
+comet skill resume --change ./changes/demo
+```
+
+升级当前 Run 到新 Skill 版本：
+
+```bash
+comet skill resume --change ./changes/demo --upgrade my-skill --project .
 ```
 
 <Warning>
-  `comet skill eval` 只检查某次 Engine Run 的完成度。评估一个 Skill 产品能力，请用 [comet eval](/zh/cli/eval)。
+  `--upgrade` 不能和 `--status`、`--summary`、`--artifact`、`--state` 组合使用。`--summary`、`--artifact`、`--state` 必须配合 `--status` 使用。
 </Warning>
+
+## Eval 示例
+
+检查当前 Run 的 runtime eval：
+
+```bash
+comet skill eval --change ./changes/demo --scope completion
+```
+
+或：
+
+```bash
+comet skill eval --run-id demo-run --project . --scope completion
+```
+
+`--scope` 可选 `progress`、`step` 或 `completion`（默认 `progress`）。
+
+## 文本模式的恢复提示
+
+`comet skill` 在文本模式下会直接打印 `Pending action` 和 `Next:` 恢复提示，让你不需要在暂停的 Run 或失败的 eval 后自己猜下一步。
+
+例如 `run` 输出：
+
+```text
+Run: demo-run
+Status: paused
+Current step: collect-evidence
+Pending action: collect-evidence (tool, step collect-evidence)
+Runtime evals: 1
+Next: complete the pending action, then run comet skill resume
+```
+
+`eval` 失败时会提示：
+
+```text
+Next: record the missing artifact/state and rerun comet skill eval
+```
+
+<Warning>
+  `comet skill eval` 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill 产品能力，请用 [comet eval](/zh/cli/eval)。详见 [Runtime eval](/zh/eval/runtime)。
+</Warning>
+
+## 下一步
+
+- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 理解 Skill 包和 Engine Run 的运行语义
+- [Runtime eval](/zh/eval/runtime) — 区分 `comet skill eval` 和 `comet eval`
+- [Skill Factory 概览](/zh/skill-factory/overview) — 创建可复用 Skill 的主入口

@@ -1,0 +1,78 @@
+---
+title: "评估任意 Skill 常见问题"
+description: "解答 comet eval 两种入口、collect/run 区别、失败归因、报告和发布证据的常见疑问。"
+---
+
+关于 `comet eval` 评估系统、报告解读和发布证据的常见问题。
+
+## 基础概念
+
+<AccordionGroup>
+  <Accordion title="comet eval 到底评估什么">
+    `comet eval` 通过共享 eval harness 执行真实模型任务，验证一个 Skill 作为产品能力能不能通过评估，产出发布前证据。它封装了 pytest、task registry、profile、报告生成，你不需要手工拼参数。详见[评估系统概览](/zh/eval/overview)。
+  </Accordion>
+
+  <Accordion title="comet eval 和 comet skill eval 有什么区别">
+    `comet eval` 评估 Skill 的产品能力，产出发布前证据。`comet skill eval` 检查某次 Engine Run 是否缺 artifact 或状态，不执行模型任务，不产出发布证据。发布 readiness 只需要 `comet eval`。详见[Runtime eval](/zh/eval/runtime)。
+  </Accordion>
+
+  <Accordion title="我需要懂 pytest 或 Docker 吗">
+    不需要。`comet eval` 封装了底层细节，你只需要知道用 `--manifest` 还是 `--skill-path`。底层细节由 harness 处理。详见[Eval harness](/zh/eval/harness)。
+  </Accordion>
+</AccordionGroup>
+
+## 两种入口
+
+<AccordionGroup>
+  <Accordion title="--manifest 和 --skill-path 该用哪个">
+    有 `comet/eval.yaml`（通常是 `/comet-any` 生成物）用 `--manifest`，这是发布前完整评估。只有本地 Skill 目录、还在早期调试用 `--skill-path --quick`。要进入发布 readiness 必须用 `--manifest`。两者互斥。
+  </Accordion>
+
+  <Accordion title="--quick 是什么，默认 task 是什么">
+    `--quick` 配合 `--skill-path` 使用，默认选中 `generic-skill-smoke` task，适合低成本早期冒烟。它不等于发布前完整证据，准备发布时仍需走 manifest 路径。
+  </Accordion>
+
+  <Accordion title="为什么先 collect 再 run">
+    `collect` 只做发现预检查（验证 manifest、task、路径），不消耗模型调用，成本最低，适合刚生成完 Skill 后排错。`run` 才执行真实评估。先 collect 能快速发现配置问题，避免浪费模型调用。详见[快速上手](/zh/eval/quickstart)。
+  </Accordion>
+</AccordionGroup>
+
+## 报告与失败
+
+<AccordionGroup>
+  <Accordion title="报告在哪里找">
+    CLI 输出会打印 `Report path`，通常是 `eval/local/logs/experiments/<experiment-id>/summary.html`。如果路径里有 `<experiment-id>` 占位符，用同一段输出里的 `Experiment` 值对应查找。详见[读取评估报告](/zh/eval/reports)。
+  </Accordion>
+
+  <Accordion title="评估失败了，怎么判断问题出在哪">
+    看报告里的 failure attribution（失败归因）。`harness` 说明环境/依赖/路径问题，`workflow` 说明 Skill 流程没达预期，`task` 说明任务定义/fixture 问题，`model` 说明模型行为不稳定。归因决定你该改什么。详见[读取评估报告](/zh/eval/reports)。
+  </Accordion>
+
+  <Accordion title="collect 报错说找不到 manifest">
+    检查路径是否正确，确认 `comet/eval.yaml` 文件存在。如果不在 Comet 仓库根目录，加 `--project <dir>` 指向正确根目录。
+  </Accordion>
+
+  <Accordion title="model 归因失败要重跑吗">
+    `model` 归因说明模型行为或工具使用不稳定，重跑通常有效。如果反复失败，考虑降低 Skill 对非确定行为的依赖。
+  </Accordion>
+</AccordionGroup>
+
+## 发布证据
+
+<AccordionGroup>
+  <Accordion title="Eval 通过了就能发布吗">
+    Eval 通过只是条件之一。`/comet-any` 或后端会把 eval 证据纳入 readiness：没有证据、失败、对应旧 hash 都不能 publish。通过且 hash 匹配才能进入 review/publish。详见[评估系统概览](/zh/eval/overview)。
+  </Accordion>
+
+  <Accordion title="eval 证据对应旧 hash 是什么意思">
+    说明 Skill 在上次评估后被修改了（draft hash 变了），旧评估结果不再有效。需要重新跑 `comet eval run` 生成绑定当前 hash 的证据。
+  </Accordion>
+
+  <Accordion title="我能手工把报告路径写进发布状态吗">
+    不要。`/comet-any` 会通过 Bundle 后端记录结构化证据。手工编辑 Bundle 状态或内部 JSON 会破坏 hash 绑定和 readiness 校验。
+  </Accordion>
+
+  <Accordion title="quick smoke 能当发布证据吗">
+    不能。`--skill-path --quick` 只是早期冒烟，覆盖范围有限。发布前必须通过 `/comet-any` 生成 `comet/eval.yaml`，再用 `--manifest` 跑完整评估。
+  </Accordion>
+</AccordionGroup>

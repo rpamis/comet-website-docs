@@ -1,39 +1,102 @@
 ---
-title: "Eval harness"
-description: "理解 Comet 如何封装本地 eval harness，让用户从项目根目录运行 Skill 评估。"
+title: "Eval harness（进阶）"
+description: "深入理解 Comet 如何封装本地 eval harness，让用户从项目根目录运行 Skill 评估。"
 ---
 
-Comet 的 eval harness 真实位于 Comet 仓库的 `eval/` 目录。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke。
+<Info>
+  这是进阶内容。日常评估只需要[快速上手](/zh/eval/quickstart)里的两条命令。这里讲的是 harness 内部机制，适合排查问题或理解 profile/task 选择。
+</Info>
+
+Comet 的 eval harness 真实位于 Comet 仓库的 `eval/` 目录。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke，让你不需要手工切目录或拼 pytest 参数。
+
+## 它封装了什么
+
+`comet eval` 在内部做这几件事：
+
+- 固定从 `<project>/eval` 根目录启动 harness
+- 把 `--manifest` 或 `--skill-path` 转换成 pytest 参数
+- 选择默认 profile（`generic`）或 task（`recommended`、`generic-skill-smoke`）
+- 按需生成临时 report config（`--html` 时）
+- 打印一组执行信息，便于定位报告
+
+最终它调用的是 `uv run pytest local/tests/tasks/test_tasks.py`，并传入对应参数。你不需要记住这条命令，`comet eval` 会替你组装。
 
 ## collect 和 run
 
-| 命令 | 是否执行模型任务 | 用途 |
-| --- | --- | --- |
-| `collect` | 否 | 验证 manifest、task、profile 和路径 |
-| `run` | 是 | 执行真实评估并生成报告 |
+`comet eval` 只有两个子命令，分别对应两个阶段：
+
+| 命令 | 是否执行模型任务 | `--collect-only` | 用途 |
+| --- | --- | --- | --- |
+| `collect` | 否 | 是 | 验证 manifest、task、profile 和路径，低成本排错 |
+| `run` | 是 | 否 | 执行真实评估并生成报告 |
+
+`collect` 在内部给 pytest 传 `--collect-only`，所以它只做发现，不消耗模型调用或 Docker 任务。`run` 会带 `-v` 执行真实任务。
 
 ## manifest 模式
+
+`--manifest` 适合 `/comet-any` 生成物，或任何带 `comet/eval.yaml` 的 Skill 包：
 
 ```bash
 comet eval collect --manifest ./generated-skill/comet/eval.yaml
 comet eval run --manifest ./generated-skill/comet/eval.yaml --html
 ```
 
-manifest 通常由 `/comet-any` 生成，包含目标 Skill、profile、推荐任务、预期产物和交互配置。
+manifest 通常由 `/comet-any` 生成，包含目标 Skill、profile、推荐任务、预期产物和交互配置。Engine-enabled 生成物默认使用 `authoring-skill` profile 和 `authoring-skill-smoke` quick eval。
 
 ## skill-path 模式
+
+`--skill-path` 适合还没有 `comet/eval.yaml` 的本地 Skill 目录：
 
 ```bash
 comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 ```
 
-它适合早期冒烟。默认 quick smoke 是 `generic-skill-smoke`。
+它适合早期冒烟。使用 `--skill-path` 时，`--quick` 默认选中 `generic-skill-smoke` task。你也可以用 `--task` 显式指定任务，或用 `--profile` 覆盖 profile。
+
+| 模式 | 默认 profile | 默认 task | 适合场景 |
+| --- | --- | --- | --- |
+| `--manifest` | manifest 自带（通常 `authoring-skill`） | `recommended` | 发布前评估 |
+| `--skill-path --quick` | `generic` | `generic-skill-smoke` | 早期冒烟 |
+| `--skill-path`（无 `--quick`） | `generic` | `recommended` | 手动指定任务时 |
+
+## 执行信息
+
+`comet eval` 在运行前会先打印一组执行信息，让你能定位报告和排查问题：
+
+- `Eval root`：实际从哪个 `eval/` 根目录启动
+- `Mode`：`collect` 或 `run`
+- `Target`：当前评估的是 manifest 还是本地 Skill 目录
+- `Experiment`：本次实验 id
+- `Profile`：本次评估使用的 profile
+- `Task`：本次评估任务
+- `Report path`：报告位置
+- `Report config`：启用 `--html` 时使用的临时报告配置
+
+`run` 模式还会额外提示：失败归因会被记录到生成的 eval summary 里，按 harness、workflow、task、model 四个桶分类。
 
 ## 失败归因
 
-报告会帮助区分：
+报告会帮助区分失败来源：
 
-- `harness`: 环境、依赖、Docker、路径或 harness 问题。
-- `workflow`: Skill 流程没达到预期。
-- `task`: 任务定义或 fixture 问题。
-- `model`: 模型行为不稳定或工具使用问题。
+| 归因 | 含义 | 下一步 |
+| --- | --- | --- |
+| `harness` | 环境、依赖、Docker、路径或 harness 问题 | 检查依赖、Docker、网络或本地环境 |
+| `workflow` | Skill 流程没达到预期 | 回到 `/comet-any` 优化 Skill |
+| `task` | 任务定义或 fixture 问题 | 检查 eval 任务定义和 fixture |
+| `model` | 模型行为不稳定或工具使用问题 | 重跑或降低对非确定行为的依赖 |
+
+这个归因用于判断下一步应该修 Skill、修 eval 配置，还是重跑环境。详见[读取评估报告](/zh/eval/reports)。
+
+## 不要把 harness 和 runtime eval 混淆
+
+`comet eval` 和 `comet skill eval` 名字接近，但用途不同：
+
+- `comet eval`：评估一个 Skill 包或 `comet/eval.yaml`，回答"这个 Skill 作为产品能力能不能通过评估"。
+- `comet skill eval`：检查某个正在运行的 deterministic Skill Run 是否缺 artifact 或状态，回答"这次 Run 是否完整"。
+
+详见 [Runtime eval](/zh/eval/runtime)。
+
+## 下一步
+
+- [读取评估报告](/zh/eval/reports) — 学会看懂报告信号和失败归因
+- [comet eval 命令](/zh/cli/eval) — 完整选项和子命令参考

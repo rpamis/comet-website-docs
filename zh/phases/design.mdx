@@ -1,42 +1,133 @@
 ---
 title: "design 阶段"
-description: "了解 Comet 如何用 Superpowers 设计文档把需求转成可执行方案。"
+description: "design 阶段调用 brainstorming，用 handoff 交接包把 OpenSpec artifacts 交给 Superpowers，做深度技术设计并产出 Design Doc。"
 ---
 
-design 阶段回答“怎么做”。它补足 open 阶段没有展开的架构、边界、数据流、错误处理和验证策略。
+design 阶段做深度技术设计。它用 `comet-handoff` 把 open 阶段的 OpenSpec artifacts 交给 Superpowers `brainstorming`，产出 Design Doc。
 
-## 何时进入
+## 调用的 skill
 
-- full workflow 完成 open 后。
-- hotfix/tweak 命中升级信号，需要补完整设计。
-- 恢复时发现已有 change 但缺 Design Doc。
+| Skill | 用途 | 何时调用 |
+| --- | --- | --- |
+| `brainstorming` | 深度技术设计（方案、风险、测试策略） | Step 1b，立即执行，不可跳过 |
+| `brainstorming`（再次） | 中等规模 spec 更新时重新设计 | build 阶段发现接口/组件/数据流变化时 |
+
+design 阶段不调用 OpenSpec skill——OpenSpec artifacts 已在 open 阶段创建。
 
 ## 产物
 
-```text
-docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
+| 产物 | 位置 | 说明 |
+| --- | --- | --- |
+| Design Doc | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | 最终技术设计文档 |
+| handoff 交接包 | `.comet/handoff/design-context.json` + `.md` | OpenSpec→Superpowers 交接上下文 |
+| brainstorm-summary.md | `.comet/handoff/brainstorm-summary.md` | 上下文压缩恢复检查点 |
+
+## 完整步骤
+
+### Step 0：入口状态验证
+
+```bash
+node "$COMET_STATE" check <name> design
 ```
 
-Design Doc 会关联当前 OpenSpec change，并成为 build 阶段写计划的输入。
+如果 `handoff_context` 和 `handoff_hash` 已存在，先确认它们是否匹配当前 artifacts，再决定是否重新生成。
 
-## 好的设计应该包含什么
+### Step 1a：生成 handoff 交接包
 
-- 用户目标和非目标。
-- 受影响的模块和文件。
-- 关键数据流或状态流。
-- 错误处理和恢复方式。
-- 测试和验证策略。
-- 需要用户决策的风险点。
+必须脚本生成，不用 Agent 摘要：
 
-```mermaid
-flowchart TD
-  A["OpenSpec proposal"] --> B["Brainstorm 方案"]
-  B --> C["比较 2-3 个路径"]
-  C --> D["用户批准设计"]
-  D --> E["写 Design Doc"]
-  E --> F["生成 build plan"]
+```bash
+node "$COMET_HANDOFF" <change-name> design --write
 ```
+
+交接包形态取决于 `context_compression` 配置：
+
+| 模式 | 产出 | 内容 |
+| --- | --- | --- |
+| `off`（默认） | `design-context.json` + `.md` | 完整摘要，每文件带 sha256，超 80 行截断 |
+| `beta` | `spec-context.json` + `.md` | delta spec verbatim 投影，其他文件 hash 引用 |
+
+同时把 `handoff_context` 和 `handoff_hash` 写入 `.comet.yaml`。
+
+### Step 1b：执行 brainstorming
+
+加载 `brainstorming`，以交接包为上下文做深度技术设计：
+
+- 实现方案、技术风险、测试策略、边界条件
+- 不得只做一轮 Q&A 就创建 Design Doc
+- 如果 delta spec 缺验收场景，只能写 Spec Patch 回写 `specs/*/spec.md`，不能在 Design Doc 里写第二份需求 spec
+- 增量更新 `brainstorm-summary.md`
+
+### Step 1c：用户确认设计方案（停顿点）
+
+展示方案摘要（技术方案、权衡、风险、测试策略、Spec Patch），等待用户确认。详见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
+
+### Step 1d：brainstorming 检查点定稿
+
+把已确认的方案写入 `brainstorm-summary.md`——这是上下文压缩后的恢复锚点。
+
+### Step 1e：主动式上下文压缩
+
+触发平台原生 compaction。如果平台不支持程序化触发，暂停让你手动压缩，完成后继续。
+
+### Step 2：创建 Design Doc
+
+在主会话用完整 brainstorming 上下文创建 Design Doc，带最小 frontmatter：
+
+```yaml
+---
+comet_change: <change-name>
+role: technical-design
+canonical_spec: openspec
+---
+```
+
+如果需要 Spec Patch，编辑对应 `specs/*/spec.md`。
+
+### Step 3：更新 Comet 状态
+
+```bash
+node "$COMET_STATE" set <name> design_doc <path>
+```
+
+如果 delta spec 改了，重新生成 handoff 更新 hash：
+
+```bash
+node "$COMET_HANDOFF" <change-name> design --write
+```
+
+### 退出
+
+```bash
+node "$COMET_GUARD" <change-name> design --apply
+```
+
+推进到 `phase: build`。
+
+## 退出条件（guard 检查）
+
+guard 在离开 design 时检查：
+
+- Design Doc 已创建
+- frontmatter 含 `comet_change`、`role: technical-design`、`canonical_spec: openspec`
+- `handoff_context` 和 `handoff_hash` 已写入 `.comet.yaml`
+- `handoff_hash` 匹配当前 OpenSpec artifacts（漂移会 FATAL）
+- markdown 交接包带可追溯标记（源路径、mode、sha256）
+- beta 模式下 `spec-context.json` 结构有效
+
+## 何时进入
+
+- full workflow 完成 open 后
+- hotfix/tweak 命中升级信号，需要补完整设计
+- 恢复时发现已有 change 但缺 Design Doc
 
 <Warning>
   full workflow 不应跳过 design。hotfix 和 tweak 可以跳过，但一旦范围变质，就应升级回 full。
 </Warning>
+
+## 下一步
+
+- [build 阶段](/zh/phases/build) — design 完成后进入计划与执行
+- [上下文压缩机制](/zh/concepts/context-compression) — handoff 交接包详解
+- [工作流中间产物](/zh/concepts/intermediate-artifacts) — brainstorm-summary 等产物
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — design 的停顿点

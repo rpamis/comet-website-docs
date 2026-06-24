@@ -1,0 +1,133 @@
+---
+title: "快速上手：组合任意 Skill"
+description: "用 /comet-any 三步创建一个可复用 Skill 的最短路径。新手从这里开始。"
+---
+
+本页是使用 `/comet-any` 创建、组合 Skill 的最短上手路径。只需要理解一个入口、一个偏好文件和一条主线，就能跑通一次完整创建。想了解完整机制、Engine、Bundle 和发布门禁，再看[进阶内容](#进阶内容)。
+
+## 你需要记住的主线
+
+```text
+/comet-any -> comet eval -> comet publish
+```
+
+`/comet-any` 负责创建，`comet eval` 负责验证，`comet publish` 负责发布和分发。你只需要调用 `/comet-any`，它会在内部帮你调用后端命令。
+
+## 前提
+
+- 已经通过 `comet init` 安装了 Comet（见 [CLI 快速上手](/zh/cli/quickstart)）。
+- 在 Agent 平台（如 Claude Code、Codex）里能用 `/comet-any`。
+
+## 第一步：调用 /comet-any
+
+在 Agent 平台里输入：
+
+```text
+/comet-any
+```
+
+然后描述你想创建的 Skill。例如：
+
+```text
+请创建一个 PR 评审助手。
+它要先澄清评审范围，再制定检查计划，再执行代码审查，最后在完成前要求验证证据。
+目标是给团队复用，不只是当前一次任务。
+```
+
+`/comet-any` 会从三种起点里让你选一个：
+
+- **改一版 `/comet`** — 在经典五阶段流程上做增量调整。
+- **做一个新 Skill** — 从你的目标描述创建全新 Skill。
+- **整理已有 Skill** — 把现有 Skill 整理成可发布的 Skill。
+
+## 第二步：确认组合方案
+
+`/comet-any` 会读取项目里的真实 Skill，生成一个组合方案，并暂停等你确认。这是"Skill Maker 方案确认页"，在它上面做三选一：
+
+1. **确认生成** — 按方案写入 Bundle draft。
+2. **修改方案** — 调整目标、偏好或候选后重新生成方案。
+3. **取消** — 不写任何状态。
+
+<Tip>
+  如果 `/comet-any` 提示有候选缺失或有多个来源，它一定会暂停问你——它不会替你选择或忽略。按提示选来源即可。
+</Tip>
+
+## 第三步：评估和发布
+
+确认后，`/comet-any` 生成 Skill 包。然后用两条命令验证并发布：
+
+```bash
+# 验证
+comet eval collect --manifest ./generated-skill/comet/eval.yaml
+comet eval run --manifest ./generated-skill/comet/eval.yaml --html
+
+# 检查发布 readiness
+comet publish status my-skill --project . --json
+```
+
+`/comet-any` 也会主动推进这些步骤。需要手工发布时：
+
+```bash
+comet publish review my-skill --platform claude --json
+comet publish approve my-skill --reviewer alice --json
+comet publish run my-skill --platform claude --json
+```
+
+分发到平台前会先让你看预览，确认后才真正写入。详见[发布和分发 Skill](/zh/skill-factory/publishing)。
+
+## 可选：准备偏好文件
+
+第一次使用时 `/comet-any` 会扫描平台 Skill 并推荐默认偏好。你也可以直接创建偏好文件，告诉它优先复用哪些 Skill：
+
+```yaml
+# .comet/skill-preferences.yaml
+version: 1
+mode: advisory
+
+prefer:
+  - brainstorming
+  - writing-plans
+  - requesting-code-review
+  - verification-before-completion
+
+require:
+  - verification-before-completion
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: disclose
+  hooks: disclose
+```
+
+保存到 `.comet/skill-preferences.yaml` 即可。详细字段含义见[进阶的偏好文档](/zh/skill-factory/preferences)。
+
+## 常见问题
+
+<Accordion title="我不懂 Bundle、Factory、composition 这些词">
+普通用户不需要懂。这些是 `/comet-any` 的内部后端概念。你只需要调用 `/comet-any`，它会在内部调用 CLI 维护状态。
+</Accordion>
+
+<Accordion title="/comet-any 和 /comet 有什么区别">
+`/comet` 是经典 Spec 模式入口，驱动 open/design/build/verify/archive 五阶段流程。`/comet-any` 是 Skill Factory，用来创建、优化、组合可复用的 Skill。两者是不同入口。
+</Accordion>
+
+<Accordion title="做到一半中断了怎么办">
+直接对 Agent 说"继续上次的 Skill 创建"。`/comet-any` 会扫描可恢复状态，展示名称、状态和下一步，让你选择继续哪一个。
+</Accordion>
+
+<Accordion title="生成物会被自动分发吗">
+不会。`/comet-any` 发布后会询问你是否分发，并先展示预览。只有你确认后才会真正写入平台。
+</Accordion>
+
+## 进阶内容
+
+基础路径到这里就结束了。如果你需要更深入地理解 Skill Factory，看这些页面：
+
+| 进阶主题 | 适合场景 |
+| --- | --- |
+| [Skill Factory 概览](/zh/skill-factory/overview) | 理解 `/comet-any` 做什么、产出什么、和经典模式的边界 |
+| [创建 Skill 的完整流程](/zh/skill-factory/workflow) | 从恢复状态到生成、评估、评审、发布、分发的完整步骤 |
+| [Skill 偏好与真实来源](/zh/skill-factory/preferences) | `advisory`/`strict` 模式、策略、`resolved-skills.json` 证据 |
+| [发布和分发 Skill](/zh/skill-factory/publishing) | readiness 状态链、门禁、能力缺口和可执行披露 |
