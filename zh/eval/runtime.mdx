@@ -1,30 +1,69 @@
 ---
 title: "Runtime eval（进阶）"
-description: "区分 comet eval 和 comet skill eval，并理解 Engine Run 的本地完成度检查。"
+description: "区分 comet eval 和 comet skill eval，理解 Engine Run 的本地完成度检查、checks.yaml 格式和 pending action 恢复。"
 ---
 
 <Info>
-  这是进阶内容，主要面向使用 Engine Run 的进阶用户。如果你只做 `comet eval`，可以跳过本页。
+  这是进阶内容，主要面向使用 Engine Run 的进阶用户。如果你只做 `comet eval`（创建期评估），可以跳过本页。
 </Info>
 
-Comet 有两类 eval。名字相似，但用途不同，不要混用。
+Comet 有两类 eval。名字相似，但用途不同，**不要混用**。
 
 ## 对比
 
-| 命令 | 评估对象 | 适合的问题 | 是否是发布证据 |
-| --- | --- | --- | --- |
-| `comet eval run` | Skill 包或 `comet/eval.yaml` | 这个 Skill 能不能通过产品级评估 | 是 |
-| `comet skill eval` | 某次 deterministic Engine Run | 这个 Run 是否缺 artifact 或状态 | 否 |
+| 命令 | 评估对象 | 适合的问题 | 是否是发布证据 | 读哪个文件 |
+| --- | --- | --- | --- | --- |
+| `comet eval run` | Skill 包或 `comet/eval.yaml` | 这个 Skill 能不能通过产品级评估 | **是** | `comet/eval.yaml` |
+| `comet skill eval` | 某次 deterministic Engine Run | 这个 Run 是否缺 artifact 或状态 | 否 | `comet/checks.yaml` |
 
 ## 为什么有两类
 
 `comet eval` 面向"这个 Skill 作为产品能力能不能通过评估"，它通过共享 eval harness 执行真实模型任务，产出发布前证据。
 
-`comet skill eval` 面向"这个正在运行的 deterministic Skill Run 是否完整"，它只检查某次 Run 是否满足 `comet/checks.yaml` 里的 runtime checks，不执行模型任务，也不产出发布证据。
+`comet skill eval` 面向"这个正在运行的 deterministic Skill Run 是否完整"，它只检查某次 Run 是否满足 `comet/checks.yaml` 里的 runtime checks，**不执行模型任务**，也**不产出发布证据**。
 
 两者服务于不同阶段：`comet skill eval` 在 Skill 运行中检查完成度，`comet eval` 在发布前验证产品能力。
 
-## `comet skill eval` 示例
+## runtime eval 的检查格式
+
+runtime eval 定义在 Skill 包的 `comet/checks.yaml`（或 `comet/evals.yaml`，两者二选一，不能同时存在）。`/comet-any` 生成物默认用 `checks.yaml`。
+
+```yaml
+# comet/checks.yaml
+runtime:
+  - id: completed
+    scope: completion
+    type: state_equals
+    field: status
+    equals: completed
+```
+
+每个 runtime eval 的字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | eval 标识 |
+| `scope` | `progress`（按需）/ `step`（每次 outcome 后）/ `completion`（Run 完成时） |
+| `type` | `artifact_exists` 或 `state_equals` |
+| `artifact` | `artifact_exists` 时检查的 artifact key |
+| `field` / `equals` | `state_equals` 时检查 Run state 字段是否等于指定值 |
+
+### 两种检查类型
+
+| 类型 | 判断方式 |
+| --- | --- |
+| `artifact_exists` | artifacts 存储里有对应的 artifact |
+| `state_equals` | Run state 的某个字段等于指定值 |
+
+### 三个作用域
+
+| scope | 何时运行 | 触发方式 |
+| --- | --- | --- |
+| `step` | 每次提交 action outcome 后自动运行 | 自动 |
+| `completion` | Run 到达 completed 时自动运行 | 自动 |
+| `progress` | 按需运行 | `comet skill eval --scope progress` |
+
+## comet skill eval 示例
 
 runtime eval 通常配合 `comet skill run` 和 `comet skill resume` 使用：
 
@@ -66,9 +105,26 @@ Engine-enabled 生成物会写入 `comet/checks.yaml` 和 `comet/eval.yaml`：
 
 ## 文本模式的恢复提示
 
-`comet skill` 在文本模式下也会直接打印 `Pending action` 和 `Next:` 恢复提示，让你不需要在暂停的 Run 或失败的 eval 后自己猜下一步该做什么。
+`comet skill` 在文本模式下会直接打印 `Pending action` 和 `Next:` 恢复提示，让你不需要在暂停的 Run 或失败的 eval 后自己猜下一步。
 
-例如 `comet skill eval` 失败后，输出会直接告诉你缺哪个 artifact 或哪个 check 没过。
+例如 `run` 输出：
+
+```text
+Run: demo-run
+Status: paused
+Current step: collect-evidence
+Pending action: collect-evidence (tool, step collect-evidence)
+Runtime evals: 1
+Next: complete the pending action, then run comet skill resume
+```
+
+`eval` 失败时会提示：
+
+```text
+Next: record the missing artifact/state and rerun comet skill eval
+```
+
+每个 `PASS`/`FAIL` 会带 evidence，例如 `PASS completed: state.status = completed` 或 `FAIL report-exists: artifact report(missing) not found`。
 
 ## 怎么选
 
@@ -85,11 +141,11 @@ Engine-enabled 生成物会写入 `comet/checks.yaml` 和 `comet/eval.yaml`：
   ```
 
 <Warning>
-  准备发布 Skill 时，不要只跑 `comet skill eval`。发布 readiness 需要通用 `comet eval` 证据。
+  准备发布 Skill 时，<strong>不要</strong>只跑 <code>comet skill eval</code>。发布 readiness 需要通用 <code>comet eval</code> 证据。<code>comet skill eval</code> 只检查某次 Run 的完成度，不是通用 Skill 评估。
 </Warning>
 
 ## 下一步
 
 - [comet skill 命令](/zh/cli/skill) — 完整 Skill 包和 Run 工具参考
 - [comet eval 命令](/zh/cli/eval) — 完整评估选项
-- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 理解 Engine Run 的运行语义
+- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 理解 Engine Run 的运行语义、pending action、不可变快照

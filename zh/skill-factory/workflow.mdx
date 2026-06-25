@@ -1,186 +1,284 @@
 ---
 title: "创建 Skill 的完整流程（进阶）"
-description: "从准备偏好到生成、评估、评审、发布和分发，走完 /comet-any 工作流。"
+description: "从准备偏好到恢复、生成、评估、评审、发布和分发，走完 /comet-any（Skill Maker）的每一个阶段。"
 ---
 
 <Info>
   这是进阶内容，覆盖完整流程的每一步。如果你只想快速跑通，先看[快速上手：组合任意 Skill](/zh/skill-factory/getting-started)。
 </Info>
 
-本页描述普通用户视角的 `/comet-any` 完整流程。CLI 是内部确定性后端，用户只需要调用 `/comet-any`；这里列出命令是为了让你理解流程，不需要你记忆 Bundle 子命令。
+本页描述普通用户视角的 `/comet-any` 完整流程。CLI 是内部确定性后端，用户只需要调用 `/comet-any`；这里列出命令是为了让你**理解流程**，不需要你记忆 Bundle 子命令。
 
 ## 主线
 
 ```text
-/comet-any 创建 -> comet eval 验证 -> comet publish review/approve/run -> comet publish distribute --preview -> comet publish distribute
+/comet-any 创建
+  → comet eval collect / run（验证）
+  → comet publish review / approve / run（发布）
+  → comet publish distribute --preview / distribute（分发）
+```
+
+完整流程可以分为 **17 个阶段**，下面逐个讲。
+
+```mermaid
+flowchart LR
+    S1["1 恢复状态"] --> S2["2 首次向导"]
+    S2 --> S3["3 选起点+语言"]
+    S3 --> S4["4 解析真实 Skill"]
+    S4 --> S5["5 解决缺失/歧义"]
+    S5 --> S6["6 读真实实现"]
+    S6 --> S7["7 方案确认页"]
+    S7 --> S8["8 澄清目标"]
+    S8 --> S9["9 初始化 draft"]
+    S9 --> S10["10 生成 Skill 源码"]
+    S10 --> S11["11 生成 Engine Package"]
+    S11 --> S12["12 编译校验"]
+    S12 --> S13["13 评估工作量"]
+    S13 --> S14["14 记录评估证据"]
+    S14 --> S15["15 发布"]
+    S15 --> S16["16 安装预览"]
+    S16 --> S17["17 真实分发"]
 ```
 
 ## 1. 恢复现有创作状态
 
-除非你明确说"重新开始"或"放弃旧状态"，否则 `/comet-any` 会先尝试恢复现有流程。
+除非你明确说"重新开始"或"放弃旧状态"，否则 `/comet-any` 会**先尝试恢复**现有流程，而不是直接新建。
 
-它会把恢复信息整理成"恢复摘要"，优先给你看 `resumeSummary`、`Current step`、`Suggested user command` 和阻塞原因，而不是让你自己去 `.comet/bundle-authoring/` 查文件。
+它会把恢复信息整理成**恢复摘要**，优先给你看 `resumeSummary`、`Current step`、`Suggested user command` 和阻塞原因，而不是让你自己去 `.comet/bundle-authoring/` 查文件。
 
 如果有多个可恢复条目，`/comet-any` 会展示每个条目的名称、状态、next action 和原因，让你选择继续哪一个。
 
-## 2. 准备偏好
+恢复时会检查这几项是否仍然有效：
 
-项目级偏好文件位于：
+- Bundle Factory state 是否存在
+- draft hash 是否变化
+- `.comet/skill-preferences.yaml` 的 `preferenceHash` 是否变化
+- resolved Skill hash 是否变化
+- Eval evidence 是否仍匹配当前 hash
+- approval 是否仍匹配当前 hash
 
-```text
-.comet/skill-preferences.yaml
-```
+<Info>
+  想看后端具体返回什么字段，可以手工跑 <code>comet bundle factory-guide --project . --json</code>。它会返回 <code>preference</code>、<code>inventory</code>、<code>resumable</code>、<code>nextQuestions</code>、<code>userMessage</code>。
+</Info>
 
-它和 `.comet/config.yaml` 同级，表达这个项目希望 `/comet-any` 优先复用哪些 Skill，以及遇到缺失、歧义、偏离和 scripts/hooks 时怎么处理。
+## 2. 运行首次使用向导
 
-如果文件不存在，`/comet-any` 会先扫描 Comet 支持的平台 Skill，按能力分组展示可复用能力，并询问是否保存推荐偏好。你不需要每次在输入框里重新列一长串 Skill。
+如果是第一次使用（没有偏好、没有可恢复状态），`/comet-any` 会扫描 Comet 支持的平台 Skill inventory，按**能力分组**展示可复用能力，并询问是否保存推荐偏好。你不需要每次在输入框里重新列一长串 Skill。
 
-详细的字段含义见 [Skill 偏好与真实来源](/zh/skill-factory/preferences)。
+## 3. 选择起点和语言
 
-## 3. 调用 `/comet-any` 并选择起点
+从三种起点里选一个（见[Skill Factory 概览 · 三种起点](/zh/skill-factory/overview#三种起点)）：
 
-在 Agent 平台里调用：
-
-```text
-/comet-any
-```
-
-然后从三种起点里选一个：
-
-- `改一版 /comet`：在 `/comet` 受保护边界内做增量调整，只允许增加 Skill、替换 Skill、关闭 Skill。
-- `做一个新 Skill`：从目标描述创建新的 Comet-native Skill。
-- `整理已有 Skill`：读取现有 Skill 或候选 Skill，整理成新的 Comet-native Skill。
+- `改一版 /comet`（后端 `mode=derive`）
+- `做一个新 Skill`（后端 `mode=create`，默认）
+- `整理已有 Skill`（后端 `mode=optimize`）
 
 同时确认默认语言和 locales。至少记录默认 locale；多语言 Skill 需要说明哪些文件由 locale overlay 覆盖。
 
-## 4. 处理缺失和歧义候选
+## 4. 读取偏好并解析真实 Skill
 
-`/comet-any` 会用 `find-skill` 解析真实本地 Skill，再通过候选检查得到 `available`、`missing`、`ambiguous` 三类结果。
+`/comet-any` 读取 `.comet/skill-preferences.yaml`，然后用 `find-skill` 解析本地真实 Skill。解析通过候选检查得到三类结果：
 
-如果候选缺失或有多个来源，`/comet-any` 必须暂停询问你。它不能静默忽略缺失候选，也不能在多个来源中替你选择。
+| 状态 | 含义 |
+| --- | --- |
+| `available` | 找到唯一来源 |
+| `missing` | 完全找不到 |
+| `ambiguous` | 有多个不同来源 |
 
-你明确选择来源后，`/comet-any` 会更新 Factory metadata。你明确同意忽略缺失偏好时，它会记录原因。如果还有 unresolved factory Skill candidates，`/comet-any` 不会继续生成。
+<Warning>
+  不得只按名字推测能力。<code>/comet-any</code> 必须读取最终候选的真实 <code>SKILL.md</code>、直接 reference、rules、scripts 和 hooks。
+</Warning>
 
-## 5. 生成 Skill Maker 方案并等待确认
+## 5. 处理缺失和歧义候选
 
-`/comet-any` 会先按偏好提出组合方案，并标注每个 Skill 的 `preferenceIndex`、来源、hash、用途和调用顺序。组合方案至少要说明：
+如果候选 `missing` 或 `ambiguous`，`/comet-any` **必须暂停询问你**。它不能静默忽略缺失候选，也不能在多个来源中替你选择。
 
-- 新 Skill 名称和目标场景。
-- 预计复用的 Skill、来源、hash、用途和调用顺序。
-- 哪些来自 `prefer`，哪些来自 `require`，哪些由目标语义自动补充。
-- 缺失和歧义候选。
-- 是否偏离偏好顺序，以及原因。
-- scripts/hooks 会产生什么可执行披露。
-- 将生成哪些文件。
+你明确选择来源后，`/comet-any` 会更新 Factory metadata。你明确同意忽略缺失偏好时，它会记录原因（进入评审摘要）。如果还有 unresolved factory Skill candidates，`/comet-any` 不会继续生成。
+
+后端等价命令（理解流程用，不需手动跑）：
+
+```bash
+# 指定来源解决歧义
+comet bundle factory-resolve <name> --candidate <query> --source <root-or-hash> --json
+
+# 或显式忽略缺失（必须给原因）
+comet bundle factory-resolve <name> --candidate <query> --ignore-missing --reason "<reason>" --json
+```
+
+## 6. 读取真实候选实现
+
+`/comet-any` 读取每个候选的真实实现（`SKILL.md`、references、rules、scripts、hooks），**只读不执行**，用于理解真实能力。
+
+## 7. 生成 Skill Maker 方案并等待确认
+
+`/comet-any` 按偏好提出组合方案，并标注每个 Skill 的 `preferenceIndex`、来源、hash、用途、调用顺序和**阶段名**。这一页就是"**Skill Maker 方案确认页**"。
+
+方案确认页至少包含这些区块：
+
+| 区块 | 内容 |
+| --- | --- |
+| 你在做什么 | 起点、Skill 名、目标 |
+| 保留 / 新增 / 替换 / 关闭 | 对应起点的调整词汇 |
+| 不能做 | 被拒绝的调整（例如替换 protected 步骤） |
+| 阶段名 | 每个环节的 stage name + 来源（custom/recommended）+ phase/label |
+| 将生成哪些文件 | 产物清单 |
+| Validate / Install / Advanced details | 校验、安装、进阶信息 |
 
 <Info>
-  必须明确告诉用户现在展示的是"Skill Maker 方案确认页"。用户确认前不会写 Bundle draft。
+  必须明确告诉用户现在展示的是<strong>"Skill Maker 方案确认页"</strong>。用户确认前不会写 Bundle draft。
 </Info>
 
-你需要在确认页做三选一：
+你需要在确认页做**三选一**：
 
-1. `confirm-generate` — 确认生成，随后写入 Bundle draft。
+1. `confirm-generate` — 确认生成，随后写入 Bundle draft（仅当无 blocker 时才显示）。
 2. `revise-proposal` — 修改目标、偏好、候选或控制面策略后重新 proposal。
 3. `cancel` — 不写入 Bundle state。
 
-## 6. 生成产物
+## 8. 澄清 Skill Factory 目标
 
-用户确认后，`/comet-any` 生成 Comet-native Skill 源码和 Engine Package。一次完整生成或优化后，产物应包含：
+如果方案需要补充信息，`/comet-any` 会澄清：目标是什么、entry 还是 internal Skill、共享哪些资源、目标平台、是否需要 Engine。
 
-```text
-<bundle-draft>/
-  bundle.yaml
-  skills/<entry-skill>/
-    SKILL.md
-    comet/
-      skill.yaml
-      guardrails.yaml
-      checks.yaml
-      eval.yaml
-    reference/
-      resolved-skills.json
-      composition-report.md
-    scripts/
-  rules/
-  hooks/
-```
+## 9. 初始化 draft 和 Factory metadata
 
-- `SKILL.md`：用户真正调用的入口。
-- `reference/resolved-skills.json`：真实 Skill 来源、hash、摘要、选择原因和偏好证据，包含 `sourceSummaries`，证明组合基于本地真实内容而不是只按名称猜测。
-- `comet/skill.yaml`：内部运行计划。
-- `comet/guardrails.yaml`：由偏好和风险策略生成的约束。
-- `comet/checks.yaml`：运行完成度和 required Skill 检查。
-- `comet/eval.yaml`：Eval manifest。
-
-多步骤、需要恢复、需要 guardrails、需要 runtime evals 或包含脚本副作用的生成物，会生成 Engine Package（`comet/skill.yaml`、`comet/guardrails.yaml`、`comet/checks.yaml`、`comet/eval.yaml`）。轻量单步 Skill 可以不启用 Engine，但会失去 Run 恢复和 runtime eval。
-
-## 7. 评估
-
-有 `comet/eval.yaml` 时，推荐先做发现预检查：
+用户确认后，`/comet-any` 调用后端初始化 draft：
 
 ```bash
-comet eval collect --manifest ./generated-skill/comet/eval.yaml
+# dry-run proposal，不写 Bundle state
+comet bundle factory-propose <name> --file <plan.json> --json
+
+# 写入确认后的 Factory state
+comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
 ```
 
-然后跑真实评估并生成 HTML 报告：
+`factory-init` 会把规范化 plan 固化到 `.comet/bundle-factory-plans/<name>/plan.json`，并记录 `planHash` 和 `preferenceHash`。
 
-```bash
-comet eval run --manifest ./generated-skill/comet/eval.yaml --html
+### plan.json 结构
+
+```json
+{
+  "goal": "Create a review-oriented Comet-native Skill.",
+  "preferredSkills": ["brainstorming", "writing-plans"],
+  "callChain": ["brainstorming", { "skill": "writing-plans", "preferenceIndex": 1 }],
+  "stageNames": [
+    { "skill": "brainstorming", "name": "review-workflow-discovery", "label": "Discovery" },
+    { "skill": "writing-plans", "name": "review-workflow-plan", "label": "Plan" }
+  ],
+  "deviations": [
+    { "skill": "writing-plans", "expectedIndex": 1, "actualIndex": 0, "reason": "..." }
+  ],
+  "engineMode": "deterministic",
+  "runnerMode": "standalone",
+  "mode": "create",
+  "defaultLocale": "zh",
+  "locales": ["zh", "en"]
+}
 ```
 
-Eval 结果必须绑定当前 draft hash。没有当前 hash 的 Eval 证据、Eval 失败或 Eval 被跳过时，不得 publish。详见[评估系统概览](/zh/eval/overview)。
+关键字段：
 
-## 8. 评审和批准
+| 字段 | 说明 |
+| --- | --- |
+| `mode` | `create` / `optimize` / `derive`，对应三种起点 |
+| `engineMode` | `none` / `deterministic` / `adaptive`（默认 `deterministic`） |
+| `runnerMode` | `change`（绑定 OpenSpec 目录） / `standalone`（默认） |
+| `callChain` | 调用链，每个元素是 Skill 名或 `{skill, preferenceIndex}` |
+| `stageNames` | 阶段名覆盖（`name` 必须匹配 `^[a-z0-9][a-z0-9._-]*$`） |
+| `baseTemplate` + `templateDelta` | `derive` 模式必填 |
+| `sourceRoot` | `optimize` 模式必填 |
 
-发布前必须先看 readiness。`/comet-any` 会基于评审摘要展示：
+## 10. 生成 Comet-native Skill 源码
 
-- entry Skill、internal Skill、`planHash`、`preferenceHash`
-- 项目级偏好模式和 required Skill
-- 真实 Skill 证据和推荐调用顺序
-- 偏离偏好顺序的项和原因
-- 能力缺口和可执行披露
-- Eval 结果摘要
-- `Readiness:`、`Blockers:`、`Warnings:`、`Evidence:`
+`/comet-any` 通过**创作车道**（authoring lanes）组装产物。生成物包含入口 `SKILL.md` 和每个内部阶段 Skill 的 `SKILL.md`，并写入 `reference/resolved-skills.json`（含 `sourceSummaries`，证明组合基于本地真实内容而不是只按名称猜测）。
 
-需要手工命令时：
+<Info>
+  <code>/comet-any</code> 优先使用原生的 <code>skill-creator</code>，必须在使用 Comet 兜底前征得同意。
+</Info>
+
+## 11. 生成 Engine Package
+
+多步骤、需要恢复、需要 guardrails、需要 runtime evals 或包含脚本副作用的生成物，会生成 Engine Package。轻量单步 Skill（`engineMode: none`）可以不启用 Engine，但会失去 Run 恢复和 runtime eval。
+
+生成的 Engine 四件套：`comet/skill.yaml`、`comet/guardrails.yaml`、`comet/checks.yaml`、`comet/eval.yaml`。Engine 机制的完整说明见[Skill 与 Engine](/zh/skill-factory/engine)。
+
+## 12. 编译和校验
+
+`/comet-any` 编译到参考平台并校验：
 
 ```bash
+comet bundle compile <name> --platform <id> --json
+```
+
+校验包括稳定控制面（required capability set）和平台能力匹配。
+
+## 13. 展示评估工作量
+
+`/comet-any` 展示评估工作量，让你选 `skip` / `quick` / `full`：
+
+```bash
+comet bundle eval-plan <name> --level quick --json
+comet bundle eval-plan <name> --level full --json
+```
+
+返回 `level`、`components[]`、`estimatedRuns`、`tokenWorkload`、`explanation`。这是一个**描述性估算**，不是 token 承诺。
+
+| 级别 | 覆盖范围 | 估算 |
+| --- | --- | --- |
+| `quick` | static、entry-smoke、baseline、assertion-grading、platform-compile | `4 + entries*2` 次 |
+| `full` | quick 全部 + trigger-accuracy、routing-overlap、failure-analysis 等 | `quick + 6 + entries*3` 次 |
+
+## 14. 记录评估证据
+
+实际执行评估（这一步对应 `comet eval`）并把证据绑定到当前 hash：
+
+```bash
+# 记录 eval 证据（result JSON 必须绑定当前 Bundle hash）
+comet bundle eval-record <name> --result <file> --json
+```
+
+只有 `result.passed`、所有 entry 通过、`compilePassed`、`safetyPassed` 全满足，状态才会推进到 `eval-passed`；否则回退到 `draft` 并清除 review/ready/conflict。
+
+<Warning>
+  证据 <code>bundleHash</code> 不等于当前 <code>currentHash</code> 时，只写文件不推进状态。旧 hash 证据可以保留在磁盘，但不能推进状态。
+</Warning>
+
+## 15. 评审、批准、发布
+
+发布前必须先看 readiness。`/comet-any` 会基于评审摘要展示 entry Skill、internal Skill、`planHash`、`preferenceHash`、真实 Skill 证据、推荐调用顺序、偏离项和原因、能力缺口、可执行披露、Eval 结果摘要，以及 `Readiness:`、`Blockers:`、`Warnings:`、`Evidence:`。
+
+```bash
+# 评审摘要
 comet publish review my-skill --platform <reference-platform> --json
+
+# 人工批准
 comet publish approve my-skill --reviewer alice --json
+
+# 发布
+comet publish run my-skill --platform <reference-platform> --json
 ```
 
 只有用户显式批准后，才能继续发布。阻塞项见[发布和分发 Skill](/zh/skill-factory/publishing)。
 
-## 9. 发布
+## 16. 安装预览（强制）
 
-只有当前 hash 已通过 Eval 且人工批准后，才能发布：
-
-```bash
-comet publish run my-skill --platform <reference-platform> --json
-```
-
-## 10. 分发预览和真实分发
-
-发布后，`/comet-any` 必须询问你是否分发，不能自动分发。真正执行前必须先跑 preview：
+发布后，`/comet-any` **必须询问你是否分发**，不能自动分发。真正执行前**必须先跑 preview**：
 
 ```bash
 comet publish distribute my-skill --platform <id> --scope project --preview --json
 ```
 
-preview 会展示：
+preview 会展示 `Install preview`、planned files、unsupported capability、executable disclosures、`No files were written`。
 
-- `Install preview`、planned files
-- unsupported capability
-- executable disclosures
-- `No files were written`
+## 17. 真实分发
 
-确认后才运行真实分发：
+确认 preview 结果后，移除 `--preview` 执行真实分发：
 
 ```bash
 comet publish distribute my-skill --platform <id> --scope project --json
 ```
 
 如果目标平台包含 hook 或脚本等可执行能力，必须先展示披露信息，用户确认后才可加 `--confirm-executables`。如果用户明确选择跳过 optional 能力，才可加 `--skip-capability <capability>`。
+
+---
 
 ## 恢复中断流程
 
@@ -190,20 +288,18 @@ comet publish distribute my-skill --platform <id> --scope project --json
 继续上次的 Skill 创建
 ```
 
-`/comet-any` 应先扫描可恢复状态，展示名称、状态、next action、blockers 和上次确认的组合方案摘要。恢复时会检查：
+`/comet-any` 会先扫描可恢复状态，展示名称、状态、next action、blockers 和上次确认的组合方案摘要。恢复时的 hash 漂移处理：
 
-- Bundle Factory state 是否存在。
-- draft hash 是否变化。
-- `.comet/skill-preferences.yaml` 的 `preferenceHash` 是否变化。
-- resolved Skill hash 是否变化。
-- Eval evidence 是否仍匹配当前 hash。
-- approval 是否仍匹配当前 hash。
+| 模式 | 偏好或 Skill 来源变化时 |
+| --- | --- |
+| `advisory` | 给 warning，让你选择继续旧组合方案或重新生成 |
+| `strict` | 阻塞，要求你确认继续或重新生成 |
 
-如果偏好或 Skill 来源发生变化，`advisory` 模式应提示并让你选择继续旧组合方案或重新生成；`strict` 模式应默认阻塞，要求你确认继续或重新生成。
+---
 
 ## 完整示例：创建一个 PR 评审助手
 
-先准备偏好（可选）：
+### 1. 准备偏好（可选）
 
 ```yaml
 # .comet/skill-preferences.yaml
@@ -228,42 +324,47 @@ policies:
   hooks: disclose
 ```
 
-然后调用：
+### 2. 调用 /comet-any 并描述目标
 
 ```text
 /comet-any
 ```
 
-可以这样描述目标：
-
 ```text
 请基于项目级偏好创建一个 PR 评审助手。
-它要先澄清评审范围，再制定检查计划，再执行代码审查，最后在完成前要求验证证据。
+它要先澄清评审范围，再制定检查计划，再执行代码审查，
+最后在完成前要求验证证据。
 目标是给团队复用，不只是当前一次任务。
 ```
 
-确认方案后，走评估和发布：
+### 3. 确认方案后，走评估和发布
 
 ```bash
+# 评估
 comet eval collect --manifest ./generated-skill/comet/eval.yaml
 comet eval run --manifest ./generated-skill/comet/eval.yaml --html
+
+# 评审、批准、发布
 comet publish review review-helper --platform claude --json
 comet publish approve review-helper --reviewer alice --json
 comet publish run review-helper --platform claude --json
+
+# 分发（强制预览 → 真实分发）
 comet publish distribute review-helper --platform claude --scope project --preview --json
 comet publish distribute review-helper --platform claude --scope project --json
 ```
 
 ## 用户最少需要记什么
 
-1. `/comet-any` 是创建、优化、组合 Skill 的主入口。
+1. `/comet-any` 是创建、优化、组合 Skill 的**唯一主入口**。
 2. `.comet/skill-preferences.yaml` 是项目级偏好，可以手写，也可以由 `/comet-any` 生成。
-3. 生成前必须先看组合方案，确认后才会写 Bundle draft。
-4. Eval 是发布前证据，不是发布动作。
+3. 生成前必须先看**组合方案**，确认后才会写 Bundle draft。
+4. **Eval 是发布前证据**，不是发布动作。
 5. Publish 和 distribute 复用 Comet 的 Bundle 后端，不需要你手写内部状态。
 
 ## 下一步
 
 - [Skill 偏好与真实来源](/zh/skill-factory/preferences) — 配置 `.comet/skill-preferences.yaml`
 - [发布和分发 Skill](/zh/skill-factory/publishing) — readiness、approval、publish 和 distribute
+- [Skill 与 Engine](/zh/skill-factory/engine) — Engine Package 和 runtime eval
 - [评估系统概览](/zh/eval/overview) — eval 如何为发布提供证据
