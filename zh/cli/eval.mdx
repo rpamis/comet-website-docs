@@ -16,6 +16,22 @@ description: "通过共享 eval harness 评估本地 Skill 或 comet/eval.yaml�
 | `comet eval collect` | 只做发现和预检查，不执行模型或 Docker 任务 | 否 |
 | `comet eval run` | 执行本地 eval，可生成 HTML 报告 | 是 |
 
+<Note>
+  还有一个名字相近的 <code>comet skill eval</code>，它是<strong>完全不同的命令</strong>——检查某次 Engine Run 的 runtime checks，不是通用 Skill 评估。详见 <a href="/zh/eval/runtime">Runtime eval</a>。
+</Note>
+
+## 运行前需要准备
+
+`comet eval` 因为要跑真实模型任务，依赖以下环境（核心 Comet 运行时不需要这些）：
+
+- **uv**（`comet eval` 内部用它驱动 pytest）
+- **Python 3.11+**
+- **Docker**（构建任务镜像、隔离运行）
+- **`claude` CLI** 在 PATH 上
+- **`ANTHROPIC_API_KEY`** 或 **`ANTHROPIC_AUTH_TOKEN`**
+
+两者都没有 API key 时 harness 会**静默跳过**而不是报错。完整准备步骤见[评估快速上手 · 运行前你需要准备什么](/zh/eval/quickstart#运行前你需要准备什么)。
+
 ## 推荐路径
 
 有 `comet/eval.yaml` 时（发布前完整评估）：
@@ -32,12 +48,16 @@ comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 ```
 
 <Tip>
-  先 `collect` 做低成本发现预检查，再 `run --html` 执行真实评估。`collect` 不消耗模型调用。
+  先 <code>collect</code> 做低成本发现预检查，再 <code>run --html</code> 执行真实评估。<code>collect</code> 不消耗模型调用。
 </Tip>
 
 ## 命令选项
 
-两个子命令共用以下选项：
+### comet eval run
+
+```bash
+comet eval run [options]
+```
 
 | 选项 | 说明 | 默认值 |
 | --- | --- | --- |
@@ -51,6 +71,14 @@ comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 | `--html` | 生成 HTML 报告（同时产出 markdown） | 关闭 |
 | `--quick` | 使用默认 quick smoke task | 关闭 |
 
+### comet eval collect
+
+```bash
+comet eval collect [options]
+```
+
+支持 `--project`、`--manifest`、`--skill-path`、`--skill-name`、`--profile`、`--task`（不支持 `--html`、`--report-config`、`--quick`，因为只做发现）。
+
 ### `--manifest` 和 `--skill-path` 互斥
 
 一次评估只能选一个入口：
@@ -63,7 +91,7 @@ comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 
 | 模式 | 默认 profile | 默认 task |
 | --- | --- | --- |
-| `--manifest` | manifest 自带（通常 `authoring-skill`） | `recommended` |
+| `--manifest` | manifest 自带（通常 `authoring-skill`） | `recommended`（读 manifest 的 `recommendedTasks`） |
 | `--skill-path --quick` | `generic` | `generic-skill-smoke` |
 | `--skill-path`（无 `--quick`） | `generic` | `recommended` |
 
@@ -92,7 +120,7 @@ comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 eval/local/logs/experiments/<experiment-id>/summary.html
 ```
 
-如果 CLI 输出里显示的是 `<experiment-id>` 占位符，用同一段输出里的 `Experiment` 值对应查找即可。详见[读取评估报告](/zh/eval/reports)。
+experiment id 格式是 `<task>_<YYYYMMDD_HHMMSS>`。详见[读取评估报告](/zh/eval/reports)。
 
 ## manifest 路径和 skill-path 路径怎么选
 
@@ -104,7 +132,7 @@ eval/local/logs/experiments/<experiment-id>/summary.html
 | 要进入发布 readiness | `--manifest` |
 
 <Warning>
-  发布 readiness 优先使用 manifest 路径。`--skill-path --quick` 只适合早期冒烟，不要当成最终发布评估。
+  发布 readiness 优先使用 manifest 路径。<code>--skill-path --quick</code> 只适合早期冒烟，不要当成最终发布评估。
 </Warning>
 
 ## 失败时怎么判断下一步
@@ -131,9 +159,9 @@ eval/local/logs/experiments/<experiment-id>/summary.html
 
 ### HTML 报告没找到
 
-先看 CLI 输出的 `Experiment` 和 `Report path`。如果路径里有 `<experiment-id>`，用实际 experiment id 到 `eval/local/logs/experiments/` 目录查。
+先看 CLI 输出的 `Experiment` 和 `Report path`。如果路径里有占位符，用实际 experiment id 到 `eval/local/logs/experiments/` 目录查。
 
-## `comet eval` 和 `comet skill eval` 不一样
+## comet eval 和 comet skill eval 不一样
 
 这两个命令名字接近，但用途不同：
 
@@ -158,6 +186,7 @@ comet publish review <name> --platform <reference-platform> --json
 
 ## 下一步
 
-- [评估系统概览](/zh/eval/overview) — eval 在流程中的位置
+- [评估系统概览](/zh/eval/overview) — eval 在流程中的位置和 eval.yaml 格式
 - [读取评估报告](/zh/eval/reports) — 看懂报告信号
 - [comet publish](/zh/cli/publish) — eval 证据如何驱动发布
+- [comet skill](/zh/cli/skill) — `comet skill eval`（runtime eval）参考

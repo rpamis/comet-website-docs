@@ -1,6 +1,6 @@
 ---
 title: "Skill 偏好与真实来源（进阶）"
-description: "配置 .comet/skill-preferences.yaml 表达组合偏好，理解 advisory/strict 模式、策略和真实来源证据。"
+description: "配置 .comet/skill-preferences.yaml 表达组合偏好，理解 advisory/strict 模式、策略、preferenceHash 漂移和 resolved-skills.json 真实来源证据。"
 ---
 
 <Info>
@@ -9,7 +9,7 @@ description: "配置 .comet/skill-preferences.yaml 表达组合偏好，理解 a
 
 `.comet/skill-preferences.yaml` 是项目级偏好文件。它表达这个项目希望 `/comet-any` 优先复用哪些 Skill，以及遇到缺失、歧义、偏离和 scripts/hooks 时怎么处理。
 
-它不是严格白名单，也不是内部状态文件——你可以手写、提交到项目，也可以由 `/comet-any` 首次扫描后生成。
+它**不是**严格白名单，也**不是**内部状态文件——你可以手写、提交到项目，也可以由 `/comet-any` 首次扫描后生成。
 
 ## 文件位置
 
@@ -44,30 +44,38 @@ policies:
   hooks: disclose
 ```
 
-### `mode`
+<Warning>
+  顶层只允许这四个 key：<code>version</code>、<code>mode</code>、<code>prefer</code>、<code>require</code>、<code>policies</code>。任何未知字段会触发 <code>unknown-field</code> 警告。<code>version</code> 必须是 <code>1</code>。
+</Warning>
 
-| 模式 | 行为 |
-| --- | --- |
-| `advisory` | 默认模式。可以补充目标需要的 Skill，但必须解释偏离原因 |
-| `strict` | 团队标准化模式。required Skill 缺失、歧义或禁止 scripts/hooks 时阻塞 |
+### version
 
-### `prefer`
+必须是 `1`。用于未来 schema 演进。
 
-希望优先复用的 Skill 列表。顺序代表偏好优先级——`/comet-any` 会尽量按这个顺序构建调用链。
+### mode
 
-### `require`
+| 模式 | 行为 | 适合 |
+| --- | --- | --- |
+| `advisory` | 默认。可以补充目标需要的 Skill，但必须解释偏离原因 | 个人/小团队，灵活优先 |
+| `strict` | 团队标准化模式。required Skill 缺失、歧义或禁止 scripts/hooks 时**阻塞** | 团队标准化，一致性优先 |
 
-生成组合 Skill 时必须满足的 Skill。这些 Skill 缺失或歧义时，组合方案不能通过。
+### prefer
 
-### `policies`
+希望优先复用的 Skill 列表。**顺序代表偏好优先级**——`/comet-any` 会尽量按这个顺序构建调用链。列表里不允许重复（重复会触发 `duplicate-prefer` 警告）。
 
-| 策略 | 作用 |
-| --- | --- |
-| `missing` | 偏好 Skill 缺失时 `ask`（询问）或 `fail`（失败） |
-| `ambiguous` | 同名 Skill 有多个不同来源时 `ask` 或 `fail` |
-| `deviation` | 偏离偏好顺序时 `explain`（解释原因）或 `fail` |
-| `scripts` | 生成或分发 scripts 时 `allow`、`disclose`（披露）或 `deny` |
-| `hooks` | 生成或分发 hooks 时 `allow`、`disclose` 或 `deny` |
+### require
+
+生成组合 Skill 时**必须满足**的 Skill。这些 Skill 缺失或歧义时，组合方案不能通过。同样不允许重复。
+
+### policies
+
+| 策略 | 可选值 | 默认 | 作用 |
+| --- | --- | --- | --- |
+| `missing` | `ask` / `fail` | `ask` | 偏好 Skill 缺失时询问还是直接失败 |
+| `ambiguous` | `ask` / `fail` | `ask` | 同名 Skill 有多个不同来源时询问还是失败 |
+| `deviation` | `explain` / `fail` | `explain` | 偏离偏好顺序时解释还是失败 |
+| `scripts` | `allow` / `disclose` / `deny` | `disclose` | 生成或分发 scripts 时的策略 |
+| `hooks` | `allow` / `disclose` / `deny` | `disclose` | 生成或分发 hooks 时的策略 |
 
 ## 推荐起点
 
@@ -96,9 +104,11 @@ policies:
   hooks: disclose
 ```
 
-`/comet-any` 也会在偏好不存在时主动扫描平台 Skill inventory，按能力分组推荐默认偏好，并询问你是否保存为项目级偏好。
+`/comet-any` 也会在偏好不存在时主动扫描平台 Skill inventory，按能力分组推荐默认偏好，并询问你是否保存为项目级偏好。`factory-guide` 返回的 `preference` 字段会标记偏好状态为 `missing` / `present` / `invalid`。
 
-## 手写示例：偏严谨的 PR 评审 Skill
+## 手写示例
+
+### 偏严谨的 PR 评审 Skill
 
 ```yaml
 version: 1
@@ -122,59 +132,154 @@ policies:
   hooks: disclose
 ```
 
-保存后直接调用 `/comet-any`，描述目标即可。`/comet-any` 会读取这个偏好并按 `prefer`/`require` 运行。
+### 团队标准化（strict 模式）
+
+```yaml
+version: 1
+mode: strict
+
+prefer:
+  - writing-plans
+  - test-driven-development
+  - verification-before-completion
+
+require:
+  - verification-before-completion
+  - test-driven-development
+
+policies:
+  missing: fail
+  ambiguous: fail
+  deviation: fail
+  scripts: disclose
+  hooks: deny
+```
+
+这个配置下：required Skill 缺失或歧义会直接阻塞；任何偏离偏好顺序都会失败；hooks 一律不允许。
+
+### 完全禁止可执行能力
+
+如果你的环境对脚本和钩子零容忍：
+
+```yaml
+version: 1
+mode: strict
+
+prefer: []
+require: []
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: deny
+  hooks: deny
+```
+
+`/comet-any` 会在生成阶段就拒绝任何带 scripts/hooks 的组合方案。
 
 ## 偏好如何影响生成
 
-`/comet-any` 会按以下规则使用偏好：
+`/comet-any` 按以下规则使用偏好：
 
-- 优先读取项目级偏好 `.comet/skill-preferences.yaml`。
-- 偏好不存在时，扫描平台 Skill inventory，按能力分组推荐默认偏好，并询问是否保存。
-- 用 `find-skill` 解析真实本地 Skill 来源与内容。
-- `advisory` 可在说明原因后补充目标需要的 Skill。
-- `strict` 遇到 required 缺失、歧义或禁止的 scripts/hooks 必须阻塞。
+1. 优先读取项目级偏好 `.comet/skill-preferences.yaml`。
+2. 偏好不存在时，扫描平台 Skill inventory，按能力分组推荐默认偏好，并询问是否保存。
+3. 用 `find-skill` 解析真实本地 Skill 来源与内容。
+4. `advisory` 可在说明原因后补充目标需要的 Skill。
+5. `strict` 遇到 required 缺失、歧义或禁止的 scripts/hooks 必须阻塞。
 
 <Warning>
-  不得只按名字推测能力；`/comet-any` 必须读取最终候选的真实 `SKILL.md`、直接 reference、rules、scripts 和 hooks。
+  不得只按名字推测能力；<code>/comet-any</code> 必须读取最终候选的真实 <code>SKILL.md</code>、直接 reference、rules、scripts 和 hooks。
 </Warning>
 
 ## 缺失和歧义候选
 
-`/comet-any` 必须暂停并询问你如何处理 `missing` 和 `ambiguous` 项。它不能静默忽略缺失候选，也不能在多个来源中替你选择。
+`/comet-any` **必须暂停并询问**你如何处理 `missing` 和 `ambiguous` 项。它不能静默忽略缺失候选，也不能在多个来源中替你选择。
+
+| 候选状态 | advisory | strict |
+| --- | --- | --- |
+| `missing` 且 `policies.missing=ask` | 暂停询问 | 暂停询问（若在 require 中则阻塞） |
+| `missing` 且 `policies.missing=fail` | 阻塞 | 阻塞 |
+| `ambiguous` 且 `policies.ambiguous=ask` | 暂停让你选来源 | 暂停让你选来源 |
+| `ambiguous` 且 `policies.ambiguous=fail` | 阻塞 | 阻塞 |
 
 你明确选择来源后，`/comet-any` 会更新 Factory metadata。你明确同意忽略缺失偏好时，它会记录原因，这个原因会进入评审摘要。
 
 ## resolved-skills.json
 
-生成物应包含真实来源证据：
+生成物包含真实来源证据：
 
 ```text
 reference/resolved-skills.json
 ```
 
-它记录：
+它的结构：
 
-- resolved Skill 名称。
-- 来源路径或来源标识。
-- 描述。
-- hash。
-- reference、rules、scripts、hooks 摘要。
-- `sourceSummaries`：从真实 `SKILL.md` 正文提炼出的内容摘要。
+```json
+{
+  "schemaVersion": 1,
+  "resolvedSkills": [
+    {
+      "query": "writing-plans",
+      "preferenceIndex": 1,
+      "status": "available",
+      "sources": [
+        {
+          "name": "writing-plans",
+          "preferenceIndex": 1,
+          "platform": "claude",
+          "scope": "global",
+          "origin": "builtin",
+          "root": "...",
+          "description": "...",
+          "skillMd": "...",
+          "references": [{ "path": "...", "contentHash": "..." }],
+          "scripts": [{ "path": "...", "sideEffect": "none" }],
+          "hash": "..."
+        }
+      ]
+    }
+  ],
+  "sourceSummaries": [
+    {
+      "query": "writing-plans",
+      "preferenceIndex": 1,
+      "status": "available",
+      "source": { "name": "...", "platform": "...", "root": "...", "hash": "..." },
+      "summary": "（从真实 SKILL.md 正文提炼，≤600 字符）"
+    }
+  ],
+  "stageNames": [{ "skill": "writing-plans", "name": "review-workflow-plan" }],
+  "preference": { "mode": "advisory", "source": "...", "hash": "..." }
+}
+```
+
+`sourceSummaries` 是从真实 `SKILL.md` 正文提炼出的内容摘要（去掉 frontmatter、代码块、标题，取前 3 段散文）。
 
 <Tip>
-  这个文件是"不是按名字猜的"的证据。准备发布或审查时优先看它——它证明组合基于本地真实内容。
+  这个文件是<strong>"不是按名字猜的"</strong>的证据。准备发布或审查时优先看它——它证明组合基于本地真实内容。每个候选的 <code>status</code> 会是 <code>available</code> / <code>missing</code> / <code>ambiguous</code> 之一。
 </Tip>
 
-## 偏好漂移
+## preferenceHash 和偏好漂移
 
-`.comet/skill-preferences.yaml` 在 Factory 初始化后发生变化时（`preferenceHash` 变化）：
+Comet 对偏好文件计算一个 SHA-256 hash（`preferenceHash`），存入 Factory metadata。`.comet/skill-preferences.yaml` 在 Factory 初始化后发生变化时（`preferenceHash` 变化）：
 
-- `advisory` 模式：给出 warning，提示你选择继续旧组合方案或重新生成。
-- `strict` 模式：阻塞，要求你确认继续或重新生成。
+| 模式 | 漂移时 |
+| --- | --- |
+| `advisory` | 给 warning，提示你选择继续旧组合方案或重新生成 |
+| `strict` | **阻塞**，要求你确认继续或重新生成 |
 
-生成物会记录 `preferenceHash`、模式、策略和 required Skill 作为项目级偏好证据。
+生成物会记录 `preferenceHash`、模式、策略和 required Skill 作为项目级偏好证据。这些会出现在评审摘要里。
+
+## 偏好漂移怎么处理
+
+如果偏好漂移导致阻塞或 warning，你有两个选择：
+
+1. **继续旧组合方案**：确认旧的组合仍然符合你的意图。旧方案基于旧偏好生成，可能在评审摘要里出现 `[preference]` 偏离提示。
+2. **重新生成**：放弃旧 draft，基于新偏好重新走 `/comet-any` 流程。这会生成新的 `planHash`、`preferenceHash` 和 resolved-skills 证据。
 
 ## 下一步
 
 - [创建 Skill 的完整流程](/zh/skill-factory/workflow) — 完整 `/comet-any` 流程
 - [发布和分发 Skill](/zh/skill-factory/publishing) — readiness 如何使用偏好和 eval 证据
+- [Skill Factory 概览](/zh/skill-factory/overview) — 三种起点和受保护边界
