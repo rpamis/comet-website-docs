@@ -1,81 +1,33 @@
 ---
-title: "Comet Automation Scripts：Guard、State、Handoff、Archive"
-sidebarTitle: "Overview"
-description: "六个 shell scripts 驱动 Comet workflow：guard 强制 phase transitions，state 管理 .comet.yaml，handoff 打包 context，archive 关闭 changes。"
+title: "核心脚本概览"
+description: "了解 Comet 随 Skill 分发的状态、守卫、交接和归档脚本。"
 ---
 
-Comet 的可靠性来自一组 shell scripts。它们把 workflow control 从 AI prompt text 中移出，放进可测试、可复用的工具中。这些 scripts 可在 macOS、Linux 和 Windows（Git Bash）上运行。
+Comet 的内置脚本随 Skill 包分发。0.4.0-beta.1 中这些脚本通过 Node 运行，不再要求 Bash。
 
-## Scripts 列表
+## 脚本职责
 
-| Script | 用途 |
-|--------|---------|
-| `comet-env.sh` | Script discovery helper：导出 bundled script paths（`COMET_GUARD`、`COMET_STATE`、`COMET_HANDOFF`、`COMET_ARCHIVE`、`COMET_YAML_VALIDATE`） |
-| `comet-guard.sh` | Phase transition guard：验证 exit conditions，`--apply` 自动更新 `.comet.yaml` |
-| `comet-handoff.sh` | Design handoff：从 OpenSpec artifacts 生成带 SHA256 tracing 的 deterministic context packages |
-| `comet-archive.sh` | One-command archive：验证 state、同步 specs、移动到 archive、更新 status |
-| `comet-yaml-validate.sh` | Schema validator：验证 `.comet.yaml` structure 和 field values |
-| `comet-state.sh` | Unified state management：init/set/get/check/scale |
+| 脚本 | 职责 |
+| --- | --- |
+| `comet-state.mjs` | 读取、写入和转换 `.comet.yaml` |
+| `comet-guard.mjs` | 检查阶段门禁，并在 `--apply` 时推进状态 |
+| `comet-handoff.mjs` | 生成阶段交接包 |
+| `comet-archive.mjs` | 调用 OpenSpec archive 并完成归档收尾 |
+| `comet-env.mjs` | 定位脚本目录 |
+| `comet-runtime.mjs` | 共享运行时实现 |
 
-## 在 Session 中加载 Scripts
+## Agent 如何定位脚本
 
-始终通过 `comet-env.sh` 定位 scripts，不要硬编码 paths。Script locations 会因平台、install scope 和 OS 而异。在 session 开始时 source 一次 `comet-env.sh`，会把所有 script paths 导出为 environment variables。
-
-```bash
-COMET_ENV="${COMET_ENV:-$(find . "$HOME"/.*/skills "$HOME/.config" "$HOME/.gemini" -path '*/comet/scripts/comet-env.sh' -type f -print -quit 2>/dev/null)}"
-if [ -z "$COMET_ENV" ]; then
-  echo "ERROR: comet-env.sh not found. Ensure the comet skill is installed." >&2
-  return 1
-fi
-. "$COMET_ENV"
-```
-
-source `comet-env.sh` 后，session 中会提供以下 environment variables：
-
-| Variable | 指向 |
-|----------|-----------|
-| `$COMET_GUARD` | `comet-guard.sh` |
-| `$COMET_STATE` | `comet-state.sh` |
-| `$COMET_HANDOFF` | `comet-handoff.sh` |
-| `$COMET_ARCHIVE` | `comet-archive.sh` |
-| `$COMET_YAML_VALIDATE` | `comet-yaml-validate.sh` |
-
-继续前，也应该验证所有 variables 都已填充：
+Skill 内会先定位 `comet-env.mjs`，再得到脚本目录。不要在文档或提示词里硬编码用户机器路径。
 
 ```bash
-if [ -z "$COMET_GUARD" ] || [ -z "$COMET_STATE" ] || [ -z "$COMET_HANDOFF" ] || [ -z "$COMET_ARCHIVE" ]; then
-  echo "ERROR: Comet scripts not found. Ensure the comet skill is installed." >&2
-  echo "Expected path pattern: */comet/scripts/comet-*.sh under project or platform skill directories" >&2
-  return 1
-fi
+COMET_SCRIPTS_DIR="$(node "$COMET_ENV")"
+COMET_STATE="$COMET_SCRIPTS_DIR/comet-state.mjs"
+COMET_GUARD="$COMET_SCRIPTS_DIR/comet-guard.mjs"
+COMET_HANDOFF="$COMET_SCRIPTS_DIR/comet-handoff.mjs"
+COMET_ARCHIVE="$COMET_SCRIPTS_DIR/comet-archive.mjs"
 ```
 
-## 跨平台说明
+## 日常用户要不要直接运行
 
-Comet 通过 `COMET_BASH` 解析可用的 bash executable。`comet-env.sh` 会在测试候选 executables 后自动导出该变量，包括 Windows 上的 Git Bash paths。Windows WSL launcher（`System32/bash.exe`）会被明确排除。
-
-始终按以下方式调用 scripts：
-
-```bash
-"$COMET_BASH" "$COMET_GUARD" <args>
-"$COMET_BASH" "$COMET_STATE" <args>
-```
-
-使用 `"$COMET_BASH"` 而不是直接调用 scripts，可确保 Windows Git Bash 在所有支持平台上都被正确处理。
-
-## Script pages
-
-<CardGroup cols={2}>
-  <Card title="comet-guard.sh" icon="shield-check" href="/scripts/comet-guard">
-    Phase transition guard：在推进 workflow 前验证 exit conditions
-  </Card>
-  <Card title="comet-state.sh" icon="database" href="/scripts/comet-state">
-    Unified state management：读取和写入 `.comet.yaml` 的唯一接口
-  </Card>
-  <Card title="comet-handoff.sh" icon="arrow-right-arrow-left" href="/scripts/comet-handoff">
-    Design context handoff：从 OpenSpec artifacts 生成带 SHA256 trace 的 context packages
-  </Card>
-  <Card title="comet-archive.sh" icon="box-archive" href="/scripts/comet-archive">
-    Automated archive：同步 delta specs、标注文档并关闭 change
-  </Card>
-</CardGroup>
+多数情况下不用。普通用户优先使用 `/comet`、`comet status` 和 `comet doctor`。脚本主要服务于 Skill 内部流程和高级排障。

@@ -1,98 +1,64 @@
 ---
-title: "comet-handoff.sh — Comet 的 Design Context Handoff"
-sidebarTitle: "comet-handoff.sh"
-description: "comet-handoff.sh 从 OpenSpec artifacts 创建带 SHA256 trace 的 context package，并将 handoff_context 和 handoff_hash 写入 .comet.yaml 供 guard validation 使用。"
+title: "comet-handoff"
+description: "生成阶段交接包和 handoff hash，把 OpenSpec artifacts 整理成 Superpowers 能读懂的上下文。"
 ---
 
-`comet-handoff.sh` 会从 OpenSpec artifacts 生成紧凑、可追踪的 context package，用来连接 Design 和 Build phases。SHA256 hash 确保 Phase 3 中的 AI agent 使用与 design 时完全相同的 source material；任何 design 后对 OpenSpec artifacts 的编辑，都会在 phase 推进前被 `comet-guard.sh` 检测到。
+`comet-handoff.mjs` 负责把当前阶段的 OpenSpec artifacts 整理成交接包，并计算 handoff hash。它是 design 阶段把 OpenSpec（WHAT）和 Superpowers（HOW）物理对接的脚本，也服务于长任务、子代理执行和上下文恢复。
 
-## 用法
+## 它算哪些文件
+
+handoff hash 对以下 OpenSpec artifacts 计算内容 hash：
+
+```text
+openspec/changes/<name>/proposal.md
+openspec/changes/<name>/design.md
+openspec/changes/<name>/tasks.md
+openspec/changes/<name>/specs/<capability>/spec.md   # 每个 delta spec
+```
+
+对每个文件先算 per-file sha256，再把"相对路径 + per-file sha256"拼起来算最终 sha256，得到 `handoff_hash`。路径统一用正斜杠，保证 macOS/Linux/Windows 字节一致。
+
+## 交接包格式
+
+`comet-handoff.mjs ... --write` 在 `openspec/changes/<name>/.comet/handoff/` 下产出：
+
+| 模式 | 产出文件 | 内容 |
+| --- | --- | --- |
+| `off`（默认） | `design-context.json` + `design-context.md` | 完整 artifacts 内容，每文件带 SHA256 |
+| `beta`（压缩） | `spec-context.json` + `spec-context.md` | spec 文件 verbatim 投影 + supporting 文件只存 hash，节省约 25–30% token |
+
+JSON 包含 `change`、`phase`、`mode`、`canonical_spec: openspec`、`context_hash` 和 `files` 数组。markdown 包带 `Generated-by:` 标记和每个文件的 `Source:`/`SHA256:` 引用。
+
+## hash 的作用
+
+`handoff_hash` 写入 `.comet.yaml`，在三个地方发挥作用：
+
+| 阶段 | hash 的作用 |
+| --- | --- |
+| design | 生成 hash 并写入 `.comet.yaml` 的 `handoff_hash` 和 `handoff_context` |
+| guard（离开 design） | 重算 hash，不一致就 FATAL，提示重新生成 handoff |
+| verify | 用 `--hash-only` 快速重算，一致说明 OpenSpec artifacts 未变 |
+
+### 快速重算
+
+`--hash-only` 是快速路径，跳过所有文件写入，只重算 hash（前提是 change 目录和 3 个必需文件存在）：
 
 ```bash
-"$COMET_BASH" "$COMET_HANDOFF" <change-name> design --write [--full]
+node "$COMET_HANDOFF" <change-name> --hash-only
 ```
 
-**参数：**
+## 什么时候有用
 
-| Argument | 说明 |
-|----------|-------------|
-| `<change-name>` | active change 的名称 |
-| `design --write` | 必需 positional arguments；唯一支持的 mode |
-| `--full` | 包含完整 artifact content，而不是 compact excerpts（默认：compact，每个文件截断到 80 行） |
+- build 阶段任务很多。
+- 使用 subagent-driven development。
+- Agent 会话发生上下文压缩。
+- 需要把当前工作交给另一个会话。
 
-## 生成内容
+<Tip>
+  普通用户不需要手工运行 handoff。`/comet-design` 会在 design 阶段自动生成，恢复时先用 `comet status` 和 `/comet`。
+</Tip>
 
-Handoff 会在 change directory 内创建两个文件：
+## 下一步
 
-```
-openspec/changes/<name>/.comet/handoff/
-├── design-context.json   ← machine-readable index with file paths and SHA256 hashes
-└── design-context.md     ← human/agent-readable excerpts with traceability markers
-```
-
-handoff package 中包含的 **source files**：
-
-- `openspec/changes/<name>/proposal.md`
-- `openspec/changes/<name>/design.md`
-- `openspec/changes/<name>/tasks.md`
-- `openspec/changes/<name>/specs/<capability>/spec.md` (all delta specs, sorted)
-
-`design-context.md` 文件包含 `comet-guard.sh` 要求的这些 traceability markers：
-
-- `Generated-by: comet-handoff.sh`
-- `Mode: compact` 或 `Mode: full`
-- 每个文件：`Source: <path>` 和 `SHA256: <hash>`
-
-## 写入 .comet.yaml 的字段
-
-生成 context package 后，handoff 会调用 `comet-state.sh set` 记录：
-
-| 字段 | 值 |
-|-------|-------|
-| `handoff_context` | 生成的 `design-context.json` 路径 |
-| `handoff_hash` | 合并 source material 的 SHA256（paths + per-file hashes 再一起 hash） |
-
-## Guard validation
-
-design phase 完成前，`comet-guard.sh design --apply` 会强制执行以下所有条件：
-
-1. `handoff_context` 已设置并指向非空文件
-2. `handoff_hash` 是有效的 64 字符 hex SHA256
-3. 记录的 `handoff_hash` 匹配当前 source material 的 SHA256；如果 handoff 生成后有任何 OpenSpec artifact 被编辑，此检查会失败
-4. `design-context.md` 与 `design-context.json` 一同存在
-5. markdown 包含所有必需 traceability markers（`Generated-by`、`Mode`、每个文件的 `Source:` 和 `SHA256:`）
-
-如果运行 handoff 后编辑了 OpenSpec artifacts，必须重新运行 `comet-handoff.sh` 来重新生成 package 并更新 `handoff_hash`。
-
-## Compact mode 与 full mode
-
-在 **compact mode**（默认）中，每个 source file 都会以截断 excerpt 的形式包含，最多 80 行，同时提供完整 file path 供 agent 直接读取。这会让大型 proposals 或 specs 的 handoff package 保持较小。
-
-在 **full mode**（`--full`）中，每个 source file 的完整内容都会嵌入 markdown。当 agent 需要完整 artifact visibility 且不想额外读取文件时使用此模式。
-
-```bash
-# Compact mode (default) — truncates files over 80 lines
-"$COMET_BASH" "$COMET_HANDOFF" my-feature design --write
-
-# Full mode — embeds complete file content
-"$COMET_BASH" "$COMET_HANDOFF" my-feature design --write --full
-```
-
-## 何时运行
-
-Handoff 会在 Phase 2（deep design）结束时由 AI agent 自动运行，紧接在调用 `comet-guard.sh design --apply` 之前。通常无需手动运行，除非：
-
-- OpenSpec artifacts 在 design 后被编辑，需要刷新 hash
-- handoff files 被删除或损坏
-- 你正在为需要完整 artifact content 的 downstream agent 使用 `--full` 运行 handoff
-
-<Note>
-OpenSpec artifacts（`proposal.md`、`design.md`、`tasks.md`、delta specs）仍是 canonical source of truth。handoff package 是 deterministic snapshot，是给 Phase 3 agents 使用的只读 context pack，不是 agent-authored summary。
-</Note>
-
-## 前置条件
-
-- `.comet.yaml` 中必须设置 `phase: design`；handoff 拒绝在 design phase 之外运行
-- `proposal.md`、`design.md` 和 `tasks.md` 必须都存在且非空
-- `comet-state.sh` 必须与 `comet-handoff.sh` 一同存在（用于写入 `handoff_context` 和 `handoff_hash`）
-- shell environment 中必须可用 `sha256sum` 或 `shasum`
+- [工作流概念](/zh/concepts/workflow) — 理解 handoff 如何把 OpenSpec 和 Superpowers 串起来
+- [状态与配置](/zh/concepts/state-management) — `handoff_hash` 和 `handoff_context` 字段

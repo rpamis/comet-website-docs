@@ -1,99 +1,133 @@
 ---
-title: "Phase 2: Deep Design — Brainstorming 和 Design Doc"
-sidebarTitle: "Design"
-description: "Design phase 使用 Superpowers brainstorming 创建 Design Doc 和 delta specs，这是每个 full-workflow change 必需的 deep-design 步骤。"
+title: "design 阶段"
+description: "design 阶段调用 brainstorming，用 handoff 交接包把 OpenSpec artifacts 交给 Superpowers，做深度技术设计并产出 Design Doc。"
 ---
 
-Design phase 是 OpenSpec hand off 给 Superpowers 的地方。在你于 Phase 1 确认 change structure 后，`/comet-design` 会从 Phase 1 artifacts 生成 handoff package，并加载 Superpowers brainstorming skill 来进行深度技术探索，梳理 implementation approaches、risks、trade-offs 和 testing strategy。只有在你明确批准 design proposal 后，它才会写入最终 Design Doc 并推进 workflow。
+design 阶段做深度技术设计。它用 `comet-handoff` 把 open 阶段的 OpenSpec artifacts 交给 Superpowers `brainstorming`，产出 Design Doc。
 
-## Trigger
+## 调用的 skill
 
-直接运行 `/comet-design`，或在 Phase 1 完成后让 `/comet` 自动分发。
+| Skill | 用途 | 何时调用 |
+| --- | --- | --- |
+| `brainstorming` | 深度技术设计（方案、风险、测试策略） | Step 1b，立即执行，不可跳过 |
+| `brainstorming`（再次） | 中等规模 spec 更新时重新设计 | build 阶段发现接口/组件/数据流变化时 |
 
-## Owner
+design 阶段不调用 OpenSpec skill——OpenSpec artifacts 已在 open 阶段创建。
 
-**OpenSpec and Superpowers** — OpenSpec 从 Phase 1 artifacts 生成 handoff package；Superpowers brainstorming 驱动技术探索并产出 Design Doc。
+## 产物
+
+| 产物 | 位置 | 说明 |
+| --- | --- | --- |
+| Design Doc | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | 最终技术设计文档 |
+| handoff 交接包 | `.comet/handoff/design-context.json` + `.md` | OpenSpec→Superpowers 交接上下文 |
+| brainstorm-summary.md | `.comet/handoff/brainstorm-summary.md` | 上下文压缩恢复检查点 |
+
+## 完整步骤
+
+### Step 0：入口状态验证
+
+```bash
+node "$COMET_STATE" check <name> design
+```
+
+如果 `handoff_context` 和 `handoff_hash` 已存在，先确认它们是否匹配当前 artifacts，再决定是否重新生成。
+
+### Step 1a：生成 handoff 交接包
+
+必须脚本生成，不用 Agent 摘要：
+
+```bash
+node "$COMET_HANDOFF" <change-name> design --write
+```
+
+交接包形态取决于 `context_compression` 配置：
+
+| 模式 | 产出 | 内容 |
+| --- | --- | --- |
+| `off`（默认） | `design-context.json` + `.md` | 完整摘要，每文件带 sha256，超 80 行截断 |
+| `beta` | `spec-context.json` + `.md` | delta spec verbatim 投影，其他文件 hash 引用 |
+
+同时把 `handoff_context` 和 `handoff_hash` 写入 `.comet.yaml`。
+
+### Step 1b：执行 brainstorming
+
+加载 `brainstorming`，以交接包为上下文做深度技术设计：
+
+- 实现方案、技术风险、测试策略、边界条件
+- 不得只做一轮 Q&A 就创建 Design Doc
+- 如果 delta spec 缺验收场景，只能写 Spec Patch 回写 `specs/*/spec.md`，不能在 Design Doc 里写第二份需求 spec
+- 增量更新 `brainstorm-summary.md`
+
+### Step 1c：用户确认设计方案（停顿点）
+
+展示方案摘要（技术方案、权衡、风险、测试策略、Spec Patch），等待用户确认。详见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
+
+### Step 1d：brainstorming 检查点定稿
+
+把已确认的方案写入 `brainstorm-summary.md`——这是上下文压缩后的恢复锚点。
+
+### Step 1e：主动式上下文压缩
+
+触发平台原生 compaction。如果平台不支持程序化触发，暂停让你手动压缩，完成后继续。
+
+### Step 2：创建 Design Doc
+
+在主会话用完整 brainstorming 上下文创建 Design Doc，带最小 frontmatter：
+
+```yaml
+---
+comet_change: <change-name>
+role: technical-design
+canonical_spec: openspec
+---
+```
+
+如果需要 Spec Patch，编辑对应 `specs/*/spec.md`。
+
+### Step 3：更新 Comet 状态
+
+```bash
+node "$COMET_STATE" set <name> design_doc <path>
+```
+
+如果 delta spec 改了，重新生成 handoff 更新 hash：
+
+```bash
+node "$COMET_HANDOFF" <change-name> design --write
+```
+
+### 退出
+
+```bash
+node "$COMET_GUARD" <change-name> design --apply
+```
+
+推进到 `phase: build`。
+
+## 退出条件（guard 检查）
+
+guard 在离开 design 时检查：
+
+- Design Doc 已创建
+- frontmatter 含 `comet_change`、`role: technical-design`、`canonical_spec: openspec`
+- `handoff_context` 和 `handoff_hash` 已写入 `.comet.yaml`
+- `handoff_hash` 匹配当前 OpenSpec artifacts（漂移会 FATAL）
+- markdown 交接包带可追溯标记（源路径、mode、sha256）
+- beta 模式下 `spec-context.json` 结构有效
+
+## 何时进入
+
+- full workflow 完成 open 后
+- hotfix/tweak 命中升级信号，需要补完整设计
+- 恢复时发现已有 change 但缺 Design Doc
 
 <Warning>
-**Brainstorming 不能跳过。** 对于 full-workflow changes，Superpowers `brainstorming` skill 是强制性的，不能用快速摘要或普通对话替代。唯一例外是 **hotfix** 和 **tweak** 预设，它们会完全绕过 Phase 2 并直接进入 build。如果 brainstorming skill 不可用，workflow 会停止并提示你安装或启用 Superpowers skills。
+  full workflow 不应跳过 design。hotfix 和 tweak 可以跳过，但一旦范围变质，就应升级回 full。
 </Warning>
 
-## 会发生什么
+## 下一步
 
-<Steps>
-  <Step title="生成 OpenSpec → Superpowers handoff package">
-    在 brainstorming 开始前，`comet-handoff.sh` 会从 Phase 1 artifacts 生成 deterministic context package。这会产出两个文件，并把它们的路径和 SHA256 hash 写入 `.comet.yaml`：
-    - `design-context.json` — machine-readable index（change、phase、canonical spec、source paths、hash）
-    - `design-context.md` — Superpowers 在 brainstorming 期间读取的 human-readable context，包含 source path markers、line ranges 和 SHA256 traceability
-
-    Handoff 由脚本生成，AI 不能手动写入。这确保 Superpowers 收到的是 OpenSpec 实际内容的、已验证且可追踪的 snapshot。
-  </Step>
-  <Step title="Brainstorming 探索技术问题">
-    AI 会以 handoff package 作为 context 加载 Superpowers `brainstorming` skill，并开始深度技术探索：
-    - Implementation approach：architecture、data flow、key technology choices
-    - 每个 option 的 trade-offs 和 risks
-    - Testing strategy
-    - OpenSpec delta spec 中缺失的任何 acceptance scenarios（作为 Spec Patches 提出，而不是重写 requirements）
-
-    Brainstorming 是对话式的。AI 会提出 proposals 并与你迭代。此阶段 **尚不会写入** Design Doc file。
-  </Step>
-  <Step title="你确认 design proposal（blocking pause）">
-    Brainstorming 产出 design proposal 后，AI 会暂停并展示简明摘要：
-    - 采用的 technical approach
-    - 关键 trade-offs 和 risks
-    - Testing strategy
-    - 需要写回的任何 delta spec changes
-
-    **在你明确确认前，workflow 不能推进。** 如果你要求调整，brainstorming 会继续，直到你确认。
-  </Step>
-  <Step title="写入 Design Doc">
-    你确认后，AI 会在 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` 创建 Design Doc。该文件的 frontmatter 设计上保持最小：
-
-    ```yaml
-    ---
-    comet_change: <change-name>
-    role: technical-design
-    canonical_spec: openspec
-    ---
-    ```
-
-    这会将 Design Doc 链接回 OpenSpec change，而不会重复 requirements。
-  </Step>
-  <Step title="创建或更新 Delta spec">
-    如果 brainstorming 发现缺失的 acceptance scenarios 或 new capabilities，位于 `openspec/changes/<name>/specs/<capability>/spec.md` 的 OpenSpec delta spec 会通过 Spec Patches 创建或更新。Handoff hash 会重新生成，以反映更新后的 artifacts。
-  </Step>
-  <Step title="更新 state，并由 guard 推进 workflow">
-    `design_doc` path 会记录到 `.comet.yaml`。如果发生 delta spec changes，handoff package 会重新生成以保持 hash 最新。随后 phase guard 会验证所有 exit conditions，包括 `handoff_hash` 是否匹配当前 artifacts，以及 `design-context.md` 是否包含脚本生成的 traceability markers，然后自动 transition 到 `phase: build`。
-  </Step>
-</Steps>
-
-## Artifacts
-
-| Artifact | Path | 说明 |
-|----------|------|-------------|
-| Design Doc | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | Technical RFC：implementation approach、trade-offs、testing strategy |
-| Delta spec | `openspec/changes/<name>/specs/<capability>/spec.md` | 此 change 的 acceptance scenarios 和 capability spec |
-| Handoff context (JSON) | `openspec/changes/<name>/.comet/handoff/design-context.json` | 带 SHA256 hash 的 machine-readable handoff index |
-| Handoff context (Markdown) | `openspec/changes/<name>/.comet/handoff/design-context.md` | 带 source path 和 traceability markers 的 human-readable handoff context |
-
-## The Handoff Package
-
-`comet-handoff.sh` 用来解决一个具体问题：AI agents 即时总结 context 时，会产生不一致且不可追踪的输出。Comet 通过从实际文件内容 deterministic 生成 handoff，并包含 SHA256 hashes、source path markers 和 line ranges，确保 Superpowers 始终基于 OpenSpec 实际内容的已验证 snapshot 工作。
-
-默认 package 是紧凑且可追踪的 excerpt。如果确实需要所有 source artifacts 的完整内容，可以显式生成 full handoff：
-
-```bash
-"$COMET_BASH" "$COMET_HANDOFF" <change-name> design --write --full
-```
-
-在 workflow 从 design 推进到 build 前，phase guard 会检查 `.comet.yaml` 中存储的 `handoff_hash`。如果 hash 与当前 OpenSpec artifacts 不匹配，guard 会阻止 transition 并报告 mismatch。
-
-## Context Compaction Recovery
-
-Design phase 可能会在 brainstorming 期间触发 context compaction。如果发生这种情况，运行 recovery command，获取已完成内容和下一步所需操作的结构化摘要：
-
-```bash
-"$COMET_BASH" "$COMET_STATE" check <change-name> design --recover
-```
-
-该脚本会输出当前 phase、哪些 fields 已完成、哪些仍 pending，以及推荐的 recovery action。按照 recovery action 从正确步骤恢复。
+- [build 阶段](/zh/phases/build) — design 完成后进入计划与执行
+- [上下文压缩机制](/zh/concepts/context-compression) — handoff 交接包详解
+- [工作流中间产物](/zh/concepts/intermediate-artifacts) — brainstorm-summary 等产物
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — design 的停顿点
