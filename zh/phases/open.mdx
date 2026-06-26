@@ -1,9 +1,136 @@
 ---
 title: "open 阶段"
-description: "open 阶段调用 openspec-explore 和 openspec-new-change，把想法变成 OpenSpec change，创建 proposal、design、tasks 和 Comet 状态。"
+description: "open 阶段调用 openspec-explore 和 openspec-new-change，把你的想法变成可执行的 OpenSpec change——一段引导式的需求澄清和文档创建过程。"
 ---
 
-open 阶段负责把用户目标变成可执行 change。它调用 OpenSpec skill 探索需求、创建 artifacts，并初始化 Comet 状态。
+open 阶段把你脑子里的想法变成一个可执行的 change：探索需求、澄清范围、创建 proposal/design/tasks，并初始化 Comet 状态。从你的角度看，这是一段**引导式的对话**——Comet 会反复问你问题，确认理解对了，才动手写文档。
+
+<Tip>
+  <strong>正常情况下你只需要 <code>/comet</code>。</strong><code>/comet</code> 自带意图识别，会读取文件状态自动判断当前在 open 阶段并调用 <code>/comet-open</code>。本文描述的 <code>/comet-open</code> 是它内部调用的阶段 Skill——只有当你想<strong>手动控制</strong>（例如关闭了 <code>auto_transition</code>、或想只跑这一个阶段）时，才需要直接输入 <code>/comet-open</code>。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
+</Tip>
+
+## 本阶段如何触发
+
+`/comet-open` 通常**不是你手敲的命令**，而是 `/comet` 自动路由到的结果。
+
+### 默认：用 /comet 自动识别
+
+`/comet` 每次调用都重新读取文件状态（不依赖对话历史），按以下条件路由到 open 阶段：
+
+| 触发条件 | 行为 |
+| --- | --- |
+| 项目里没有活跃 change | 自动调用 `/comet-open` |
+| 有活跃 change 但 `.comet.yaml` 缺失 | 自动调用 `/comet-open` 补齐状态 |
+| 用户明确要创建新变更 | 自动调用 `/comet-open` |
+
+所以你只需要输入 `/comet` 并描述想做什么，它会自己判断该不该开新 change。open 阶段完成后，`/comet` 还会自动衔接下一个阶段（design）。详见[自动推进机制](/zh/concepts/auto-transition)。
+
+### 手动：什么时候才需要直接 /comet-open
+
+- 关闭了自动衔接（`auto_transition: false`）——此时 `/comet` 推进完一个阶段会停下，你需要手动调用下一个阶段 Skill。
+- 只想单独跑 open 阶段（调试、或在阶段之间插入人工审核）。
+- `comet status` 显示状态在 open，但你想强制重新进入。
+
+**自动推进开着就用 `/comet`，关了才需要手动用各阶段命令。**
+
+---
+
+## 你会经历什么
+
+open 阶段不是一次性生成文档，而是一段**多轮对话 + 多个停顿点**的流程。全程用你触发工作流时用的语言提问和产出文档。
+
+```mermaid
+flowchart TD
+    Start["你说出想法"] --> S1["加载 openspec-explore<br/>反复提问澄清"]
+    S1 --> S1a{"大型 PRD /<br/>多个独立能力?"}
+    S1a -->|是| Stop1["停顿点 1：PRD 拆分预检<br/>三选一"]
+    S1a -->|否| S1sum["生成澄清摘要<br/>5 个必备部分"]
+    Stop1 --> S1sum
+    S1sum --> Stop2["停顿点 2：确认需求澄清完成"]
+    Stop2 --> Stop3["停顿点 3：确认 change 名称"]
+    Stop3 --> S2["加载 openspec-new-change<br/>逐个生成 proposal → design → tasks"]
+    S2 --> S3["入口状态验证 + 内容完整性检查"]
+    S3 --> Stop4["停顿点 4：审视三个文档并确认"]
+    Stop5 --> Exit["comet-guard open --apply<br/>推进到下一阶段"]
+```
+
+### 第一步：探索想法与澄清需求
+
+Comet 加载 `openspec-explore`，**围绕你的想法持续提问**，直到能整理出一份完整的**澄清摘要**。它不会把一次问答当成"够了"——会一直问到这五个部分都清楚：
+
+| 澄清摘要的五个必备部分 | 你要想清楚的事 |
+| --- | --- |
+| **目标** | 真正要解决的问题、期望的结果 |
+| **非目标** | 明确不做什么 |
+| **范围边界** | 涉及/不涉及的模块、用户、平台、数据 |
+| **关键未知项** | 假设、风险、依赖 |
+| **验收场景草案** | 核心成功场景 + 关键边界场景 |
+
+### 停顿点 1：PRD 拆分预检（条件触发）
+
+如果你的输入是一个**大型 PRD、路线图或完整产品计划**，或者澄清摘要里出现了**多个独立能力**，Comet 会在这里暂停，给你一份**候选拆分清单**（每个拆分项含建议名称、目标范围、非目标、依赖顺序、核心验收场景），然后让你三选一：
+
+| 选项 | 含义 |
+| --- | --- |
+| **创建多个 OpenSpec changes** | 按拆分清单创建多个独立 change（每个都要用自己的 `/comet-open`） |
+| **保持为一个 change** | 不拆，继续单 change 流程，把不拆的原因记进文档 |
+| **调整拆分方案后继续** | 你描述调整，Comet 重新出清单再问一次 |
+
+<Tip>
+  拆分后 Comet <strong>不会</strong>自动推进任何单个 change 到 design。它会暂停问你想先做哪一个，只推进你选的那个，其余保持活跃等以后 <code>/comet</code> 恢复。
+</Tip>
+
+### 停顿点 2：确认需求澄清完成
+
+在创建任何文档之前，Comet 把完整的澄清摘要（五个部分）摆给你看，**等你明确确认**。确认前不会创建 proposal/design/tasks，也不会用 `openspec-propose` 一次性生成。
+
+### 停顿点 3：确认 change 名称
+
+在 `openspec new change` 之前，Comet 让你定名字。**名字必须是 kebab-case 英文**（小写字母、数字、连字符，例如 `refine-requirements-doc`）。它会：
+
+- 推荐 2-3 个 kebab-case 英文名，每个带一行范围说明
+- 让你**自行输入名称**——如果你输入的是中文或非合规文本，它会转换成合规 kebab-case 并**回显让你确认**
+- 如果名字和已有 change 冲突，报告冲突让你换一个
+
+### 第二步：创建 change 结构
+
+加载 `openspec-new-change`。完整工作流**默认不加载** `openspec-propose`（一次性生成全部），只有你明确要求时才允许。Comet 用**标准产物循环**逐个生成 proposal → design → tasks：
+
+1. 刷新状态：`openspec status --change "<name>" --json`
+2. 获取指令：`openspec instructions proposal|design|tasks --change "<name>" --json`
+3. 读取 `dependencies`、遵循 `template` 和 `instruction`、应用 `context`/`rules` 约束（**不复制到文档内容里**）、写入 `resolvedOutputPath`
+4. 每个 artifact 后再刷新状态确认
+
+<Warning>
+  如果 <code>openspec instructions</code> 失败、返回无效 JSON、或没提供可用的 <code>resolvedOutputPath</code>，Comet 会<strong>立即停止</strong>并报告 OpenSpec 错误，<strong>不会</strong>回退成硬编码文档结构——那会绕过项目规则。change 名必须是你确认过的 kebab-case 名，Comet 不会自作主张扩大或缩小范围。
+</Warning>
+
+### 第三步：入口状态验证 + 内容完整性检查
+
+```bash
+node "$COMET_STATE" check <name> open
+```
+
+然后逐个确认三个文件存在且非空：proposal（背景/目标/范围）、design（架构决策/选型/数据流）、tasks（任务描述）。任何一个缺失或为空，Comet 都不会继续，而是回到创建步骤。
+
+### 停顿点 4：审视三个文档并确认
+
+Comet 把三个文档的摘要摆给你看（proposal 的背景目标范围、design 的架构决策选型、tasks 的任务数和关键任务），然后让你**二选一**：
+
+| 选项 | 含义 |
+| --- | --- |
+| **确认，继续下一阶段** | 文档符合预期，运行阶段 guard 推进 |
+| **需要调整** | 你给修改意见，Comet 改完相关文件再请求确认 |
+
+### 退出：推进到下一阶段
+
+```bash
+node "$COMET_GUARD" <change-name> open --apply
+```
+
+`--apply` 是必须的——没有它 `.comet.yaml` 会停在 `phase: open`，下一阶段的入口检查会失败。full workflow 推进到 `phase: design`；hotfix/tweak 直接跳到 `phase: build`（跳过 design）。
+
+---
 
 ## 调用的 skill
 
@@ -13,7 +140,7 @@ open 阶段负责把用户目标变成可执行 change。它调用 OpenSpec skil
 | `openspec-new-change` | 创建 change 骨架 | Step 2，立即执行，不可跳过 |
 
 <Warning>
-  完整工作流默认<strong>不加载</strong> <code>openspec-propose</code>（一次性生成全部 artifacts）。只有用户明确要求时才允许。Comet 用标准产物循环逐个生成。
+  完整工作流默认<strong>不加载</strong> <code>openspec-propose</code>（一次性生成全部 artifacts）。只有用户明确要求时才允许。
 </Warning>
 
 ## 产物
@@ -28,93 +155,46 @@ openspec/changes/<name>/
 └── specs/<capability>/spec.md   # delta spec
 ```
 
-## 完整步骤
-
-### Step 0：输出语言约束
-
-传递用户请求语言给 OpenSpec 的所有提问和产物。恢复已有 change 时保持既有主语言。
-
-### Step 1：探索想法与需求澄清
-
-加载 `openspec-explore`，围绕以下内容持续提问，直到形成澄清摘要：
-
-- 目标、非目标
-- 范围边界（涉及/不涉及的模块、用户、平台、数据）
-- 关键未知项（假设、风险、依赖）
-- 验收场景草案（核心场景 + 边界场景）
-
-不得把一次问答视为足够澄清。
-
-### Step 1a：PRD 拆分预检（停顿点）
-
-如果输入是大型 PRD 或澄清摘要包含多个独立能力，触发拆分预检。详见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
-
-### Step 1b：需求澄清完成确认（停顿点）
-
-展示澄清摘要，等待用户确认。确认前不创建任何 artifact。
-
-### Step 1c：change 名称确认（停顿点）
-
-推荐 2-3 个 kebab-case 英文名，让用户选择或自行输入。名称必须是 kebab-case 英文。
-
-### Step 2：创建 change 结构
-
-加载 `openspec-new-change`。按标准产物循环逐个生成 proposal → design → tasks：
-
-1. 刷新状态：`openspec status --change "<name>" --json`
-2. 获取指令：`openspec instructions <proposal|design|tasks> --change "<name>" --json`
-3. 读取 `dependencies`、遵循 `template` 和 `instruction`、应用 `context`/`rules` 约束（不复制到 artifact）、写入 `resolvedOutputPath`
-4. 每个 artifact 后刷新状态确认
-
-然后初始化 Comet 状态：
+初始化 Comet 状态：
 
 ```bash
 node "$COMET_STATE" init <name> full
 ```
 
-### Step 3：入口状态验证
+## 幂等性：可以安全重复
 
-```bash
-node "$COMET_STATE" check <name> open
-```
+open 阶段所有操作都可以安全重复执行。如果 `.comet.yaml` 已经在 `phase: open` 且三个产物都已存在，Comet 会**跳过已完成步骤**，从第一个缺失的步骤继续。这让你在中断后重新 `/comet` 也不会搞乱状态。
 
-### Step 4：内容完整性检查
+## 四个停顿点一览
 
-逐个确认三个文件存在且非空：proposal（背景/目标/范围）、design（架构决策/选型/数据流）、tasks（任务描述）。
+open 阶段有 4 个停顿点（全局编号 1-4，整个五阶段工作流共 13 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
 
-### Step 5：用户审视确认（停顿点）
+| 停顿点 | 何时出现 | 你要做什么 |
+| --- | --- | --- |
+| 1 PRD 拆分 | 输入是大 PRD 或多个独立能力 | 拆分 / 不拆 / 调整方案 |
+| 2 需求澄清完成 | 澄清摘要生成后 | 确认理解对了 |
+| 3 change 名称 | 创建 change 前 | 选名 / 自定义名 |
+| 4 文档审视 | 三文档生成后 | 确认 / 要调整 |
 
-展示三个文档摘要，等待用户确认。
-
-### 退出
-
-```bash
-node "$COMET_GUARD" <change-name> open --apply
-```
-
-full workflow 推进到 `phase: design`；hotfix/tweak 推进到 `phase: build`。
-
-## 何时进入
-
-- 项目里没有活跃 change
-- 用户明确要创建新变更
-- `.comet.yaml` 缺失，需要补齐
-
-## 幂等性
-
-open 阶段所有操作可安全重复。如果 `.comet.yaml` 已处于 `phase: open` 且三个产物都已存在，跳过已完成步骤。
+所有停顿点都遵循[决策点协议](/zh/concepts/decision-points)——Comet 不能用推荐规则、默认值或"用户应该会同意"来代替你的明确选择。
 
 ## 常见问题
 
 <AccordionGroup>
   <Accordion title=".comet.yaml 缺失怎么办">
-    不要用 `/opsx:new` 绕过。重新运行 `/comet`，让它通过 `/comet-open` 补齐状态。
+    不要用 `/opsx:new` 绕过——它只创建 OpenSpec artifacts，不会创建 `.comet.yaml`，change 会落在 Comet 状态机之外。重新运行 `/comet`，让它通过 `/comet-open` 补齐状态。
   </Accordion>
+
   <Accordion title="change 名称有什么限制">
-    必须是 kebab-case 英文（小写字母、数字、连字符）。中文或非合规名称会被转换并回显确认。
+    必须是 kebab-case 英文（小写字母、数字、连字符）。中文或非合规名称会被转换成 kebab-case 并回显让你确认。和已有 change 冲突会报告让你换一个。
   </Accordion>
+
   <Accordion title="openspec instructions 失败了怎么办">
-    立即停止 artifact 创建并报告 OpenSpec 错误。不得回退为硬编码文档结构，那会绕过项目规则。
+    Comet 会立即停止 artifact 创建并报告 OpenSpec 错误，不会回退为硬编码文档结构。检查 OpenSpec CLI 是否正常、`template`/`instruction`/`dependencies` 是否满足。
+  </Accordion>
+
+  <Accordion title="大型 PRD 一定要拆吗">
+    不一定。拆分预检会给你三选一（拆分 / 保持一个 / 调整方案），你可以选择保持为一个 change，但要把不拆的原因记进文档。
   </Accordion>
 </AccordionGroup>
 
@@ -123,3 +203,4 @@ open 阶段所有操作可安全重复。如果 `.comet.yaml` 已处于 `phase: 
 - [design 阶段](/zh/phases/design) — open 完成后进入深度设计
 - [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的 4 个停顿点详解
 - [大型 PRD 拆分](/zh/guides/prd-splitting) — Step 1a 的完整机制
+- [自动推进机制](/zh/concepts/auto-transition) — open 完成后如何自动衔接 design
