@@ -1,44 +1,86 @@
 ---
 title: "状态损坏与恢复"
-description: "处理 .comet.yaml 缺失、格式异常、证据缺失和阶段冲突。"
+description: "当 /comet 路由不对、.comet.yaml 缺失或格式异常、证据缺失时，如何用 comet status / comet doctor 诊断和恢复。"
 ---
 
-状态损坏时，目标是恢复真实事实，而不是强行改字段让流程继续。
+正常恢复只需要 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)）。**本页是当 `/comet` 路由不对、或状态看起来坏了时**的诊断和恢复指南。
 
-## 常见症状
+状态损坏时，目标是**恢复真实事实**，而不是强行改字段让流程继续。
 
-| 症状 | 可能原因 | 先做什么 |
+## 先判断：是状态坏了，还是只是中断
+
+| 情况 | 这算什么 | 怎么办 |
 | --- | --- | --- |
-| `comet status` 没有下一步 | `.comet.yaml` 缺失或格式异常 | 运行 `comet doctor` |
-| build 无法进入 verify | 缺少 `build_mode`、`isolation` 或 `tdd_mode` | 回到 build 选择 |
-| verify 通过但不能 archive | 缺验证报告或分支状态未处理 | 补验证报告 |
-| archive 后仍显示 active | 手工移动目录或状态没同步 | 用 OpenSpec 状态核对 |
+| 会话断了、上下文压缩了、换了设备 | 正常中断 | 直接 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)） |
+| `/comet` 路由到的阶段不对 | 可能元数据和文件冲突 | `/comet` 会以文件为准自愈；若仍不对，跑诊断 |
+| `.comet.yaml` 缺失或格式异常 | 状态损坏 | `comet doctor` 诊断 |
+| 声明的产物/证据在磁盘上找不到 | 证据缺失 | `comet status` 看 `runtime_eval` |
 
 ## 诊断命令
 
 ```bash
-comet status --json
-comet doctor --json
+comet status        # 看活跃 change 的 phase、任务完成度、runtime_eval
+comet doctor        # 诊断安装、环境、Skill 完整性、.comet.yaml 有效性
 ```
 
-JSON 输出适合给 Agent 或自动化工具读取。普通用户可以先看文本输出。
+加 `--json` 适合给 Agent 或自动化工具读；普通用户先看文本输出。
+
+### comet status 看什么
+
+每个活跃 change 报告：`phase`、任务 `done/total`、`workflow | build_mode`、`run_step`、`runtime_mode`、`runtime_eval`（声明的步骤证据是否真在磁盘上）、`design`、`plan`、`verify_result`，以及 `next:` 提示。
+
+`runtime_eval` 失败时会提示 `run <命令> or restore missing evidence (...)`——按提示补证据或恢复。
+
+### comet doctor 看什么
+
+检查 Comet CLI 版本、openspec CLI、Superpowers、工作目录（`docs/superpowers/specs`、`docs/superpowers/plans`）、各平台 Skill 完整性、脚本是否存在、CodeGraph，以及每个 change 的 `.comet.yaml` 有效性和 `runtime_eval`。常见修复提示：`npm install -g @fission-ai/openspec@latest`、`run: comet init`、`run: comet update --scope ...`。
+
+## 常见症状和处理
+
+| 症状 | 可能原因 | 先做什么 |
+| --- | --- | --- |
+| `comet status` 没有下一步 | `.comet.yaml` 缺失或格式异常 | `comet doctor` |
+| build 无法进入 verify | 缺 `build_mode`/`isolation`/`tdd_mode` | 回 build 阶段补选（`/comet` 会路由过去让你选） |
+| verify 通过但不能 archive | 缺验证报告或分支状态未处理 | 补验证报告、设 `branch_status: handled` |
+| archive 后仍显示 active | 手工移动目录或状态没同步 | 用 `openspec status` 核对，用归档脚本重跑（可恢复） |
+| `/comet` 报 `.comet.yaml` 格式异常 | 文件被手工改坏 | `comet doctor`；严重时从 git 恢复 `.comet.yaml` |
 
 ## 恢复原则
 
-- 以 OpenSpec 文件、Design Doc、Plan、测试结果和实际工作树为证据。
-- 不要手工写 machine-owned Run 字段。
-- 不要把 `build_pause` 当成 `build_mode`。
-- 不要跳过 verify 失败决策点。
-- 不要手工伪造 archive 状态。
+- **以文件为证据**：OpenSpec artifacts、Design Doc、Plan、测试结果、实际工作树是事实来源。
+- **不要手工写 machine-owned Run 字段**（`.comet/run-state.json` 等）。
+- **不要把 `build_pause` 当成 `build_mode`**——它们是不同字段。
+- **不要跳过 verify 失败决策点**——必须由你选修复或接受偏差。
+- **不要手工伪造 archive 状态**——归档由 `/comet-archive` 脚本完成。
+- **不要手工编辑 `.comet.yaml` 推进 phase**——用 guard `--apply` 或 `comet-state transition`。
+
+## .comet.yaml 缺失或坏了怎么办
+
+`/comet` 对坏状态有兼容路径：
+
+- `.comet.yaml` 缺失时，回退到 `openspec status --json` + `tasks.md` + `docs/superpowers/` 文件检查重建状态。
+- 格式异常时，以文件状态为准，用 `comet-state set` 修正后继续。
+- `phase: open` 但 proposal/design/tasks 已完整时，先 guard `--apply` 修正状态再判定。
+
+如果 `/comet` 自己修不了（比如文件被严重改坏），从 git 恢复 `.comet.yaml`，再跑 `comet doctor` 确认。
 
 ## 推荐处理流程
 
 ```mermaid
 flowchart TD
-  A["发现状态异常"] --> B["读取 comet status"]
-  B --> C["运行 comet doctor"]
-  C --> D["核对 OpenSpec artifacts"]
-  D --> E["核对 Superpowers design/plan"]
-  E --> F["核对工作树和验证证据"]
-  F --> G["用 Comet 命令恢复"]
+  A["/comet 路由不对或状态异常"] --> B["comet status 看 runtime_eval"]
+  B --> C["comet doctor 诊断环境/状态"]
+  C --> D{"是安装/环境问题?"}
+  D -->|是| E["按 doctor 提示修复<br/>comet init / update / 装 openspec"]
+  D -->|否| F["核对 OpenSpec artifacts"]
+  F --> G["核对 Superpowers design/plan"]
+  G --> H["核对工作树和验证证据"]
+  H --> I["用 Comet 命令恢复<br/>不手工改 machine-owned 字段"]
+  I --> J["重新 /comet"]
 ```
+
+## 下一步
+
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 正常中断只需 `/comet`
+- [项目文件结构](/zh/guides/project-structure) — 状态都存在哪些文件里
+- [状态与配置](/zh/concepts/state-management) — `.comet.yaml` 字段和状态守卫

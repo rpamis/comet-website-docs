@@ -1,54 +1,109 @@
 ---
 title: "项目文件结构"
-description: "了解 Comet 在项目中创建哪些目录，以及每类文件分别承担什么职责。"
+description: "了解 Comet 在项目里创建哪些目录和文件，以及每类文件分别承担什么职责——理解这个有助于恢复和排查。"
 ---
 
-Comet 把需求事实、设计计划、运行状态和用户生成 Skill 分开保存。
+Comet 把**需求事实、设计计划、运行状态和用户生成 Skill** 分开保存。理解这些文件的位置和职责，有助于你恢复中断的工作、排查状态问题，以及做跨设备/CI 集成。
+
+所有恢复相关的状态都在**仓库文件里**（不依赖对话历史），所以换设备、换平台、上下文压缩后，`/comet` 都能从文件重建状态。详见[恢复中断的工作](/zh/guides/resuming-workflow)。
 
 ## 经典工作流目录
 
 ```text
 openspec/
-├── config.yaml
+├── config.yaml                       # OpenSpec 项目配置
 ├── changes/
-│   ├── <name>/
-│   │   ├── .openspec.yaml
-│   │   ├── .comet.yaml
-│   │   ├── proposal.md
-│   │   ├── design.md
-│   │   ├── tasks.md
-│   │   └── specs/<capability>/spec.md
-│   └── archive/YYYY-MM-DD-<name>/
-└── specs/<capability>/spec.md
+│   ├── <name>/                       # 一个活跃 change
+│   │   ├── .openspec.yaml            # OpenSpec 状态
+│   │   ├── .comet.yaml               # Comet 工作流状态（用户可读投影 + run_id 链接）
+│   │   ├── proposal.md               # Why + What
+│   │   ├── design.md                 # How（高层）
+│   │   ├── tasks.md                  # 任务清单（- [ ] / - [x]）
+│   │   ├── specs/<capability>/spec.md   # delta spec
+│   │   └── .comet/                   # Comet 运行产物（见下）
+│   └── archive/YYYY-MM-DD-<name>/    # 已归档 change
+└── specs/<capability>/spec.md        # 当前主规格（归档时由 delta 合并）
 
 docs/superpowers/
-├── specs/YYYY-MM-DD-<topic>-design.md
-└── plans/YYYY-MM-DD-<feature>.md
+├── specs/YYYY-MM-DD-<topic>-design.md   # 技术设计文档（Design Doc）
+├── plans/YYYY-MM-DD-<feature>.md        # 实施计划
+└── reports/YYYY-MM-DD-<name>-verify.md  # 验证报告（可选）
 ```
+
+### change 内的 .comet/ 运行产物
+
+每个 change 目录下还有一个 `.comet/` 子目录，存运行期产物（多为 machine-owned，不要手工编辑）：
+
+```text
+openspec/changes/<name>/.comet/
+├── run-state.json          # Engine Run state（machine-owned）
+├── pending-action.json     # 当前等待的 pending action
+├── trajectory.jsonl        # append-only 轨迹审计
+├── context.md              # 当前 Agent 上下文
+├── artifacts.json          # 产出的 artifacts 映射
+├── checkpoint.json         # 一致性检查点
+├── handoff/                # handoff 交接包（design 阶段生成）
+│   ├── design-context.json     # 默认模式机器索引
+│   ├── design-context.md       # 默认模式可读摘要
+│   ├── spec-context.json       # beta 压缩模式
+│   ├── spec-context.md
+│   └── brainstorm-summary.md   # brainstorming 恢复检查点
+└── subagent-progress.md    # subagent 调度检查点（仅 subagent 模式）
+```
+
+<Tip>
+  <code>brainstorm-summary.md</code> 和 <code>subagent-progress.md</code> 是<strong>恢复锚点</strong>——上下文压缩后 Agent 会重载它们继续。你通常不需要读这些文件，但知道它们在哪有助于排查。
+</Tip>
 
 ## Comet 配置和运行目录
 
+项目根的 `.comet/` 目录存放项目级配置和各能力的运行数据：
+
 ```text
 .comet/
-├── config.yaml
-├── skills/
-├── runs/
-├── bundle-authoring/
-├── bundle-factory-plans/
-└── bundles/
+├── config.yaml               # 项目级 Comet 配置（auto_transition/review_mode/context_compression 等）
+├── skill-preferences.yaml    # /comet-any 的项目级 Skill 偏好
+├── skills/                   # 项目 Skill 池（按名覆盖内置 Skill）
+├── runs/<run-id>/            # standalone Engine Run 状态
+├── skill-snapshots/<hash>/   # 不可变 Skill 快照
+├── bundle-authoring/         # /comet-any 创作状态
+├── bundle-drafts/            # Bundle draft
+├── bundle-factory-plans/     # Factory plan
+├── bundle-evals/             # eval 证据
+├── bundles/                  # 已发布 Bundle
+└── tmp/                      # 临时文件
 ```
 
-不同项目不一定都会出现所有目录。只有使用对应能力后才会创建。
+不同项目不一定都会出现所有目录——**只有使用对应能力后才会创建**（例如没用过 `/comet-any` 就不会有 `bundle-*` 目录）。
 
-## 目录职责
+## 目录和文件职责
 
-| 路径 | 职责 |
-| --- | --- |
-| `openspec/changes/` | 活跃 change 和归档 change |
-| `openspec/specs/` | 当前主规格 |
-| `docs/superpowers/specs/` | 技术设计文档 |
-| `docs/superpowers/plans/` | 实施计划 |
-| `.comet/config.yaml` | 项目级 Comet 配置 |
-| `.comet/skills/` | 项目 Skill 池 |
-| `.comet/runs/` | standalone Engine Run 状态 |
-| `.comet/bundles/` | 已发布 Bundle |
+| 路径 | 职责 | 谁读写 |
+| --- | --- | --- |
+| `openspec/changes/<name>/.comet.yaml` | Comet 工作流状态（phase、workflow、build 决策、verify_result、run_id 链接） | Agent 读写，用户可读 |
+| `openspec/changes/<name>/.comet/run-state.json` | Engine Run 细节（currentStep、pending、trajectory、artifacts） | machine-owned，不要手工编辑 |
+| `openspec/changes/` | 活跃 change 和归档 change | OpenSpec + Comet |
+| `openspec/specs/` | 当前主规格（归档时由 delta 合并进来） | OpenSpec |
+| `docs/superpowers/specs/` | 技术设计文档（Design Doc） | Superpowers + Comet |
+| `docs/superpowers/plans/` | 实施计划 | Superpowers + Comet |
+| `.comet/config.yaml` | 项目级 Comet 配置 | 用户编辑 |
+| `.comet/skill-preferences.yaml` | `/comet-any` 偏好（advisory/strict、prefer/require） | 用户编辑或 `/comet-any` 生成 |
+| `.comet/skills/` | 项目 Skill 池（按名覆盖内置） | `comet skill install` |
+| `.comet/runs/<run-id>/` | standalone Engine Run 状态 | `comet skill run --run-id` |
+| `.comet/bundles/` | 已发布 Bundle | `comet publish run` |
+
+## 哪些该提交到 git
+
+- **应该提交**：`openspec/`（含 change artifacts 和 `.comet.yaml`）、`docs/superpowers/`、`.comet/config.yaml`、`.comet/skill-preferences.yaml`。这些是事实来源，提交后才能跨设备恢复。
+- **看情况**：`.comet/skills/`、`.comet/bundles/`（团队共享则提交；个人本地则忽略）。
+- **通常忽略**：`.comet/tmp/`、运行期临时文件。
+
+<Note>
+  <code>.comet.yaml</code> 和 <code>run-state.json</code> 的边界：<code>.comet.yaml</code> 保存<strong>用户可理解的工作流投影</strong>（phase、build_mode、verify_result 等），只通过 <code>run_id</code> 链接到 Engine；完整的 Run 细节在 <code>run-state.json</code>。所以你看 <code>.comet.yaml</code> 就能理解当前进度，不必读 machine-owned 的 Run 文件。
+</Note>
+
+## 下一步
+
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 这些文件如何支撑 `/comet` 恢复
+- [状态损坏与恢复](/zh/guides/state-recovery) — 状态坏了怎么排查
+- [状态与配置](/zh/concepts/state-management) — `.comet.yaml` 字段详解
