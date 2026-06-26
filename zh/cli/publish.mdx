@@ -3,7 +3,7 @@ title: "comet publish"
 description: "审核、批准、发布和分发 /comet-any 生成的 Skill publish candidate。"
 ---
 
-`comet publish` 是普通用户面对 `/comet-any` 产物的发布入口。它复用 Bundle 后端的状态和 readiness 契约，但不引入第二个状态模型，把命令组织成 readiness、review、approval、publish 和 distribute。
+`comet publish` 是普通用户面对 `/comet-any` 产物的发布入口。它**复用 Bundle 后端**的状态和 readiness 契约，但不引入第二个状态模型，把命令组织成 readiness、review、approval、publish 和 distribute。
 
 预设的心智模型是：
 
@@ -11,18 +11,26 @@ description: "审核、批准、发布和分发 /comet-any 生成的 Skill publi
 - `comet eval` 验证生成物
 - `comet publish` 处理 readiness、人工批准、发布和分发
 
+<Info>
+  <code>comet publish</code> 是 <code>comet bundle</code> 后端的<strong>薄封装</strong>（thin facade）。每个 <code>publish</code> 子命令都委托给对应的 <code>bundle</code> 函数。普通用户用 <code>publish</code>，审计/排障时才直接用 <code>bundle</code>。
+</Info>
+
 ## 子命令
 
-| 命令 | 用途 |
-| --- | --- |
-| `comet publish list` | 列出可恢复的 publish candidate |
-| `comet publish status <name>` | 查看 readiness 和 next action |
-| `comet publish review <name>` | 生成发布前评审摘要 |
-| `comet publish approve <name>` | 批准当前 hash 的 candidate |
-| `comet publish run <name>` | 发布已批准 candidate |
-| `comet publish distribute <name>` | 分发已发布 candidate 到平台 |
+| 命令 | 用途 | 必需参数 |
+| --- | --- | --- |
+| `comet publish list` | 列出可恢复的 publish candidate | — |
+| `comet publish status <name>` | 查看 readiness 和 next action | `<name>` |
+| `comet publish review <name>` | 生成发布前评审摘要 | `<name>`、`--platform` |
+| `comet publish approve <name>` | 批准当前 hash 的 candidate | `<name>`、`--reviewer` |
+| `comet publish run <name>` | 发布已批准 candidate | `<name>`、`--platform` |
+| `comet publish distribute <name>` | 分发已发布 candidate 到平台 | `<name>`、`--platform` |
 
 所有子命令都支持 `--json`。
+
+<Note>
+  <code>comet publish</code> 没有 reject 子命令。<code>approve</code> 是用户唯一批准入口（内部调用 <code>reviewBundle</code> 并固定 decision=approved）。需要拒绝时用高级的 <code>comet bundle review <name> --reject --reviewer <name></code>。
+</Note>
 
 ## 推荐流程
 
@@ -70,31 +78,44 @@ comet publish distribute review-helper --platform claude --scope project --json
 | `--json` | 输出结构化 JSON |
 | `--platform <id>` | 目标平台（可多次传） |
 | `--scope <project\|global>` | 分发范围 |
-| `--reviewer <name>` | 评审人（`approve`） |
+| `--reviewer <name>` | 评审人（`approve` 必需） |
+| `--locale <locale>` | 语言 |
+| `--overwrite` | 覆盖已有发布候选（`run`）/ 已有分发（`distribute`） |
 | `--preview` | 分发预览 |
 | `--confirm-executables` | 确认可执行披露 |
-| `--skip-capability <cap>` | 跳过 optional 能力 |
+| `--skip-capability <cap>` | 跳过 optional 能力（可多次传） |
+
+## readiness 结论
+
+`comet publish status` 会展示四种 readiness 结论之一：
+
+| 结论 | 含义 |
+| --- | --- |
+| `published` | 已发布 |
+| `can-publish` | 可以发布（已批准且 hash 匹配） |
+| `needs-confirmation` | 等待确认（无 blocker 但还没批准） |
+| `blocked` | 不能发布（有 blocker） |
 
 ## readiness 阻塞项
 
-readiness blockers 会阻止 publish。只要存在以下任一项，就必须停在评审阶段：
+readiness blockers 会阻止 publish。每个 blocker 有一个**阻塞码**前缀，`comet publish status` 会直接展示 `Readiness:`、`Blockers:`、`Warnings:` 和 `Evidence:`，并给出 `nextAction` 恢复命令：
 
-- 还有 unresolved candidate。
-- required Skill 缺失或歧义。
-- strict 模式下偏好文件漂移。
-- Eval 没跑、Eval 对应旧 hash、或缺少当前 hash 的 Eval 证据。
-- 没有人工 approval，或 approval 对应旧 hash。
-- required capability gap。
-- executable disclosure 未确认。
-- review summary 不是 publishable。
+| 阻塞码 | 含义 |
+| --- | --- |
+| `[candidate]` | 还有 unresolved candidate |
+| `[preference]` | （strict）required Skill 缺失/歧义；偏好漂移 |
+| `[proposal]` | proposal 未确认 |
+| `[composition]` | composition 有 issue |
+| `[control-plane]` | 稳定控制面校验失败 |
+| `[draft]` | 缺少 `currentHash` |
+| `[eval]` | 缺少/失败/对应旧 hash 的 Eval 证据 |
+| `[publish]` | status `ready` 但没有 ready metadata |
 
-<Tip>
-  `comet publish status` 会直接展示 `Readiness:`、`Blockers:`、`Warnings:` 和 `Evidence:`。当 `Readiness: blocked` 时，先根据 blockers 处理候选恢复、Eval 或 review，再继续 publish。
-</Tip>
+完整的阻塞码表和恢复建议见[发布和分发 Skill · 阻塞码](/zh/skill-factory/publishing#阻塞码blocker-codes)。
 
 ## 分发预览是强制的
 
-执行真实分发前必须先跑 preview：
+执行真实分发前**必须先跑 preview**：
 
 ```bash
 comet publish distribute review-helper --platform claude --scope project --preview --json
@@ -123,11 +144,20 @@ comet publish distribute review-helper --platform claude --scope project --confi
 comet publish distribute review-helper --platform claude --scope project --skip-capability <capability> --json
 ```
 
-- required 能力缺口：取消该平台。
-- optional 能力缺口：必须由用户显式选择 skip。
-- Hook/脚本披露：必须由用户确认后才可分发。
+| 能力类型 | 缺口处理 |
+| --- | --- |
+| required 能力缺口 | **取消该平台**，不能跳过 |
+| optional 能力缺口 | 必须**由用户显式选择 skip** |
+| Hook/脚本披露 | 必须**由用户确认**后才可分发 |
 
-`hooks/*.yaml` 是 Comet portable hook descriptor，只在 `comet publish distribute` 编译到目标平台配置后生效。
+`hooks/*.yaml` 是 **Comet portable hook descriptor**，只在 `comet publish distribute` 编译到目标平台配置后生效。
+
+## Bundle 和 publish 的关系
+
+| 命令 | 定位 | 适合谁 |
+| --- | --- | --- |
+| `comet publish` | 用户发布入口 | 普通用户 |
+| `comet bundle` | 高级 Bundle 后端 | 审计、调试、自动化集成 |
 
 ## 下一步
 
