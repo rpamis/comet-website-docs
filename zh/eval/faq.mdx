@@ -1,9 +1,9 @@
 ---
 title: "评估任意 Skill 常见问题"
-description: "解答 comet eval 两种入口、collect/run 区别、失败归因、报告和发布证据的常见疑问。"
+description: "解答 comet eval 两种入口、collect/run 区别、环境准备、失败归因、报告和发布证据的常见疑问。"
 ---
 
-关于 `comet eval` 评估系统、报告解读和发布证据的常见问题。
+关于 `comet eval` 评估系统、环境准备、报告解读和发布证据的常见问题。
 
 ## 基础概念
 
@@ -13,11 +13,35 @@ description: "解答 comet eval 两种入口、collect/run 区别、失败归因
   </Accordion>
 
   <Accordion title="comet eval 和 comet skill eval 有什么区别">
-    `comet eval` 评估 Skill 的产品能力，产出发布前证据。`comet skill eval` 检查某次 Engine Run 是否缺 artifact 或状态，不执行模型任务，不产出发布证据。发布 readiness 只需要 `comet eval`。详见[Runtime eval](/zh/eval/runtime)。
+    `comet eval` 评估 Skill 的产品能力，产出发布前证据（读 `comet/eval.yaml`）。`comet skill eval` 检查某次 Engine Run 是否缺 artifact 或状态，不执行模型任务，不产出发布证据（读 `comet/checks.yaml`）。发布 readiness 只需要 `comet eval`。详见[Runtime eval](/zh/eval/runtime)。
   </Accordion>
 
   <Accordion title="我需要懂 pytest 或 Docker 吗">
     不需要。`comet eval` 封装了底层细节，你只需要知道用 `--manifest` 还是 `--skill-path`。底层细节由 harness 处理。详见[Eval harness](/zh/eval/harness)。
+  </Accordion>
+
+  <Accordion title="两套评估系统是什么意思">
+    创建期评估（`comet eval`，读 `comet/eval.yaml`）和运行期评估（`comet skill eval`，读 `comet/checks.yaml`）。前者是发布证据，后者是 Run 完成度检查。详见[评估系统概览 · 两套评估系统](/zh/eval/overview#两套评估系统不要混淆)。
+  </Accordion>
+</AccordionGroup>
+
+## 环境准备
+
+<AccordionGroup>
+  <Accordion title="运行 eval 需要什么环境">
+    需要 `uv`、Python 3.11+、Docker，以及 `ANTHROPIC_API_KEY`（或 `ANTHROPIC_AUTH_TOKEN`）。核心 Comet 运行时不需要这些，只有 `comet eval` 需要。完整准备步骤见[评估快速上手 · 运行前你需要准备什么](/zh/eval/quickstart#运行前你需要准备什么)。
+  </Accordion>
+
+  <Accordion title="评估瞬间"通过"但感觉没真跑">
+    几乎肯定是环境没准备好：Docker 没起、没有 API key、或 `claude` CLI 不在 PATH。harness 在这些情况下会**跳过**而不是失败。先确认环境就绪。
+  </Accordion>
+
+  <Accordion title="怎么安装 uv">
+    macOS/Linux：`curl -LsSf https://astral.sh/uv/install.sh | sh`。Windows PowerShell：`powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`。`uv` 会自动管理 Python 版本和 `eval/.venv`。
+  </Accordion>
+
+  <Accordion title="API key 怎么配">
+    `export ANTHROPIC_API_KEY=sk-ant-...`，或在 `eval/.env` 里配置（harness 会自动加载）。用代理型凭证（BigModel / OpenRouter）时用 `ANTHROPIC_AUTH_TOKEN`。
   </Accordion>
 </AccordionGroup>
 
@@ -35,13 +59,17 @@ description: "解答 comet eval 两种入口、collect/run 区别、失败归因
   <Accordion title="为什么先 collect 再 run">
     `collect` 只做发现预检查（验证 manifest、task、路径），不消耗模型调用，成本最低，适合刚生成完 Skill 后排错。`run` 才执行真实评估。先 collect 能快速发现配置问题，避免浪费模型调用。详见[快速上手](/zh/eval/quickstart)。
   </Accordion>
+
+  <Accordion title="authoring-skill 和 generic profile 有什么区别">
+    `authoring-skill`（8 维 rubric，maxTurns=8）用于 `/comet-any` 生成的 Skill，检查生成包完整性、resolved-skills 证据、Engine 契约等。`generic`（7 维 rubric，maxTurns=12）用于通用 Skill 冒烟。详见[评估系统概览 · Profile 体系](/zh/eval/overview#profile-体系)。
+  </Accordion>
 </AccordionGroup>
 
 ## 报告与失败
 
 <AccordionGroup>
   <Accordion title="报告在哪里找">
-    CLI 输出会打印 `Report path`，通常是 `eval/local/logs/experiments/<experiment-id>/summary.html`。如果路径里有 `<experiment-id>` 占位符，用同一段输出里的 `Experiment` 值对应查找。详见[读取评估报告](/zh/eval/reports)。
+    CLI 输出会打印 `Report path`，通常是 `eval/local/logs/experiments/<experiment-id>/summary.html`。experiment id 格式是 `<task>_<YYYYMMDD_HHMMSS>`。详见[读取评估报告](/zh/eval/reports)。
   </Accordion>
 
   <Accordion title="评估失败了，怎么判断问题出在哪">
@@ -54,6 +82,10 @@ description: "解答 comet eval 两种入口、collect/run 区别、失败归因
 
   <Accordion title="model 归因失败要重跑吗">
     `model` 归因说明模型行为或工具使用不稳定，重跑通常有效。如果反复失败，考虑降低 Skill 对非确定行为的依赖。
+  </Accordion>
+
+  <Accordion title="Rubric 分很低但 check 全过，算通过吗">
+    算通过。Rubric 是**信息性**评分（`[RUBRIC]` 行和 `RubricAvg`），不直接决定通过与否。真正的通过/失败由校验器和 required skill 调用决定。Rubric 分低是诊断信号，可以用来优化 Skill 但不影响发布门禁。
   </Accordion>
 </AccordionGroup>
 

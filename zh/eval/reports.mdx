@@ -1,6 +1,6 @@
 ---
 title: "读取评估报告（进阶）"
-description: "深入了解 comet eval run --html 生成的报告位置、重点字段、失败归因和下一步判断。"
+description: "深入了解 comet eval run --html 生成的报告位置、experiment id、重点字段、失败归因、rubric 评分和下一步判断。"
 ---
 
 <Info>
@@ -17,36 +17,75 @@ description: "深入了解 comet eval run --html 生成的报告位置、重点�
 eval/local/logs/experiments/<experiment-id>/summary.html
 ```
 
-如果 CLI 输出里显示的是 `<experiment-id>` 占位符，用同一段输出里的 `Experiment` 值对应查找即可。到下面目录查也能找到对应实验：
+`<experiment-id>` 的实际格式是 `<experiment_name>_<YYYYMMDD_HHMMSS>`，例如 `authoring_skill_smoke_20260625_143000`。experiment name 来自第一个参数化测试的 task name（`-` 转 `_`，没有测试时默认 `experiment`）。
+
+如果 CLI 输出里显示的是占位符，用同一段输出里的 `Experiment` 值对应查找即可。到下面目录查也能找到对应实验：
 
 ```text
 eval/local/logs/experiments/
 ```
 
+## 报告目录结构
+
+```text
+eval/local/logs/experiments/<experiment-id>/
+├── summary.md            # 主报告（总是生成）
+├── summary.html          # HTML 版（--html 时）
+├── metadata.json         # experiment 元数据
+├── events/               # stream-json 事件
+├── raw/                  # 原始 stdout / stderr
+├── reports/              # 每次运行的 report.json
+└── artifacts/            # Claude 产出的文件
+```
+
+- `reports/<treatment>_rep<n>_report.json`：每次运行的完整结果，含 `passed`、`checks_passed[]`、`checks_failed[]`、`events_summary`（tokens/cost/skills_invoked/failure_attribution）。
+- `metadata.json`：`experiment_id`、`started_at`、`completed_at`、`total_runs`、`total_passed`、`treatments[]`、`report_outputs`。
+
 ## 优先看什么
 
 打开报告后，优先看这几类信息，而不是逐行读底层日志：
 
-- 评估是否通过
-- 失败归因是 harness、workflow、task 还是 model
+- **评估是否通过**（summary 顶部 / CLI 输出）
+- **失败归因**是 harness、workflow、task 还是 model
 - 失败用例是否和 Skill 目标相关
-- 是否缺少预期 artifact
+- 是否缺少预期 artifact（硬校验）
 - 是否是路径、manifest 或环境问题
 - token / cost / duration 是否异常
 
 ## 失败归因
 
-`comet eval run` 的输出会提示 failure attribution：报告会把失败归到 harness、workflow、task、model 四个桶里。这个归因用于判断下一步应该修 Skill、修 eval 配置，还是重跑环境。
+`comet eval run` 的输出会提示 failure attribution：报告会把失败归到 harness、workflow、task、model 四个桶里。归因逻辑按顺序判断：
+
+| 归因 | 触发条件 | 含义 |
+| --- | --- | --- |
+| `harness` | required skill 完全没被调用；或 generic profile 且无 skill 运行 | 环境/依赖/路径问题，Skill 没真正跑起来 |
+| `task` | check 涉及 artifact path / validator / task directory | 任务定义或 fixture 问题 |
+| `workflow` | check 涉及 `.comet.yaml`/guard/state/transition/archive；或 skill 调用契约失败 | Skill 流程没达预期 |
+| `model` | 默认兜底（任务在可观察的工作流执行后失败） | 模型行为不稳定 |
+
+## Rubric 评分（信息性）
+
+报告里会有 `[RUBRIC] <dim>: <score> - <reason>` 行和汇总的 `RubricAvg` 列。这是**信息性**评分，不直接决定通过与否。不同 profile 的维度：
+
+| Profile | 主要维度 |
+| --- | --- |
+| `generic` | completion、skill_invocation、artifact_presence、instruction_following、interaction_compliance、efficiency、safety_boundary |
+| `comet-workflow` | main_flow、gate_guard、skill_invocation、spec_drift、completion、efficiency、decision_point_compliance、artifact_quality、recovery_resilience |
+| `authoring-skill` | generated_package、resolved_skill_evidence、engine_contract、review_readiness 等 |
+
+<Note>
+  Rubric 是<strong>诊断工具</strong>，不是<strong>通过条件</strong>。真正的通过/失败由校验器（expected artifacts、test_scripts）和"required skill 是否被调用"决定。Rubric 分低但 check 全过，仍然算通过。
+</Note>
 
 ## 如何决定下一步
 
 | 报告信号 | 含义 | 下一步 |
 | --- | --- | --- |
 | manifest 读取失败 | 路径或文件不存在 | 修 `comet/eval.yaml` 或路径 |
-| harness 失败 | 环境、依赖、Docker、网络 | 检查依赖、Docker、网络或本地环境 |
-| workflow 失败 | Skill 执行流程没达到预期 | 回到 `/comet-any` 优化 Skill |
-| task 失败 | 任务定义、验证条件或 fixture 问题 | 检查 eval 任务定义和 fixture |
-| model 不稳定 | 模型行为或工具使用不稳定 | 重跑或降低对非确定行为的依赖 |
+| `harness` 归因 | 环境、依赖、Docker、网络 | 检查 Docker、`ANTHROPIC_API_KEY`、`claude` CLI |
+| `workflow` 归因 | Skill 执行流程没达到预期 | 回到 `/comet-any` 优化 Skill |
+| `task` 归因 | 任务定义、验证条件或 fixture 问题 | 检查 eval 任务定义和 fixture |
+| `model` 归因 | 模型行为或工具使用不稳定 | 重跑或降低对非确定行为的依赖 |
 | 缺少 expected artifact | 任务没产出预期文件 | 检查任务定义或 Skill 产出逻辑 |
 
 ## 失败时怎么判断是哪个环节
@@ -62,22 +101,32 @@ eval/local/logs/experiments/
 
 ### run 失败
 
-优先看报告里的 failure attribution，按上面的桶定位。
+优先看报告里的 failure attribution，按上面的桶定位。再看 `reports/<treatment>_rep<n>_report.json` 里的 `events_summary`：
+
+- `skills_invoked` 为空 → harness 归因，Skill 没跑起来
+- `files_created` 缺少 expected artifact → Skill 没产出预期文件
+- `total_tokens` 异常低 → 可能 Skill 提前终止
+
+### 评估"瞬间通过"
+
+几乎肯定是环境没准备好导致 suite 被跳过。检查 Docker、API key、`claude` CLI。
 
 ### HTML 报告没找到
 
-先看 CLI 输出的 `Experiment` 和 `Report path`。如果路径里有 `<experiment-id>`，用实际 experiment id 到 `eval/local/logs/experiments/` 目录查。
+先看 CLI 输出的 `Experiment` 和 `Report path`。如果路径里有占位符，用实际 experiment id 到 `eval/local/logs/experiments/` 目录查。
 
 ## 报告如何进入发布
 
-不要手工编辑 Bundle 状态，也不要手工把报告路径写进内部 JSON。让 `/comet-any` 或 Bundle 后端记录 eval 结果，并让 `comet publish status` 读取 readiness。
+**不要**手工编辑 Bundle 状态，也**不要**手工把报告路径写进内部 JSON。让 `/comet-any` 或 Bundle 后端记录 eval 结果，并让 `comet publish status` 读取 readiness。
 
 Eval 证据进入 readiness 的规则：
 
-- 没有 eval 证据：不能 publish
-- eval 失败：不能 publish
-- eval 证据对应旧 hash：不能 publish
-- eval 通过且 hash 匹配：可以进入 review / publish 判断
+| 情况 | 能否 publish |
+| --- | --- |
+| 没有 eval 证据 | 不能 |
+| eval 失败 | 不能 |
+| eval 证据对应旧 hash | 不能 |
+| eval 通过且 hash 匹配 | 可以进入 review / publish 判断 |
 
 ## 下一步
 
