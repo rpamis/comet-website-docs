@@ -1,205 +1,100 @@
 ---
-title: "hotfix 预设"
-description: "使用 hotfix 轻量路径快速修复明确 bug：open→build→verify→archive 四步，跳过 brainstorming 和完整 plan，保留状态恢复、验证和归档。"
+title: "Comet Hotfix Preset：无需 Brainstorming 的快速 Bug Fix"
+sidebarTitle: "Hotfix"
+description: "hotfix 预设会跳过 brainstorming 和 deep design，直接从 open 进入 build、verify 和 archive，适合小型且已充分理解的 bug fixes。"
 ---
 
-hotfix 是 Comet 的轻量预设之一,适合修复明确的 bug。它跳过完整 brainstorming 和完整 plan,走 `open → build → verify → archive` 四步,但仍保留 OpenSpec 状态、验证和归档。
+hotfix 预设面向小型、聚焦且解决方案已经清晰的 bug fixes。它会跳过 brainstorming phase 以更快推进，提供一条从问题描述到 archived fix 的精简路径，避免 full workflow design 的开销。
 
-## 调用的 skill
+## 何时使用 Hotfix
 
-| Skill | 用途 | 何时调用 |
-| --- | --- | --- |
-| `openspec-new-change` | 创建精简 change | Step 1 快速开启 |
-| `systematic-debugging` | 异常调试 | build 过程中出现崩溃/测试失败/构建失败时强制加载 |
-| `comet-verify` | 验证 | Step 4 |
-| `comet-archive` | 归档 | Step 5 |
+仅当满足以下**所有**条件时，才使用 `/comet-hotfix`：
 
-hotfix **不调用** `openspec-explore`（不做长探索）、`brainstorming`（不做深度设计）、`writing-plans`（不做完整 plan,除非任务超过 3 个）。
+- fix 面向现有 functionality，不引入 new capability
+- change scope 可预测：通常影响 **少于 3 个文件**
+- 不需要 **interface changes** 或 architecture adjustments
+- fix 不引入 **new public API**
+- fix scope 限定在 **single function or module** 内
+- 不涉及 **database schema changes**
 
-## 适用条件（必须全部满足）
+当这些条件都成立时，hotfix 会提供从 bug description 到 archive 的最快路径。
 
-- 修复已有功能的 bug,不新增 capability
-- 不涉及接口变更或架构调整
-- 改动范围可预估（文件数仅作提示,不是硬性升级条件）
+## Hotfix workflow
 
-## 不适合使用
-
-- 需要跨模块重新设计
-- 需要数据库 schema 变更
-- 引入新的 capability 或 public API
-- 需要产品方案讨论
-- 修复过程中发现需求不清晰
-
-<Note>
-  如果修复过程中命中升级信号（见下文"升级判定"）,Comet 会暂停让你选择继续 hotfix 还是升级 full。
-</Note>
-
-## 完整流程
-
-### Step 1：快速开启（preset open）
-
-加载 `openspec-new-change` 创建精简版产物（不做 `openspec-explore` 长探索）：
-
-| 产物 | 内容 |
-| --- | --- |
-| proposal.md | 问题描述 + 根因分析 + 修复目标（无需方案对比） |
-| design.md | 修复方案（1 个即可,无需多方案对比） |
-| tasks.md | 修复任务清单 |
-| delta spec | **通常不需要**（除非修复改变了已有 spec 的验收场景） |
-
-初始化 hotfix 状态：
-
-```bash
-node "$COMET_STATE" init <name> hotfix
-node "$COMET_STATE" check <name> open
-node "$COMET_GUARD" <change-name> open --apply
+```
+/comet-hotfix
+  open → build → verify → archive
+  (brainstorming skipped)
 ```
 
-### Step 2：直接构建（preset build）
+hotfix execution chain 是完整五阶段 workflow 的精简子集：
 
-使用 hotfix 默认值：`build_mode: direct`、`review_mode: off`。跳过 `brainstorming` 和 `writing-plans`。
+| Phase | 会发生什么 |
+|-------|-------------|
+| **Open** | 精简 artifact creation：`proposal.md`、`design.md`、`tasks.md`（无 multi-solution comparison；除非影响现有 acceptance scenarios，否则无 delta spec） |
+| **Build** | Direct build（`build_mode: direct`）：tasks 逐个执行，每个 task 运行 formatter 和 tests，commits 使用 `fix:` prefix |
+| **Verify** | Root cause elimination check，然后进行 `comet-verify` scale assessment（小型 hotfix 通常符合 lightweight verification：≤ 3 tasks、≤ 2 files） |
+| **Archive** | 确认 `verify_result: pass` 后复用 `/comet-archive` |
 
-逐任务执行：
+## 启动 Hotfix
 
-1. 读取 tasks.md 未完成任务
-2. 对每个任务：改代码 → 格式化 → 跑测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
-3. 全部完成后显式运行项目测试和构建命令
+在你的 AI 编程工具中，描述你想修复的 bug。Comet 会自动评估你的描述：
+
+- 如果满足 hotfix conditions，`/comet` 会 **auto-route** 到 `/comet-hotfix`，无需你直接调用。
+- 你也可以直接调用 `/comet-hotfix`，明确使用该预设。
+
+调用后，hotfix workflow 会**连续**运行，不会暂停等待输入，除非到达定义好的 decision points（upgrade conditions 和 verification failures）。
+
+## Build mode
+
+Hotfix 默认使用 `direct` build mode。这意味着单个 agent 会顺序执行所有 tasks，不启动 sub-agents，也不生成完整 implementation plan。如果 task count 超过 3，agent 会转入 `/comet-build` 的 plan 和 execution method selection。
+
+## 升级条件
 
 <Warning>
-  执行过程中出现崩溃、测试失败、构建失败时,<strong>强制加载</strong> <code>systematic-debugging</code>。根因调查完成前不得修复源码。详见 <a href="/zh/concepts/decision-points">异常调试协议</a>。
+如果在 hotfix 期间发现以下任一条件，Comet 会暂停并要求你确认是否升级到 full workflow。Agent **不能**自动继续 hotfix，必须得到你的明确确认。
+
+| 条件 | 为什么触发升级 |
+|-----------|---------------------------|
+| Change 涉及 **3 个或更多文件** | 超出 single-point fix scope |
+| 需要 architecture changes（new modules、interfaces 或 dependencies） | 需要 deep design |
+| 需要 database schema changes | 结构调整需要完整 planning |
+| Fix 引入 **new public API** | 创建外部 interface，需要 design review |
+| Fix scope 超出 **single function or module** | 需要协调式 changes |
+
+Upgrade 需要交互式确认。如果你拒绝，hotfix 会停止，Comet 会报告该 change 已超出 hotfix scope。
 </Warning>
 
-**任务超过 3 个**时转入 `/comet-build` 的计划与执行方式选择（注意这不触发 full 升级,只切换执行方式）。
+## 升级到 Full Workflow
 
-**修复影响已有 spec 验收场景**时,创建 delta spec（仅 `## MODIFIED Requirements` 部分）。
+当确认 hotfix 需要升级时，Comet 会遵循以下路径：
 
-### Step 3：根因消除检查
+```
+hotfix → full (upgrade)
+  open → [supplement Design Doc] → design → build → verify → archive
+```
 
-build guard 之前执行,确保修复确实消除问题根因：
+你确认后，Comet 会：
 
-1. 读 proposal.md 的 bug 描述和根因
-2. 搜索验证问题代码不再存在
-3. 根因未消除 → 回 Step 2 继续修复（仍在 build 阶段,无需状态回退）
+1. 将 `.comet.yaml` 中的 `workflow` 字段更新为 `full`
+2. 加载 `comet-design` skill，在现有 hotfix artifacts 基础上补充完整 Design Doc
+3. 从 design phase 起正常进入 full workflow
+
+这意味着 hotfix 的 `proposal.md`、`design.md` 和 `tasks.md` 会被保留并继续扩展，你不需要从头开始。
+
+## Phase guards
+
+Hotfix 会强制执行与 full workflow 相同的 phase guard transitions：
 
 ```bash
-node "$COMET_GUARD" <change-name> build --apply
+# Transition open → build
+"$COMET_BASH" "$COMET_GUARD" <change-name> open --apply
+
+# Transition build → verify (after root cause elimination check)
+"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
+
+# Transition verify → archive (handled by /comet-verify)
+"$COMET_BASH" "$COMET_GUARD" <change-name> verify --apply
 ```
 
-### Step 4：验证（preset verify）
-
-加载 `comet-verify`,由规模评估决定 light 或 full：
-
-| 场景 | 验证路径 |
-| --- | --- |
-| 无 delta spec 的小范围 hotfix | 通常 light（6 项检查,review_mode: off 不自动审查） |
-| 创建了 delta spec | 按规模评估规则进入 full |
-
-想增加审查可在验证前手动设置：
-
-```bash
-node "$COMET_STATE" set <name> review_mode standard
-```
-
-### Step 5：归档（preset archive）
-
-加载 `comet-archive`。要求 `verify_result: pass`,并等待归档前最终确认。如有 delta spec,同步到 main spec。
-
-## 流程图
-
-```mermaid
-flowchart TD
-  A["bug 描述"] --> B["Step 1 快速开启<br/>openspec-new-change"]
-  B --> C["Step 2 直接构建<br/>build_mode: direct"]
-  C --> D{"命中升级信号?"}
-  D -->|是| E["升级判定（停顿点）"]
-  E -->|继续 hotfix| F
-  E -->|升级 full| G["preset-escalate → design"]
-  D -->|否| F["Step 3 根因消除检查"]
-  F --> H{"根因消除?"}
-  H -->|否| C
-  H -->|是| I["Step 4 验证<br/>comet-verify"]
-  I --> J{"验证通过?"}
-  J -->|否| K["验证失败决策"]
-  K -->|修复| C
-  J -->|是| L["Step 5 归档<br/>comet-archive"]
-  L --> M["完成"]
-```
-
-## 升级判定
-
-hotfix 的范围判定采用三层分工,避免"用纯文件数当硬性升级条件"误杀正常 bug 修复：
-
-### 1. 质变信号（命中任一即暂停）
-
-| 质变信号 | 说明 |
-| --- | --- |
-| 跨模块协调修改 | 需要跨组件、跨层协同改动 |
-| 需要新增 capability | 修复引入了新能力 |
-| 数据库 schema 变更 | 结构性调整 |
-| 引入新的 public API | 修复产生了新的对外接口 |
-| 触及深层架构问题 | 根因消除检查发现需架构层面方案 |
-
-### 2. 文件数 tripwire（用户拍板）
-
-改动文件数超提示阈值（如超过 4 个）时暂停交用户决定。文件数是提示触发器,不是硬性升级条件——文件多不等于有质变。
-
-### 3. 验证级别（scale 脚本判定）
-
-`comet-state scale` 只决定 `verify_mode`,不卡流程、不触发升级。
-
-### 升级决策（停顿点）
-
-| 选项 | 结果 |
-| --- | --- |
-| A：继续 hotfix | 用户确认范围可控,继续 open→build→verify→archive |
-| B：升级 full | 用户认为需要深度设计 |
-
-选 B 后用合法升级通道：
-
-```bash
-node "$COMET_STATE" transition <name> preset-escalate
-```
-
-原子地设 `workflow`/`classic_profile` 为 `full`、`phase` 回退到 `design`、清空 `design_doc`,然后加载 `comet-design` 补 Design Doc,走完整流程。
-
-## 连续执行模式
-
-hotfix 默认**一次性连续执行**——调用 `/comet-hotfix` 后自动推进,不主动停顿。
-
-例外情况（无论 `auto_transition` 取何值都必须暂停）：
-
-1. 命中升级判定信号
-2. 任务超过 3 个转入 `/comet-build` 时的工作区和执行方式选择
-3. 验证阶段的验证失败决策和分支处理
-4. 归档前最终确认
-
-`auto_transition: false` 时降级为逐阶段手动推进。
-
-<Tip>
-  hotfix 不是"无流程"。它只是减少前期设计成本,同时保留恢复、验证和归档。
-</Tip>
-
-## 和 full workflow 的区别
-
-| 维度 | hotfix | full |
-| --- | --- | --- |
-| 流程 | open→build→verify→archive | open→design→build→verify→archive |
-| brainstorming | 跳过 | 必须做 |
-| plan | 跳过（除非任务超过 3 个） | 必须做 |
-| build_mode | 默认 direct | 需选择（subagent/executing-plans/direct） |
-| review_mode | 默认 off | 需选择（off/standard/thorough） |
-| delta spec | 通常不需要 | 按 PRD 拆分 |
-| handoff | 不需要 | design 阶段必须生成 |
-
-## 退出条件
-
-- Bug 已修复,测试通过
-- change 已归档
-- 如有 spec 变更,已同步到 main spec
-
-## 下一步
-
-- [tweak 预设](/zh/presets/tweak) — 另一个轻量预设
-- [自动推进机制](/zh/concepts/auto-transition) — preset 的连续执行和升级
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — hotfix 的停顿点
-- [verify 阶段](/zh/phases/verify) — hotfix 复用的验证流程
+Guards 会在推进前验证 exit conditions。没有设置 `isolation` 和 `build_mode` 时，hotfix 不能进入 `verify`；没有 `verify_result: pass` 时，不能 archive。
