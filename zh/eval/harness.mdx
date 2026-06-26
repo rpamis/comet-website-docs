@@ -139,6 +139,31 @@ eval/local/logs/experiments/<experiment-id>/
 
 字段包括：`passed`、`checks_passed[]`、`checks_failed[]`、`events_summary`（duration、turns、tool_calls、tokens、cost、files_created、skills_invoked、failure_attribution）。
 
+## 一次评估内部：Docker 隔离 + 双 Agent + rubric
+
+理解这一段能帮你判断评估结果是否可信。`comet eval run` 内部按 `treatment × task × reps` 跑，每次运行：
+
+```mermaid
+flowchart TD
+    A["注入 treatment<br/>(Skills + CLAUDE.md)"] --> B["构建隔离 Docker 环境<br/>(每个 task 的 Dockerfile)"]
+    B --> Interact{"interaction.mode?"}
+    Interact -->|none / generic| C1["单轮：claude -p 跑完"]
+    Interact -->|auto_user / comet、authoring| C2["多轮双 Agent 循环<br/>被测 Agent + 用户模拟 Agent"]
+    C1 --> D["解析 stream-json 事件"]
+    C2 --> D
+    D --> E["跑任务校验器<br/>(target_artifacts + test_scripts)"]
+    E --> F["跑 profile rubric<br/>输出 [RUBRIC] 各维度分"]
+    F --> G["计算失败归因<br/>harness/workflow/task/model"]
+    G --> H["写 report.json + summary"]
+```
+
+关键点：
+
+- 模型在 **Docker 容器**里运行，和你的工作目录隔离。
+- **双 Agent 循环**（`auto_user` 模式）：被测 Agent 跑被测 Skill，每个决策点由**用户模拟 Agent**回复（批准合理方案、选默认、推动前进，永不拒绝、不写代码）。被测 Agent 用 `--resume` 续接同一会话，最多 `max_turns` 轮（comet-workflow 12、authoring-skill 8），命中"完成"提前结束。这让多阶段工作流能**自动跑完整条链**。完整循环和决策点检测见[评分指标与双 Agent 评测](/zh/eval/scoring)。
+- **rubric 评分**在校验器之后跑，把结果作为 `[RUBRIC]` 信息性检查追加（comet-workflow rubric 永不产生硬失败；generic/authoring 对特定缺失项产生硬失败）。
+- 真正的**通过/失败**由任务校验器（expected artifacts 存在 + test_scripts 通过）决定，rubric 分和 pass@k 是诊断信息。
+
 ## 报告输出配置
 
 报告输出由 `ReportOutputConfig` 控制，优先级：
@@ -193,6 +218,7 @@ LangSmith suite 额外需要 `LANGSMITH_API_KEY`、`LANGSMITH_TRACING=true`、`T
 
 ## 下一步
 
+- [评分指标与双 Agent 评测](/zh/eval/scoring) — rubric 维度细则、pass@k/pass^k、双 Agent 交互循环
 - [读取评估报告](/zh/eval/reports) — 学会看懂报告信号和失败归因
 - [comet eval 命令](/zh/cli/eval) — 完整选项和子命令参考
 - [评估系统概览](/zh/eval/overview) — eval 在流程中的位置和 eval.yaml 格式
