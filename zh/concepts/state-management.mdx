@@ -1,155 +1,250 @@
 ---
-title: "Comet .comet.yaml State Management 字段参考"
-sidebarTitle: "状态机管理"
-description: ".comet.yaml 参考：Comet 可恢复五阶段 workflow state 的字段定义、state machine constraints 和 bash transition commands。"
+title: "状态与配置"
+description: "理解 .comet.yaml 的所有字段含义、.comet/config.yaml 项目配置、配置优先级、环境变量，以及用户可配置什么、怎么配置。"
 ---
 
-Comet 的 state machine 为每个 change 使用两个 YAML 文件。一个归 OpenSpec 所有，用于跟踪正式的 spec lifecycle。另一个归 Comet 所有，用于跟踪 workflow engine 需要知道的一切：change 处于哪个 phase、应该如何 build、verification 是否通过，以及 change 是否已 archived。二者配合后，即使 AI 编程会话被关闭再重新打开，agent 也能从长时间运行的 change 中断处准确恢复。
+Comet 的恢复能力来自文件化状态。理解两层状态文件和一层项目配置，你就能知道 Comet 在每个阶段读什么、用户能配置什么、以及字段代表什么意思。
 
-## 解耦的 State Files
+## 两层状态 + 一层配置
 
-| File | Owner | 用途 |
-|------|-------|---------|
-| `.openspec.yaml` | OpenSpec | 由 OpenSpec Skills 管理的 spec lifecycle metadata、change identity 和 status annotations |
-| `.comet.yaml` | Comet | 由 Comet scripts 管理的 workflow phase、execution mode（`build_mode`、`isolation`）、verification status、artifact paths 和 archive state |
-
-这两个文件都位于 `openspec/changes/<name>/` 下的 change directory 中。保持分离意味着 OpenSpec operations 永远不会破坏 Comet workflow state，Comet state updates 也不会干扰 OpenSpec 的 spec-lifecycle logic。从直接编辑的角度看，Agents 应将 `.comet.yaml` 视为只读，所有写入都应通过 `comet-state.sh` 完成。
-
-## The `.comet.yaml` File
-
-一个完整填充的 `.comet.yaml` 如下所示：
-
-```yaml
-workflow: full
-phase: build
-build_mode: subagent-driven-development
-build_pause: null
-isolation: branch
-verify_mode: null
-design_doc: docs/superpowers/specs/YYYY-MM-DD-topic-design.md
-plan: docs/superpowers/plans/YYYY-MM-DD-feature.md
-base_ref: a1b2c3d4e5f6...
-verify_result: pending
-verification_report: null
-branch_status: pending
-created_at: 2026-05-26
-verified_at: null
-archived: false
-direct_override: false
-build_command: null
-verify_command: null
-handoff_context: openspec/changes/<name>/.comet/handoff/design-context.json
-handoff_hash: <sha256>
+```mermaid
+flowchart LR
+  A[".comet.yaml<br/>每个 change 一个"] --> B["用户可见工作流投影<br/>phase / build_mode / verify_result"]
+  C[".comet/run-state.json<br/>每个 change 或 run 一个"] --> D["machine-owned Run state<br/>currentStep / pending / artifacts"]
+  E[".comet/config.yaml<br/>项目级，全局一份"] --> F["项目默认值<br/>context_compression / review_mode / auto_transition"]
+  B --> G["status / doctor / guard"]
+  D --> G
+  F --> H["init 时快照到 .comet.yaml"]
 ```
 
-### 核心字段
-
-| 字段 | 允许值 | 含义 |
-|-------|---------------|---------|
-| `workflow` | `full`, `hotfix`, `tweak` | 此 change 使用的 workflow 预设。它在 init 时设置，并驱动整个 pipeline 中的 routing decisions。 |
-| `phase` | `open`, `design`, `build`, `verify`, `archive` | 当前 workflow phase。由 `comet-state.sh init` 初始化为 `open`；只能通过 guard transitions 推进。 |
-| `build_mode` | `subagent-driven-development`, `tdd`, `direct`, or `null` | 用户在 build 阶段选择的 Superpowers execution method。必须在 `build → verify` transition 前设置。 |
-| `build_pause` | `plan-ready`, `null` | 内部 build-phase pause marker。参见下方 [The build_pause Field](#the-build_pause-field)。 |
-| `isolation` | `branch`, `worktree`, `null` | Workspace isolation method。`hotfix` 和 `tweak` 默认使用 `branch`；`full` workflow 会保持 `null`，直到用户在 Phase 3 选择。必须在 `build → verify` 前解析完成。 |
-| `verify_mode` | `light`, `full`, `null` | Verification thoroughness。`tweak` 使用 `light`；`full` workflow 和 `hotfix` 使用 `full`。 |
-| `verify_result` | `pending`, `pass`, `fail` | 最近一次 verification run 的结果。`pass` 作为 archive phase 的门禁；`fail` 会触发阻塞性的用户决策。 |
-| `verification_report` | File path or `null` | 已写入 verification report file 的路径。必须指向一个现有文件，才允许 `verify-pass` transition。 |
-| `branch_status` | `pending`, `handled` | Branch operations（merge、close 或 carry-forward）是否已完成。Verify 通过前必须是 `handled`。 |
-| `archived` | `true`, `false` | Change 是否已完成 archive phase。一旦为 `true`，workflow 即完成，目录已移动到 archive tree。 |
-| `verified_at` | ISO timestamp or `null` | 应用 `verify-pass` transition 时由 `comet-state.sh` 写入的 timestamp。 |
-| `created_at` | Date string (`YYYY-MM-DD`) or `null` | Change 创建日期，由 `comet-state.sh init` 自动设置。 |
-
-### Artifact Path 字段
-
-| 字段 | 允许值 | 含义 |
-|-------|---------------|---------|
-| `design_doc` | File path or `null` | Phase 2 产出的 Superpowers Design Doc（technical RFC）路径。Brainstorming 完成后由 `comet-design` 写入。 |
-| `plan` | File path or `null` | Phase 3 产出的 Superpowers implementation plan 路径。生成 plan file 时写入。 |
-| `base_ref` | Git commit SHA or `null` | Change init 时记录的 Git commit SHA。在没有 plan 时用于 scale assessment。 |
-| `handoff_context` | File path or `null` | 离开 Phase 2 时由 `comet-handoff.sh` 生成的 design-context JSON package 路径。用于将可追踪的 OpenSpec context 传入 Superpowers。 |
-| `handoff_hash` | SHA-256 hex string or `null` | handoff context file 的 hash，由 `comet-handoff.sh` 记录。Guard 会在 build phase 开始前验证此 hash。 |
-
-### 可选和 Override 字段
-
-| 字段 | 允许值 | 含义 |
-|-------|---------------|---------|
-| `direct_override` | `true`, `false` | 允许在 `full` workflow 中使用 `build_mode: direct`。必须显式设置为 `true`；没有此 flag 时，guard 会阻止 full workflows 使用 `direct` mode。 |
-| `build_command` | Shell command string or `null` | Project build command。如果已设置，`comet-guard.sh` 会在 build-phase validation 期间先运行它并打印失败输出。 |
-| `verify_command` | Shell command string or `null` | Project verification command。Verify guard 会先运行它；如果不存在，则回退到 `build_command`。 |
-
-## State Machine Constraints
+| 文件 | 位置 | 谁管理 | 作用 |
+| --- | --- | --- | --- |
+| `.comet.yaml` | `openspec/changes/<name>/.comet.yaml` | 用户可见，通过 `/comet` 和 guard 流转 | 工作流投影：阶段、执行方式、验证结果 |
+| `.comet/run-state.json` | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | machine-owned，不要手编 | Engine Run 细节：currentStep、pending、trajectory |
+| `.comet/config.yaml` | 项目根 `.comet/config.yaml` | 用户可手写或由 init 生成 | 项目级默认值，init 时快照到新 change |
 
 <Warning>
-以下 constraints 是由 `comet-guard.sh` 和 `comet-state.sh` 共同强制执行的 **hard rules**。如果未满足这些条件就尝试推进阶段，会产生带可执行建议的 `[HARD STOP]` error。
-
-- **`isolation` 必须是 `branch` 或 `worktree`**，才允许 `build → verify` transition。`null` 值会阻止 transition。
-- **`build_mode` 必须已选择**（非 null），才允许 `build → verify` transition。
-- **`full` workflow 中的 `build_mode: direct` 需要 `direct_override: true`**。没有此 flag 时，guard 会拒绝 transition。`hotfix` 和 `tweak` 预设可以自由使用 `direct`。
-- **`verification_report` 必须指向一个现有文件**，才允许 `verify-pass` transition。`null` 值或指向不存在文件的路径都会阻止 transition。
-- **`branch_status` 必须是 `handled`**，verify 才能通过。Branch operations 不能跳过。
-- **`build_pause: plan-ready` 不得写入 `build_mode`**。它是 pause marker，不是 execution mode。见下方说明。
+  不要手工编辑 `.comet/run-state.json` 的 machine-owned 字段，也不要手工把已归档 change 标成完成。归档应通过 `/comet-archive` 完成。
 </Warning>
 
-## The `build_pause` Field
+## 项目配置：.comet/config.yaml
 
-`build_pause` 是只在 build 阶段内部使用的特殊 marker，用于记录一次有意的阶段中暂停。它 **不是 execution mode**，绝不能赋值给 `build_mode`。
+`.comet/config.yaml` 是项目级配置，全局一份。`comet init` 会在项目级安装时自动生成（不存在才写），你也可以手写或提交到仓库。
 
-| Value | 含义 |
-|-------|---------|
-| `null` | 当前没有 pause。正常 build execution。 |
-| `plan-ready` | Implementation plan 已生成。用户选择在此暂停，通常是为了在开始执行前切换 AI models，并且尚未选择 `isolation` 或 `build_mode`。 |
+### 生成的内容
 
-**恢复 `plan-ready` pause 时：**
-
-1. Comet 检测到 `build_pause: plan-ready`，并确认 `plan` 中路径指向的 plan file 存在。
-2. 现有 plan 会原样复用，**不会重新生成**。
-3. 系统会提示用户选择 `isolation` 和 `build_mode` 以继续。
-4. 两者都选择后，`build_pause` 会清除为 `null`，execution 恢复。
-
-如果设置了 `build_pause: plan-ready` 但 plan file 缺失，Comet 会进入 corrupted-state recovery flow，并可能重新生成 plan。
-
-## State Transitions 如何工作
-
-Agents 使用 `comet-state.sh` 通过 state transitions 推进 `.comet.yaml`。不允许直接编辑 YAML，所有 state writes 都要通过该脚本，以确保 schema validity、enum correctness 和一致的 field co-updates。
-
-实践中，大多数 transitions 会在 phase exits 时由 `comet-guard.sh --apply` 自动触发。`--apply` flag 会指示 guard 验证 exit conditions；如果通过，则在内部调用 `comet-state.sh transition`。必要时你也可以直接触发 transitions：
-
-```bash
-"$COMET_BASH" "$COMET_STATE" transition <change-name> open-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> design-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> build-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> verify-pass
-"$COMET_BASH" "$COMET_STATE" transition <change-name> verify-fail
-"$COMET_BASH" "$COMET_STATE" transition <archive-name> archived
+```yaml
+# context_compression: off | beta
+context_compression: off
+# review_mode: off | standard | thorough
+review_mode: off
+# auto_transition: true | false
+auto_transition: true
 ```
 
-每个 transition event 都映射到一组 field updates：
+### 三个配置项
 
-| Event | 对 `.comet.yaml` 的影响 |
-|-------|------------------------|
-| `open-complete` | 设置 `phase: design` |
-| `design-complete` | 设置 `phase: build`，写入 `handoff_context` 和 `handoff_hash` |
-| `build-complete` | 设置 `phase: verify` |
-| `verify-pass` | 设置 `verify_result: pass`，写入 `verified_at` timestamp |
-| `verify-fail` | 设置 `verify_result: fail` |
-| `archived` | 设置 `archived: true`、`phase: archive` |
+| 配置项 | 允许值 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `context_compression` | `off` \| `beta` | `off` | 控制 design→build 交接时的上下文压缩。详见[上下文压缩机制](/zh/concepts/context-compression) |
+| `review_mode` | `off` \| `standard` \| `thorough` | `off`（作为默认值） | 控制代码审查强度。详见[代码审查机制](/zh/concepts/review-mode) |
+| `auto_transition` | `true` \| `false` | `true` | 阶段推进后是否自动调用下一个阶段 Skill |
 
-`$COMET_BASH` 和 `$COMET_STATE` 是由 `comet-env.sh` 导出的环境变量。始终先 source 这个 helper，并在整个会话中使用这些变量，而不是硬编码 script paths：
+<Note>
+  项目配置的值在创建新 change 时<strong>快照</strong>到该 change 的 <code>.comet.yaml</code>。之后修改项目配置不影响已有 change——这保证每个 change 的行为是确定的。
+</Note>
 
-```bash
-COMET_ENV="$(find . "$HOME"/.*/skills "$HOME/.config" "$HOME/.gemini" \
-  -path '*/comet/scripts/comet-env.sh' -type f -print -quit 2>/dev/null)"
-. "$COMET_ENV"
+## 配置优先级
 
-# Now use $COMET_GUARD, $COMET_STATE, $COMET_HANDOFF, $COMET_ARCHIVE
-"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
+每个配置项的运行时值按以下优先级解析：
+
+```text
+change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > 默认值
 ```
 
-### Guard vs. Direct Transition
+| 层级 | 说明 | 设置方式 |
+| --- | --- | --- |
+| change 级 `.comet.yaml` | 最高优先级。change 创建时从项目配置快照，之后由 `/comet` 流转 | 由 `/comet` 阶段 Skill 写入 |
+| 环境变量 | 仅在 change 级字段为空时生效，适合 CI/CD 临时覆盖 | `export COMET_AUTO_TRANSITION=true` |
+| 项目级 `.comet/config.yaml` | change 级为空、环境变量也未设时的回退 | 手写或 init 生成 |
+| 默认值 | 最后回退 | 见上表 |
 
-| 方法 | 何时使用 |
-|--------|-------------|
-| `comet-guard.sh <name> <phase> --apply` | 阶段结束时使用。先验证 exit conditions，然后应用 transition |
-| `comet-state.sh transition <name> <event>` | 当不需要 guard validation 时直接更新 state（例如 recovery flows、script internals） |
+## auto_transition 详解
 
-Guard 是权威的 exit check。直接调用 `comet-state.sh transition` 会绕过 validation，只有在调用上下文已经独立验证 preconditions 时才应这样做。
+`auto_transition` 控制阶段推进后是否自动调用下一个 Skill。
+
+| 值 | 行为 |
+| --- | --- |
+| `true`（默认） | guard 推进 `phase` 后，输出 `NEXT: auto`，自动调用下一个阶段 Skill |
+| `false` | guard 推进 `phase` 后，输出 `NEXT: manual`，打印 HINT，由你手动运行下一个 Skill |
+
+<Warning>
+  <strong>阶段推进一定发生</strong>——guard 的 <code>--apply</code> 总是更新 <code>phase</code> 字段，与 <code>auto_transition</code> 无关。<code>auto_transition</code> 只影响是否自动调用下一个 Skill。用户决策点（确认 proposal、选择执行方式等）无论 <code>auto_transition</code> 是什么都会阻塞。
+</Warning>
+
+环境变量覆盖（仅 change 级为空时生效）：
+
+```bash
+export COMET_AUTO_TRANSITION=true
+```
+
+## .comet.yaml 字段全表
+
+每个活跃 change 的 `.comet.yaml` 包含以下字段。
+
+### 工作流与阶段
+
+| 字段 | 类型 / 允许值 | 含义 |
+| --- | --- | --- |
+| `workflow` | `full` \| `hotfix` \| `tweak` | 工作流预设 |
+| `phase` | `open` \| `design` \| `build` \| `verify` \| `archive` | 当前阶段。init 设为 `open`，guard 推进 |
+| `auto_transition` | `true` \| `false` | 是否自动调用下一个 Skill |
+
+### 执行方式
+
+| 字段 | 类型 / 允许值 | 含义 |
+| --- | --- | --- |
+| `build_mode` | `subagent-driven-development` \| `executing-plans` \| `direct` | 执行方式 |
+| `build_pause` | `null` \| `plan-ready` | build 内部暂停点。`plan-ready` = 计划已生成，暂停等用户选择 |
+| `subagent_dispatch` | `null` \| `confirmed` | 只有 `confirmed` 才允许 `build_mode: subagent-driven-development` |
+| `tdd_mode` | `tdd` \| `direct` | `tdd` 强制每个任务先写失败测试；`direct` 不强制 |
+| `review_mode` | `off` \| `standard` \| `thorough` | 代码审查强度。详见[代码审查机制](/zh/concepts/review-mode) |
+| `isolation` | `branch` \| `worktree` | 工作区隔离方式 |
+| `context_compression` | `off` \| `beta` | 从项目配置快照。详见[上下文压缩机制](/zh/concepts/context-compression) |
+
+### 验证与分支
+
+| 字段 | 类型 / 允许值 | 含义 |
+| --- | --- | --- |
+| `verify_mode` | `light` \| `full` | 验证深度 |
+| `verify_result` | `pending` \| `pass` \| `fail` | 验证结果 |
+| `verification_report` | 相对路径 | 验证报告路径，verify pass 前必须指向已存在的文件 |
+| `branch_status` | `pending` \| `handled` | 分支处理状态，verify pass 前必须为 `handled` |
+| `verified_at` | `YYYY-MM-DD` 或 `null` | 验证通过时间 |
+
+### 路径引用
+
+| 字段 | 类型 / 允许值 | 含义 |
+| --- | --- | --- |
+| `design_doc` | 相对路径或 `null` | Superpowers Design Doc 路径 |
+| `plan` | 相对路径或 `null` | Superpowers 实施计划路径 |
+| `base_ref` | git SHA 字符串 | change 创建时的 commit SHA，用于变更规模评估 |
+| `build_command` | 受限 shell 字符串 | 项目构建命令，guard 先运行它。允许命令词、引号、路径、`&&`；拒绝 `;`、管道、裸 `&`、`$`、反引号 |
+| `verify_command` | 受限 shell 字符串 | 项目验证命令，未设时回退到 build_command |
+| `direct_override` | `true` \| `false` | full workflow 用 `build_mode: direct` 时必须为 `true` |
+
+### 时间与归档
+
+| 字段 | 类型 / 允许值 | 含义 |
+| --- | --- | --- |
+| `created_at` | `YYYY-MM-DD` | change 创建日期，init 自动写入 |
+| `archived` | `true` \| `false` | 是否已归档 |
+
+### machine-managed（不要手编）
+
+| 字段 | 含义 |
+| --- | --- |
+| `handoff_context` | design 交接上下文文件路径（machine-written） |
+| `handoff_hash` | 交接上下文 hash（machine-written） |
+| `run_id` | 链接到 Engine Run state |
+
+### machine-owned（不能通过 set 修改）
+
+| 字段 | 含义 |
+| --- | --- |
+| `classic_profile` | 只由状态机设置，等于 workflow |
+| `classic_migration` | Classic 迁移版本 |
+
+## 状态机硬约束
+
+这些约束同时存在于 `comet-guard.mjs` 和 `comet-state.mjs transition` 两个守卫层：
+
+| 约束 | 说明 |
+| --- | --- |
+| `build → verify` 前 | `isolation` 必须是 `branch` 或 `worktree` |
+| `build → verify` 前 | `build_mode` 必须已选择 |
+| `build_mode: subagent-driven-development` | 需要 `subagent_dispatch: confirmed` |
+| full workflow 离开 build | `tdd_mode` 必须是 `tdd` 或 `direct` |
+| full workflow 离开 build | `review_mode` 必须是 `off`/`standard`/`thorough` |
+| `build_mode: direct` | hotfix/tweak 默认允许；full 需要 `direct_override: true` |
+| `verify → archive` 前 | `verify_result` 必须是 `pass` |
+| `verify-pass` 转换 | 需要 `verification_report` 指向已存在的文件，`branch_status` 为 `handled` |
+| `build_pause` | 不是执行方式，不能写进 `build_mode` |
+
+<Note>
+  直接 <code>comet-state set &lt;name&gt; phase &lt;value&gt;</code> 会被硬阻止，除非设了 <code>COMET_FORCE_PHASE=1</code>（仅修复用）。阶段推进只能通过 guard <code>--apply</code>。
+</Note>
+
+### preset 升级
+
+hotfix/tweak 命中升级信号（跨模块、新 API、schema 变更等）时，通过 `preset-escalate` 转换升级到 full：
+
+- 原子地设置 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`，清除 `design_doc`。
+- 这是 preset→full 升级的**唯一合法通道**——直接 `set phase design` 被硬阻止，`set classic_profile` 是 machine-owned 也被硬阻止。
+
+## 环境变量
+
+| 环境变量 | 用途 | 适用场景 |
+| --- | --- | --- |
+| `COMET_AUTO_TRANSITION` | 覆盖 auto_transition（change 级为空时生效） | CI/CD 或临时覆盖 |
+| `COMET_CONTEXT_COMPRESSION` | 覆盖 context_compression（change 级为空时生效） | 临时测试压缩模式 |
+| `COMET_REVIEW_MODE` | 覆盖 review_mode 默认解析（resolver 层） | 临时指定审查模式 |
+| `COMET_FORCE_PHASE` | `=1` 时允许直接 `set phase`（修复用逃逸口） | 状态修复排障 |
+| `COMET_OPENSPEC` | 指定 openspec CLI 路径（默认 `openspec`） | 自定义 OpenSpec 安装位置 |
+
+<Note>
+  <code>COMET_AUTO_TRANSITION</code>、<code>COMET_FORCE_PHASE</code>、<code>COMET_OPENSPEC</code> 是用户可用的环境变量。<code>COMET_CONTEXT_COMPRESSION</code> 和 <code>COMET_REVIEW_MODE</code> 存在于解析层但未在用户文档中正式记录，主要用于内部和测试。
+</Note>
+
+## 怎么配置
+
+### 配置项目默认值
+
+编辑 `.comet/config.yaml`：
+
+```yaml
+context_compression: beta
+review_mode: thorough
+auto_transition: true
+```
+
+提交到仓库，团队成员的新 change 会用这些默认值。
+
+### 临时覆盖（环境变量）
+
+```bash
+export COMET_AUTO_TRANSITION=false
+```
+
+影响当前会话，不改文件。
+
+### 修改单个 change 的字段
+
+通过 `comet-state` 命令（不要直接编辑文件）：
+
+```bash
+node "$COMET_STATE" set <change-name> verify_mode full
+node "$COMET_STATE" set <change-name> review_mode thorough
+```
+
+machine-owned 字段（`classic_profile`、`classic_migration`、`run_id`）不能用 `set` 修改。
+
+## 状态和 Run state 的边界
+
+`.comet.yaml` 保存用户可理解的工作流投影。Engine 运行细节放在 `.comet/run-state.json`。两者通过 `run_id` 链接。
+
+| 你想知道的 | 看哪里 |
+| --- | --- |
+| 当前阶段和下一步 | `.comet.yaml` 的 `phase` |
+| 执行方式和验证结果 | `.comet.yaml` 的 `build_mode`、`verify_result` |
+| Engine 当前步骤和 pending action | `.comet/run-state.json` 的 `currentStep`、`pending` |
+| 轨迹审计 | `.comet/trajectory.jsonl` |
+
+详见[Skill 与 Engine（进阶）](/zh/skill-factory/engine)。
+
+## 下一步
+
+- [上下文压缩机制](/zh/concepts/context-compression) — context_compression 的 off/beta 模式详解
+- [代码审查机制](/zh/concepts/review-mode) — review_mode 的 off/standard/thorough 详解
+- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — Run state 和 Engine 运行语义
+- [工作流概念](/zh/concepts/workflow) — 五阶段如何使用这些状态字段

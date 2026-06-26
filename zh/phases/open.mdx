@@ -1,71 +1,125 @@
 ---
-title: "Phase 1: Open — 探索想法并创建 Change"
-sidebarTitle: "Open"
-description: "Open phase 通过 OpenSpec 探索你的想法，创建包含 proposal.md、design.md 和 tasks.md 的 change，并暂停等待你的明确确认。"
+title: "open 阶段"
+description: "open 阶段调用 openspec-explore 和 openspec-new-change，把想法变成 OpenSpec change，创建 proposal、design、tasks 和 Comet 状态。"
 ---
 
-Open phase 是每个 Comet workflow 的起点。`/comet-open` 不会直接跳进代码，而是先使用 OpenSpec 和你一起探索 problem space，产出三个 structured artifacts，定义你*为什么*要做这个 change、高层 approach *是什么*、需要哪些 *tasks*。然后它会暂停，等待你的明确批准后才继续。
+open 阶段负责把用户目标变成可执行 change。它调用 OpenSpec skill 探索需求、创建 artifacts，并初始化 Comet 状态。
 
-## Trigger
+## 调用的 skill
 
-在 AI 工具中直接运行 `/comet-open`，或直接运行 `/comet`，让它检测到没有 active change 后自动分发到 Open phase。
+| Skill | 用途 | 何时调用 |
+| --- | --- | --- |
+| `openspec-explore` | 探索问题空间、澄清需求 | Step 1，立即执行，不可跳过 |
+| `openspec-new-change` | 创建 change 骨架 | Step 2，立即执行，不可跳过 |
 
-## 前置条件
+<Warning>
+  完整工作流默认<strong>不加载</strong> <code>openspec-propose</code>（一次性生成全部 artifacts）。只有用户明确要求时才允许。Comet 用标准产物循环逐个生成。
+</Warning>
 
-- 没有 active change（或你想开始一个新的）
-- 已安装 Comet skill（已经运行过 `comet init`）
+## 产物
 
-## 会发生什么
+```text
+openspec/changes/<name>/
+├── .openspec.yaml
+├── .comet.yaml          # Comet 状态（comet-state init）
+├── proposal.md          # Why + What
+├── design.md            # How（高层）
+├── tasks.md             # 任务清单
+└── specs/<capability>/spec.md   # delta spec
+```
 
-<Steps>
-  <Step title="探索 problem space">
-    AI 会加载 `openspec-explore` skill，并自由探索你的想法：提出澄清问题、梳理 goals 和 constraints，并总结 problem space。此步骤是强制性的，不能跳过。
-  </Step>
-  <Step title="创建 change structure">
-    AI 会加载 `openspec-new-change`（如果你的意图仍需整理，则加载 `openspec-propose`）来搭建 change directory，并产出三个 core artifacts。Change name **必须由你提供**；如果你还没有提供，Comet 会询问。
-  </Step>
-  <Step title="写入 artifacts">
-    会在 `openspec/changes/<name>/` 下创建三个文档和两个 state files：
-    - **proposal.md** — *Why* 和 *What*：problem background、goals、scope 和 non-goals
-    - **design.md** — high-level architecture decisions 和 approach selection
-    - **tasks.md** — 可执行的 checkbox task list
-    - **.openspec.yaml** — OpenSpec change metadata
-    - **.comet.yaml** — Comet workflow state（初始化为 `phase: open`）
-  </Step>
-  <Step title="内容完整性检查">
-    在暂停等待 review 前，AI 会确认三个文档都非空且结构完整。如果任何文件缺失或为空，它会先补齐再继续。
-  </Step>
-  <Step title="你 review 并确认（blocking pause）">
-    AI 会展示三个文档的摘要，并请你确认或要求调整。**在你明确选择 "Confirm" 之前，workflow 不能推进。** 如果你要求调整，AI 会修改文档并重新提交确认。
-  </Step>
-  <Step title="Phase guard 运行并推进 state">
-    你确认后，phase guard 会验证所有 exit conditions，并自动将 `.comet.yaml` 转换到下一 phase。Full-workflow changes 会进入 `phase: design`；hotfix 和 tweak 预设会直接跳到 `phase: build`。
-  </Step>
-</Steps>
+## 完整步骤
 
-## Artifacts
+### Step 0：输出语言约束
 
-| File | Location | 说明 |
-|------|----------|-------------|
-| `proposal.md` | `openspec/changes/<name>/proposal.md` | Problem background、goals、scope 和 non-goals，即 *Why* 和 *What* |
-| `design.md` | `openspec/changes/<name>/design.md` | High-level architecture decisions 和 approach selection，即 *How (overview)* |
-| `tasks.md` | `openspec/changes/<name>/tasks.md` | 用于跨所有 phases 跟踪 implementation progress 的 checkbox task list |
-| `.openspec.yaml` | `openspec/changes/<name>/.openspec.yaml` | OpenSpec change metadata 和 spec lifecycle state |
-| `.comet.yaml` | `openspec/changes/<name>/.comet.yaml` | Comet workflow state，用于跟踪 phase、build mode、verification status 等 |
+传递用户请求语言给 OpenSpec 的所有提问和产物。恢复已有 change 时保持既有主语言。
 
-## 用户决策点
+### Step 1：探索想法与需求澄清
 
-Open phase 有一个 **blocking pause**：三个 artifacts 创建并通过完整性检查后，AI 会停止并展示结构化摘要供你 review。你必须选择以下之一：
+加载 `openspec-explore`，围绕以下内容持续提问，直到形成澄清摘要：
 
-- **Confirm, proceed to next phase** — artifacts 符合预期；phase guard 运行，workflow 推进
-- **Needs adjustment** — 提供 notes；AI 修改文档并重新提交确认
+- 目标、非目标
+- 范围边界（涉及/不涉及的模块、用户、平台、数据）
+- 关键未知项（假设、风险、依赖）
+- 验收场景草案（核心场景 + 边界场景）
 
-Workflow 不会自动推进。这是你在任何 deep design 或 code generation 开始前修正 scope、重命名 tasks 或调整 approach 的机会。
+不得把一次问答视为足够澄清。
 
-## 命名规则
+### Step 1a：PRD 拆分预检（停顿点）
 
-Change name **必须由你提供**。Comet 永远不会自动生成或推断名称。如果你一开始没有提供，AI 会在创建任何文件前询问。
+如果输入是大型 PRD 或澄清摘要包含多个独立能力，触发拆分预检。详见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
 
-<Note>
-**Output language**：所有 artifacts，包括 `proposal.md`、`design.md`、`tasks.md` 以及所有 AI questions 和 summaries，都会使用你的请求语言编写。如果你用 English，artifacts 就是 English；如果你用 Chinese，artifacts 就是 Chinese。恢复现有 change 时，除非你明确要求切换，否则会保留主导 artifact language。
-</Note>
+### Step 1b：需求澄清完成确认（停顿点）
+
+展示澄清摘要，等待用户确认。确认前不创建任何 artifact。
+
+### Step 1c：change 名称确认（停顿点）
+
+推荐 2-3 个 kebab-case 英文名，让用户选择或自行输入。名称必须是 kebab-case 英文。
+
+### Step 2：创建 change 结构
+
+加载 `openspec-new-change`。按标准产物循环逐个生成 proposal → design → tasks：
+
+1. 刷新状态：`openspec status --change "<name>" --json`
+2. 获取指令：`openspec instructions <proposal|design|tasks> --change "<name>" --json`
+3. 读取 `dependencies`、遵循 `template` 和 `instruction`、应用 `context`/`rules` 约束（不复制到 artifact）、写入 `resolvedOutputPath`
+4. 每个 artifact 后刷新状态确认
+
+然后初始化 Comet 状态：
+
+```bash
+node "$COMET_STATE" init <name> full
+```
+
+### Step 3：入口状态验证
+
+```bash
+node "$COMET_STATE" check <name> open
+```
+
+### Step 4：内容完整性检查
+
+逐个确认三个文件存在且非空：proposal（背景/目标/范围）、design（架构决策/选型/数据流）、tasks（任务描述）。
+
+### Step 5：用户审视确认（停顿点）
+
+展示三个文档摘要，等待用户确认。
+
+### 退出
+
+```bash
+node "$COMET_GUARD" <change-name> open --apply
+```
+
+full workflow 推进到 `phase: design`；hotfix/tweak 推进到 `phase: build`。
+
+## 何时进入
+
+- 项目里没有活跃 change
+- 用户明确要创建新变更
+- `.comet.yaml` 缺失，需要补齐
+
+## 幂等性
+
+open 阶段所有操作可安全重复。如果 `.comet.yaml` 已处于 `phase: open` 且三个产物都已存在，跳过已完成步骤。
+
+## 常见问题
+
+<AccordionGroup>
+  <Accordion title=".comet.yaml 缺失怎么办">
+    不要用 `/opsx:new` 绕过。重新运行 `/comet`，让它通过 `/comet-open` 补齐状态。
+  </Accordion>
+  <Accordion title="change 名称有什么限制">
+    必须是 kebab-case 英文（小写字母、数字、连字符）。中文或非合规名称会被转换并回显确认。
+  </Accordion>
+  <Accordion title="openspec instructions 失败了怎么办">
+    立即停止 artifact 创建并报告 OpenSpec 错误。不得回退为硬编码文档结构，那会绕过项目规则。
+  </Accordion>
+</AccordionGroup>
+
+## 下一步
+
+- [design 阶段](/zh/phases/design) — open 完成后进入深度设计
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的 4 个停顿点详解
+- [大型 PRD 拆分](/zh/guides/prd-splitting) — Step 1a 的完整机制

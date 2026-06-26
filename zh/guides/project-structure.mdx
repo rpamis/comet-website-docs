@@ -1,99 +1,54 @@
 ---
-title: "Comet 项目结构：Skills、OpenSpec 和 State Files"
-sidebarTitle: "产物项目结构"
-description: "了解 Comet 如何在项目目录中组织 skills、OpenSpec change artifacts、Superpowers design documents 和 state files。"
+title: "项目文件结构"
+description: "了解 Comet 在项目中创建哪些目录，以及每类文件分别承担什么职责。"
 ---
 
-运行 `comet init` 后，Comet 会建立清晰的目录结构，将 **WHAT**（OpenSpec artifacts）与 **HOW**（Superpowers documents）分离，并把 skills 安装到你的 AI 平台 skills 目录中。Comet 跟踪、恢复和归档 change 所需的一切都保存在磁盘上，而不是 conversation history 中。
+Comet 把需求事实、设计计划、运行状态和用户生成 Skill 分开保存。
 
-## 目录树
+## 经典工作流目录
 
-```
-your-project/
-├── .claude/skills/              # Platform skills dir (Comet + OpenSpec + Superpowers)
-│   ├── comet/SKILL.md
-│   │   └── scripts/
-│   │       ├── comet-guard.sh       # Phase transition guard (--apply auto-updates state)
-│   │       ├── comet-env.sh         # Script discovery helper
-│   │       ├── comet-handoff.sh     # Design handoff (OpenSpec → Superpowers context tracing)
-│   │       ├── comet-archive.sh     # One-command archive automation
-│   │       ├── comet-yaml-validate.sh # Schema validator
-│   │       └── comet-state.sh       # Unified state management (init/set/get/check/scale)
-│   ├── comet-*/SKILL.md
-│   ├── openspec-*/SKILL.md
-│   └── brainstorming/SKILL.md
-├── openspec/                    # OpenSpec — WHAT
-│   ├── config.yaml
-│   └── changes/
-│       └── <name>/
-│           ├── .openspec.yaml       # OpenSpec state
-│           ├── .comet.yaml          # Comet workflow state (decoupled)
-│           ├── proposal.md
-│           ├── design.md
-│           ├── specs/<capability>/spec.md
-│           └── tasks.md
-└── docs/superpowers/            # Superpowers — HOW
-    ├── specs/                   # Design documents
-    └── plans/                   # Implementation plans
+```text
+openspec/
+├── config.yaml
+├── changes/
+│   ├── <name>/
+│   │   ├── .openspec.yaml
+│   │   ├── .comet.yaml
+│   │   ├── proposal.md
+│   │   ├── design.md
+│   │   ├── tasks.md
+│   │   └── specs/<capability>/spec.md
+│   └── archive/YYYY-MM-DD-<name>/
+└── specs/<capability>/spec.md
+
+docs/superpowers/
+├── specs/YYYY-MM-DD-<topic>-design.md
+└── plans/YYYY-MM-DD-<feature>.md
 ```
 
-## Skills Directory
+## Comet 配置和运行目录
 
-Platform skills directory（上方示例为 `.claude/skills/`）会因 AI 编程平台而异。Comet 支持 28 个平台，每个平台都有自己的目录约定：
+```text
+.comet/
+├── config.yaml
+├── skills/
+├── runs/
+├── bundle-authoring/
+├── bundle-factory-plans/
+└── bundles/
+```
 
-| Platform | Skills Directory |
-|----------|----------------|
-| Claude Code | `.claude/` |
-| Cursor | `.cursor/` |
-| Gemini CLI | `.gemini/` |
-| Windsurf | `.windsurf/` |
-| GitHub Copilot | `.github/` |
-| Codex | `.codex/` |
+不同项目不一定都会出现所有目录。只有使用对应能力后才会创建。
 
-在 `comet init` 期间，你会选择一个或多个平台，Comet 会把 skills 安装到每个平台对应的目录。完整的 28 个平台及其目录映射请参阅 [Supported Platforms](/platforms) 页面。
+## 目录职责
 
-所有 Comet automation scripts 都位于 `<platform-skills-dir>/comet/scripts/` 下，并在运行时通过 `comet-env.sh` 定位，路径不会被硬编码。
-
-## OpenSpec Directory
-
-`openspec/` 目录由 OpenSpec 管理，包含定义正在构建 **WHAT** 的所有内容：
-
-- **`config.yaml`** — Project-level OpenSpec configuration
-- **`changes/<name>/`** — 每个 active change 一个子目录，包含：
-  - `proposal.md` — 问题描述、动机、目标和 scope
-  - `design.md` — Architecture decisions 和 solution design
-  - `tasks.md` — Task checklist（每个 task 完成时都会被勾选）
-  - `specs/<capability>/spec.md` — 受影响 capability 的 delta spec（修改现有 acceptance scenarios 时创建）
-  - `.openspec.yaml` — OpenSpec 为此 change 保存的 state file
-  - `.comet.yaml` — Comet 为此 change 保存的解耦 workflow state
-- **`changes/archive/YYYY-MM-DD-<name>/`** — 已完成 changes 在 archive 时移动到这里
-- **`specs/<capability>/spec.md`** — Main specs（delta specs 会在 archive 时合并进来）
-
-## Superpowers Directory
-
-`docs/superpowers/` 目录由 Superpowers 管理，包含定义 change 如何构建（**HOW**）的所有内容：
-
-- **`docs/superpowers/specs/`** — Design documents。每个 Design Doc 都是在 design phase 创建的 technical RFC，命名为 `YYYY-MM-DD-<topic>-design.md`。Archive 时，该 doc 的 frontmatter 会标注 `archived-with` status。
-- **`docs/superpowers/plans/`** — Implementation plans。每个 plan 都在 build phase 生成，命名为 `YYYY-MM-DD-<feature>.md`。Plan file headers 包含 `change:` 和 `design-doc:` metadata，用于关联对应的 OpenSpec change。
-
-## State Files
-
-每个 active change directory 中有两个 state files，各自承担不同用途：
-
-| File | Owner | 用途 |
-|------|-------|---------|
-| `.openspec.yaml` | OpenSpec | Spec lifecycle 和 change metadata：跟踪 change identity、creation date 和 OpenSpec-level status |
-| `.comet.yaml` | Comet | Workflow phase、execution mode、verification status、archive flag，以及到 Design Doc 和 Plan 的链接 |
-
-这种解耦设计意味着 OpenSpec 和 Comet 各自拥有自己的 state，而不会耦合内部逻辑。Comet 只通过 `comet-state.sh` 读写 `.comet.yaml`，agents 永远不应直接编辑它。
-
-有关这两个文件逐字段的完整文档，请参阅 [State Management](/concepts/state-management) 概念页。
-
-## Project-Level vs. Global Install
-
-`docs/superpowers/` working directories 只会为 **project-level** installs 创建：
-
-- **Project-level**（在项目目录中运行 `comet init`）：在项目中创建 `docs/superpowers/specs/` 和 `docs/superpowers/plans/`。Skills 会安装到平台的 project-scoped skills directory。
-- **Global**（`comet init --scope global`）：Skills 会安装到平台的 home-directory-level skills directory。**不会**创建 `docs/superpowers/` working directories，因为它们应存在于你工作的每个项目中。
-
-对大多数用户来说，project-level install 是合适选择：它会把所有 Comet artifacts 保留在 repository 内，让 AI agent 能够找到它们。
+| 路径 | 职责 |
+| --- | --- |
+| `openspec/changes/` | 活跃 change 和归档 change |
+| `openspec/specs/` | 当前主规格 |
+| `docs/superpowers/specs/` | 技术设计文档 |
+| `docs/superpowers/plans/` | 实施计划 |
+| `.comet/config.yaml` | 项目级 Comet 配置 |
+| `.comet/skills/` | 项目 Skill 池 |
+| `.comet/runs/` | standalone Engine Run 状态 |
+| `.comet/bundles/` | 已发布 Bundle |
