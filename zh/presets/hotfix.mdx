@@ -1,53 +1,88 @@
 ---
 title: "hotfix 预设"
-description: "使用 hotfix 轻量路径快速修复明确 bug：open→build→verify→archive 四步，跳过 brainstorming 和完整 plan，保留状态恢复、验证和归档。"
+description: "hotfix 是快速修 bug 的轻量预设：open→build→verify→archive 四步，跳过 brainstorming 和完整 plan，但仍保留状态恢复、根因消除检查、验证和归档。"
 ---
 
-hotfix 是 Comet 的轻量预设之一,适合修复明确的 bug。它跳过完整 brainstorming 和完整 plan,走 `open → build → verify → archive` 四步,但仍保留 OpenSpec 状态、验证和归档。
+hotfix 是 Comet 的轻量预设之一，适合**修复明确的 bug**。它跳过完整 brainstorming 和完整 plan，走 `open → build → verify → archive` 四步，但仍保留 OpenSpec 状态、**根因消除检查**、验证和归档。
 
-## 调用的 skill
+hotfix 不是"无流程"——它只是减少前期设计成本，同时保留恢复、验证和归档。
 
-| Skill | 用途 | 何时调用 |
-| --- | --- | --- |
-| `openspec-new-change` | 创建精简 change | Step 1 快速开启 |
-| `systematic-debugging` | 异常调试 | build 过程中出现崩溃/测试失败/构建失败时强制加载 |
-| `comet-verify` | 验证 | Step 4 |
-| `comet-archive` | 归档 | Step 5 |
+<Tip>
+  <strong>正常情况下你只需要 <code>/comet</code>。</strong>当你描述的是 bug 修复 / 热修复时，<code>/comet</code> 的<strong>意图识别会优先命中 hotfix 预设</strong>，自动调用 <code>/comet-hotfix</code>。只有想手动控制时才直接输入 <code>/comet-hotfix</code>。详见<a href="#怎么触发">怎么触发</a>。
+</Tip>
 
-hotfix **不调用** `openspec-explore`（不做长探索）、`brainstorming`（不做深度设计）、`writing-plans`（不做完整 plan,除非任务超过 3 个）。
+## 怎么触发
 
-## 适用条件（必须全部满足）
+hotfix 通常**不是你手敲的命令**。`/comet` 的 Step 0 会**优先做预设检测**（优先级高于列活跃 change）：
 
-- 修复已有功能的 bug,不新增 capability
+| 你的描述 | 路由 |
+| --- | --- |
+| 明确描述为 bug fix / 热修复 + 满足 hotfix 条件 | 自动 `/comet-hotfix` |
+| 明确描述为文案/配置/文档/prompt 小调整 | 自动 `/comet-tweak`（见 [tweak 预设](/zh/presets/tweak)） |
+| 未命中预设 | 按活跃 change 走 full `/comet` |
+
+你也可以直接输入 `/comet-hotfix`。中断后用 `/comet` 恢复时，`/comet` 会读 `.comet.yaml` 的 `workflow` 字段，在 `phase: build` 时自动路由回 `/comet-hotfix`。
+
+---
+
+## 适合什么场景
+
+**适用条件（必须全部满足）：**
+
+- 修复已有功能的 bug，**不新增 capability**
 - 不涉及接口变更或架构调整
-- 改动范围可预估（文件数仅作提示,不是硬性升级条件）
+- 改动范围可预估（文件数仅作提示，不是硬性升级条件）
 
-## 不适合使用
+**不适合：** 需要跨模块重新设计、数据库 schema 变更、引入新 capability 或 public API、需要产品方案讨论。如果修复过程命中升级信号，Comet 会暂停让你选择继续 hotfix 还是升级 full。
 
-- 需要跨模块重新设计
-- 需要数据库 schema 变更
-- 引入新的 capability 或 public API
-- 需要产品方案讨论
-- 修复过程中发现需求不清晰
+## 和 full、tweak 的关系
 
-<Note>
-  如果修复过程中命中升级信号（见下文"升级判定"）,Comet 会暂停让你选择继续 hotfix 还是升级 full。
-</Note>
+| 维度 | hotfix | full | tweak |
+| --- | --- | --- | --- |
+| 目标 | 修 bug | 新功能/架构/大需求 | 调整行为或内容 |
+| 流程 | open→build→verify→archive | open→design→build→verify→archive | open→build→verify→archive |
+| brainstorming | 跳过 | 必须做 | 跳过 |
+| Design Doc | 不需要 | 必须做 | 不需要 |
+| delta spec | **例外**（仅当修复改变已有 spec 验收场景） | 按 PRD 拆分 | **一等产物**（需要 delta spec 不构成升级理由） |
+| build 方式 | 手动 tasks 循环（`build_mode: direct`） | 需选择 | OpenSpec apply（`build_mode: direct`） |
 
-## 完整流程
+如果你不确定用 hotfix 还是 full，先用 hotfix——命中质变信号时 Comet 会暂停让你升级，不会走错。
+
+---
+
+## 你会经历什么
+
+```mermaid
+flowchart TD
+    Start["bug 描述"] --> S1["Step 1 快速开启<br/>openspec-new-change 创建精简产物"]
+    S1 --> S2["Step 2 直接构建<br/>build_mode: direct, review_mode: off"]
+    S2 --> Esc{"命中升级信号?"}
+    Esc -->|是| EscStop["停顿点：升级判定<br/>继续 hotfix / 升级 full"]
+    Esc -->|否| S3["Step 3 根因消除检查<br/>（hotfix 专属）"]
+    EscStop -->|继续 hotfix| S3
+    EscStop -->|升级 full| EscUp["preset-escalate → design"]
+    S3 --> Root{"根因消除?"}
+    Root -->|否| S2
+    Root -->|是| S4["Step 4 验证<br/>comet-verify"]
+    S4 --> Vf{"验证通过?"}
+    Vf -->|否| VfStop["停顿点：验证失败决策"]
+    VfStop -->|修复| S2
+    Vf -->|是| S5["Step 5 归档<br/>comet-archive（归档前确认）"]
+    S5 --> Done["完成"]
+```
 
 ### Step 1：快速开启（预设 open）
 
-加载 `openspec-new-change` 创建精简版产物（不做 `openspec-explore` 长探索）：
+加载 `openspec-new-change`（**不做** `openspec-explore` 长探索），创建精简版产物：
 
 | 产物 | 内容 |
 | --- | --- |
 | proposal.md | 问题描述 + 根因分析 + 修复目标（无需方案对比） |
-| design.md | 修复方案（1 个即可,无需多方案对比） |
+| design.md | 修复方案（1 个即可，无需多方案对比） |
 | tasks.md | 修复任务清单 |
-| delta spec | **通常不需要**（除非修复改变了已有 spec 的验收场景） |
+| delta spec | **通常不需要**（除非修复改变了已有 spec 的验收场景，且只用 `## MODIFIED Requirements`） |
 
-初始化 hotfix 状态：
+初始化 hotfix 状态（`init` 写入的默认值见下表）：
 
 ```bash
 node "$COMET_STATE" init <name> hotfix
@@ -55,31 +90,45 @@ node "$COMET_STATE" check <name> open
 node "$COMET_GUARD" <change-name> open --apply
 ```
 
+open guard 对 hotfix **不要求** `design.md`（只对 full 要求），所以 open 完成后直接跳到 build，**跳过 design 阶段**。
+
+### hotfix 初始化的默认值
+
+`init <name> hotfix` 写入 `.comet.yaml` 的默认值（和 tweak 完全一样，都跳过设计阶段）：
+
+| 字段 | hotfix/tweak 默认 | （full 默认） |
+| --- | --- | --- |
+| `build_mode` | `direct` | `null`（build 时选） |
+| `tdd_mode` | `direct` | `null`（build 时选） |
+| `review_mode` | `off` | 来自项目配置/env（可能 null） |
+| `isolation` | `branch` | `null`（build 时选） |
+| `verify_mode` | `light` | `null`（verify 时 scale 定） |
+
+所以 hotfix 不需要你在 build 阶段选这四项——guard 对预设工作流**豁免** `review_mode`/`tdd_mode` 选择检查。`build_mode: direct` 默认只允许 hotfix/tweak，full 必须显式设 `direct_override: true`。
+
 ### Step 2：直接构建（预设 build）
 
-使用 hotfix 默认值：`build_mode: direct`、`review_mode: off`。跳过 `brainstorming` 和 `writing-plans`。
+使用默认值 `build_mode: direct`、`review_mode: off`，跳过 `brainstorming` 和 `writing-plans`。逐任务执行：
 
-逐任务执行：
-
-1. 读取 tasks.md 未完成任务
-2. 对每个任务：改代码 → 格式化 → 跑测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
+1. 读 tasks.md 未完成任务
+2. 每个任务：改代码 → 格式化 → 跑测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
 3. 全部完成后显式运行项目测试和构建命令
 
 <Warning>
-  执行过程中出现崩溃、测试失败、构建失败时,<strong>强制加载</strong> <code>systematic-debugging</code>。根因调查完成前不得修复源码。详见 <a href="/zh/concepts/decision-points">异常调试协议</a>。
+  执行中出现崩溃、测试失败、构建失败时，<strong>强制加载</strong> <code>systematic-debugging</code>——根因调查完成前不得修复源码。先加最小失败测试复现，再修源码，跑相关测试和构建确认。这是 build/hotfix/tweak 共享的<a href="/zh/concepts/decision-points">异常调试协议</a>。
 </Warning>
 
-**任务超过 3 个**时转入 `/comet-build` 的计划与执行方式选择（注意这不触发 full 升级,只切换执行方式）。
+**任务超过 3 个**时转入 `/comet-build` 的计划与执行方式选择（注意：这**不触发 full 升级**，只切换执行方式，`workflow` 仍是 `hotfix`）。**修复影响已有 spec 验收场景**时，创建 delta spec（仅 `## MODIFIED Requirements`）。
 
-**修复影响已有 spec 验收场景**时,创建 delta spec（仅 `## MODIFIED Requirements` 部分）。
+### Step 3：根因消除检查（hotfix 专属）
 
-### Step 3：根因消除检查
-
-build guard 之前执行,确保修复确实消除问题根因：
+**这是 hotfix 独有的步骤**（tweak 没有），在 build guard 之前执行，确保修复确实消除了问题根因：
 
 1. 读 proposal.md 的 bug 描述和根因
 2. 搜索验证问题代码不再存在
-3. 根因未消除 → 回 Step 2 继续修复（仍在 build 阶段,无需状态回退）
+3. 根因未消除 → 回 Step 2 继续修复（仍在 build 阶段，无需状态回退）
+
+这一步本身也是升级信号来源：根因消除检查发现**深层架构问题**，或修复需要**额外接口变更**，命中质变信号，暂停交你决定。
 
 ```bash
 node "$COMET_GUARD" <change-name> build --apply
@@ -87,11 +136,11 @@ node "$COMET_GUARD" <change-name> build --apply
 
 ### Step 4：验证（预设 verify）
 
-加载 `comet-verify`,由规模评估决定 light 或 full：
+复用 `/comet-verify`，由规模评估决定 light 或 full：
 
 | 场景 | 验证路径 |
 | --- | --- |
-| 无 delta spec 的小范围 hotfix | 通常 light（6 项检查,review_mode: off 不自动审查） |
+| 无 delta spec 的小范围 hotfix | 通常 light（6 项检查，`review_mode: off` 不自动审查） |
 | 创建了 delta spec | 按规模评估规则进入 full |
 
 想增加审查可在验证前手动设置：
@@ -102,32 +151,13 @@ node "$COMET_STATE" set <name> review_mode standard
 
 ### Step 5：归档（预设 archive）
 
-加载 `comet-archive`。要求 `verify_result: pass`,并等待归档前最终确认。如有 delta spec,同步到 main spec。
+复用 `/comet-archive`。要求 `verify_result: pass`，并等待**归档前最终确认**。如有 delta spec，同步到 main spec。
 
-## 流程图
+---
 
-```mermaid
-flowchart TD
-  A["bug 描述"] --> B["Step 1 快速开启<br/>openspec-new-change"]
-  B --> C["Step 2 直接构建<br/>build_mode: direct"]
-  C --> D{"命中升级信号?"}
-  D -->|是| E["升级判定（停顿点）"]
-  E -->|继续 hotfix| F
-  E -->|升级 full| G["preset-escalate → design"]
-  D -->|否| F["Step 3 根因消除检查"]
-  F --> H{"根因消除?"}
-  H -->|否| C
-  H -->|是| I["Step 4 验证<br/>comet-verify"]
-  I --> J{"验证通过?"}
-  J -->|否| K["验证失败决策"]
-  K -->|修复| C
-  J -->|是| L["Step 5 归档<br/>comet-archive"]
-  L --> M["完成"]
-```
+## 升级判定（三层分工）
 
-## 升级判定
-
-hotfix 的范围判定采用三层分工,避免"用纯文件数当硬性升级条件"误杀正常 bug 修复：
+hotfix 的范围判定采用三层分工，避免"用纯文件数当硬性升级条件"误杀正常 bug 修复：
 
 ### 1. 质变信号（命中任一即暂停）
 
@@ -141,65 +171,58 @@ hotfix 的范围判定采用三层分工,避免"用纯文件数当硬性升级�
 
 ### 2. 文件数 tripwire（用户拍板）
 
-改动文件数超提示阈值（如超过 4 个）时暂停交用户决定。文件数是提示触发器,不是硬性升级条件——文件多不等于有质变。
+改动文件数超过提示阈值（**如超过 4 个**）时暂停交你决定。文件数是**提示触发器**，不是硬性升级条件——文件多不等于有质变。
 
 ### 3. 验证级别（scale 脚本判定）
 
-`comet-state scale` 只决定 `verify_mode`,不卡流程、不触发升级。
+`comet-state scale` 只决定 `verify_mode`，不卡流程、不触发升级。
 
 ### 升级决策（停顿点）
 
+命中信号或 tripwire 时，Comet **暂停让你二选一**（不能自行升级或自行判定可继续）：
+
 | 选项 | 结果 |
 | --- | --- |
-| A：继续 hotfix | 用户确认范围可控,继续 open→build→verify→archive |
-| B：升级 full | 用户认为需要深度设计 |
+| **A 继续 hotfix** | 你确认范围可控，继续 open→build→verify→archive |
+| **B 升级 full** | 你认为需要深度设计 |
 
-选 B 后用合法升级通道：
+选 B 后用合法升级通道（**不能手工编辑 `.comet.yaml`**）：
 
 ```bash
 node "$COMET_STATE" transition <name> preset-escalate
 ```
 
-原子地设 `workflow`/`classic_profile` 为 `full`、`phase` 回退到 `design`、清空 `design_doc`,然后加载 `comet-design` 补 Design Doc,走完整流程。
+它**原子地**设 `workflow: full`、`classic_profile: full`、`phase` 回退到 `design`、清空 `design_doc`，然后加载 `/comet-design` 补 Design Doc。已完成的代码、tasks 和 OpenSpec artifacts 都保留——你只补一个 Design Doc，不是从头来。`preset-escalate` 只能从 `phase: build` 的 hotfix/tweak 触发，其他情况会报错。
 
-## 连续执行模式
+## 连续执行和必停点
 
-hotfix 默认**一次性连续执行**——调用 `/comet-hotfix` 后自动推进,不主动停顿。
-
-例外情况（无论 `auto_transition` 取何值都必须暂停）：
+hotfix 默认**一次性连续执行**——调用后自动推进，不主动停顿。但无论 `auto_transition` 取何值，以下情况**必须暂停**等你确认：
 
 1. 命中升级判定信号
 2. 任务超过 3 个转入 `/comet-build` 时的工作区和执行方式选择
 3. 验证阶段的验证失败决策和分支处理
 4. 归档前最终确认
 
-`auto_transition: false` 时降级为逐阶段手动推进。
+`auto_transition: false` 时降级为逐阶段手动推进（每个 phase 边界停下，由你手动运行下一阶段命令）。
 
 <Tip>
-  hotfix 不是"无流程"。它只是减少前期设计成本,同时保留恢复、验证和归档。
+  升级后绝不会自动归档——无论自动衔接还是手动，<code>/comet-archive</code> 都会先做归档前最终确认。
 </Tip>
-
-## 和 full workflow 的区别
-
-| 维度 | hotfix | full |
-| --- | --- | --- |
-| 流程 | open→build→verify→archive | open→design→build→verify→archive |
-| brainstorming | 跳过 | 必须做 |
-| plan | 跳过（除非任务超过 3 个） | 必须做 |
-| build_mode | 默认 direct | 需选择（subagent/executing-plans/direct） |
-| review_mode | 默认 off | 需选择（off/standard/thorough） |
-| delta spec | 通常不需要 | 按 PRD 拆分 |
-| handoff | 不需要 | design 阶段必须生成 |
 
 ## 退出条件
 
-- Bug 已修复,测试通过
+- Bug 已修复，测试通过
 - change 已归档
-- 如有 spec 变更,已同步到 main spec
+- 如有 spec 变更，已同步到 main spec
+- 阶段守卫：build→verify 前 `comet-guard <name> build --apply`，verify→archive 前 `comet-guard <name> verify --apply`
+
+## 恢复
+
+hotfix 幂等。中断后用 `/comet` 恢复——它读 `.comet.yaml` 的 `workflow` 字段，在 `phase: build` 时自动路由回 `/comet-hotfix`。`comet-state check <name> build --recover` 给出恢复上下文，从 tasks.md 第一个未完成任务继续。
 
 ## 下一步
 
-- [tweak 预设](/zh/presets/tweak) — 另一个轻量预设
-- [自动推进机制](/zh/concepts/auto-transition) — 预设的连续执行和升级
+- [tweak 预设](/zh/presets/tweak) — 另一个轻量预设（调整行为或内容）
+- [自动推进机制](/zh/concepts/auto-transition) — 预设的连续执行、升级和 `preset-escalate`
 - [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — hotfix 的停顿点
 - [verify 阶段](/zh/phases/verify) — hotfix 复用的验证流程
