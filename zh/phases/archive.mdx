@@ -5,6 +5,29 @@ description: "archive 阶段不调用 skill，用 comet-archive 脚本完成 Ope
 
 archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产物，并移动到 archive 目录。它关闭整个 spec 生命周期。
 
+<Tip>
+  <strong>正常情况下你只需要 <code>/comet</code>。</strong>verify 通过后，<code>/comet</code> 会自动衔接调用 <code>/comet-archive</code>。本文描述的 <code>/comet-archive</code> 是它内部调用的阶段 Skill——只有当你想<strong>手动控制</strong>（例如关闭了 <code>auto_transition</code>、或想只跑这一个阶段）时，才需要直接输入 <code>/comet-archive</code>。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
+</Tip>
+
+## 本阶段如何触发
+
+`/comet-archive` 通常**不是你手敲的命令**，而是 `/comet` 自动衔接的结果。
+
+### 默认：用 /comet，自动衔接
+
+verify 阶段通过后（`verify_result: pass`），`/comet` 会先做归档前确认，确认后自动衔接调用 `/comet-archive`。下一次调用 `/comet` 时，如果检测到 `verify_result: pass`，也会路由到 archive。archive 不受 workflow 类型影响，始终返回标准 Skill。详见[自动推进机制](/zh/concepts/auto-transition)。
+
+### 手动：什么时候才需要直接 /comet-archive
+
+- 关闭了自动衔接（`auto_transition: false`）——verify 通过后 `/comet` 会停下并打印 HINT，你需要手动调用 `/comet-archive`。
+- 只想单独跑 archive 阶段（例如恢复一个 `phase: archive` 的 change 完成归档）。
+
+<Warning>
+  归档应由 <code>/comet-archive</code> 或归档脚本完成，不要手工 transition。且归档成功后不要再跑 <code>comet-guard &lt;name&gt; archive</code>——活跃目录已不存在，guard 会报错。
+</Warning>
+
+**自动推进开着就用 `/comet`，关了才需要手动用各阶段命令。**
+
 ## 调用的 skill
 
 **archive 阶段不通过 Skill 工具加载任何 skill。** 所有工作由脚本完成：`comet-state.mjs`、`comet-archive.mjs`、`comet-guard.mjs`。归档脚本内部调用 OpenSpec archive 能力做 delta→主 spec 语义合并。
@@ -75,8 +98,7 @@ flowchart TD
 
 ## 何时进入
 
-- `verify_result: pass`
-- 分支已处理（`branch_status: handled`）
+正常情况下由 `/comet` 在 verify 通过后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。前置条件：`verify_result: pass` 且分支已处理（`branch_status: handled`）。
 
 <Warning>
   归档成功后<strong>不要</strong>再跑 <code>comet-guard &lt;name&gt; archive</code>——活跃目录已不存在，guard 会报错。归档完整性由脚本退出码和归档目录状态判断。
