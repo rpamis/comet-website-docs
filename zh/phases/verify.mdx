@@ -36,17 +36,17 @@ build 阶段退出后（`phase: verify, verify_result: pending`），`/comet` �
 flowchart TD
     Entry["入口状态验证"] --> Scale["Step 1：scale 自动评估规模<br/>决定 light / full"]
     Scale --> Dirty{"工作区有未提交改动?"}
-    Dirty -->|实现/测试/tasks| Fail1b["报失败，进停顿点 1b"]
+    Dirty -->|实现/测试/tasks| Fail1b["报失败，进停顿点 10"]
     Dirty -->|仅验证产物| Cont["继续"]
     Dirty -->|干净| Cont
     Cont --> Check["Step 2：按 verify_mode 跑检查<br/>light 6 项 / full 7 项"]
     Check --> Pass{"全部通过?"}
-    Pass -->|否| Stop1b["停顿点 1：验证失败决策<br/>全部修复 / 逐项处理"]
+    Pass -->|否| Stop1b["停顿点 10：验证失败决策<br/>全部修复 / 逐项处理"]
     Pass -->|是| Drift{"full 检查 6：spec 漂移?"}
     Stop1b -->|verify-fail| Build["回 build 修复"]
     Stop1b -->|逐项处理| Check
-    Drift -->|是| Stop2b["停顿点 2：spec 漂移决策<br/>A / B / C"]
-    Drift -->|否| Stop3["停顿点 3：分支收尾<br/>四选一"]
+    Drift -->|是| Stop2b["停顿点 11：spec 漂移决策<br/>A / B / C"]
+    Drift -->|否| Stop3["停顿点 12：分支收尾<br/>四选一"]
     Stop2b -->|B| Build
     Stop2b -->|A/C| Stop3
     Stop3 --> Record["Step 4：写验证报告 + branch_status"]
@@ -96,9 +96,9 @@ Comet 自动算三项，**任一超阈值就走 full**：
 
 | 情况 | 处理 |
 | --- | --- |
-| 改动属于当前 change 且触及实现/测试/tasks/delta spec/design doc | **不在 verify 修**，报失败进停顿点 1b |
+| 改动属于当前 change 且触及实现/测试/tasks/delta spec/design doc | **不在 verify 修**，报失败进停顿点 10 |
 | 改动只是验证产物（报告草稿、分支处理笔记） | 可继续 |
-| 有实现但 tasks.md 没勾选 | 当"build 状态滞后"，报失败进停顿点 1b |
+| 有实现但 tasks.md 没勾选 | 当"build 状态滞后"，报失败进停顿点 10 |
 
 ### Step 2：按 verify_mode 跑检查
 
@@ -128,10 +128,10 @@ light 跳过：spec 场景覆盖、Design Doc 一致性深度比对、delta spec
 | 3 | 实现符合 Superpowers Design Doc |
 | 4 | 能力 spec 场景全部通过 |
 | 5 | proposal.md 目标满足 |
-| 6 | delta spec 与 Design Doc 无矛盾（**漂移检测，触发停顿点 2**） |
+| 6 | delta spec 与 Design Doc 无矛盾（**漂移检测，触发停顿点 11**） |
 | 7 | 关联 Design Doc 可定位 |
 
-### 停顿点 1：验证失败决策
+### 停顿点 10：验证失败决策
 
 任何检查失败时，Comet **暂停等你决定**（不能自动 verify-fail 或自动调 `/comet-build`）。它会列出失败项、严重程度（CRITICAL/IMPORTANT/WARNING/SUGGESTION）和推荐处理方式。
 
@@ -148,19 +148,19 @@ light 跳过：spec 场景覆盖、Design Doc 一致性深度比对、delta spec
 
 verify-fail 回滚到 build 时，`branch_status` **不重置**——如果你之前已处理过分支，修复后再进 verify 可跳过分支处理，直接 `comet-state set <name> branch_status handled` 保留结果。
 
-### 停顿点 2：spec 漂移决策（仅 full 检查 6）
+### 停顿点 11：spec 漂移决策（仅 full 检查 6）
 
 delta spec 有内容但 Design Doc 没反映时，Comet **暂停让你三选一**（单选，不能自动选）：
 
 | 选项 | 适用场景 | 之后 |
 | --- | --- | --- |
 | **A** | 偏差合理但 Design Doc 漏记，想留个说明 | Design Doc 追加 "Implementation Divergence" 段，记录原因；继续验证 |
-| **B** | 偏差较大，设计没跟上 | `verify-fail` 回 build，加载 `brainstorming` 重新对齐 Design Doc + delta spec |
+| **B** | 偏差较大，设计没跟上 | `verify-fail` 回 build，加载 `brainstorming` 重新对齐 Design Doc + delta spec（回到[停顿点 11](#停顿点-11-spec-漂移决策仅-full-检查-6)） |
 | **C** | 偏差可接受，不想补 | 确认接受继续验证（归档时 Design Doc 让位给主 spec） |
 
 判断口径：说明性问题（Design Doc 漏记，实现没问题）选 A；设计性问题（Design Doc 跟不上现实）选 B；无关紧要不值得回头补选 C。
 
-### 停顿点 3：分支收尾
+### 停顿点 12：分支收尾
 
 加载 `finishing-a-development-branch`，**暂停让你选**分支处理方式（不能按推荐/默认/当前分支状态自动选）：
 
@@ -206,7 +206,7 @@ guard 校验 `verification_report` 指向存在的文件、`branch_status: handl
 | `requesting-code-review` | 轻量代码审查 | Step 2 light 第 6 项，`review_mode: standard`/`thorough` 时 |
 | `openspec-verify-change` | OpenSpec spec 对齐验证 | Step 2b（full 模式，必须加载） |
 | `finishing-a-development-branch` | 分支收尾处理 | Step 3，立即执行 |
-| `brainstorming` | spec 漂移修复 | 停顿点 2 选 B 时 |
+| `brainstorming` | spec 漂移修复 | 停顿点 11 选 B 时 |
 
 ## verify_mode 覆盖
 
@@ -218,11 +218,13 @@ node "$COMET_STATE" set <change-name> verify_mode <light|full>
 
 ## 三个停顿点一览
 
+verify 阶段有 3 个停顿点（全局编号 10-12，整个五阶段工作流共 13 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
+
 | 停顿点 | 何时出现 | 你要做什么 |
 | --- | --- | --- |
-| 1 验证失败 | 任何检查失败 | 全部修复回 build / 逐项处理（CRITICAL 必修） |
-| 2 spec 漂移 | full 检查 6 发现矛盾 | A 追加说明 / B 回 build 重设计 / C 接受偏差 |
-| 3 分支收尾 | 验证通过后 | 合并 / PR / 保持 / 丢弃 |
+| 10 验证失败 | 任何检查失败 | 全部修复回 build / 逐项处理（CRITICAL 必修） |
+| 11 spec 漂移 | full 检查 6 发现矛盾 | A 追加说明 / B 回 build 重设计 / C 接受偏差 |
+| 12 分支收尾 | 验证通过后 | 合并 / PR / 保持 / 丢弃 |
 
 ## 下一步
 
