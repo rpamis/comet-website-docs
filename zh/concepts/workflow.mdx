@@ -1,273 +1,148 @@
 ---
-title: "工作流概念"
-description: "理解 /comet 为什么把 OpenSpec 的 WHAT 和 Superpowers 的 HOW 串成五阶段，产物如何交接，重叠 spec 如何处理，以及如何归档。"
+title: "Comet 五阶段开发工作流说明"
+sidebarTitle: "Workflow"
+description: "Comet 如何将 OpenSpec 和 Superpowers 串联为 open、design、build、verify、archive 五个阶段，并支持自动阶段检测和可恢复状态。"
 ---
 
-`/comet` 是 Comet 的经典 Spec 模式入口。它把一次变更拆成五个阶段：open、design、build、verify、archive。这五个阶段把 OpenSpec 和 Superpowers 两套工具连成一条可恢复的工作流。
+Comet 是一个五阶段开发工作流，会把两套互补的 AI skill sets — OpenSpec 和 Superpowers — 串联成单一自动化 pipeline。每个阶段都有明确 owner、定义清晰的 entry conditions、脚本化 exit guards，以及固定的 artifacts。你用 `/comet` 启动一个 change，依次完成 design、implementation 和 verification，然后通过 archive 关闭它。如果会话中途结束，再次运行 `/comet` 就会从你离开的准确位置继续。
 
-## 为什么把 OpenSpec 和 Superpowers 串起来
+## 双星模型
 
-OpenSpec 和 Superpowers 各有所长，但单独使用时都有短板：
+Comet 建立在项目称为 **dual-star** 的模型之上：两套 skill sets 围绕同一目标运转。
 
-| 工具 | 擅长 | 短板 |
-| --- | --- | --- |
-| OpenSpec | WHAT — 需求、提案、spec 生命周期、delta spec、归档 | 提案和 tasks 缺少深度设计的细节 |
-| Superpowers | HOW — brainstorming、技术设计、计划、执行、收尾、验证 | 缺少状态化设计，spec 完成后只有勾选，Agent 恢复时容易反复回看文档和代码 |
+| Star | 处理 | 责任 |
+|------|---------|--------------------|
+| **OpenSpec** | **WHAT** | Requirements, proposals, spec lifecycle, delta-to-main sync, archiving |
+| **Superpowers** | **HOW** | Technical design, brainstorming, planning, TDD-driven execution, code review |
 
-```mermaid
-flowchart LR
-  A["用户目标"] --> B["OpenSpec: WHAT"]
-  A --> C["Superpowers: HOW"]
-  B --> D["proposal/design/tasks/spec delta"]
-  C --> E["Design Doc/Plan/实现/Review"]
-  D --> F["验证通过"]
-  E --> F
-  F --> G["归档到主 specs"]
-```
-
-Comet 的职责不是替代任何一方，而是：
-
-- **把两者的产物对齐到同一条链**——OpenSpec 记录的 WHAT 和 Superpowers 组织的 HOW 指向同一个 change。
-- **用状态机和守卫保证交接可靠**——不让 Agent 靠对话历史猜进度，而是从文件状态和可检查证据恢复。
-- **把文档同步自动化**——handoff、状态更新、验证和归档都进脚本流程，减少"记得更新设计文档""记得同步 spec""记得归档"这类反复提醒。
-
-核心原则：brainstorming 必不可跳过。每次变更都必须经过深度设计（hotfix 和 tweak preset 除外）。
+二者都不是可选项。OpenSpec 为你的 change 提供正式身份：proposal、structured specs 和 task list。Superpowers 为它提供技术深度：通过 brainstorming 产出的 Design Doc、详细 implementation plan，以及按 task commit 的 disciplined execution。Comet 的 Skills 和 shell scripts 会编排二者之间的 handoff，在整个过程中保持 artifacts 关联和 state 一致。
 
 ## 五个阶段
 
-| 阶段 | 负责方 | 目标 | 主要产物 |
-| --- | --- | --- | --- |
-| open | OpenSpec | 把想法变成 OpenSpec change | `proposal.md`、`design.md`、`tasks.md`、delta spec |
-| design | Superpowers | 做深度技术设计 | `docs/superpowers/specs/...-design.md`、handoff 包 |
-| build | Superpowers | 写计划并执行 | `docs/superpowers/plans/...md`、代码改动、测试证据 |
-| verify | 双方 | 验证实现符合设计和 spec | 验证报告、分支处理结果 |
-| archive | OpenSpec | 合并 delta spec 并归档 | `openspec/changes/archive/YYYY-MM-DD-name/` |
+每个阶段都映射到一个 slash command、一个 owner，以及一组具体 output artifacts。
 
-### open — OpenSpec 记录 WHAT
+| # | Phase | Command | Owner | Artifacts |
+|---|-------|---------|-------|-----------|
+| 1 | **Open** | `/comet-open` | OpenSpec | `proposal.md`, `design.md`, `tasks.md` |
+| 2 | **Deep Design** | `/comet-design` | Superpowers | Design Doc, delta spec |
+| 3 | **Plan & Build** | `/comet-build` | Superpowers | Implementation plan, code commits |
+| 4 | **Verify & Finish** | `/comet-verify` | Both | Verification report, branch handling |
+| 5 | **Archive** | `/comet-archive` | OpenSpec | delta→main spec sync, archive |
 
-`/comet-open` 创建一个 OpenSpec change，产出：
+**Phase 1 — Open** 创建 OpenSpec change：proposal 捕获 *why* 和 *what*，design 概述高层 architecture decisions，tasks file 将工作拆分为 commit-by-commit checklist。Comet 也会在这里初始化 `.comet.yaml`，开始跟踪 state。
 
-```text
-openspec/changes/<name>/
-├── .openspec.yaml          # OpenSpec 状态
-├── .comet.yaml             # Comet 工作流状态（Classic 字段 + run_id）
-├── proposal.md             # Why + What
-├── design.md               # How（高层）
-├── tasks.md                # 任务清单
-└── specs/<capability>/spec.md   # delta spec
+**Phase 2 — Deep Design** 运行 Superpowers brainstorming，产出 Design Doc（technical RFC），并写入或更新 delta capability spec。这是在编写任何代码之前锁定 architectural decisions 的阶段。
+
+**Phase 3 — Plan & Build** 生成与 change 和 Design Doc 绑定的详细 implementation plan，然后逐 task 执行。每个 task 一个 commit，commit messages 反映 design intent。
+
+**Phase 4 — Verify & Finish** 运行项目 tests 并写入 verification report。它还会处理 branch operations（merge、close 或 carry forward），在阶段关闭前把 `branch_status` 更新为 `handled`。
+
+**Phase 5 — Archive** 将 delta spec 同步到 main spec tree，用 `archived-with` status 标注 Design Doc 和 plan，并把 change directory 移动到 `openspec/changes/archive/`。这是唯一一个完成后不能重试的阶段。
+
+## Workflow Diagram
+
+```
+/comet
+  ↓ auto-detect phase from .comet.yaml + openspec list --json
+
+/comet-open ──→ /comet-design ──→ /comet-build ──→ /comet-verify ──→ /comet-archive
+ (OpenSpec)      (Superpowers)     (Superpowers)       (Both)          (OpenSpec)
+
+Preset: /comet-hotfix  (skips brainstorming)
+  open ──→ build ──→ verify ──→ archive
+    ↑ upgrade triggered → pause for confirmation → supplement Design Doc → return to full workflow
+
+Preset: /comet-tweak  (skips brainstorming + full plan)
+  open ──→ lightweight build ──→ light verify ──→ archive
+    ↑ upgrade triggered → pause for confirmation → supplement Design Doc → return to full workflow
 ```
 
-Comet 会用 OpenSpec 的 `openspec instructions` 流程逐个生成 proposal、design、tasks，遵守项目的 `template`、`instruction`、`dependencies` 和 `resolvedOutputPath`，而不是一次性批量生成。完整工作流禁止跳过 brainstorming 直接 one-shot 生成提案。
+一旦某个阶段的 exit conditions 满足且不需要用户决策，Comet 会自动推进到下一阶段。除非到达 blocking decision point（见下方），否则 agent 不会在阶段之间停下。
 
-<Warning>
-  必须用 `/comet-open` 而不是 `/opsx:new` 创建 change。`/opsx:new` 只创建 OpenSpec artifacts，不会创建 `.comet.yaml`，change 会落在 Comet 状态机之外。
-</Warning>
+## 预设路径
 
-### design — Superpowers 深度设计，OpenSpec 保持权威
+两个预设命令通过跳过开销大于价值的阶段，简化常见的低复杂度 changes。
 
-这是两套工具物理对接的阶段。Comet 用 `comet-handoff.mjs` 生成一个交接包，把 open 阶段的 OpenSpec artifacts 整理成 Superpowers 能读懂的上下文，再交给 Superpowers `brainstorming` 做深度设计。
+### `/comet-hotfix` — Quick Bug Fix
 
-```mermaid
-flowchart LR
-  A["OpenSpec artifacts"] --> B["comet-handoff.mjs --write"]
-  B --> C["design-context.json/md"]
-  C --> D["Superpowers brainstorming"]
-  D --> E["Design Doc"]
-  B --> F["handoff_hash 写入 .comet.yaml"]
-```
+跳过由 brainstorming 驱动的 deep design 阶段。适用于 root cause 已经明确，并且 fix 是自包含的情况（单个 function 或 module）。完整的 Phase 1（Open）仍会运行，以创建合适的 change artifacts。
 
-Design Doc 的 frontmatter 显式声明 OpenSpec 是权威来源：
+**如果满足以下任一条件，则升级到 full workflow**：
+- Change 触及 **3 个或更多文件**
+- 涉及 architecture changes（新 modules、interfaces 或 dependencies）
+- 需要 database schema changes
+- Fix 引入新的 public API surface
+- Scope 超出单个 function 或 module
 
-```yaml
----
-comet_change: <name>
-role: technical-design
-canonical_spec: openspec   # OpenSpec 是权威，不是 Design Doc
----
-```
+### `/comet-tweak` — Small Adjustment
 
-关键约束：**Agent 不能写第二份需求 spec**。如果 delta spec 缺少验收场景，只能在 `specs/*/spec.md` 上写 Spec Patch（回写），不能扩大范围。如果写了 Spec Patch，必须重新生成 handoff 更新 hash。
+跳过 brainstorming **以及** 完整 implementation plan。适用于 copy changes、configuration value edits、documentation updates 或 prompt text adjustments。
 
-### build — Superpowers 执行，feed by WHAT
+**如果满足以下任一条件，则升级到 full workflow**：
+- Change 触及 **5 个或更多文件**
+- 需要 cross-module coordination
+- 需要 **5 个或更多** new test cases
+- 添加或移除 config items（不只是值变更）
 
-计划由加载 Superpowers `writing-plans` 的子代理生成，它的 frontmatter 是两个世界的显式链接：
+当满足 upgrade condition 时，Comet 会暂停，要求用户确认切换，补充 Design Doc，然后在适当阶段重新进入 full workflow。
 
-```yaml
----
-change: <openspec-change-name>
-design-doc: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-base-ref: <实现前的 git HEAD>
----
-```
+## 自动阶段检测
 
-计划输入是 Design Doc（Superpowers）+ `tasks.md`（OpenSpec 任务边界）。执行方式由用户选择：`subagent-driven-development` 或 `executing-plans`，配合 `isolation`（branch/worktree）、`tdd_mode`、`review_mode`。
+不带参数运行 `/comet` 会触发 automatic detection。Agent 会读取 `.comet.yaml` 并运行 `openspec list --json`，判断所有 active changes 的准确状态，然后分发到正确阶段，不需要你记住上次停在哪里。
 
-### verify — 双方都查，用 hash 检测漂移
+**Step 0 — 预设和 active-change discovery：**
 
-verify 会加载 Superpowers `verification-before-completion`，然后按 `verify_mode` 分支：
+预设检测会先运行。如果用户输入匹配 hotfix 或 tweak criteria，则直接调用对应预设，并跳过下表。
 
-- **light**（6 项检查）：任务完成、diff 对比、构建、测试、安全、轻量代码评审。跳过 spec 覆盖、Design Doc 一致性和漂移检查。
-- **full**：额外加载 `openspec-verify-change`，同时检查 OpenSpec `design.md` 和 Superpowers Design Doc，包括"delta spec 与 design doc 无矛盾"。
+| Active changes | User input | 行为 |
+|----------------|------------|----------|
+| None | 非预设输入 | → 调用 `/comet-open` 创建新 change |
+| Exactly 1 | `/comet <description>` | → **Ask**：继续此 change 或创建新 change |
+| Multiple | `/comet <description>` | → **Ask**：继续现有 change 或创建新 change；如果继续，则列出列表供选择 |
+| Exactly 1 | `/comet` (no description) | → 自动选择，进入 Step 1 |
+| Multiple | `/comet` (no description) | → 列出 active changes 供用户选择 |
 
-## 产物如何交接：handoff hash
+**Step 1 — 读取 `.comet.yaml`** 中的 `phase`、`workflow`、`build_pause`、`build_mode`、`isolation` 和 `verify_result`。
 
-Comet 用一个 **handoff hash** 把 OpenSpec artifacts 和后续阶段绑在一起，这是它可靠性的核心机制。
+**Step 2 — Phase determination**（按第一个匹配项执行）：
 
-### hash 怎么算
+1. `archived: true` 或 change 已移动到 archive directory → Workflow complete
+2. `verify_result: pass` 且尚未 archived → 调用 `/comet-archive`
+3. `verify_result: fail` → 进入 verification failure decision point（blocking pause）
+4. `phase: verify` 或所有 tasks 已勾选 → 调用 `/comet-verify`
+5. `phase: build` 或 Design Doc 存在但 build/plan 未完成 → 按 workflow 路由（`full` → `/comet-build`，`hotfix` → `/comet-hotfix`，`tweak` → `/comet-tweak`）
+6. `phase: design` 或 change 存在但没有 Design Doc → 调用 `/comet-design`
+7. `phase: open` 或 active change 存在但缺少 `.comet.yaml` → 调用 `/comet-open`
+8. 没有 active change → 调用 `/comet-open`
 
-`comet-handoff.mjs` 对这些文件计算内容 hash：
+<Note>
+每次 context resume 时，phase detection 都会从 Step 0 重新运行。Comet 从不依赖 conversation history 来判断 phase state，只依赖 `.comet.yaml` 和可验证的 file state。
+</Note>
 
-```text
-openspec/changes/<name>/proposal.md
-openspec/changes/<name>/design.md
-openspec/changes/<name>/tasks.md
-openspec/changes/<name>/specs/<capability>/spec.md   # 每个 delta spec
-```
+## Decision Points
 
-对每个文件先算 per-file sha256，再把"相对路径 + per-file sha256"拼起来算最终 sha256，得到 `handoff_hash`。路径统一用正斜杠，保证 macOS/Linux/Windows 的 hash 输入字节一致。
+工作流中的某些节点需要明确的用户输入，agent 才能继续。这些是 **blocking pauses**。Agent 必须使用交互式工具（例如 Claude Code 中的 `AskUserQuestion`）等待你的回应。仅输出文本不算用户决策。
 
-### hash 在各阶段的作用
+| Phase | 阻塞决策 |
+|-------|------------------|
+| **Open** | Review 并确认 proposal、design 和 task breakdown |
+| **Design** | 在 brainstorming 期间确认 technical approach |
+| **Build** | plan 生成后，选择暂停（例如切换 models）或继续；如果继续，选择 workspace isolation method（`branch` 或 `worktree`）和 execution mode |
+| **Build** | 确认需要 redesign 或拆分为新 change 的 scope expansion |
+| **Verify** | 当 verification 失败时，决定修复还是接受 deviation |
+| **Verify** | 选择 branch handling method（merge、close 或 carry forward） |
+| **Any** | 触发 upgrade conditions 时，确认从 hotfix/tweak 升级到 full workflow |
 
-```mermaid
-flowchart TD
-  A["design 阶段"] --> B["comet-handoff --write 生成 hash"]
-  B --> C["handoff_hash 写入 .comet.yaml"]
-  C --> D["guard 在离开 design 时重算 hash"]
-    D --> E{"hash 一致?"}
-  E -->|否| F["FATAL: artifacts 漂移，重新生成 handoff"]
-  E -->|是| G["进入 build"]
-  G --> H["verify 阶段"]
-  H --> I["--hash-only 重算 hash"]
-  I --> J{"hash 一致?"}
-  J -->|是| K["OpenSpec artifacts 未变，可省略全文重读"]
-  J -->|否| L["全文重读所有 artifacts"]
-```
+所有其他 phase transitions 都是自动的。在这些节点上，agent 不得用默认值、历史偏好或未得到回应的建议替代真实用户响应。
 
-| 阶段 | hash 的作用 |
-| --- | --- |
-| design | 生成 hash，写入 `.comet.yaml` 的 `handoff_hash` 和 `handoff_context` |
-| guard（离开 design） | 重算 hash，如果和记录的不一致就 FATAL，提示重新生成 handoff |
-| verify | 用 `--hash-only` 快速重算，hash 一致说明 OpenSpec artifacts 没变，可省略全文重读；不一致则全文重读 |
+## Core Principles
 
-### handoff 包格式
+<Note>
+**适用于所有阶段的 core principles：**
 
-`comet-handoff.mjs ... --write` 在 `openspec/changes/<name>/.comet/handoff/` 下产出：
-
-| 模式 | 产出文件 | 内容 |
-| --- | --- | --- |
-| `off`（默认） | `design-context.json` + `design-context.md` | 完整 artifacts 内容，每文件带 SHA256 |
-| `beta`（压缩） | `spec-context.json` + `spec-context.md` | spec 文件 verbatim 投影 + supporting 文件只存 hash，节省约 25–30% token |
-
-JSON 包含 `change`、`phase`、`mode`、`canonical_spec: openspec`、`context_hash` 和 `files` 数组。guard 会额外验证 markdown 包带有 `Generated-by:` 标记和每个文件的 `Source:`/`SHA256:` 引用，保证 Superpowers 消费的上下文可追溯。
-
-## 如何处理 spec 范围
-
-Comet **不做 spec 去重或重叠检测**。它处理 spec 范围问题的方式是 delta spec 生命周期 + 归档时委托 OpenSpec 合并。
-
-<Tip>
-  大型 PRD 拆分是 Comet 贴近现实需求开发的独立特性——把一个大需求拆成多个可独立设计、交付、归档的 change。详见[大型 PRD 拆分](/zh/guides/prd-splitting)。
-</Tip>
-
-### delta spec 语义
-
-delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 **OpenSpec 原生概念**，不是 Comet 发明的。Comet 消费但不重写这些语义：
-
-- open 阶段创建 delta spec，描述本次变更对哪些能力的增删改。
-- build 阶段把 delta spec 当作**活文档**——小修直接改，中改重新 brainstorming，大改通过 `/comet-open` 开新 change。
-- archive 阶段由 OpenSpec CLI 按 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 语义合并 delta 到主 spec。
-
-### verify 的 spec 漂移决策
-
-如果 verify 发现 delta spec 有 Design Doc 没反映的内容，让你三选一：
-
-| 选项 | 含义 |
-| --- | --- |
-| A | 在 design doc 追加"Implementation Divergence"说明 |
-| B | 退回 build + brainstorming 重新对齐 |
-| C | 接受偏差，归档时 design doc 标记 `superseded-by-main-spec` |
-
-## 如何归档
-
-archive 阶段关闭整个 spec 生命周期。`comet-archive.mjs` 是归档的确定性入口，但它把 delta→主 spec 的合并**委托给 OpenSpec CLI**，自己做前后校验。
-
-### 归档流程
-
-```mermaid
-flowchart TD
-  A["最终确认决策点"] -->|确认归档| B["comet-archive.mjs"]
-  A -->|需要调整| C["archive-reopen 回 verify"]
-  B --> D["校验入口状态: phase=archive, verify_result=pass"]
-  D --> E["检查归档目标不冲突"]
-  E --> F["写 pending action checkpoint"]
-  F --> G["openspec archive --yes 合并 delta 到主 spec"]
-  G --> H["校验主 spec 无 delta 标题残留"]
-  H --> I["标注 design doc 和 plan 的 archived-with"]
-  I --> J["设置 archived: true, 移动目录"]
-```
-
-`comet-archive.mjs` 逐步做：
-
-1. **校验 change 名**（kebab-case）。
-2. **定位 change 目录**，如果已被之前的归档移走，扫描 archive 目录恢复。
-3. **校验入口状态**：`phase` 必须是 `archive`，`verify_result` 必须是 `pass`。
-4. **检查归档目标可用**：`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在。
-5. **写 pending action checkpoint**，支持归档中断后恢复。
-6. **调用 OpenSpec archive**：`openspec archive <change> --yes`，这一步真正执行 delta→主 spec 合并并移动 change 目录。
-7. **解析归档目录**：重新定位 OpenSpec 实际放的位置（日期前缀可能变化）。
-8. **校验主 spec 干净**：扫描 `openspec/specs/*/spec.md`，如果残留 `## ADDED/MODIFIED/REMOVED/RENAMED Requirements` 这类 delta-only 标题就 FATAL。
-9. **标注 frontmatter**：design doc 加 `archived-with` 和 `status: final`，plan 加 `archived-with`。幂等设计，已有标注会先移除再重写。
-10. **更新归档状态**：设置 `archived: true`，Run 状态转为 `completed`，清除 pending action。
-
-### 归档目录结构
-
-```text
-openspec/changes/archive/YYYY-MM-DD-<change-name>/
-```
-
-日期取 UTC（`new Date().toISOString().slice(0,10)`），保证跨时区一致。
-
-<Warning>
-  归档成功后不要再跑 `comet-guard <name> archive`——活跃目录已不存在，guard 会报错。归档完整性由退出码和归档目录状态判断。
-</Warning>
-
-### 预览
-
-`comet-archive.mjs ... --dry-run` 可以预览归档流程而不真正执行 OpenSpec，用 `[DRY-RUN]` 标记标注，报告多少步会成功。
-
-## 自动检测怎么工作
-
-每次调用 `/comet`，Comet 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。
-
-```mermaid
-flowchart TD
-  A["调用 /comet"] --> B["检测 hotfix/tweak preset"]
-  B --> C["openspec list --json"]
-  C --> D["读取 .comet.yaml"]
-  D --> E{"阶段和证据一致?"}
-  E -->|一致| F["路由到当前阶段 Skill"]
-  E -->|不一致| G["用 guard/status 修正或诊断"]
-  G --> F
-```
-
-## 用户会在哪些地方参与
-
-Comet 会自动推进无歧义阶段，但不会替你做产品或风险决策。常见阻塞点包括：
-
-- open 阶段确认 proposal、design 和 tasks（大型需求还会遇到 PRD 拆分，见[大型 PRD 拆分](/zh/guides/prd-splitting)）。
-- design 阶段确认方案，以及是否写 Spec Patch。
-- build 阶段选择隔离方式和执行方式。
-- verify 失败后选择修复或接受偏差（A/B/C）。
-- archive 前做最终确认。
-- hotfix/tweak 命中升级信号时选择继续轻量路径或升级 full。
-
-## 轻量预设
-
-`/comet-hotfix` 和 `/comet-tweak` 跳过完整 brainstorming，但仍保留 OpenSpec 状态、验证和归档。它们适合范围明确的小改动。出现跨模块协调、新 public API、schema 变更或深层架构问题时，应升级到 full。
-
-## 下一步
-
-- [大型 PRD 拆分](/zh/guides/prd-splitting) — 把大需求拆成多个可独立交付的 change
-- [状态与配置](/zh/concepts/state-management) — 理解 `.comet.yaml` 字段和状态守卫
-- [Skill 的类型与用途](/zh/concepts/skills) — Comet Skill 的三类来源
-- [comet-handoff](/zh/scripts/comet-handoff) — 交接包和 hash 的脚本细节
-- [comet-archive](/zh/scripts/comet-archive) — 归档脚本的完整说明
+- **Brainstorming 不可跳过** — 除了满足复杂度条件的 `hotfix` 和 `tweak` 预设，每个 change 在写代码前都必须经过 deep design（Phases 1–2）。
+- **Delta specs 是 living documents** — delta capability spec 可以在 Phase 3（Plan & Build）期间自由编辑，并且只会在 archive 时同步到 main spec tree。
+- **保持 tasks.md 同步** — 每完成一个 task，就在 `tasks.md` 中勾选；每个 task 一个 commit。
+- **频繁 commit** — `tasks.md` 中每个 task 一个 commit；commit messages 必须反映 Design Doc 中的 design intent。
+- **Archive 前先 verify** — `/comet-verify` 必须产出 passing verification report，才允许运行 `/comet-archive`。Guard scripts 会将此作为 hard constraint 强制执行。
+</Note>

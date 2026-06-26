@@ -1,66 +1,148 @@
 ---
-title: "Comet 是什么"
-description: "了解 Comet 的产品定位、核心能力，以及它如何把工作流、Skill、评估和发布连成闭环。"
+title: "Comet — Agent Skill Harness 从想法到归档的阶段守卫自动化"
+sidebarTitle: "介绍"
+description: "Comet 将 OpenSpec 的 spec 生命周期管理与 Superpowers 的 TDD 驱动开发结合为面向软件项目的五阶段 AI 辅助工作流。"
 ---
 
-Comet 是面向 AI 编码的可恢复工作流与 Skill 平台。它把 OpenSpec、Superpowers、Skill Factory、Eval 和发布门禁放进同一个工具链，让你用一套方式完成需求、设计、实现、验证、归档和 Skill 分发。
+**Comet** (`@rpamis/comet`) 是一个 npm CLI 工具，用于安装 AI 编程 Skills，并把两套一流的 skill set — [OpenSpec](https://github.com/Fission-AI/OpenSpec) 和 [Superpowers](https://github.com/obra/superpowers) — 串联成一个完全自动化的五阶段开发流水线。安装一次之后，每次 AI 编程会话都能获得从想法到已归档 spec 的结构化、有状态工作流。
 
-## 你可以用 Comet 做什么
+## Comet 是什么？
 
-- 用 `/comet` 把一次产品或代码变更从想法推进到归档。
-- 用 `/comet-any` 把自己的工作流整理成可复用 Skill。
-- 用 `comet eval` 为 Skill 生成发布前证据。
-- 用 `comet publish` 审核、批准、发布并分发 `/comet-any` 产物。
-- 用 `comet status` 和 `comet doctor` 看清当前阶段、下一步和恢复建议。
+- **OpenSpec** 负责 **WHAT**：需求 proposal、spec 生命周期管理、delta-spec 跟踪和归档。
+- **Superpowers** 负责 **HOW**：brainstorming、TDD 驱动编码、subagent 驱动开发、代码审查和 plan 编写。
 
-```mermaid
-flowchart LR
-  A["产品想法或修复"] --> B["/comet 可恢复工作流"]
-  B --> C["OpenSpec 记录 WHAT"]
-  B --> D["Superpowers 组织 HOW"]
-  C --> E["验证与归档"]
-  D --> E
-  F["可复用工作流想法"] --> G["/comet-any Skill Factory"]
-  G --> H["comet eval 证据"]
-  H --> I["comet publish 发布与分发"]
+**Comet 将二者串联起来**，用 guard scripts、YAML state machine 和智能主入口 (`/comet`) 把它们的 skills 连接在一起。它会自动检测你在工作流中的位置，并从那个准确位置恢复，无需浪费 token 重新读取文档，也无需手动跟踪阶段。
+
+---
+
+## Comet 解决的问题
+
+AI 编程工作流通常会在两类常见场景中失效：
+
+| 问题 | 根因 |
+|---|---|
+| Agents 在恢复时重新检查所有文档，浪费 token | 没有记录哪个阶段已完成、还有什么未完成的有状态记录 |
+| Spec 文档与代码变更不同步 | 文档同步依赖手动提醒 Agent |
+| 阶段过早推进（没有证据却标记为“done”） | 没有强制真实退出条件的 guard conditions |
+| Skills 触发“看起来像”的操作，而不是真正的 skill 调用 | 对嵌套 skill invocation 的理解不足 |
+
+Comet 通过以下方式修复这些问题：
+
+1. 在 `.comet.yaml` 中记录阶段、执行模式、验证结果和归档状态。`.comet.yaml` 是专用的 Comet 工作流状态文件，与 OpenSpec 自身的 `.openspec.yaml` 解耦。
+2. 在每个阶段边界运行 **guard scripts** (`comet-guard.sh`)，检查 tasks、YAML 字段、验证证据和归档条件，满足后才允许工作流前进。
+3. 在脚本化流程中自动处理 handoff、状态更新、validation 和 archive sync，因此用户不必再提醒 Agent “更新 design doc” 或 “同步 spec”。
+
+<Note>
+  Comet 不会简单相信 Agent 说“done”。每个阶段退出前都会由脚本检查真实证据，包括文件是否存在、字段值、SHA256 hashes 和 task completion，然后才推进状态。
+</Note>
+
+---
+
+## 五阶段流水线
+
+Comet 将每项工作组织为五个顺序阶段。主入口 `/comet` 会读取 `.comet.yaml` 中 active spec 的状态，并自动分发到正确阶段。
+
+```
+/comet
+  ↓ auto-detect phase
+┌──────────────┐    ┌───────────────┐    ┌───────────────┐    ┌────────────────┐    ┌────────────────┐
+│  1. OPEN     │───▶│  2. DESIGN    │───▶│  3. BUILD     │───▶│  4. VERIFY     │───▶│  5. ARCHIVE    │
+│ /comet-open  │    │ /comet-design │    │ /comet-build  │    │ /comet-verify  │    │ /comet-archive │
+│  (OpenSpec)  │    │ (Superpowers) │    │ (Superpowers) │    │   (Both)       │    │  (OpenSpec)    │
+└──────────────┘    └───────────────┘    └───────────────┘    └────────────────┘    └────────────────┘
 ```
 
-## 与普通提示词不同的地方
+### 阶段概要
 
-普通提示词依赖对话历史。Comet 依赖文件化状态和可检查证据。
+| 阶段 | 命令 | Owner | 关键产物 |
+|---|---|---|---|
+| **1. Open** | `/comet-open` | OpenSpec | `proposal.md`, `design.md`, `tasks.md` |
+| **2. Deep Design** | `/comet-design` | Superpowers | Design Doc, delta spec |
+| **3. Plan & Build** | `/comet-build` | Superpowers | Implementation plan, code commits |
+| **4. Verify & Finish** | `/comet-verify` | Both | Verification report, branch handling |
+| **5. Archive** | `/comet-archive` | OpenSpec | Delta→main spec sync, archive |
 
-| 关心点 | 没有 Comet | 使用 Comet |
-| --- | --- | --- |
-| 中断恢复 | 需要 Agent 回忆上下文，还没有开始写代码就花费大量Token | 从 `.comet.yaml`状态机、OpenSpec 和运行证据恢复，**支持跨设备0上下文恢复现场** |
-| 阶段边界 | Agent容易跳过设计或验证，如代码实现完毕但文档未打勾、在不该写代码的阶段直接写代码 | 五阶段流程有明确质量门禁，**不在对应阶段完成任务无法退出当前阶段**，强制Agent对应阶段做完所有事情 |
-| 自动推进 | 需要人工记忆大量Skill流程，先用哪个Skill，完成之后再用哪个Skill，中间依赖人工推进流程 | **自动推进**，Comet会自动推进核心Skill流程，**除必要HITL交互点以外，无需用户接管** |
-| 轻量修复 | 容易触发Skill完整流程，造成不必要的Token消耗 | 内置 hotfix 和 tweak，提供轻量需求方案路径 |
-| Skill 复用 | 靠复制提示词 | `/comet-any` 生成可评审、可评估、可分发的 Skill |
-| 发布前证据 | 靠人工判断 | eval、review、approval 和 readiness 绑定当前 hash |
+### Preset 路径
 
-## 四条主线
+对于较小的变更，Comet 提供两条预设路径，用来跳过不值得承担完整设计开销的阶段：
 
-<CardGroup cols={2}>
-  <Card title="/comet 经典工作流" icon="signature" href="/zh/concepts/workflow">
-    适合需求、功能、重构、修复和需要归档的项目变更。
-  </Card>
-  <Card title="CLI 操作台" icon="terminal" href="/zh/cli/quickstart">
-    适合安装、诊断、更新、Skill 管理、评估和发布。
-  </Card>
-  <Card title="/comet-any Skill Factory" icon="blackberry" href="/zh/skill-factory/getting-started">
-    适合创建、优化或组合可复用 Skill。
-  </Card>
-  <Card title="Skill 评估系统" icon="vial-circle-check" href="/zh/eval/quickstart">
-    适合用可浏览报告验证 Skill 行为，并作为发布证据。
-  </Card>
-</CardGroup>
+| Preset | 路径 | 跳过 |
+|---|---|---|
+| `/comet-hotfix` | open → build → verify → archive | Brainstorming/deep design |
+| `/comet-tweak` | open → lightweight build → light verify → archive | Brainstorming 和完整 plan |
 
-## 安装后你会得到什么
+<Info>
+  在完整工作流中，Brainstorming **不可跳过**。每个实质性变更在实现前都必须经过 deep design。这是有意设置的 guard，不是疏漏。
+</Info>
 
-`comet init` 会把 Comet Skill、规则、脚本和平台适配文件安装到你选择的项目级或全局位置。它还会准备 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`，让设计和计划有固定位置。
+---
 
-Comet 0.4.0-beta.1 的运行时只依赖 Node.js。内置状态、守卫、交接和归档脚本都通过 Node 入口执行，不再把 Bash、Git Bash 或 WSL 当作工作流前提。
+## 关键收益
 
-<Tip>
-  如果你只想开始一次项目变更，先读 [快速开始](/zh/quickstart)。如果你想创建可复用 Skill，直接看 [组合任意 Skill 快速上手](/zh/skill-factory/getting-started)。
-</Tip>
+### 恢复时自动检测阶段
+
+在 Phase 3 中途关闭 AI 编程会话？回来后只需输入 `/comet`。Comet 会从 `.comet.yaml` 读取 active spec，动态识别正在执行的阶段并继续，无需重新读取每份文档，也无需猜测进度。
+
+如果存在多个 active specs，Comet 会显示选择列表，让你选择要恢复哪一个。
+
+### Guard Script 强制阶段转换
+
+每个阶段退出都由 `comet-guard.sh` 把关：
+
+- **入口验证** — 在开始阶段前检查文件存在性和状态一致性；失败时输出 `[HARD STOP]` 和可执行的修复建议。
+- **退出验证** — 在推进状态前确认 tasks 确实完成、verification reports 存在，并且 branch status 已处理。
+- **`--apply` 模式** — `comet-guard.sh --apply` 会自动更新 `.comet.yaml`，无需手动编辑状态。
+
+### YAML State Machine
+
+两个相互解耦的状态文件跟踪完整生命周期：
+
+| 文件 | Owner | 用途 |
+|---|---|---|
+| `.openspec.yaml` | OpenSpec | Spec 生命周期、change metadata |
+| `.comet.yaml` | Comet | 工作流阶段、执行模式、验证状态 |
+
+这种分离意味着 Comet 可以升级或替换，而不影响 OpenSpec 的数据；agents 也拥有一个干净、定义明确的接口，可通过 `comet-state.sh` 查询状态。
+
+### 支持 28 个 AI 编程平台
+
+`comet init` 会把 skills 安装到 28 个 AI 编程平台，从 Claude Code、Cursor 到 GitHub Copilot、Gemini CLI、Amazon Q Developer 等。交互式安装器会自动检测你已经在项目中配置的平台，并预先选中它们。
+
+查看完整的 [Platforms](/platforms) 列表。
+
+---
+
+## 你能从 Comet 学到什么
+
+除了工作流本身，Comet 项目也是高级 AI 编程模式的可运行参考实现：
+
+- **如何可靠触发嵌套 Skills** — 确保 Agent 真正调用 skill（带有可见输出），而不是基于描述执行“看起来像”的操作。
+- **如何让组合 Skills 跨阶段自动流转** — 把多套 skill set 连接成单一连贯流水线，无需在每次 handoff 时手动干预。
+- **如何把 Spec 生命周期变成可恢复工作流** — 用有状态 YAML 连接 OpenSpec 和 Superpowers 产物，让 agents 能在任务中途正确恢复。
+- **如何把文档同步变成自动化** — 通过脚本化 handoff、状态更新、validation 和 archive sync，让用户不再需要提醒 Agent。
+- **如何设计 Agents 可执行的 guard conditions** — 用脚本检查的证据替代“agent 说 done”。
+- **如何跨平台分发和安装 Skills** — 在 CLI 安装器中处理 project 与 global scope、语言选择和平台特定目录差异。
+- **如何把 shell scripts 变成 Agent 工作流基础设施** — 编写跨平台脚本（macOS、Linux、Windows Git Bash），把脆弱的工作流控制从 Prompt 文本迁移到可测试、可复用的工具中。
+
+---
+
+## Comet 能带来什么
+
+安装并运行 Comet 后，你的 AI 编程会话将获得：
+
+- ✅ 在编写任何代码之前进行结构化 proposal 和 design 阶段
+- ✅ 由 Superpowers 方法论支撑的 TDD 驱动实现
+- ✅ 自动 commit discipline（每个 task 一个 commit，message 反映 design intent）
+- ✅ 经过验证、有证据支撑的阶段转换，不会过早推进
+- ✅ 实现过程中持续跟踪 delta spec，并在 archive 时同步
+- ✅ 从想法到合并后的 spec，每个变更都有完整的已归档记录
+
+---
+
+## 准备开始了吗？
+
+安装 Comet，并在五分钟内运行你的第一个工作流。
+
+<Card title="Quickstart →" icon="rocket" href="/quickstart">
+  全局安装 Comet，运行 `comet init`，并在你的 AI 编程工具中调用 `/comet`。
+</Card>

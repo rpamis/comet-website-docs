@@ -14,9 +14,6 @@
 
 ## Terminology
 
-{/* Add product-specific terms and preferred usage */}
-{/* Example: Use "workspace" not "project", "member" not "user" */}
-
 ### 中文翻译规则
 
 - **preset** 在中文正文中翻译为「预设」。例如「preset 升级」写作「预设升级」、「preset→full 升级」写作「预设→full 升级」、「继续 preset 轻量流程」写作「继续预设轻量流程」。
@@ -24,8 +21,6 @@
 - 章节标题中的 preset 一律改为「预设」（如「## 预设升级」）。
 
 ## Style preferences
-
-{/* Add any project-specific style rules below */}
 
 - Use active voice and second person ("you")
 - Keep sentences concise — one idea per sentence
