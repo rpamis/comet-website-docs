@@ -52,24 +52,27 @@ description: "用 /comet-any 创建、组合并发布一个可复用 Skill 的�
 
 `/comet-any` 会让你从**三种起点**里选一个。这是 Skill Maker 的第一层选择，决定了整个生成方式：
 
-| 起点 | 含义 | 典型场景 |
-| --- | --- | --- |
-| **改一版 `/comet`** | 在经典五阶段流程上做增量调整 | 想给 `/comet` 加一个评审环节、关掉某个环节 |
-| **做一个新 Skill** | 从你的目标描述创建全新 Skill | 沉淀一个团队专属流程 |
-| **整理已有 Skill** | 把现有 Skill 整理成可发布的标准 Skill 包 | 把散乱的 Skill 规范化 |
+| 起点 | Skill Maker 意图 | 含义 | 典型场景 |
+| --- | --- | --- | --- |
+| **基于 Comet 现有 Skill 的五阶段定制** | `customize-comet` | 在经典五阶段上做增量调整 | 想给 `/comet` 加一个评审环节、要求用组件库 |
+| **创建全新 workflow Skill** | `new-skill` | 从目标描述创建全新工作流 | 沉淀一个团队专属流程 |
+| **整理已有 Skill** | `upgrade-existing` | 把现有 Skill 整理成可发布的标准包 | 把散乱的 Skill 规范化 |
+
+不管选哪种起点，`/comet-any` 最终都会把目标编译成同一种 **Workflow Contract**（由 Workflow Node、Skill Binding、Required Skill Call、Output Schema、Guardrail、Handoff 组成）。详见[Skill Factory 概览](/zh/skill-factory/overview#workflow-contract所有路径的共同模型)。
 
 <Warning>
-  选择<strong>改一版 <code>/comet</code></strong>时，<code>/comet</code> 被视为<strong>受保护边界</strong>：<code>open / design / build / verify / archive</code> 五阶段和状态机不能被改写，你只能<strong>增加 Skill、替换 Skill、关闭 Skill</strong>。
+  选择<strong>基于 Comet 现有 Skill 的五阶段定制</strong>时，<code>/comet</code> 被视为<strong>受保护边界</strong>：control 节点（<code>open</code>/<code>execute</code>/<code>verify</code>/<code>archive</code>）不能被替换实现，你只能对节点<strong>增加 Required Skill Call、增强（augment）、关闭（仅可选节点）</strong>。
 </Warning>
 
 ## 第三步：确认组合方案（Skill Maker 确认页）
 
-`/comet-any` 会读取项目里的真实 Skill，生成一个**组合方案**，然后**暂停等你确认**。这一页叫"Skill Maker 方案确认页"，是整个流程的关键检查点。它会展示：
+`/comet-any` 会读取项目里的真实 Skill，把目标编译成 **Workflow Contract**，生成一个**组合方案**，然后**暂停等你确认**。这一页叫"Skill Maker 方案确认页"，是整个流程的关键检查点。它会展示：
 
-- 你在做什么类型的 Skill、目标是什么
-- **保留**哪些 Skill、**新增**哪些、**替换**哪些、**关闭**哪些
-- 每个环节的**阶段名**（stage name）和来源
-- 哪些 Skill 来自项目偏好、哪些来自目标语义自动补充
+- 你在做什么类型的 Skill（Skill Maker 意图）、目标是什么
+- **保留**哪些节点、**新增**哪些 Required Skill Call、**替换**哪些节点实现、**关闭**哪些可选节点
+- **不能做**什么（例如替换 control 节点会被拒绝）
+- 每个节点的职责、实现 Skill、必须调用的 Skill、Output Schema
+- Workflow Contract 类型（`comet-five-phase-overlay` / `workflow-kernel`）和 Output Schemas 列表
 - 是否有缺失或歧义候选需要你处理
 - scripts / hooks 会带来什么**可执行披露**
 - 将生成哪些文件
@@ -143,20 +146,20 @@ comet publish distribute my-skill --platform claude --scope project --json
 ```mermaid
 flowchart TD
     Start["调用 /comet-any<br/>描述目标"] --> Intent{"选择起点"}
-    Intent -->|改一版 /comet| Derive["基于经典五阶段做增量"]
-    Intent -->|做一个新 Skill| New["从目标创建全新 Skill"]
+    Intent -->|基于 Comet 五阶段定制| Derive["在受保护边界内做增量"]
+    Intent -->|创建全新 workflow Skill| New["从目标编译 workflow-kernel"]
     Intent -->|整理已有 Skill| Upgrade["规范化已有 Skill"]
     Derive --> Pref["读取项目偏好<br/>解析真实 Skill"]
     New --> Pref
     Upgrade --> Pref
     Pref --> Resolve{"缺失/歧义候选?"}
     Resolve -->|是| AskUser["暂停让用户选来源"]
-    Resolve -->|否| Proposal["生成组合方案<br/>展示 Skill Maker 确认页"]
+    Resolve -->|否| Proposal["编译 Workflow Contract<br/>展示 Skill Maker 确认页"]
     AskUser --> Proposal
     Proposal --> Confirm{"用户确认?"}
     Confirm -->|修改| Proposal
     Confirm -->|取消| End1["不写任何状态"]
-    Confirm -->|确认生成| Generate["生成 Skill 包<br/>+ Engine Package + 评估清单"]
+    Confirm -->|确认生成| Generate["生成 Skill 包<br/>+ workflow-protocol.json + 评估清单"]
     Generate --> Eval["comet eval collect → run --html"]
     Eval --> Ready["comet publish review → approve → run"]
     Ready --> Preview["comet publish distribute --preview"]
@@ -200,7 +203,7 @@ policies:
   </Accordion>
 
   <Accordion title="/comet-any 和 /comet 有什么区别">
-    <code>/comet</code> 是经典 Spec 模式入口，驱动 open/design/build/verify/archive 五阶段流程。<code>/comet-any</code> 是 Skill Factory，用来<strong>创建、优化、组合可复用的 Skill</strong>。两者是不同入口，但 <code>/comet-any</code> 的"改一版 <code>/comet</code>"模式可以以 <code>/comet</code> 为基础做增量调整。
+    <code>/comet</code> 是经典 Spec 模式入口，驱动 open/design/build/verify/archive 五阶段流程。<code>/comet-any</code> 是 Skill Factory，用来<strong>创建、优化、组合可复用的 Skill</strong>。两者是不同入口，但 <code>/comet-any</code> 的"基于 Comet 现有 Skill 的五阶段定制"可以以 <code>/comet</code> 为基础做增量调整（在受保护边界内增加 Required Skill Call、替换 producer 节点、关闭可选节点）。
   </Accordion>
 
   <Accordion title="做到一半中断了怎么办">
@@ -222,7 +225,7 @@ policies:
 
 | 进阶主题 | 适合场景 |
 | --- | --- |
-| [Skill Factory 概览](/zh/skill-factory/overview) | 理解 `/comet-any` 做什么、产出什么、三种起点和受保护边界 |
+| [Skill Factory 概览](/zh/skill-factory/overview) | 理解 Workflow Contract、三种起点、受保护边界和内置节点 |
 | [创建 Skill 的完整流程](/zh/skill-factory/workflow) | 从恢复状态到生成、评估、评审、发布、分发的每一步详解 |
 | [Skill 偏好与真实来源](/zh/skill-factory/preferences) | `advisory`/`strict` 模式、策略、`resolved-skills.json` 证据 |
 | [发布和分发 Skill](/zh/skill-factory/publishing) | readiness 状态链、门禁、能力缺口和可执行披露 |

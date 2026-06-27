@@ -101,7 +101,7 @@ base-ref: <git rev-parse HEAD>   # 实现前的 commit，verify 用它算变更�
 
 | 选项 | 说明 | 推荐 |
 | --- | --- | --- |
-| **A `subagent-driven-development`** | 主会话只协调，后台子代理实现，带审查 | 任务数 ≥ 3、复杂度高 |
+| **A `subagent-driven-development`** | 主会话只协调，后台子代理实现；每个任务在隔离的实现者子代理里运行，审查由 `review_mode` 驱动 | 任务数 ≥ 3、复杂度高 |
 | **B `executing-plans`** | 轻量执行，不需子代理环境 | 任务 ≤ 2、无跨模块依赖；来自 hotfix 路径 |
 | `direct` | 直接实现 | 仅 hotfix/tweak 默认；full 需显式 `direct_override: true` |
 
@@ -121,8 +121,8 @@ base-ref: <git rev-parse HEAD>   # 实现前的 commit，verify 用它算变更�
 | 选项 | 说明 | 推荐 |
 | --- | --- | --- |
 | `off` | 不自动审查 | 文档、配置、文案、小范围低风险 |
-| **`standard`** | 任务完成后一次轻量审查，最多一轮自动修复 | **默认推荐**，大多数普通改动 |
-| `thorough` | 按批次/风险边界审查 + 最终完整审查 | 高风险、多模块、架构/安全 |
+| **`standard`** | 默认不派每任务审查者；只在任务命中风险信号时派每任务审查者，外加一次最终轻量审查 | **默认推荐**，大多数普通改动 |
+| `thorough` | 每个任务都派一个每任务审查者（spec + 质量），外加一次最终完整审查 | 高风险、多模块、架构/安全 |
 
 详见[代码审查机制](/zh/concepts/review-mode)。
 
@@ -134,11 +134,12 @@ base-ref: <git rev-parse HEAD>   # 实现前的 commit，verify 用它算变更�
 | --- | --- | --- |
 | 谁写代码 | 主会话直接做 | 主会话**只协调**，后台子代理实现（禁止主会话直接写代码） |
 | 任务推进 | 顺序执行，逐个勾选 | 每个任务派新子代理，通过验收后立即派下一个，**不停下问你要不要继续** |
-| 审查 | 最后一次 review gate（standard/thorough） | 按 review_mode 派审查者 + 修复 agent |
+| 审查 | review gate 按 `review_mode` 缩放（standard=一次最终；thorough=每 3 任务分段 + 最终） | 按 review_mode 派每任务审查者 + 修复 agent（thorough=每任务；standard=仅风险任务） |
+| 模型选择 | 主会话直接执行 | **每次派发必须显式指定模型**（实现者/修复者/审查者各自缩放） |
 | 进度可见 | 对话里直接看到 | 维护 `.comet/subagent-progress.md` 检查点 |
 
 <Tip>
-  <code>subagent-driven-development</code> 下，每个 task 通过验收并被勾选后会<strong>立即派发下一个 task</strong>，不会停下来总结或问你。只有四种情况会停：审查修复轮数耗尽（BLOCKED）、遇到真实歧义、平台无后台调度、你明确要停。
+  <code>subagent-driven-development</code> 下，每个 task 通过验收并被勾选后会<strong>立即派发下一个 task</strong>，不会停下来总结或问你。只有四种情况会停：审查修复轮数耗尽（BLOCKED）、遇到真实歧义、平台无后台调度、你明确要停。审查强度由 <code>review_mode</code> 决定（thorough=每任务审查；standard=仅风险任务审查）。
 </Tip>
 
 <Note>
@@ -152,9 +153,26 @@ base-ref: <git rev-parse HEAD>   # 实现前的 commit，verify 用它算变更�
 1. **先定位根因**——读完整错误、查最近改动、追数据流。**根因调查完成前不得提任何修复。**
 2. 根因是源码 bug 时，先加一个最小失败测试复现，再修源码。
 3. 修完跑失败测试、相关测试、项目构建/验证命令确认全过。
+4. 失败测试、源码修复和 tasks.md 勾选都保留在当前 change 内，不要另开"写测试用例"change 替代当前验证循环。
+
+#### 多失败的并行排查
+
+进入四阶段流程前，先做一个**失败独立性评估**，决定串行还是并行：
+
+| 情况 | 处理 |
+| --- | --- |
+| **串行**（沿用 `systematic-debugging`） | 失败 ≤ 2 个；失败相关（修一个可能修另一个）；共享状态；会动同一批文件；独立性未确立 |
+| **并行**（加载 Superpowers `dispatching-parallel-agents`） | **≥ 3 个失败来自不同问题域**（不同测试文件、不同根因、不同子系统独立损坏） |
+
+满足并行条件时：
+
+1. 用 Skill 工具加载 Superpowers `dispatching-parallel-agents`。
+2. **每个独立失败派一个后台排查 agent**（按问题域分组，全部派发放在**同一条响应**里并发执行）。每个 prompt 自包含（具体失败、错误信息、允许排查范围、禁止动其他问题域代码）。
+3. 所有 agent 仍受"根因定位前不得改源码"约束——它们只**定位根因并返回发现**，不直接提交修复。
+4. 所有排查返回后，主会话**串行**汇总发现并修复；修复仍走当前 `review_mode` 的验证和审查循环。
 
 <Warning>
-  即使 <code>review_mode: off</code>，异常调试协议也<strong>不跳过</strong>——<code>off</code> 只跳过代码审查，不跳过真实问题的调试。
+  <strong>并行只用于排查，不用于修复。</strong>修复始终串行，避免多个 agent 同时改同一批文件冲突——这与 <code>subagent-driven-development</code>"不要并行派发多个实现子代理"的红线一致。即使 <code>review_mode: off</code>，异常调试协议也<strong>不跳过</strong>——<code>off</code> 只跳过代码审查，不跳过真实问题的调试。
 </Warning>
 
 ### Step 4：spec 增量更新
@@ -196,8 +214,9 @@ node "$COMET_GUARD" <change-name> build --apply
 | `executing-plans` | 轻量执行计划 | Step 3，`build_mode: executing-plans` |
 | `subagent-driven-development` | 子代理驱动执行 | Step 3，`build_mode: subagent-driven-development` |
 | `test-driven-development` | 强制 TDD | Step 3，`tdd_mode: tdd` 时 |
-| `requesting-code-review` | 代码审查门禁 | Step 3，`review_mode: standard`/`thorough` + `executing-plans` 时 |
+| `requesting-code-review` | 代码审查门禁 | Step 3，`review_mode: standard`/`thorough` 时（executing-plans 按 review_mode 缩放；subagent 模式按每任务/风险派审查者） |
 | `systematic-debugging` | 异常调试 | Step 3b，崩溃/测试失败/构建失败时强制加载 |
+| `dispatching-parallel-agents` | 多失败并行排查 | Step 3b，≥ 3 个独立失败时加载（仅排查，修复串行） |
 | `brainstorming` | 中等规模 spec 更新 | Step 4，发现接口/组件/数据流变化时 |
 
 ## 产物
@@ -217,7 +236,7 @@ node "$COMET_GUARD" <change-name> build --apply
 - `isolation` 是 `branch` 或 `worktree`
 - `build_mode` 已选（subagent 模式需 `subagent_dispatch: confirmed`）
 - `tdd_mode` 已选
-- `review_mode` 已选（standard/thorough 需审查完成，CRITICAL 已修复；off 需记录跳过原因）
+- `review_mode` 已选（按 executing-plans review gate 完成：standard/thorough 已请求审查并修复 CRITICAL 或记录非 CRITICAL 接受原因；off 已记录跳过原因）
 
 guard 读 `build_command`/`verify_command`（配置在 `.comet.yaml` 或仓库根），找不到才回退到 npm/Maven/Cargo 自动检测。命令语法受限：只允许命令词、引号、路径和 `&&`，**禁止** `;`、管道、裸 `&`、`$`、反引号。
 

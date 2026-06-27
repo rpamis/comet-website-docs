@@ -67,11 +67,15 @@ flowchart LR
 
 ## 3. 选择起点和语言
 
-从三种起点里选一个（见[Skill Factory 概览 · 三种起点](/zh/skill-factory/overview#三种起点)）：
+从三种起点里选一个（见[Skill Factory 概览 · 三种起点](/zh/skill-factory/overview#三种起点)），它们对应三种 **Skill Maker 意图**（`skillMakerIntent`）：
 
-- `改一版 /comet`（后端 `mode=derive`）
-- `做一个新 Skill`（后端 `mode=create`，默认）
-- `整理已有 Skill`（后端 `mode=optimize`）
+| 起点 | `skillMakerIntent` |
+| --- | --- |
+| 基于 Comet 现有 Skill 的五阶段定制 | `customize-comet` |
+| 创建全新 workflow Skill | `new-skill` |
+| 整理已有 Skill | `upgrade-existing` |
+
+不管选哪种起点，`/comet-any` 最终都会把目标编译成同一种 **Workflow Contract**（`workflow.kind` 为 `comet-five-phase-overlay` 或 `workflow-kernel`）。详见[Workflow Contract](/zh/skill-factory/overview#workflow-contract所有路径的共同模型)。
 
 同时确认默认语言和 locales。至少记录默认 locale；多语言 Skill 需要说明哪些文件由 locale overlay 覆盖。
 
@@ -111,16 +115,16 @@ comet bundle factory-resolve <name> --candidate <query> --ignore-missing --reaso
 
 ## 7. 生成 Skill Maker 方案并等待确认
 
-`/comet-any` 按偏好提出组合方案，并标注每个 Skill 的 `preferenceIndex`、来源、hash、用途、调用顺序和**阶段名**。这一页就是"**Skill Maker 方案确认页**"。
+`/comet-any` 把目标编译成 **Workflow Contract**，按偏好提出组合方案，并标注每个节点的职责、实现 Skill、Required Skill Call 和 Output Schema。这一页就是"**Skill Maker 方案确认页**"。
 
 方案确认页至少包含这些区块：
 
 | 区块 | 内容 |
 | --- | --- |
-| 你在做什么 | 起点、Skill 名、目标 |
+| 你在做什么 | Skill Maker 意图、Skill 名、目标 |
+| Workflow contract | `kind`（`comet-five-phase-overlay` / `workflow-kernel`）、每个节点的职责/实现 Skill/必须调用的 Skill/Output Schema、Output Schemas 列表 |
 | 保留 / 新增 / 替换 / 关闭 | 对应起点的调整词汇 |
-| 不能做 | 被拒绝的调整（例如替换 protected 步骤） |
-| 阶段名 | 每个环节的 stage name + 来源（custom/recommended）+ phase/label |
+| 不能做 | 被拒绝的调整（例如 override control 节点） |
 | 将生成哪些文件 | 产物清单 |
 | Validate / Install / Advanced details | 校验、安装、进阶信息 |
 
@@ -131,7 +135,7 @@ comet bundle factory-resolve <name> --candidate <query> --ignore-missing --reaso
 你需要在确认页做**三选一**：
 
 1. `confirm-generate` — 确认生成，随后写入 Bundle draft（仅当无 blocker 时才显示）。
-2. `revise-proposal` — 修改目标、偏好、候选或控制面策略后重新 proposal。
+2. `revise-proposal` — 修改目标、偏好、候选或 Workflow Contract 后重新 proposal。
 3. `cancel` — 不写入 Bundle state。
 
 ## 8. 澄清 Skill Factory 目标
@@ -154,23 +158,34 @@ comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
 
 ### plan.json 结构
 
+`plan.json` 的主输入是 `workflow`（Workflow Contract），不再用 `callChain` / `stageNames`：
+
 ```json
 {
-  "goal": "Create a review-oriented Comet-native Skill.",
-  "preferredSkills": ["brainstorming", "writing-plans"],
-  "callChain": ["brainstorming", { "skill": "writing-plans", "preferenceIndex": 1 }],
-  "stageNames": [
-    { "skill": "brainstorming", "name": "review-workflow-discovery", "label": "Discovery" },
-    { "skill": "writing-plans", "name": "review-workflow-plan", "label": "Plan" }
-  ],
-  "deviations": [
-    { "skill": "writing-plans", "expectedIndex": 1, "actualIndex": 0, "reason": "..." }
-  ],
+  "goal": "基于 Comet 现有 Skill 的五阶段定制，要求组件库和白盒审查。",
+  "skillMakerIntent": "customize-comet",
+  "workflow": {
+    "kind": "comet-five-phase-overlay",
+    "name": "team-comet",
+    "goal": "要求组件库和白盒审查。",
+    "nodes": {
+      "execute": {
+        "requiredSkillCalls": [
+          {
+            "skill": "elementui",
+            "reason": "Use project component library during direct implementation."
+          }
+        ]
+      },
+      "review": {
+        "requiredSkillCalls": [
+          { "skill": "whitebox-code-standard", "scope": "review" }
+        ]
+      }
+    }
+  },
   "engineMode": "deterministic",
-  "runnerMode": "standalone",
-  "mode": "create",
-  "defaultLocale": "zh",
-  "locales": ["zh", "en"]
+  "runnerMode": "standalone"
 }
 ```
 
@@ -178,17 +193,35 @@ comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
 
 | 字段 | 说明 |
 | --- | --- |
-| `mode` | `create` / `optimize` / `derive`，对应三种起点 |
+| `skillMakerIntent` | `customize-comet` / `new-skill` / `upgrade-existing`，对应三种起点；不写会按 `workflow.kind` 和 `mode` 推断 |
+| `workflow.kind` | `comet-five-phase-overlay`（五阶段定制）或 `workflow-kernel`（全新工作流） |
+| `workflow.nodes` | 按 Workflow Node id 覆盖或增强内置节点（`requiredSkillCalls`、`augmentations`、`implementation`、`satisfies`、`disabled`） |
+| `workflow.customNodes` | `workflow-kernel` 模式声明全新节点（每个必须带 `responsibility`） |
+| `workflow.outputSchemas` | `workflow-kernel` 模式声明自定义 Output Schema |
 | `engineMode` | `none` / `deterministic` / `adaptive`（默认 `deterministic`） |
 | `runnerMode` | `change`（绑定 OpenSpec 目录） / `standalone`（默认） |
-| `callChain` | 调用链，每个元素是 Skill 名或 `{skill, preferenceIndex}` |
-| `stageNames` | 阶段名覆盖（`name` 必须匹配 `^[a-z0-9][a-z0-9._-]*$`） |
-| `baseTemplate` + `templateDelta` | `derive` 模式必填 |
-| `sourceRoot` | `optimize` 模式必填 |
+| `mode` | `create`（默认）/ `optimize`，`optimize` 必须提供 `sourceRoot` |
+| `defaultLocale` / `locales` | 默认语言和 locales |
+
+<Warning>
+  Factory plan 不允许未知字段；<code>workflow</code> 必须是合法的 Workflow Contract。读取时会立刻调用 <code>normalizeWorkflowDefinition</code> 校验，不通过会直接报错（见[Skill Factory 概览 · 校验失败码](/zh/skill-factory/overview#校验失败码validation-findings)）。
+</Warning>
+
+#### Workflow Node 操作语义
+
+| 操作 | 含义 | 适用节点 |
+| --- | --- | --- |
+| `require`（默认 for requiredSkillCalls） | 要求节点内调用某 Skill，不替换实现 | 所有节点 |
+| `augment`（默认 for augmentations） | 增强节点，不替换主实现 | 所有节点 |
+| `override`（implementation 替换） | 替换节点实现 | 仅 producer（需 `satisfies`）；control 不可；普通模式 override control 会失败 |
+| `disable` | 关闭节点 | 仅 `optional` 节点（`review`） |
 
 ## 10. 生成 Comet-native Skill 源码
 
-`/comet-any` 通过**创作车道**（authoring lanes）组装产物。生成物包含入口 `SKILL.md` 和每个内部阶段 Skill 的 `SKILL.md`，并写入 `reference/resolved-skills.json`（含 `sourceSummaries`，证明组合基于本地真实内容而不是只按名称猜测）。
+`/comet-any` 通过**创作车道**（authoring lanes）组装产物。生成物包含入口 `SKILL.md`、每个 Workflow Node 对应的内部 Skill，并写入：
+
+- `reference/workflow-protocol.json` —— **唯一运行事实源**（节点、边、Output Schema、state、evals），runtime / eval / review / readiness 全读它
+- `reference/resolved-skills.json` —— 真实 Skill 来源证据 + workflow 节点绑定
 
 <Info>
   <code>/comet-any</code> 优先使用原生的 <code>skill-creator</code>，必须在使用 Comet 兜底前征得同意。
@@ -208,7 +241,7 @@ comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
 comet bundle compile <name> --platform <id> --json
 ```
 
-校验包括稳定控制面（required capability set）和平台能力匹配。
+校验包括 Workflow Contract 语义、稳定控制面（required capability set）和平台能力匹配。Workflow Contract 在生成前已经过 `normalizeWorkflowDefinition` 校验（control 节点不能 override、producer override 要 satisfy、Output Schema 要存在等），编译阶段会再次核对产物与 `workflow-protocol.json` 一致。
 
 ## 13. 展示评估工作量
 
