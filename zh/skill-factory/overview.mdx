@@ -1,13 +1,13 @@
 ---
 title: "Skill Factory 概览（进阶）"
-description: "深入理解 /comet-any（Skill Maker）如何创建、优化、组合、评估和分发 Comet-native Skill，三种起点、受保护边界、产物结构和发布门禁。"
+description: "深入理解 /comet-any（Skill Maker）如何用 Workflow Contract 把任意 Skill 编排成可验证、可评审、可分发的 Comet-native Skill，三种起点、受保护边界、Workflow Node 和发布门禁。"
 ---
 
 <Info>
   这是进阶内容。如果你只想快速创建一个 Skill，先看[快速上手：组合任意 Skill](/zh/skill-factory/getting-started)。
 </Info>
 
-`/comet-any`（也叫 **Skill Maker**）是 Comet 的 Skill Factory。你描述想要的工作流，它读取真实本地 Skill、生成**可验证、可评审、可分发**的 Skill 或 Bundle，并把后端复杂度（Bundle、Factory、composition、Phase Recipe、resolved-skills）隐藏在内部。
+`/comet-any`（也叫 **Skill Maker**）是 Comet 的 Skill Factory。你描述想要的工作流，它读取真实本地 Skill、把目标编译成一份 **Workflow Contract**，再生成**可验证、可评审、可分发**的 Skill Bundle，并把后端复杂度（Bundle、Factory、composition、resolved-skills）隐藏在内部。
 
 ## 核心设计原则
 
@@ -15,8 +15,8 @@ description: "深入理解 /comet-any（Skill Maker）如何创建、优化、�
 
 | 层 | 内容 | 谁会接触 |
 | --- | --- | --- |
-| **用户层** | 三种起点 + `增加 Skill / 替换 Skill / 关闭 Skill` 的调整词汇 | 所有用户 |
-| **内部层** | Bundle、Factory、composition、template delta、resolved-skills.json | 仅审计/排障时查看 |
+| **用户层** | 三种起点 + `保留 / 新增 / 替换 / 关闭` 的调整词汇 + 每个节点的职责说明 | 所有用户 |
+| **内部层** | Bundle、Factory、composition、Workflow Protocol、resolved-skills.json | 仅审计/排障时查看 |
 
 **用户唯一需要记住的入口是 `/comet-any`**。CLI（`comet bundle`、`comet publish`）是它的确定性后端，普通用户不需要手动操作。
 
@@ -40,47 +40,148 @@ description: "深入理解 /comet-any（Skill Maker）如何创建、优化、�
 
 ## 三种起点
 
-用户第一层只需要从三种起点里选一个。它们对应后端三种 `mode`：
+用户第一层只需要从三种起点里选一个。它们对应三种 **Skill Maker 意图**（`skillMakerIntent`），后端会把每条路径都编译到同一种 Workflow Contract：
 
-| 起点（用户层） | 后端 mode | 含义 | 必须提供 |
+| 起点（用户层） | Skill Maker 意图 | 含义 | 典型场景 |
 | --- | --- | --- | --- |
-| **改一版 `/comet`** | `derive` | 在 `/comet` 受保护边界内做增量调整 | `baseTemplate` + `templateDelta` |
-| **做一个新 Skill** | `create`（默认） | 从目标描述创建新的 Comet-native Skill | `goal` |
-| **整理已有 Skill** | `optimize` | 读取现有 Skill 整理成可发布 Skill | `sourceRoot` |
+| **基于 Comet 现有 Skill 的五阶段定制** | `customize-comet` | 在 `/comet` 受保护边界内做增量调整 | 给 `/comet` 加一个评审环节、要求用组件库 |
+| **创建全新 workflow Skill** | `new-skill` | 从目标描述生成新的 workflow-kernel | 沉淀一个团队专属流程 |
+| **整理已有 Skill** | `upgrade-existing` | 把现有 Skill 整理成可发布标准包 | 把散乱的 Skill 规范化 |
 
-### 受保护边界：改一版 /comet
+## Workflow Contract：所有路径的共同模型
 
-当你选择"改一版 `/comet`"时，`/comet` 被视为**受保护边界**。这五个阶段硬编码在协议里，不可改写：
+不管你选哪种起点，`/comet-any` 最终都会把目标编译成同一种 **Workflow Contract**。这是理解整个 Skill Factory 的核心概念：
 
-```text
-open → design → build → verify → archive
-```
+| 概念 | 含义 |
+| --- | --- |
+| **Workflow Node** | 流程中的可恢复节点，例如 `open`、`design`、`plan`、`execute`、`review`、`verify`、`archive` |
+| **Node Responsibility** | 该节点在 Agent workflow 里承担的职责，用来解释它为什么存在、要产出什么、能否替换 |
+| **Skill Binding** | 某个节点的实现 Skill 或辅助 Skill |
+| **Required Skill Call** | 要求节点内**必须调用**某个 Skill，但**不替换**节点的实现。例如要求 `execute` 必须调用 `elementui` |
+| **Output Schema** | 节点必须产出的文件、状态或 evidence。脚本、eval、readiness 只认 Output Schema，不认 Skill 名字 |
+| **Guardrail** | 阻断或放行节点推进的检查 |
+| **Handoff** | 子代理或跨节点交接时必须带回的 evidence |
+| **workflow-protocol.json** | 生成包的**唯一运行事实源**，runtime / eval / review / readiness 都读它 |
 
-允许的调整**只有三种**：
+### 两类 Workflow
 
-| 调整词汇 | 后端动作 | 限制 |
-| --- | --- | --- |
-| **增加 Skill** | `templateDelta.add` | 在某个阶段的 `before`/`after` 插入 |
-| **替换 Skill** | `templateDelta.replace` | 只能替换 `mutable` 步骤 |
-| **关闭 Skill** | `templateDelta.disable` | 只能关闭 `optional` 步骤 |
+<Columns columns={2}>
+  <Column>
+    #### `comet-five-phase-overlay`
+    以 Comet 经典五阶段为骨架做增量调整。保留 `/comet` 主流程和 `.comet.yaml` 状态语义，内置 8 个节点。
+  </Column>
+  <Column>
+    #### `workflow-kernel`
+    全新自定义工作流。从零声明节点、Output Schema、Guardrail 和 Handoff，需要重新声明 state。
+  </Column>
+</Columns>
 
-`/comet` 的 Skill Maker 模板把这五个阶段拆成 7 个步骤，每个步骤标记为 `protected`（受保护）、`mutable`（可替换）或 `optional`（可关闭）：
+## 受保护边界：基于 Comet 现有 Skill 的五阶段定制
 
-| 阶段 / 步骤 | Skill | 类型 |
-| --- | --- | --- |
-| `open/open` | `comet-open` | protected |
-| `design/brainstorming` | `comet-design` | mutable |
-| `build/writing-plans` | `writing-plans` | mutable |
-| `build/build-execution` | `comet-build` | mutable |
-| `build/build-review` | `requesting-code-review` | optional |
-| `verify/verify-result-transition` | `comet-verify` | protected |
-| `archive/archive-delta-sync` | `comet-archive` | protected |
+当你选择"基于 Comet 现有 Skill 的五阶段定制"时，`/comet` 被视为**受保护边界**。`comet-five-phase-overlay` 内置这 8 个节点：
 
-还有两种**预设 profile**：`hotfix`（去掉 design）、`tweak`（去掉 design 和 writing-plans）。
+| 节点 | 职责 | 类型 | 可用操作 |
+| --- | --- | --- | --- |
+| `open` | 接收需求、选定变更形态、初始化 Comet state | control | `require`、`augment` |
+| `design` | 把确认的需求变成设计产物和 OpenSpec delta | producer | `require`、`augment`、`override` |
+| `plan` | 产出可执行的实施计划 | producer | `require`、`augment`、`override` |
+| `execute` | 直接执行实施计划 | control | `require`、`augment` |
+| `subagent-execute` | 委派子代理执行并要求回传 evidence | handoff | `require`、`augment` |
+| `review` | 在验证前用审查 Skill 检查实现（可选） | guardrail | `require`、`augment`、`disable` |
+| `verify` | 运行验证、调和分支、决定是否完成 | control | `require`、`augment` |
+| `archive` | 归档 OpenSpec 变更并同步 delta | control | `require`、`augment` |
+
+普通模式下有明确规则：
+
+| 规则 | 说明 |
+| --- | --- |
+| **control 节点不能 override** | `open`、`execute`、`verify`、`archive` 只能 `require`/`augment`（例如要求调用某个 Skill），不能替换实现 |
+| **producer 节点可以 override** | `design`、`plan` 可以替换实现，但必须 `satisfies` 对应的 Output Schema |
+| **可选节点可以 disable** | `review` 标记为 `optional`，可以关闭 |
+| **Required Skill Call 不替换实现** | 它要求节点**内部调用**某个 Skill，节点本身的实现 Skill 不变 |
 
 <Warning>
-  评审阶段会硬阻塞任何<strong>缺少五阶段</strong>的生成请求（finding code：<code>missing-comet-phase</code>）。<code>protected</code> 步骤不能被替换，<code>disable</code> 只作用于 <code>optional</code> 步骤。
+  想替换 control 节点（<code>open</code>/<code>execute</code>/<code>verify</code>/<code>archive</code>）？普通模式不允许。这时要改走高级 <strong>workflow-kernel</strong>，并重新声明 state、Output Schema 和 Guardrail。
 </Warning>
+
+### 8 个内置 Output Schema
+
+`/comet-any` 内置 8 个 Output Schema，runtime/eval/readiness 据此判断节点是否达标，而不是看 Skill 名字：
+
+| Output Schema | 节点 | 产出 |
+| --- | --- | --- |
+| `comet.intake.v1` | `open` | Comet state 初始化 |
+| `comet.design.v1` | `design` | 设计文档 + OpenSpec delta |
+| `comet.plan.v1` | `plan` | 实施计划 + tasks |
+| `comet.execution-evidence.v1` | `execute` | 实现摘要 + 测试证据 |
+| `comet.handoff.v1` | `subagent-execute` | 移交请求 + 回传结果 |
+| `comet.review.v1` | `review` | 审查摘要（blockers 可选） |
+| `comet.verify.v1` | `verify` | 验证命令 + 验证结果 |
+| `comet.archive.v1` | `archive` | 归档摘要 + 归档状态 |
+
+<Tip>
+  producer 节点做 <code>override</code> 时，必须在 <code>satisfies</code> 里声明它满足哪个 Output Schema。例如替换 <code>design</code> 实现，必须 <code>satisfies: ["comet.design.v1"]</code>，否则校验会报 <code>producer-missing-output-schema</code>。
+</Tip>
+
+## 方案示例：给 /comet 加组件库和白盒审查
+
+下面这个 `plan.json` 用 Required Skill Call 给 `execute`/`subagent-execute` 加组件库、给 `review` 加白盒审查——**不替换任何节点实现**：
+
+```json
+{
+  "goal": "基于 Comet 现有 Skill 的五阶段定制，要求组件库和白盒审查。",
+  "skillMakerIntent": "customize-comet",
+  "workflow": {
+    "kind": "comet-five-phase-overlay",
+    "name": "team-comet",
+    "goal": "要求组件库和白盒审查。",
+    "nodes": {
+      "execute": {
+        "requiredSkillCalls": [
+          {
+            "skill": "elementui",
+            "reason": "Use project component library during direct implementation."
+          }
+        ]
+      },
+      "subagent-execute": {
+        "requiredSkillCalls": [
+          { "skill": "elementui", "scope": "handoff" }
+        ]
+      },
+      "review": {
+        "requiredSkillCalls": [
+          { "skill": "whitebox-code-standard", "scope": "review" }
+        ]
+      }
+    }
+  }
+}
+```
+
+关键点：`execute`/`subagent-execute`/`review` 的实现 Skill 没变，只是在节点内部**强制调用**额外 Skill，并通过 Handoff / Output Schema 收回 evidence。
+
+### 自定义节点（workflow-kernel）
+
+`workflow-kernel` 允许声明全新节点。每个节点必须用 `responsibility` 说明职责，并声明 Output Schema 和 Guardrail：
+
+```json
+{
+  "id": "delegate-notes",
+  "label": "Delegate Notes",
+  "kind": "handoff",
+  "responsibility": "Delegate release note drafting and require returned evidence.",
+  "implementation": { "skill": "handoff-coordinator", "scope": "handoff" },
+  "requiredSkillCalls": [
+    { "skill": "release-notes", "scope": "handoff" }
+  ],
+  "operations": ["require", "augment"],
+  "outputSchemas": ["release.notes.v1"],
+  "guardrails": [
+    { "id": "handoff-returned", "label": "Handoff returned evidence", "validation": "semantic" }
+  ]
+}
+```
 
 ## /comet-any 做什么
 
@@ -90,11 +191,11 @@ open → design → build → verify → archive
 2. 读取 `.comet/skill-preferences.yaml` 里的偏好顺序（`advisory` / `strict` 模式）。
 3. 用 `find-skill` **解析真实 Skill 内容**（读 `SKILL.md`、references、rules、scripts、hooks），而不是只按名字猜测。
 4. 处理**缺失或歧义**候选，必须暂停询问用户。
-5. 生成组合方案和**阶段名**（stage names）。
-6. 先展示 **Skill Maker 方案确认页**，用户确认后才写 draft。
-7. 写入 `reference/resolved-skills.json` 作为**真实来源证据**（含 `sourceSummaries`）。
-8. 为多步骤 Skill 生成 **Engine Package**（`skill.yaml`、`guardrails.yaml`、`checks.yaml`、`eval.yaml`）。
-9. 生成 `comet/eval.yaml` 评估清单。
+5. 把目标编译成 **Workflow Contract**（Workflow Nodes、Skill Bindings、Output Schemas、Guardrails、Handoffs）。
+6. **校验** Workflow Contract（control 不能 override、producer override 要 satisfy、Output Schema 要存在等）。
+7. 先展示 **Skill Maker 方案确认页**，用户确认后才写 draft。
+8. 生成 entry Skill、每个节点的内部 Skill、`reference/workflow-protocol.json` 和 scripts。
+9. 生成 `comet/eval.yaml` 评估清单（Engine 启用时还有 Engine Package）。
 10. 进入 readiness、review、approval、publish 和 distribute。
 
 ```mermaid
@@ -107,13 +208,13 @@ flowchart TD
     E --> F["find-skill 解析真实 Skill"]
     F --> G{"缺失或歧义?"}
     G -->|是| H["暂停让用户选择<br/>（硬规则，不静默忽略）"]
-    G -->|否| I["生成组合方案 + 阶段名"]
+    G -->|否| I["编译成 Workflow Contract<br/>并校验"]
     H --> I
     I --> J["Skill Maker 方案确认页"]
     J --> K{"用户确认?"}
     K -->|修改| I
     K -->|取消| End["不写状态"]
-    K -->|确认生成| L["生成 Skill 包 + Engine Package"]
+    K -->|确认生成| L["生成 Skill 包<br/>+ workflow-protocol.json"]
     L --> M["comet eval collect → run --html"]
     M --> N{"评估通过?"}
     N -->|否| F
@@ -128,9 +229,9 @@ flowchart TD
 
 - 想把团队流程做成**可复用 Skill**。
 - 想优化已有 Skill，使其可评估、可发布。
+- 想在 `/comet` 五阶段基础上**增加、替换或关闭**某些环节。
 - 想组合多个 Skill，并**保留真实来源证据**。
 - 想把生成物**分发到 Claude Code、Codex 等平台**。
-- 想在 `/comet` 五阶段基础上**增加、替换或关闭**某些 Skill。
 
 ## /comet-any 的产出
 
@@ -142,22 +243,25 @@ flowchart TD
   skills/<entry-skill>/
     SKILL.md                          # 用户真正调用的入口
     comet/
-      skill.yaml                      # Engine 运行计划
+      skill.yaml                      # Engine 运行计划（Engine 启用时）
       guardrails.yaml                 # 运行时约束
       checks.yaml                     # runtime eval（运行期）
       eval.yaml                       # 创建期评估 manifest（发布前证据）
     reference/
-      resolved-skills.json            # 真实 Skill 来源证据
+      workflow-protocol.json          # 唯一运行事实源（runtime/eval/review/readiness 共用）
+      resolved-skills.json            # 真实 Skill 来源证据 + workflow 节点信息
       composition-report.md           # 组合方案和偏离解释
-      workflow-protocol.json          # 工作流协议
       decision-points.md              # 决策点
       recovery.md                     # 恢复路径
       skill-review.md                 # 作者自审
-      authoring-lanes.json            # 创作车道记录
+      authoring-lanes.json            # 创作车道记录（含 protocolHash）
     scripts/                          # required control plane
       workflow-state.mjs
       workflow-guard.mjs
       workflow-handoff.mjs
+      comet-plan.mjs
+      comet-check.mjs
+      comet-hook-guard.mjs
   rules/                              # required control plane
   hooks/                              # required control plane（portable hook descriptor）
 ```
@@ -167,22 +271,23 @@ flowchart TD
 | 文件 | 生命周期 | 职责 |
 | --- | --- | --- |
 | `SKILL.md` | 创建期 + 运行期 | 用户真正调用的入口 |
-| `reference/resolved-skills.json` | 创建期 | 真实 Skill 来源、hash、`sourceSummaries`、选择原因和偏好证据 |
+| `reference/workflow-protocol.json` | 创建期 + 运行期 | **唯一运行事实源**：节点、边、Output Schema、state、evals |
+| `reference/resolved-skills.json` | 创建期 | 真实 Skill 来源、hash、workflow 节点绑定、偏好证据 |
 | `reference/composition-report.md` | 创建期 | 组合方案、偏离解释、风险和 review evidence |
 | `comet/skill.yaml` | 运行期 | 内部运行计划（goal、orchestration、steps），不是用户手写入口 |
 | `comet/guardrails.yaml` | 运行期 | 由偏好和风险策略生成的约束（允许列表、预算） |
-| `comet/checks.yaml` | 运行期 | runtime evals（progress/step/completion） |
+| `comet/checks.yaml` | 运行期 | runtime eval（progress/step/completion） |
 | `comet/eval.yaml` | 创建期 | Eval manifest（`comet eval` 的输入） |
 
-<Note>
-  <strong>容易混淆的命名：</strong>复数 <code>evals.yaml</code>（或 <code>checks.yaml</code>）是<strong>运行期</strong> eval，由 Engine 在运行时检查；单数 <code>eval.yaml</code> 是<strong>创建期</strong>评估 manifest，由 <code>comet eval</code> 在发布前验证。两者生命周期不同，不能混为一谈。
-</Note>
+<Tip>
+  <strong>workflow-protocol.json 是核心。</strong>runtime、eval、review、publish readiness 全部读这一份协议，保证"创建时校验通过"和"运行时能恢复"指向同一个事实。
+</Tip>
 
 ### 必需能力集合（required capability set）
 
 稳定组合 Skill Bundle 的 required capability set 是 `skills / scripts / rules / hooks / references`：
 
-- `skills`：入口 Skill 和各阶段内部 Skill。
+- `skills`：入口 Skill 和各节点内部 Skill。
 - `scripts / rules / hooks`：**required control plane**，不是可随意删除的附属文件。它们负责状态推进、守卫、移交的确定性。
 - `references`：真实来源证据和创作审计。
 
@@ -199,11 +304,31 @@ flowchart TD
 - **用户只调用这个 Skill**，CLI 是内部后端。
 - 必须**用 `find-skill` 解析真实 Skill**，不能只按名字推测能力。
 - **缺失/歧义候选必须暂停**询问用户，绝不静默忽略或替用户选择。
-- `factory-generate` 遇到未解决候选会 **fail closed**。
-- **Eval 被跳过或失败** → 永远不进入 ready，永远不生成安装候选。
+- 必须先展示方案确认页，**用户确认后才写 draft**。
+- Required Skill Call **不替换**节点实现。
+- producer override 必须声明 `satisfies` 的 Output Schema。
+- control 节点普通模式不得 override。
+- eval、review、publish readiness 必须读取**同一份** `workflow-protocol.json`。
+- 子代理 Handoff 必须要求子代理加载 Required Skill Call 并回传 evidence。
+- 脚本只读取 protocol 和 state，不把 Skill 名称当成校验依据。
+- **Eval 被跳过或失败** → 永远不进入 ready。
 - **缺少人工批准** → 永远不 ready。
 - **分发前必须先 preview**，用户确认后才写入。
-- 非 JSON 输出必须显式展示 `Readiness:`、`Blockers:`、`Warnings:`、`Evidence:` 和 `Validate this Skill`。
+- 安装前必须询问用户，不得自动安装。
+
+## 校验失败码（validation findings）
+
+`/comet-any` 在编译 Workflow Contract 时会校验，失败会给出明确 finding code：
+
+| finding code | 含义 |
+| --- | --- |
+| `unknown-node` | patch 引用了当前 kind 不存在的节点 |
+| `unsupported-operation` | 节点不支持该操作（例如对 control 节点 override） |
+| `control-node-override` | control 节点普通模式被 override |
+| `producer-missing-output-schema` | producer override 没有声明 satisfies 的 Output Schema |
+| `missing-output-schema` | 节点引用了未定义的 Output Schema |
+| `duplicate-node` | 重复定义了相同 id 的节点 |
+| `disabled-required-node` | 必需节点被 disable（只有 optional 节点能 disable） |
 
 ## 下一步
 

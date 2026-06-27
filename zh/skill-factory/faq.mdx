@@ -9,19 +9,31 @@ description: "解答 /comet-any 创建、偏好配置、组合方案、评估发
 
 <AccordionGroup>
   <Accordion title="我不懂 Bundle、Factory、composition 这些词">
-    普通用户不需要懂。这些是 `/comet-any` 的内部后端概念。你只需要调用 `/comet-any`，它会在内部调用 CLI 维护确定性状态。第一层只有三种起点：改一版 `/comet`、做一个新 Skill、整理已有 Skill。详见[Skill Factory 概览](/zh/skill-factory/overview)。
+    普通用户不需要懂。这些是 `/comet-any` 的内部后端概念。你只需要调用 `/comet-any`，它会在内部调用 CLI 维护确定性状态。第一层只有三种起点：基于 Comet 现有 Skill 的五阶段定制、创建全新 workflow Skill、整理已有 Skill。详见[Skill Factory 概览](/zh/skill-factory/overview)。
   </Accordion>
 
   <Accordion title="/comet-any 和 /comet 有什么区别">
-    `/comet` 是经典 Spec 模式入口，驱动 open/design/build/verify/archive 五阶段项目变更流程。`/comet-any`（Skill Maker）是 Skill Factory，用来**创建、优化、组合可复用的 Skill Bundle**。两者是不同入口，但 `/comet-any` 的"改一版 `/comet`"模式可以以 `/comet` 为基础做增量调整。
+    `/comet` 是经典 Spec 模式入口，驱动 open/design/build/verify/archive 五阶段项目变更流程。`/comet-any`（Skill Maker）是 Skill Factory，用来**创建、优化、组合可复用的 Skill Bundle**。两者是不同入口，但 `/comet-any` 的"基于 Comet 现有 Skill 的五阶段定制"可以以 `/comet` 为基础做增量调整（在受保护边界内增加 Required Skill Call、替换 producer 节点、关闭可选节点）。
   </Accordion>
 
   <Accordion title="为什么要生成 Bundle 而不是只生成一个 SKILL.md">
     多步骤、需要恢复、需要 guardrails、需要 runtime evals 或包含脚本副作用的 Skill，必须生成稳定组合 Skill Bundle（包含 `SKILL.md` + Engine Package + control plane：`scripts`/`rules`/`hooks`/`references`）。只生成 `SKILL.md` 会失去 Run 恢复和 runtime eval。
   </Accordion>
 
-  <Accordion title="Skill Maker 确认页上的&quot;增加/替换/关闭 Skill&quot;是什么意思">
-    这是"改一版 `/comet`"起点的调整词汇。增加 Skill 是在某个阶段前后插入；替换 Skill 只能替换 `mutable` 步骤；关闭 Skill 只能关闭 `optional` 步骤。`protected` 步骤（open/verify/archive 核心环节）不能被替换。详见[Skill Factory 概览 · 受保护边界](/zh/skill-factory/overview#受保护边界改一版-comet)。
+  <Accordion title="Skill Maker 确认页上的&quot;保留/新增/替换/关闭&quot;是什么意思">
+    这是基于 Comet 现有 Skill 做五阶段定制（`customize-comet`）时的调整词汇，作用于 **Workflow Node**：**保留**节点原实现、**新增** Required Skill Call（要求节点内调用额外 Skill）、**替换** producer 节点（`design`/`plan`，必须 satisfy Output Schema）、**关闭**可选节点（只有 `review` 可关闭）。control 节点（`open`/`execute`/`verify`/`archive`）不能被替换实现。详见[Skill Factory 概览 · 受保护边界](/zh/skill-factory/overview#受保护边界基于-comet-现有-skill-的五阶段定制)。
+  </Accordion>
+
+  <Accordion title="Workflow Node 和 Required Skill Call 有什么区别">
+    Workflow Node 是流程里一个可恢复的阶段（如 `execute`），它有一个**实现 Skill**（真正干活的 Skill）。Required Skill Call 是要求这个节点**内部额外必须调用**某个 Skill，但**不替换**节点的实现 Skill。例如要求 `execute` 节点必须调用 `elementui`（组件库），但 `execute` 的实现仍是 `comet-build`。详见[Skill Factory 概览](/zh/skill-factory/overview#workflow-contract所有路径的共同模型)。
+  </Accordion>
+
+  <Accordion title="Output Schema 是什么，为什么不能只看 Skill 名字">
+    Output Schema 是节点必须产出的文件、状态或 evidence（如 `comet.design.v1`）。脚本、eval、readiness **只认 Output Schema，不认 Skill 名字**——这样替换 producer 节点的实现时，只要满足同样的 Output Schema，下游检查照样能通过。替换 producer 节点（`design`/`plan`）时必须声明 `satisfies`，否则校验报 `producer-missing-output-schema`。
+  </Accordion>
+
+  <Accordion title="workflow-protocol.json 是什么">
+    `reference/workflow-protocol.json` 是生成包的**唯一运行事实源**，记录节点、边、Output Schema、state 和 evals。runtime、eval、review、publish readiness 全部读这一份协议，保证"创建时校验通过"和"运行时能恢复"指向同一个事实。详见[Skill Factory 概览 · 关键文件职责](/zh/skill-factory/overview#关键文件职责)。
   </Accordion>
 </AccordionGroup>
 
@@ -44,8 +56,12 @@ description: "解答 /comet-any 创建、偏好配置、组合方案、评估发
     `/comet-any` 会暂停询问你，不会静默忽略或替你选择。你选择明确来源、移除缺失项或更新偏好后，它才会更新 Factory metadata 继续。`available` / `missing` / `ambiguous` 三类状态见[Skill 偏好 · 缺失和歧义候选](/zh/skill-factory/preferences#缺失和歧义候选)。
   </Accordion>
 
-  <Accordion title="stage names 是什么">
-    阶段名（stage name）是组合方案里每个环节的标识符。默认是 `<bundle-slug>-<skill-slug>`，你也可以在 plan.json 的 `stageNames` 里覆盖（必须匹配 `^[a-z0-9][a-z0-9._-]*$`）。阶段名不能和入口 Skill 名重复，也不能重复。每个阶段名标记来源 `custom`（你覆盖的）或 `recommended`（推荐的）。
+  <Accordion title="三种起点有什么区别，我该选哪个">
+    三个起点对应三种 Skill Maker 意图：`customize-comet`（基于 Comet 五阶段做增量，如加组件库/白盒审查）、`new-skill`（从零创建全新 workflow-kernel）、`upgrade-existing`（整理已有 Skill 成可发布标准包）。想沿用 `/comet` 五阶段就选第一种；想做完全不同的流程就选第二种。详见[Skill Factory 概览 · 三种起点](/zh/skill-factory/overview#三种起点)。
+  </Accordion>
+
+  <Accordion title="skillMakerIntent 是什么">
+    Skill Maker 意图（`skillMakerIntent`）是 plan.json 里标注你选了哪种起点的字段，取值 `customize-comet` / `new-skill` / `upgrade-existing`。不写时 `/comet-any` 会按 `workflow.kind` 和 `mode` 自动推断（`comet-five-phase-overlay` → `customize-comet`，`optimize` → `upgrade-existing`，其余 → `new-skill`）。
   </Accordion>
 </AccordionGroup>
 
@@ -85,7 +101,7 @@ description: "解答 /comet-any 创建、偏好配置、组合方案、评估发
   </Accordion>
 
   <Accordion title="resolved-skills.json 是什么，为什么要看它">
-    `reference/resolved-skills.json` 记录组合方案基于哪些真实 Skill、它们的 hash 和从真实 SKILL.md 提炼的内容摘要（`sourceSummaries`）。它是"不是按名字猜的"的证据。准备发布或审查时优先看它。
+    `reference/resolved-skills.json` 记录两件事：组合方案基于哪些真实 Skill、它们的 hash 和状态（`available`/`missing`/`ambiguous`）；以及每个 Workflow Node 绑定的实现 Skill、Required Skill Call 和 Output Schema。它是"不是按名字猜的"的证据，也能反查节点到 Skill 的绑定。准备发布或审查时优先看它。
   </Accordion>
 
   <Accordion title="我能手工编辑 Bundle 状态或内部 JSON 吗">
