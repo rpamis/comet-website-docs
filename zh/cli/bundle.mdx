@@ -22,7 +22,9 @@ flowchart LR
   B --> C["factory-init"]
   C --> D["factory-resolve"]
   D --> E["factory-generate"]
-  E --> F["compile"]
+  E --> AP["authoring-plan"]
+  AP --> AR["authoring-record"]
+  AR --> F["compile"]
   F --> G["eval-plan"]
   G --> H["eval-record"]
   H --> I["review-summary"]
@@ -76,6 +78,61 @@ comet bundle factory-generate <name> --json
 <Info>
   <code>proposalHash</code> 由 Factory metadata 记录并在后端校验，用户不需要把它作为 CLI 参数传入。<code>factory-init</code> 会把规范化 plan 固化到 <code>.comet/bundle-factory-plans/&lt;name&gt;/plan.json</code>，并记录 <code>planHash</code> 和 <code>preferenceHash</code>。
 </Info>
+
+## 创作协议命令（authoring）
+
+0.4.0-beta.1 起，`/comet-any` 生成的 Skill 不再是薄确定性外壳，而是携带真实人工创作内容。这通过**创作协议**（authoring protocol）实现：一个确定性的 lane DAG，每个 lane 输出经过 schema 校验，最后做一次多票 Skill 评审。
+
+### 创作流水线
+
+创作按**波次（wave）**推进，每个 lane 是一个可并行的子任务：
+
+```mermaid
+flowchart LR
+    W1["wave 1<br/>script / reference / pause-points"] --> W2["wave 2<br/>workflow-entry / skill-core"]
+    W2 --> B["barrier<br/>skill-review"]
+    B --> R["记录到 Bundle<br/>authoring-record"]
+```
+
+| Lane | 产出 | 说明 |
+| --- | --- | --- |
+| `script` | 运行时脚本（workflow-state、workflow-guard、workflow-handoff、comet-plan、comet-check、comet-hook-guard） | 6 个核心脚本 |
+| `reference` | workflow-protocol、resolved-skills、composition-report、authoring-lanes | 协议和组合证据 |
+| `pause-points` | decision-points、recovery | 决策点和恢复 |
+| `workflow-entry` | 入口 Skill 正文 | 入口创作 |
+| `skill-core` | 节点 Skill 正文 | 节点创作 |
+| `skill-review` | skill-review | 多票评审（barrier） |
+
+### authoring-plan
+
+```bash
+comet bundle authoring-plan <name> --depth quick --json
+comet bundle authoring-plan <name> --depth full --json
+```
+
+返回创作计划：要跑哪些 lane、每个 lane 的预期产出、深度（`quick` 只覆盖必要 lane，`full` 覆盖全部）。计划本身不执行任何创作。
+
+### authoring-record
+
+```bash
+comet bundle authoring-record <name> --lane <id> --file <lane-output.json> --json
+```
+
+校验并记录某个 lane 的产出：
+
+- **schema 校验**：lane 输出 JSON 必须符合该 lane 的 schema（status ∈ `DONE`/`DONE_WITH_CONCERNS`/`NEEDS_CONTEXT`/`BLOCKED`，artifacts、findings、evidence 等字段齐全）。
+- **claim 校验**：lane 声称产出哪些内容（claims），实际产物文件必须存在且匹配。
+- **写入状态**：校验通过后把 lane 产出固化到 Bundle 的创作状态（`BundleAuthoringState`），记录 lane status、findings（severity ∈ `critical`/`important`/`minor`）和 review evidence。
+- **review evidence**：`skill-review` lane 的 evidence source ∈ `deterministic-check-only`/`llm-single`/`llm-multivote`，记录真实评审结论（voters、lenses、findings），不再硬编码 `approved`。
+
+### Authored 内容分区
+
+生成的 SKILL.md 由两部分组成：
+
+- **Auto zone（自动区）**：frontmatter、路由表、Entry/Exit 检查、证据格式、恢复——不变的控制面，由模板生成。
+- **Authored zone（创作区）**：入口的 `## Decision Core`、节点的 `## Guidance`——由 skill-core / workflow-entry 子 Agent 动态创作。
+
+节点分为 `delegates`（覆盖层 → 安装富 Skill，薄指导正确）和 `substance`（工作流内核，必须有富创作指导）。一个 `substance` 节点如果缺少创作内容会渲染显式的 `AUTHORING PENDING` stub，并出现在 `unauthoredSubstanceNodes` 里——**这会阻止发布就绪**，确保生成器不能再以假完整的薄 Skill 冒充完成。
 
 ## draft 和 compile 命令
 
@@ -158,6 +215,8 @@ comet bundle distribute <name> --platform <id> --scope project --json
 | `--ignore-missing` | 忽略缺失候选（需配合 `--reason`） |
 | `--reason <text>` | 原因说明 |
 | `--level <quick\|full>` | eval 工作量级别 |
+| `--depth <quick\|full>` | 创作深度（`authoring-plan`） |
+| `--lane <id>` | 创作 lane id（`authoring-record`，必填） |
 | `--result <path>` | eval 结果文件路径 |
 | `--approve` / `--reject` | 批准或拒绝 |
 | `--reviewer <name>` | 评审人 |
