@@ -104,7 +104,26 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 
 ### LLM-as-judge 覆盖（可选）
 
-设 `BENCH_LLM_JUDGE=1` 启用。它用 LLM 重新打分**三个规则较弱的维度**（`artifact_quality`、`spec_drift`、`main_flow`），输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
+设 `BENCH_LLM_JUDGE=1` 启用。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物的实质深度**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
+
+judge 在宿主机（不在 Docker 内）通过复用被测 Agent 同款的 `claude` CLI + proxy 运行，不引入新依赖。可用 `BENCH_JUDGE_MODEL` 或 `ANTHROPIC_MODEL` 指定裁判模型。
+
+不同 profile 覆盖的维度不同：
+
+| Profile | 覆盖维度 | 说明 |
+| --- | --- | --- |
+| `comet-workflow` | `artifact_quality`、`spec_drift`、`main_flow` | 重新打分规则较弱的三个定性维度（`llm_judge.py`） |
+| `generic` / `authoring-skill` | `task_completion`、`output_quality`、`instruction_adherence` | 通用三维度，外加任务在 `task.toml` 里声明的 `rubric_criteria` 作为 `custom_N` 维度（`generic_llm_judge.py`） |
+
+generic/authoring 的三维度评分标准：
+
+| 维度 | 1.0（满分） | 0.5 | 0.0 |
+| --- | --- | --- | --- |
+| `task_completion` | 全部需求满足、产物存在且正确、基线检查通过 | 部分完成 | 关键产物缺失或为空 |
+| `output_quality` | 结构良好、完整、非平凡、有思考痕迹 | 存在但浅薄、勉强达标 | 缺失、空、明显 stub |
+| `instruction_adherence` | 完全遵守指令和约束、无违禁模式、工具使用得当 | 轻微偏离但核心意图保留 | 严重违反、危险命令、约束失败 |
+
+judge 收集 workspace 文件时跳过 `.git`、`node_modules`、`.comet` 等目录，单文件上限 3000 字符、总预算 20000 字符，大文件（>50KB）和二进制文件会被跳过，保证 prompt 不失控。裁判必须按 `[RUBRIC-JUDGE] <dim>: <score> - <reason>` 格式逐行输出，每个 reason ≤25 词并引用具体内容。
 
 ## pass@k 与 pass^k
 
