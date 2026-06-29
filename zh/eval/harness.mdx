@@ -200,12 +200,49 @@ flowchart TD
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | **必需**，两者都没有时 suite 跳过 |
 | `BENCH_CC_MODEL` | 覆盖 Claude 模型 |
 | `BENCH_CC_VERSION` | Docker 镜像里的 Claude Code 版本（默认 `latest`） |
+| `BENCH_SIMULATOR_PROMPT_FILE` | 自定义用户模拟器提示词文件（默认 `eval/simulator-instruction.md`，相对路径从 `eval/` 解析）。`--simulator-prompt` 命令行参数优先级更高 |
 | `BENCH_LLM_JUDGE=1` | 启用可选的 LLM-as-judge 覆盖评分 |
 | `COMET_EVAL_REPORT_CONFIG` | 报告输出配置路径 |
 | `BENCH_SUITE_ROOT` / `BENCH_TASKS_DIR` / `BENCH_TREATMENTS_DIR` / `BENCH_SKILLS_DIR` / `BENCH_LOGS_DIR` | 路径覆盖 |
 | `BENCH_TEST_CONTEXT` / `BENCH_TEST_RESULTS` | 覆盖 host↔Docker 传输文件名 |
 
 LangSmith suite 额外需要 `LANGSMITH_API_KEY`、`LANGSMITH_TRACING=true`、`TRACE_TO_LANGSMITH=true`。
+
+### 用 Anthropic 兼容代理认证
+
+当 `ANTHROPIC_API_KEY` 未设置时，Docker 内的 `claude` 改用 **Anthropic 兼容代理**（BigModel / mimo / OpenRouter 等）认证。需要的变量：
+
+| 变量 | 作用 |
+| --- | --- |
+| `ANTHROPIC_AUTH_TOKEN` | 代理型认证 token |
+| `ANTHROPIC_BASE_URL` | 代理的 Anthropic 兼容端点 |
+| `ANTHROPIC_MODEL` | 默认模型 |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` / `ANTHROPIC_DEFAULT_OPUS_MODEL` | 各档位模型映射 |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL_NAME` / `ANTHROPIC_DEFAULT_OPUS_MODEL_NAME` | 各档位模型显示名 |
+| `CLAUDE_CODE_SUBAGENT_MODEL` | 子 agent 模型 |
+
+这些变量在 `eval/.env.example` 里都有占位项。把它们写进 `eval/.env`，harness 启动 Docker 时会注入。
+
+### 自定义用户模拟器提示词
+
+`auto_user` 模式评测里，用户模拟 Agent 的指令由一个提示词文件驱动。默认读 `eval/simulator-instruction.md`：
+
+```text
+You are simulating a developer user in an automated eval. ...
+- Approves the proposed approach / name / plan when asked to confirm
+- Picks the most reasonable default option when asked to choose
+- Asks for clarification only if the question is truly ambiguous ...
+Never refuse; always let the workflow move forward. Do not write code or files.
+```
+
+如果你想换一套用户行为（比如更挑剔、会要求澄清更多），把你的版本写到一个文件，再用 `BENCH_SIMULATOR_PROMPT_FILE` 指向它：
+
+```bash
+# eval/.env
+BENCH_SIMULATOR_PROMPT_FILE=my-simulator-prompt.md
+```
+
+相对路径从 `eval/` 解析；文件存在才会被读取。命令行 `--simulator-prompt "..."` 的优先级最高，会覆盖文件内容。详见[评分指标与双 Agent 评测 · 用户模拟 Agent 的指令](/zh/eval/scoring#用户模拟-agent-的指令)。
 
 ## 不要把 harness 和 runtime eval 混淆
 

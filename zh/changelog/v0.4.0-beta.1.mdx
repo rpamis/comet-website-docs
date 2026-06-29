@@ -111,14 +111,24 @@ comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 - **Dashboard 改进**: 产物按来源分组（OpenSpec / Superpowers / Comet）、亮色/暗色主题切换（持久化偏好）、产物预览显示文件大小和更新时间元数据、环形图动画从 0 开始。
 - **Shared eval system**: 可复用 eval harness，含 profiles、生成的 Skill manifest、通用 smoke task、HTML 报告、失败归因、token/cost 报告，通过 `comet eval run|collect` 暴露。
 - **Platform expansion**: ZCode 支持和 MimoCode 原生支持。
+- **Trae CN 平台**：新增 Trae 国内版（`trae-cn`）独立平台支持，项目级 `.trae-cn/skills`，全局 `~/.trae-cn/skills`，平台总数达 32 个。
+- **符号链接安装模式**：`comet init` / `comet update` 新增 **copy**（传统，每平台独立副本）和 **symlink**（共享 `.comet/skills/` 中央存储）两种安装模式，节省磁盘并保证跨平台一致性；Windows 上用不需要管理员权限的 junction。
+- **Debug Gate 并行失败排查**：Debug Gate 协议现在在四阶段流程前先做一次失败独立性评估——当 ≥3 个失败来自不同问题域（不同测试文件、不同根因、独立子系统），它会加载 Superpowers `dispatching-ai.ents` skill 并为每个失败派一个后台调查 agent 并行定位根因，而非逐个串行调试。调查保持并行，修复仍串行且走当前 `review_mode` 循环，并发 agent 永不编辑同一文件。
 - **Stable composed Skill control plane**: 生成的 `/comet-any` Skill Bundle 包含 required scripts、rules、hooks、runtime checks、Eval manifest 和组合证据。
 - **Factory Skill composition**: 创作时展开 source Skill 的 `comet/flow.yaml`，含 choice resolution 和 cycle detection。
 - **Comet Any user guidance**: 首次使用 Factory guide、可确认的组合 proposal、resume summary、distribution preview。
 
 ### Changed
 
-- **`review_mode` default changed to `standard`**: full workflow 初始化的默认 `review_mode` 和运行时 fallback 从 `null`（关闭）改为 `standard`。适用于 init 模板、`classic-state-command.ts` 运行时 fallback 和冻结的 0.3.9 契约 fixture。
-- **Project config merge on init/update**: `comet init` 和 `comet update` 对 `.comet/config.yaml` 做字段级合并，而非文件存在就跳过。保留现有值、补齐缺失字段、刷新注释、保留自定义字段；损坏 YAML 优雅回退到全部默认。
+- **Classic 运行时打包**：把内部 Classic 控制包移到 `comet/runtime/classic` 下并改为**纯 YAML**（`skill.yaml` / `guardrails.yaml` / `checks.yaml`），安装产物不再暴露一个顶层、像 Skill 的 `comet-classic` 目录，但所有 `/comet*` 命令行为不变。
+- **`subagent-driven-development` 下不再重复 review**：子 Skill dispatch 参考现在明确指出 `review_mode` 接管 Superpowers `subagent-driven-development` 默认的"每个 task 后派 reviewer"，且每模式的 review 次数由整条流的 review-budget 表固定——一次 change 不再同时为 Superpowers 的逐 task review 和 Comet 自己的 review 买单。
+- **三档 review 渐变**：`review_mode` 现在形成真正的梯度：`off` = 零 task 级 reviewer（用户自担风险，记录原因）；`standard` = 仅当一个 task 命中风险信号时派一个 task 级 reviewer（spec + quality）；`thorough` = 每个 task 都派 task 级 reviewer，取代旧的批量 review。
+- **每条 dispatch 必须显式选模型**：子 Skill dispatch 参考现在要求每次 implementer / fixer / reviewer dispatch 都显式指定模型，而不是静默继承会话里最贵的模型。
+- **`review_mode` 默认改为 `standard`**：full workflow 初始化的默认 `review_mode` 和运行时 fallback 从 `null`（关闭）改为 `standard`。
+- **`/comet` 主入口渐进式加载**：脚本定位引导（env-var 解析、`--apply`/`transition`/`next`/`archive` 命令参考、输出格式）从主 `comet/SKILL.md` 移到新的 `comet/reference/scripts.md` 单一来源，主入口每次加载省掉约 45 行内联样板。
+- **Comet 子 Skill 渐进式加载**：把 `/comet` 的引导重构扩展到所有阶段和预设 Skill。frontmatter description 现在只描述触发条件，共享的脚本定位设置放在 `comet/reference/scripts.md`，`comet/reference/context-recovery.md` 定义一条**任意入口恢复规则**——从 `/comet-open`、`/comet-build`、`/comet-hotfix`、`/comet-tweak` 或其他入口恢复都保持确定性，无需在每个 Skill 里重复同样的样板。
+- **归档提交提示**：archive Skill 现在以一个明确的"提交归档变更"步骤收尾。归档脚本只移动文件、合并 spec——不自动 commit——新步骤会提示用户 `git add -A && git commit` 并完成 phase 4 的分支处理，避免归档结果留在工作树未提交。
+- **Project config merge on init/update**：`comet init` 和 `comet update` 对 `.comet/config.yaml` 做字段级合并，而非文件存在就跳过。保留现有值、补齐缺失字段、刷新注释、保留自定义字段；损坏 YAML 优雅回退到全部默认。
 - **Publish facade path**: `comet publish` 作为常规 readiness/approval/publish/distribute 路径，`comet bundle` 作为高级后端。
 - **Comet product model**: 围绕纯 Node 运行时、可恢复工作流诊断、可复用 Skill 平台和 `/comet-any` 作为主 Skill 创建路径重新定位。
 - **Repository and runtime layout**: 仓库重组为 `app/`、`domains/`、`platform/`、`scripts/` 和对应测试。
@@ -129,6 +139,20 @@ comet eval run --skill-path ./my-skill --skill-name my-skill --quick
 - **Publish readiness**: review 输出现在包含面向用户的 readiness 结论和下一步，在原始 blocker 证据之前。
 - **Comet Any Skill Maker language**: 围绕定制 `/comet`、创建新 Skill、升级已有 Skill 重构语言，Bundle 和 Factory 概念保留在内部审计层。
 
+### Eval 增强
+
+- **自定义用户模拟器提示词**：新增 `BENCH_SIMULATOR_PROMPT_FILE` 环境变量（默认 `eval/simulator-instruction.md`）。auto_user 评测里，用户模拟 Agent 的指令可由你指定的文件覆盖，相对路径从 `eval/` 解析。`--simulator-prompt` 命令行参数仍保留更高优先级。
+- **Anthropic 兼容代理认证**：当 `ANTHROPIC_API_KEY` 未设置时，`claude` 可改用 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`（BigModel / mimo / OpenRouter 等）认证。配套变量 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_HAIKU/SONNET/OPUS_MODEL`、`ANTHROPIC_DEFAULT_*_MODEL_NAME`、`CLAUDE_CODE_SUBAGENT_MODEL` 让代理后端的模型路由可控。
+
+### Fixed
+
+- **Windows 路径处理**：修复 OpenSpec init/update 在含空格目录下的路径引用，`comet init` 不再因项目路径含空格而失败。
+- **部分 init 失败汇总**：`comet init` 把有任何组件失败的平台归入 `Failed` 并点名失败组件，而不是把部分安装既显示为已安装又显示为失败。
+- **Skill 文档 EN/ZH 同步**：补回英文 `comet-build` Skill 里缺失的 `review_mode` 选择表和 review-gate 条件，回填中文 verify Skill 的"重试上限"段落。
+- **Lint 噪声清理**：修复 `domains/bundle/authoring.ts`、`domains/factory/package.ts`、`domains/skill/platform-install.ts` 的 lint 告警，并新增 `scripts/lint/gitignore-top-level.mjs` 防止顶层 artifact 被意外提交。
+
 ### Removed
 
-- **Bash-first runtime assumptions**: 移除旧的 shell-script 运行时/测试假设；Node launcher 和跨平台 runtime check 成为默认契约。
+- **Bash-first 运行时依赖**: 移除旧的 shell-script 运行时/测试假设；Node launcher 和跨平台 runtime check 成为默认契约。
+- **无用的 boilerplate 版本标记**：从 `comet/SKILL.md` 的脚本定位块移除没人读取的 `boilerplate version: vN` 标注，git 已经追踪跨文件同步。
+- **主 comet Skill 的最佳实践附录**：从 `comet/SKILL.md` 删除"Best Practices / 最佳实践"附录。每一条都在 Decision Core 或对应子 Skill（comet-build / comet-archive / comet-hotfix / comet-tweak）里有更精确的指引，附录只是重复，子 Skill 仍是唯一来源。
