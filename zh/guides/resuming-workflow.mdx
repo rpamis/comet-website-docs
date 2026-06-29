@@ -62,6 +62,33 @@ description: "会话中断、上下文压缩或换设备后，通常只需要重
 
 如果 Agent 平台自动压缩了上下文（之前的对话被摘要了），你还是输入 `/comet`。Agent 内部会按上下文压缩恢复协议重载状态——必要时它会读 `brainstorm-summary.md`、handoff 交接包、`.comet/subagent-progress.md` 等检查点文件继续。你不需要手动操作这些文件。
 
+## 从任意阶段入口恢复
+
+正常恢复用 `/comet`，但**你也可以直接从任意阶段或预设入口恢复**——`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
+
+这是 0.4.0-beta.1 渐进式加载带来的确定性保证：每个子 Skill 进入时都会先通过 `comet/reference/scripts.md` 定位脚本，然后跑自己那个阶段的**入口检查或恢复检查**，而不是从对话历史推断阶段。
+
+```bash
+node "$COMET_STATE" check <change-name> <phase> --recover
+```
+
+- 如果检查发现实际的 phase、workflow 或证据属于**另一个** Skill，按脚本输出和 `/comet` 路由规则切换——**不要在错误的阶段里继续写状态**。
+- 如果工作树有未提交改动，先用 `comet/reference/dirty-worktree.md` 的规则归因。
+
+```mermaid
+flowchart TD
+    A["直接调 /comet-build 等任意入口"] --> B["定位脚本 scripts.md"]
+    B --> C["跑该阶段入口/恢复检查 --recover"]
+    C --> D{"实际阶段匹配?"}
+    D -->|是| E["在当前阶段继续"]
+    D -->|否| F["按脚本输出切换到正确 Skill"]
+    F --> G["不在错误阶段写状态"]
+```
+
+<Tip>
+  这条规则让你在 <strong>已知自己在哪个阶段</strong> 时跳过 <code>/comet</code> 的路由开销直接干活，同时保证即使记错了阶段也不会把状态写坏——入口检查会拦住不匹配的进入。
+</Tip>
+
 ## build 阶段恢复的特殊情况
 
 build 阶段的恢复最复杂，但大多数情况 `/comet` 也能自动处理：
