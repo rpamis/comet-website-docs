@@ -12,11 +12,11 @@ Comet 的核心能力通过 Skill 组织。经典 Spec 模式的 `/comet` 用户
 | 安装方式 | 目标目录 | 谁发现它 | 说明 |
 | --- | --- | --- | --- |
 | `comet init` | 平台目录（如 `.claude/skills/`） | AI 平台直接发现，显示为斜杠命令 | 内置工作流 Skill 装在这里 |
-| `comet skill install` | `.comet/skills/<name>` | **Comet Engine** 发现，不直接进平台 | 这就是"项目 Skill" |
-| `/comet-any` 生成 | Bundle draft 目录 | 评估发布后由 `comet publish distribute` 分发 | Factory 生成 Skill |
+| `comet skill add` | `.comet/skills/<name>` | **Comet Engine** 发现，不直接进平台 | 这就是"项目 Skill" |
+| `/comet-any` 生成 | Bundle draft 目录 | 评估发布后由 `comet publish distribute` 分发 | Skill Creator 生成 Skill |
 
 <Note>
-  <strong>平台 Skill</strong>和<strong>项目 Skill</strong>的区别：平台 Skill（<code>comet init</code> 装到 <code>.claude/skills/</code> 等）由 AI 平台直接发现并变成斜杠命令；项目 Skill（<code>comet skill install</code> 装到 <code>.comet/skills/</code>）是 Comet Engine 自己的 Skill 池，不直接暴露给平台，而是由 Engine 在运行时按名称解析。
+  <strong>平台 Skill</strong>和<strong>项目 Skill</strong>的区别：平台 Skill（<code>comet init</code> 装到 <code>.claude/skills/</code> 等）由 AI 平台直接发现并变成斜杠命令；项目 Skill（<code>comet skill add</code> 装到 <code>.comet/skills/</code>）是 Comet Engine 自己的 Skill 池，不直接暴露给平台，而是由 Engine 在运行时按名称解析。
 </Note>
 
 ## 项目 Skill 是什么
@@ -38,22 +38,21 @@ Comet 的核心能力通过 Skill 组织。经典 Spec 模式的 `/comet` 用户
 ### 怎么安装项目 Skill
 
 ```bash
-comet skill install ./my-skill --project .
+comet skill add ./my-skill --project .
 ```
 
 这会把 `./my-skill` 目录校验、计算 hash 后复制到 `.comet/skills/<metadata.name>/`。已存在时需要 `--overwrite`。安装拒绝符号链接，保证 Skill 包内容是真实的。
 
 ### Skill 创作工具链
 
-除了 `install`，`comet skill` 还提供一整套本地 Skill 工具：
+除了 `add`，`comet skill` 还提供一整套本地 Skill 工具：
 
 | 命令 | 作用 |
 | --- | --- |
-| `comet skill install` | 安装 Skill 包到 `.comet/skills/` |
-| `comet skill validate` | 校验 Skill 包结构 |
-| `comet skill inspect` | 检查 Skill 包内容（步骤、依赖、guardrails、runtime checks） |
-| `comet skill run` | 驱动一次 Skill Run |
-| `comet skill resume` | 从 pending action 检查点恢复 Run |
+| `comet skill add` | 安装 Skill 包到 `.comet/skills/` |
+| `comet skill show` | 查看 Skill 来源、结构、hash、步骤、guardrails 和 runtime checks |
+| `comet skill run` | 启动高级 deterministic Engine Run |
+| `comet skill continue` | 提交 pending action 结果或恢复 Run |
 | `comet skill check` | 运行 Engine Run 的 runtime checks |
 
 <Warning>
@@ -78,11 +77,11 @@ comet skill install ./my-skill --project .
 
 ## 用 /comet-any 创建可复用 Skill
 
-`/comet-any`（Skill Maker）是普通用户创建或优化 Skill 的主入口。你只需要描述想创建的工作流，它会：
+`/comet-any`（Skill Creator）是普通用户创建或优化 Skill 的主入口。你只需要描述想创建的工作流，它会：
 
 1. 读取项目级偏好 `.comet/skill-preferences.yaml`。
 2. 用 `find-skill` 解析**真实本地 Skill 内容**——不靠名字推测能力。
-3. 展示 Skill Maker 确认页，列出每个 Skill 的来源、hash、角色和调用顺序，等你确认。
+3. 展示 Skill Creator 确认页，列出每个 Skill 的来源、hash、角色和调用顺序，等你确认。
 4. 确认后生成**稳定组合 Skill Bundle**（含 skills/scripts/rules/hooks/references），而不是单个 `SKILL.md`。
 5. 内部走 CLI 后端做校验、生成 install-candidate、可选安装。
 
@@ -95,19 +94,19 @@ comet skill install ./my-skill --project .
 正常用户路径是：
 
 ```text
-/comet-any -> comet eval -> comet publish
+/comet-any -> comet eval -> comet publish status/next -> review/approve/run -> distribute
 ```
 
-详见[组合任意 Skill 快速上手](/zh/skill-factory/getting-started)。
+详见[组合任意 Skill 快速上手](/zh/skill-creator/getting-started)。
 
 ## Engine：进阶内容
 
-如果你用 `/comet-any` 创建可复用 Skill，或用 `comet skill` 做本地调试和 Engine Run，你需要理解 Skill Engine——Comet 的确定性运行时。Engine 涉及 Skill 包结构、pending action/resume 循环、不可变快照、guardrails 和 runtime evals。
+如果你用 `/comet-any` 创建可复用 Skill，或用 `comet skill` 做本地调试和 Engine Run，你需要理解 Skill Engine——Comet 的确定性运行时。Engine 涉及 Skill 包结构、pending action/resume 循环、不可变快照、guardrails 和 runtime checks。
 
-经典 `/comet` 用户**不需要理解 Engine**就能使用五阶段工作流。想深入了解时，看[Skill 与 Engine（进阶）](/zh/skill-factory/engine)——完整的 Engine 机制详解，位于组合任意 Skill tab。
+经典 `/comet` 用户**不需要理解 Engine**就能使用五阶段工作流。想深入了解时，看[Skill 与 Engine（进阶）](/zh/skill-creator/engine)——完整的 Engine 机制详解，位于组合任意 Skill tab。
 
 ## 下一步
 
 - [工作流概念](/zh/concepts/workflow) — `/comet` 如何串联五阶段
 - [状态与配置](/zh/concepts/state-management) — `.comet.yaml` 字段和配置
-- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 深入理解 Engine 运行时
+- [Skill 与 Engine（进阶）](/zh/skill-creator/engine) — 深入理解 Engine 运行时

@@ -1,22 +1,21 @@
 ---
 title: "comet skill"
-description: "管理本地 Comet Skill 包，并运行 deterministic Skill Run。"
+description: "管理本地 Comet Skill 包，并调试高级 deterministic Engine Run。"
 ---
 
-`comet skill` 是低层 Skill 包和 Engine Run 工具。它发现显式 Skill 目录、`.comet/skills/` 下的项目覆盖和内置 Skill，并提供本地 Skill 包管理和 deterministic Run。
+`comet skill` 是低层 Skill 包和 Engine Run 工具。它发现显式 Skill 目录、`.comet/skills/` 下的项目覆盖和内置 Skill，并提供本地 Skill 包管理和高级 deterministic Engine Run 调试。
 
-普通用户创建可复用 Skill 时优先用 [`/comet-any`](/zh/skill-factory/overview)。
+普通用户创建可复用 Skill 时优先用 [`/comet-any`](/zh/skill-creator/overview)。`comet skill run` / `comet skill continue` 更适合调试高级 Engine Run。
 
 ## 子命令
 
 | 命令 | 用途 |
 | --- | --- |
-| `comet skill install <path>` | 安装本地 Skill 到项目 Skill 池 |
-| `comet skill validate <skill>` | 校验 Skill 包结构 |
-| `comet skill inspect <skill>` | 查看 Skill 内容和元数据 |
-| `comet skill run <skill>` | 启动 deterministic Skill Run |
-| `comet skill resume` | 提交 pending action 的结果或恢复 Run |
-| `comet skill eval` | 检查当前 Run 的 runtime eval |
+| `comet skill add <path>` | 安装本地 Skill 到项目 Skill 池 |
+| `comet skill show <skill>` | 查看 Skill 内容、来源和元数据 |
+| `comet skill run <skill>` | 启动高级 deterministic Engine Run |
+| `comet skill continue` | 提交 pending action 的结果或恢复 Run |
+| `comet skill check` | 检查当前 Run 的 runtime checks |
 
 所有子命令都支持 `--json`。
 
@@ -26,16 +25,16 @@ description: "管理本地 Comet Skill 包，并运行 deterministic Skill Run�
 | --- | --- | --- |
 | `--project <dir>` | 项目根目录（默认 `.`） | 所有 |
 | `--json` | 输出结构化 JSON | 所有 |
-| `--overwrite` | 覆盖已存在的项目 Skill | `install` |
-| `--change <dir>` | 绑定 OpenSpec change 目录（与 `--run-id` 互斥） | `run`、`resume`、`eval` |
-| `--run-id <id>` | 用 `.comet/runs/<run-id>` 存放 Run state（与 `--change` 互斥） | `run`、`resume`、`eval` |
-| `--confirm <key=value>` | 传入确认参数 | `run`、`resume` |
-| `--status <succeeded\|failed>` | 提交 action 结果状态 | `resume` |
-| `--summary <text>` | 结果摘要（`--status` 时必需） | `resume` |
-| `--artifact <key=value>` | 提交 artifact（`--status` 时使用） | `resume` |
-| `--state <key=value>` | 提交 state（`--status` 时使用） | `resume` |
-| `--upgrade <skill>` | 用新 Skill 版本升级当前 Run | `resume` |
-| `--scope <progress\|step\|completion>` | runtime eval 范围（默认 `progress`） | `eval` |
+| `--overwrite` | 覆盖已存在的项目 Skill | `add` |
+| `--change <dir>` | 绑定 OpenSpec change 目录（与 `--run-id` 互斥） | `run`、`continue`、`check` |
+| `--run-id <id>` | 用 `.comet/runs/<run-id>` 存放 Run state（与 `--change` 互斥） | `run`、`continue`、`check` |
+| `--confirm <key=value>` | 传入确认参数 | `run`、`continue` |
+| `--status <succeeded\|failed>` | 提交 action 结果状态 | `continue` |
+| `--summary <text>` | 结果摘要（`--status` 时必需） | `continue` |
+| `--artifact <key=value>` | 提交 artifact（`--status` 时使用） | `continue` |
+| `--state <key=value>` | 提交 state（`--status` 时使用） | `continue` |
+| `--upgrade <skill>` | 用新 Skill 版本升级当前 Run | `continue` |
+| `--scope <progress\|step\|completion>` | runtime check 范围（默认 `progress`） | `check` |
 
 <Info>
   <code>--change</code> 和 <code>--run-id</code> 互斥：一次 Run 只能绑定其中一个。<code>--change</code> 绑定 OpenSpec change 目录，<code>--run-id</code> 用 <code>.comet/runs/&lt;run-id&gt;</code> 存放独立 Run state。
@@ -43,30 +42,22 @@ description: "管理本地 Comet Skill 包，并运行 deterministic Skill Run�
 
 ## 包管理
 
-### install
+### add
 
 ```bash
-comet skill install ./my-skill --project .
-comet skill install ./my-skill --project . --overwrite
+comet skill add ./my-skill --project .
+comet skill add ./my-skill --project . --overwrite
 ```
 
 把 Skill 复制到 `.comet/skills/<name>`（拒绝符号链接，用原子 rename 加备份）。项目 Skill 会**按名称覆盖**内置 Skill；无效覆盖会 **fail closed**（直接报错，而不是静默回退到内置）。
 
-### validate
+### show
 
 ```bash
-comet skill validate my-skill --project .
+comet skill show my-skill --project .
 ```
 
-解析 Skill 并返回名称、版本、来源、根目录和内容 hash。
-
-### inspect
-
-```bash
-comet skill inspect my-skill --json
-```
-
-额外返回 goal、orchestration、steps、skills、agents、tools、guardrails 和 evals。
+解析 Skill 并返回名称、版本、来源、根目录、内容 hash、steps、guardrails 和 runtime checks。
 
 ## Skill 发现顺序
 
@@ -102,28 +93,28 @@ comet skill run my-skill --run-id demo-run --project .
 5. 记录 `run_started` trajectory 事件。
 6. `decide` 解析 entry step、构造第一个动作、过 guardrails、写入 pending action、`status = waiting`。
 
-### resume：提交结果或恢复
+### continue：提交结果或恢复
 
 带 outcome（实际推进）：
 
 ```bash
-comet skill resume --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
+comet skill continue --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
 ```
 
 ```bash
-comet skill resume --run-id demo-run --project . --status succeeded --summary "完成"
+comet skill continue --run-id demo-run --project . --status succeeded --summary "完成"
 ```
 
 不带 outcome（查看/重新决定）：
 
 ```bash
-comet skill resume --change ./changes/demo
+comet skill continue --change ./changes/demo
 ```
 
 升级当前 Run 到新 Skill 版本：
 
 ```bash
-comet skill resume --change ./changes/demo --upgrade my-skill --project .
+comet skill continue --change ./changes/demo --upgrade my-skill --project .
 ```
 
 升级有严格守卫：不能有 pending action、Skill 名称必须匹配、编排模式必须匹配、当前 step 必须在新版本里仍存在。升级后记录 `state_migrated` 事件。
@@ -132,20 +123,20 @@ comet skill resume --change ./changes/demo --upgrade my-skill --project .
   <code>--upgrade</code> 不能和 <code>--status</code>、<code>--summary</code>、<code>--artifact</code>、<code>--state</code> 组合使用。<code>--summary</code>、<code>--artifact</code>、<code>--state</code> 必须配合 <code>--status</code> 使用。
 </Warning>
 
-### eval：按需检查
+### check：按需检查
 
 ```bash
-comet skill eval --change ./changes/demo --scope completion
+comet skill check --change ./changes/demo --scope completion
 ```
 
 ```bash
-comet skill eval --run-id demo-run --project . --scope completion
+comet skill check --run-id demo-run --project . --scope completion
 ```
 
-`--scope` 可选 `progress`、`step` 或 `completion`（默认 `progress`）。读 `comet/checks.yaml` 的 runtime eval。
+`--scope` 可选 `progress`、`step` 或 `completion`（默认 `progress`）。读 `comet/checks.yaml` 的 runtime checks。
 
 <Warning>
-  <code>comet skill eval</code> 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill 产品能力，请用 <a href="/zh/cli/eval">comet eval</a>。详见 <a href="/zh/eval/runtime">Runtime eval</a>。
+  <code>comet skill check</code> 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill 产品能力，请用 <a href="/zh/cli/eval">comet eval</a>。详见 <a href="/zh/eval/runtime">Runtime check</a>。
 </Warning>
 
 ## Run state 存储
@@ -180,18 +171,18 @@ Run: demo-run
 Status: paused
 Current step: collect-evidence
 Pending action: collect-evidence (tool, step collect-evidence)
-Runtime evals: 1
-Next: complete the pending action, then run comet skill resume
+Runtime checks: 1
+Next: complete the pending action, then run comet skill continue
 ```
 
-`eval` 失败时会提示：
+`check` 失败时会提示：
 
 ```text
-Next: record the missing artifact/state and rerun comet skill eval
+Next: record the missing artifact/state and rerun comet skill check
 ```
 
 ## 下一步
 
-- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — 理解 Skill 包和 Engine Run 的运行语义、pending action、不可变快照
-- [Runtime eval](/zh/eval/runtime) — 区分 `comet skill eval` 和 `comet eval`
-- [Skill Factory 概览](/zh/skill-factory/overview) — 创建可复用 Skill 的主入口
+- [Skill 与 Engine（进阶）](/zh/skill-creator/engine) — 理解 Skill 包和 Engine Run 的运行语义、pending action、不可变快照
+- [Runtime check](/zh/eval/runtime) — 区分 `comet skill check` 和 `comet eval`
+- [Skill Creator 概览](/zh/skill-creator/overview) — 创建可复用 Skill 的主入口

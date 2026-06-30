@@ -60,9 +60,20 @@ flowchart TD
 这是 Comet 唯一的跨阶段状态文件。它不是目录，是一个 YAML 文件，字段随阶段推进逐步填写。详见[状态与配置](/zh/concepts/state-management)。
 
 <Note>
-  Comet 的经典工作流<strong>刻意避免</strong>创建一堆内部 JSON 状态文件。跨会话恢复靠的是 <code>.comet.yaml</code> + handoff 文件 + 检查点 markdown，而不是一批 machine-owned JSON。<code>.comet/run-state.json</code>、<code>trajectory.jsonl</code> 这些是 Skill Engine（<code>comet skill run</code>）的内部文件，经典 <code>/comet</code> 工作流不用。
+  Comet 的经典工作流仍以 <code>.comet.yaml</code> 作为当前状态来源。<code>.comet/state-events.jsonl</code> 是追加式审计日志，用来解释状态转换历史；<code>.comet/run-state.json</code> 和 <code>trajectory.jsonl</code> 属于 machine-owned 运行细节。跨会话恢复主要靠 <code>.comet.yaml</code>、handoff 文件和检查点 markdown，排查状态为何变化时再看事件日志。
 </Note>
 
+
+### state-events.jsonl（状态转换审计）
+
+| 属性 | 说明 |
+| --- | --- |
+| 位置 | `openspec/changes/<name>/.comet/state-events.jsonl` |
+| 创建 | 第一次成功 state transition 时 |
+| 作用 | 记录 `comet-state transition`、`comet-guard --apply` 和 archive 更新造成的状态变化 |
+| 管理 | Comet 追加写入，用户可读，不要手工改 |
+
+它不是当前状态来源。当前状态仍以 `.comet.yaml` 为准。事件日志适合回答：这次 `phase` 是由 guard、手工 transition，还是 archive 流程改的？实际改了哪些字段？
 ## design 阶段产物
 
 design 阶段是中间产物最丰富的阶段，主要服务于上下文压缩和 OpenSpec→Superpowers 交接。
@@ -210,6 +221,7 @@ archive 阶段不创建新文件，而是给已有产物加标注并移动目录
 | --- | --- |
 | **上下文压缩** | handoff 交接包（design-context/spec-context）、brainstorm-summary.md |
 | **状态恢复** | .comet.yaml、subagent-progress.md、brainstorm-summary.md |
+| **状态审计** | state-events.jsonl |
 | **阶段交接** | handoff 交接包（OpenSpec→Superpowers）、plan base-ref（build→verify） |
 | **证据** | 验证报告、plan frontmatter、tasks.md 勾选、Implementation Divergence 注记 |
 | **生命周期标注** | archived-with、status、archived: true |
@@ -225,6 +237,7 @@ archive 阶段不创建新文件，而是给已有产物加标注并移动目录
 | 任务完成进度 | `tasks.md` 的勾选状态 |
 | 验证结果 | `docs/superpowers/reports/...-verify.md` |
 | handoff 是否漂移 | `.comet.yaml` 的 `handoff_hash` + 重新算 hash 对比 |
+| phase 为什么变了 | `.comet/state-events.jsonl` 的最后几行 |
 
 ## 下一步
 
