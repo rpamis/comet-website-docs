@@ -1,20 +1,20 @@
 ---
 title: "Skill 与 Engine（进阶）"
-description: "理解 Comet Skill 的三类来源、Skill 包结构、Engine 运行循环、pending action/resume 机制、不可变快照、guardrails、runtime evals，以及 /comet-any 生成物和 Engine 的关系。"
+description: "理解 Comet Skill 的三类来源、Skill 包结构、Engine 运行循环、pending action/resume 机制、不可变快照、guardrails、runtime checks，以及 /comet-any 生成物和 Engine 的关系。"
 ---
 
 <Info>
   这是进阶内容，面向想深入理解 `/comet-any` 生成物和 `comet skill` 底层机制的用户。经典 Spec 模式的 `/comet` 用户不需要理解 Engine 就能使用五阶段工作流。
 </Info>
 
-Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置了 **Skill Engine**——一个确定性运行时，负责执行、约束、持久化、恢复和评估 Comet Skill。它为多步骤 Skill 提供稳定内容 hash、不可变快照、pending action 恢复、guardrails 和 runtime eval。
+Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置了 **Skill Engine**——一个确定性运行时，负责执行、约束、持久化、恢复和评估 Comet Skill。它为多步骤 Skill 提供稳定内容 hash、不可变快照、pending action 恢复、guardrails 和 runtime check。
 
 ## 三类 Skill
 
 | 类型 | 来源 | 常见入口 | 说明 |
 | --- | --- | --- | --- |
-| 内置工作流 Skill | 随包分发在 `assets/skills/` | `/comet`、`/comet-open`、`/comet-any` | 驱动五阶段流程和 Skill Factory |
-| 项目 Skill | 安装到 `.comet/skills/<name>` | `comet skill install` | 按名称覆盖内置 Skill，无效覆盖 fail closed |
+| 内置工作流 Skill | 随包分发在 `assets/skills/` | `/comet`、`/comet-open`、`/comet-any` | 驱动五阶段流程和 Skill Creator |
+| 项目 Skill | 安装到 `.comet/skills/<name>` | `comet skill add` | 按名称覆盖内置 Skill，无效覆盖 fail closed |
 | Factory 生成 Skill | `/comet-any` 创建或组合 | `/comet-any`、`comet publish` | 生成后就是普通 Skill 包，可评估、可发布、可分发 |
 
 ### Skill 发现顺序
@@ -40,8 +40,8 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 ├── comet/
 │   ├── skill.yaml           # Skill 定义（必需）
 │   ├── guardrails.yaml      # 运行时约束（可选）
-│   ├── checks.yaml          # runtime evals（与 evals.yaml 二选一）
-│   ├── evals.yaml           # runtime evals（与 checks.yaml 二选一）
+│   ├── checks.yaml          # runtime checks（与 evals.yaml 二选一）
+│   ├── evals.yaml           # runtime checks（与 checks.yaml 二选一）
 │   └── eval.yaml            # 创建期评估 manifest（发布前证据）
 ├── evals/
 │   └── evals.json           # 创建期 Skill Eval
@@ -56,8 +56,8 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 | --- | --- | --- | --- |
 | `comet/skill.yaml` | 运行期 + 创建期 | Skill 定义：goal、orchestration、skills、agents、tools | `loadSkillPackage` |
 | `comet/guardrails.yaml` | 运行期 | 覆盖默认 guardrails（允许列表、预算、确认要求） | `loadSkillPackage` |
-| `comet/checks.yaml` 或 `comet/evals.yaml` | 运行期 | runtime evals（progress/step/completion），二选一 | `loadSkillPackage` → `SkillPackage.evals` |
-| `comet/eval.yaml` | 创建期 | 创建期评估 manifest（benchmark、grader、review） | `comet eval` / Bundle Factory |
+| `comet/checks.yaml` 或 `comet/evals.yaml` | 运行期 | runtime checks（progress/step/completion），二选一 | `loadSkillPackage` → `SkillPackage.evals` |
+| `comet/eval.yaml` | 创建期 | 创建期评估 manifest（benchmark、grader、review） | `comet eval` / Bundle 后端 |
 
 <Note>
   <strong>容易混淆的命名：</strong>复数 <code>evals.yaml</code>（或 <code>checks.yaml</code>）是运行期 eval，由 Engine 在运行时检查；单数 <code>eval.yaml</code> 是创建期评估 manifest，由 <code>comet eval</code> 在发布前验证。两者生命周期不同，不能混为一谈。<code>checks.yaml</code> 和 <code>evals.yaml</code> 不能同时存在。
@@ -155,7 +155,7 @@ flowchart LR
 ```
 
 <p align="center">
-  <img src="/assets/skill-factory-engine-illustrations/01-engine-pending-action-loop.png" alt="小鱼记录 Engine 提议的 pending action，外部执行后再通过 resume 提交 outcome" width="800" />
+  <img src="/assets/skill-creator-engine-illustrations/01-engine-pending-action-loop.png" alt="小鱼记录 Engine 提议的 pending action，外部执行后再通过 resume 提交 outcome" width="800" />
 </p>
 
 <p align="center">Engine 只提议、约束和记录；真正的副作用由外部执行后再 resume</p>
@@ -179,7 +179,7 @@ flowchart TD
   E --> F["写入 pending action<br/>status=waiting"]
   F --> G["返回 Pending action"]
   G --> H["外部执行动作"]
-  H --> I["comet skill resume<br/>提交 outcome"]
+  H --> I["comet skill continue<br/>提交 outcome"]
   I --> J{"outcome 成功?"}
   J -->|失败| K["增加重试<br/>回到 running"]
   J -->|成功| L["推进 currentStep<br/>更新 artifacts/trajectory"]
@@ -217,10 +217,10 @@ flowchart TD
 
 ### eval：按需检查
 
-`comet skill eval` 按需对持久化的 Run state 和 artifacts 重跑 evals，逐项输出 `PASS`/`FAIL`：
+`comet skill check` 按需对持久化的 Run state 和 artifacts 重跑 evals，逐项输出 `PASS`/`FAIL`：
 
 ```bash
-comet skill eval --run-id demo-run --scope completion
+comet skill check --run-id demo-run --scope completion
 ```
 
 ## 不可变快照
@@ -242,7 +242,7 @@ comet skill eval --run-id demo-run --scope completion
 修改进行中 Run 的 Skill 版本的唯一合法方式是显式升级（`--upgrade`）：
 
 ```bash
-comet skill resume --run-id demo-run --upgrade my-skill --project .
+comet skill continue --run-id demo-run --upgrade my-skill --project .
 ```
 
 升级有严格守卫：不能有 pending action、Skill 名称必须匹配、编排模式必须匹配、当前 step 必须在新版本里仍存在。升级后记录 `state_migrated` 事件。
@@ -282,9 +282,9 @@ maxRetriesPerAction: 3
 confirmationRequiredFor: []
 ```
 
-## runtime evals
+## runtime checks
 
-runtime evals 是 Engine 在运行时检查 Run 是否满足条件，和创建期 eval（`comet eval`）不同。
+runtime checks 是 Engine 在运行时检查 Run 是否满足条件，和创建期 eval（`comet eval`）不同。
 
 ### 两种检查类型
 
@@ -299,12 +299,12 @@ runtime evals 是 Engine 在运行时检查 Run 是否满足条件，和创建�
 | --- | --- | --- |
 | `step` | 每次提交 action outcome 后自动运行 | 自动 |
 | `completion` | Run 到达 completed 时自动运行 | 自动 |
-| `progress` | 按需运行 | `comet skill eval --scope progress` |
+| `progress` | 按需运行 | `comet skill check --scope progress` |
 
 ### 示例
 
 ```yaml
-# comet-classic 的 runtime eval（evals.yaml）
+# comet-classic 的 runtime check（evals.yaml）
 runtime:
   - id: classic-completed
     scope: completion
@@ -316,7 +316,7 @@ runtime:
 这个 eval 在 Run 完成时检查 `status === completed`。
 
 <Warning>
-  <code>comet skill eval</code> 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill 的产品能力能否发布，用 <a href="/zh/cli/eval">comet eval</a>。详见 <a href="/zh/eval/runtime">Runtime eval</a>。
+  <code>comet skill check</code> 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill 的产品能力能否发布，用 <a href="/zh/cli/eval">comet eval</a>。详见 <a href="/zh/eval/runtime">Runtime check</a>。
 </Warning>
 
 ## 创作车道（authoring lanes）
@@ -422,7 +422,7 @@ flowchart LR
 | --- | --- |
 | `comet/runtime/classic/skill.yaml` | deterministic 编排图（30 步，full/hotfix/tweak 三种 profile） |
 | `comet/runtime/classic/guardrails.yaml` | 允许的 7 个公开 Skill、`maxIterations: 500`、`maxRetriesPerAction: 3` |
-| `comet/runtime/classic/checks.yaml` | runtime eval（`classic-completed`：completion 时 `status == completed`） |
+| `comet/runtime/classic/checks.yaml` | runtime check（`classic-completed`：completion 时 `status == completed`） |
 
 它**不是**一个顶层、像用户 Skill 一样的 `comet-classic/` 目录——安装产物只暴露这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册，运行时由 Engine 加载。所有 `/comet*` 命令的用户面行为完全不变。
 
@@ -436,23 +436,23 @@ flowchart LR
 /comet-any -> comet eval -> comet publish
 ```
 
-详见[组合任意 Skill 快速上手](/zh/skill-factory/getting-started)。
+详见[组合任意 Skill 快速上手](/zh/skill-creator/getting-started)。
 
 ## 常见命令
 
 ```bash
 # 包管理
-comet skill install ./my-skill --project .
-comet skill validate my-skill --project .
-comet skill inspect my-skill --json
+comet skill add ./my-skill --project .
+comet skill show my-skill --project .
+comet skill show my-skill --json
 
 # Run 生命周期
 comet skill run my-skill --run-id demo-run --project .
-comet skill resume --run-id demo-run --status succeeded --summary "完成"
-comet skill eval --run-id demo-run --scope completion
+comet skill continue --run-id demo-run --status succeeded --summary "完成"
+comet skill check --run-id demo-run --scope completion
 
 # 升级进行中的 Run
-comet skill resume --run-id demo-run --upgrade my-skill --project .
+comet skill continue --run-id demo-run --upgrade my-skill --project .
 ```
 
 完整选项见 [comet skill](/zh/cli/skill)。
@@ -461,5 +461,5 @@ comet skill resume --run-id demo-run --upgrade my-skill --project .
 
 - [工作流概念](/zh/concepts/workflow) — `/comet` 如何在底层使用 Engine
 - [comet skill](/zh/cli/skill) — 完整命令参考
-- [Runtime eval](/zh/eval/runtime) — `comet skill eval` 和 `comet eval` 的区别
-- [Skill Factory 概览](/zh/skill-factory/overview) — 用 `/comet-any` 创建 Engine-enabled Skill
+- [Runtime check](/zh/eval/runtime) — `comet skill check` 和 `comet eval` 的区别
+- [Skill Creator 概览](/zh/skill-creator/overview) — 用 `/comet-any` 创建 Engine-enabled Skill

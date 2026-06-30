@@ -3,30 +3,33 @@ title: "状态与配置"
 description: "理解 .comet.yaml 的所有字段含义、.comet/config.yaml 项目配置、配置优先级、环境变量，以及用户可配置什么、怎么配置。"
 ---
 
-Comet 的恢复能力来自文件化状态。理解两层状态文件和一层项目配置，你就能知道 Comet 在每个阶段读什么、用户能配置什么、以及字段代表什么意思。
+Comet 的恢复能力来自文件化状态。理解用户可读状态、机器运行状态、追加审计日志和项目配置，你就能知道 Comet 在每个阶段读什么、用户能配置什么、以及阶段推进为什么发生。
 
-## 两层状态 + 一层配置
+## 三类状态 + 一层配置
 
 ```mermaid
 flowchart LR
   A[".comet.yaml<br/>每个 change 一个"] --> B["用户可见工作流投影<br/>phase / build_mode / verify_result"]
   C[".comet/run-state.json<br/>每个 change 或 run 一个"] --> D["machine-owned Run state<br/>currentStep / pending / artifacts"]
-  E[".comet/config.yaml<br/>项目级，全局一份"] --> F["项目默认值<br/>context_compression / review_mode / auto_transition"]
+  E[".comet/state-events.jsonl<br/>每个 change 一个"] --> F["追加式转换审计<br/>event / source / effects"]
+  H[".comet/config.yaml<br/>项目级，全局一份"] --> I["项目默认值<br/>context_compression / review_mode / auto_transition"]
   B --> G["status / doctor / guard"]
   D --> G
-  F --> H["init 时快照到 .comet.yaml"]
+  F --> G
+  I --> J["init 时快照到 .comet.yaml"]
 ```
 
 <p align="center">
   <img src="/assets/state-management-illustrations/01-state-layers.png" alt="小鱼给 .comet.yaml、run-state 和 config.yaml 三层状态抽屉贴标签" width="800" />
 </p>
 
-<p align="center">`.comet.yaml`、Run state 和项目配置各管一层，不要混在一起手工改</p>
+<p align="center">`.comet.yaml` 告诉你当前在哪，Run state 让运行时恢复，state events 解释状态为什么变了</p>
 
 | 文件 | 位置 | 谁管理 | 作用 |
 | --- | --- | --- | --- |
 | `.comet.yaml` | `openspec/changes/<name>/.comet.yaml` | 用户可见，通过 `/comet` 和 guard 流转 | 工作流投影：阶段、执行方式、验证结果 |
 | `.comet/run-state.json` | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | machine-owned，不要手编 | Engine Run 细节：currentStep、pending、trajectory |
+| `.comet/state-events.jsonl` | `openspec/changes/<name>/.comet/` | Comet 追加写入，用户可读 | 成功 state transition 的审计日志 |
 | `.comet/config.yaml` | 项目根 `.comet/config.yaml` | 用户可手写或由 init 生成 | 项目级默认值，init 时快照到新 change |
 
 <Warning>
@@ -43,7 +46,7 @@ flowchart LR
 # context_compression: off | beta
 context_compression: off
 # review_mode: off | standard | thorough
-review_mode: off
+review_mode: standard
 # auto_transition: true | false
 auto_transition: true
 ```
@@ -53,7 +56,7 @@ auto_transition: true
 | 配置项 | 允许值 | 默认值 | 含义 |
 | --- | --- | --- | --- |
 | `context_compression` | `off` \| `beta` | `off` | 控制 design→build 交接时的上下文压缩。详见[上下文压缩机制](/zh/concepts/context-compression) |
-| `review_mode` | `off` \| `standard` \| `thorough` | `off`（作为默认值） | 控制代码审查强度。详见[代码审查机制](/zh/concepts/review-mode) |
+| `review_mode` | `off` \| `standard` \| `thorough` | `standard`（full workflow 默认） | 控制代码审查强度。详见[代码审查机制](/zh/concepts/review-mode) |
 | `auto_transition` | `true` \| `false` | `true` | 阶段推进后是否自动调用下一个阶段 Skill。详见[自动推进机制](/zh/concepts/auto-transition) |
 
 <Note>
@@ -187,6 +190,30 @@ hotfix/tweak 命中升级信号（跨模块、新 API、schema 变更等）时�
 - 原子地设置 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`，清除 `design_doc`。
 - 这是预设→full 升级的**唯一合法通道**——直接 `set phase design` 被硬阻止，`set classic_profile` 是 machine-owned 也被硬阻止。
 
+## 状态转换审计日志
+
+Classic 状态转换现在共用同一张 TypeScript transition table。成功的 `comet-state transition`、`comet-guard --apply` 和归档更新都会追加一行 JSON 到：
+
+```text
+openspec/changes/<name>/.comet/state-events.jsonl
+```
+
+每条记录包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `schemaVersion` | 日志格式版本 |
+| `timestamp` | 写入时间 |
+| `change` | change 名称 |
+| `event` | `open-complete`、`build-complete`、`verify-pass` 等转换事件 |
+| `source` | `comet-state`、`comet-guard` 或 `comet-archive` |
+| `from` / `to` | 转换前后的 Classic 状态投影 |
+| `effects` | 实际变更的字段列表，例如 `phase: build -> verify` |
+
+<Tip>
+  排查"为什么 phase 变了"时，先看 <code>.comet.yaml</code> 的当前状态，再看 <code>.comet/state-events.jsonl</code> 的最后几行。它能告诉你是 guard、手工 transition 还是 archive 流程写入了这次变化。
+</Tip>
+
 ## 环境变量
 
 | 环境变量 | 用途 | 适用场景 |
@@ -243,13 +270,14 @@ machine-owned 字段（`classic_profile`、`classic_migration`、`run_id`）不�
 | 当前阶段和下一步 | `.comet.yaml` 的 `phase` |
 | 执行方式和验证结果 | `.comet.yaml` 的 `build_mode`、`verify_result` |
 | Engine 当前步骤和 pending action | `.comet/run-state.json` 的 `currentStep`、`pending` |
-| 轨迹审计 | `.comet/trajectory.jsonl` |
+| phase 为什么改变 | `.comet/state-events.jsonl` |
+| Engine 轨迹审计 | `.comet/trajectory.jsonl` |
 
-详见[Skill 与 Engine（进阶）](/zh/skill-factory/engine)。
+详见[Skill 与 Engine（进阶）](/zh/skill-creator/engine)。
 
 ## 下一步
 
 - [上下文压缩机制](/zh/concepts/context-compression) — context_compression 的 off/beta 模式详解
 - [代码审查机制](/zh/concepts/review-mode) — review_mode 的 off/standard/thorough 详解
-- [Skill 与 Engine（进阶）](/zh/skill-factory/engine) — Run state 和 Engine 运行语义
+- [Skill 与 Engine（进阶）](/zh/skill-creator/engine) — Run state 和 Engine 运行语义
 - [工作流概念](/zh/concepts/workflow) — 五阶段如何使用这些状态字段

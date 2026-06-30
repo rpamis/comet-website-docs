@@ -13,6 +13,20 @@ description: "理解 review_mode 的 off、standard、thorough 三种模式如�
   <strong>这是最关键的一条规则。</strong>Superpowers 的 <code>subagent-driven-development</code> 默认流程要求"每个任务后派一个任务审查者"。Comet 的 <code>review_mode</code> <strong>接管这一阶段</strong>，决定哪些任务拿到每任务审查者。<strong>不要派发 <code>review_mode</code> 规定之外的审查者。</strong>拿不到审查者的任务（<code>off</code>：全部；<code>standard</code>：非风险任务）直接走任务勾选并派发下一个任务。一个变更的审查总数<strong>仅由下方预算表决定</strong>。
 </Warning>
 
+
+## 与 Superpowers SDD 的边界
+
+Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开的 task reviewer 合同：实现者完成任务后，协调者按任务材料、真实 diff、测试证据和风险信号决定是否派审查者。Comet 不读取、不写入、也不要求 Superpowers `subagent-driven-development` 的内部脚本名、workspace 路径或私有实现细节。
+
+这意味着：
+
+- Superpowers 仍提供连续任务调度、预检 plan review、文件型 handoff、reviewer 中立提示、"材料不足无法验证" 的反馈语义，以及 progress reconciliation。
+- Comet 只接管 reviewer 触发策略和 review-fix 预算，也就是 `review_mode` 决定哪些任务要 task reviewer。
+- 文档、恢复和测试都以公开行为为准，不把 shipped Skill 文案绑定到 Superpowers 内部目录结构。
+
+<Info>
+  从用户角度看，你只需要在 build 阶段选择 `off`、`standard` 或 `thorough`。底层 Superpowers SDD 技能可以升级自己的实现，只要继续满足公开 task reviewer 合同，Comet 的审查策略就不需要改。
+</Info>
 ## build 阶段审查预算表
 
 这张表**只覆盖 build 阶段**，且只派这些审查者，不额外增加：
@@ -253,7 +267,7 @@ export COMET_REVIEW_MODE=standard
 
 ## 状态转换交互
 
-`review_mode` 是 build 阶段的门禁字段，**不**参与 `applyStateUpdate` 或 `transition` 事件逻辑本身。相关转换：
+`review_mode` 是 build 阶段的门禁字段。它不会改变 transition event 的字段 effects，但会在 `build-complete` 前作为硬性决策被检查。相关转换：
 
 - `build-complete` → 调用 `requireBuildDecisions`（含 review_mode 检查），通过后 `phase: verify, verify_result: pending`。
 - `verify-pass` → 要求 `verification_report` 存在且 `branch_status: handled`，然后 `phase: archive, verify_result: pass`。

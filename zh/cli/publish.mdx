@@ -9,6 +9,7 @@ description: "审核、批准、发布和分发 /comet-any 生成的 Skill publi
 
 - `/comet-any` 创建、恢复和优化 Skill
 - `comet eval` 验证生成物
+- `comet publish status` / `comet publish next` 是普通用户查 readiness 和**下一步要做什么**的入口
 - `comet publish` 处理 readiness、人工批准、发布和分发
 
 <Info>
@@ -21,6 +22,7 @@ description: "审核、批准、发布和分发 /comet-any 生成的 Skill publi
 | --- | --- | --- |
 | `comet publish list` | 列出可恢复的 publish candidate | — |
 | `comet publish status <name>` | 查看 readiness 和 next action | `<name>` |
+| `comet publish next <name>` | 打印**单个**推荐下一步（不暴露后端 Bundle 命令） | `<name>` |
 | `comet publish review <name>` | 生成发布前评审摘要 | `<name>`、`--platform` |
 | `comet publish approve <name>` | 批准当前 hash 的 candidate | `<name>`、`--reviewer` |
 | `comet publish run <name>` | 发布已批准 candidate | `<name>`、`--platform` |
@@ -37,7 +39,7 @@ description: "审核、批准、发布和分发 /comet-any 生成的 Skill publi
 ```mermaid
 flowchart LR
   A["/comet-any 生成"] --> B["comet eval run --html"]
-  B --> C["comet publish status"]
+  B --> C["comet publish status / next"]
   C --> D["comet publish review"]
   D --> E["comet publish approve"]
   E --> F["comet publish run"]
@@ -51,8 +53,11 @@ flowchart LR
 # 列出可恢复 candidate
 comet publish list --project . --json
 
-# 查看 readiness 和下一步
+# 查看完整 readiness 和阻塞项
 comet publish status review-helper --project . --json
+
+# 只想知道下一步该跑什么
+comet publish next review-helper --project . --json
 
 # 生成评审摘要
 comet publish review review-helper --platform claude --json
@@ -85,6 +90,41 @@ comet publish distribute review-helper --platform claude --scope project --json
 | `--confirm-executables` | 确认可执行披露 |
 | `--skip-capability <cap>` | 跳过 optional 能力（可多次传） |
 
+## 只想知道下一步：comet publish next
+
+`comet publish status` 给你完整的 readiness 结论和阻塞项；如果你**只想知道现在该跑哪一条命令**，用 `comet publish next`——它打印**单个**推荐下一步，不暴露任何后端 Bundle 命令：
+
+```bash
+comet publish next review-helper --project . --json
+```
+
+文本输出大致长这样：
+
+```text
+Next step for review-helper
+Status: draft
+Current step: review
+Action: Run validation review
+Command: comet publish review review-helper --platform claude --json
+Reason: Eval evidence exists but review has not been recorded
+Requires confirmation: no
+```
+
+`--json` 模式额外返回结构化字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `status` / `currentStep` | candidate 当前状态和所在阶段 |
+| `nextStep.action` / `nextStep.label` | 推荐动作的类别和用户可读标签 |
+| `nextStep.command` | 你**应该直接跑的命令**（已填好参数） |
+| `nextStep.reason` | 为什么推荐这一步 |
+| `nextStep.requiresUserConfirmation` | 这一步是否需要你先确认（如批准、分发） |
+| `preferenceDrift.changed` | 项目 Skill 偏好在本次流程启动后是否发生了漂移 |
+
+<Tip>
+  <code>comet publish next</code> 是给"被打断的 <code>/comet-any</code> 流程"恢复用的：它把后端 Bundle 的 next action 翻译成一条用户命令，所以你不需要去读 <code>comet bundle status</code> 的内部输出。<strong>偏好漂移</strong>（<code>preferenceDrift.changed</code>）为真时，<code>advisory</code> 模式会警告，<code>strict</code> 模式默认阻塞——你需要决定是继续旧方案还是重新生成。
+</Tip>
+
 ## readiness 结论
 
 `comet publish status` 会展示四种 readiness 结论之一：
@@ -111,7 +151,7 @@ readiness blockers 会阻止 publish。每个 blocker 有一个**阻塞码**前�
 | `[eval]` | 缺少/失败/对应旧 hash 的 Eval 证据 |
 | `[publish]` | status `ready` 但没有 ready metadata |
 
-完整的阻塞码表和恢复建议见[发布和分发 Skill · 阻塞码](/zh/skill-factory/publishing#阻塞码blocker-codes)。
+完整的阻塞码表和恢复建议见[发布和分发 Skill · 阻塞码](/zh/skill-creator/publishing#阻塞码blocker-codes)。
 
 ## 分发预览是强制的
 
@@ -161,6 +201,6 @@ comet publish distribute review-helper --platform claude --scope project --skip-
 
 ## 下一步
 
-- [发布和分发 Skill](/zh/skill-factory/publishing) — readiness 状态链和门禁详解
+- [发布和分发 Skill](/zh/skill-creator/publishing) — readiness 状态链和门禁详解
 - [comet bundle](/zh/cli/bundle) — 高级 Bundle 后端
 - [comet eval](/zh/cli/eval) — 发布前证据入口
