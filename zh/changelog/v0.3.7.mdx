@@ -6,115 +6,115 @@ description: '2026-06-07'
 
 ### Added
 
-- **Auto-transition config**: Added `auto_transition` (`true`|`false`) to `.comet.yaml` and the `.comet/config.yaml` project default so teams can choose whether Comet automatically advances to the next phase skill or pauses for a manual transition. When `auto_transition: false`, build/design/open/verify skills stop after meeting exit conditions and print the next manual step instead of invoking the next skill. Includes state-machine whitelist, enum validation, and schema (`comet-yaml-validate.sh`) coverage ([#74](https://github.com/rpamis/comet/pull/74)).
-- **Deterministic next-step resolver**: Added `comet-state next <change-name>` to resolve post-guard routing from `.comet.yaml` (`phase`, `workflow`, `auto_transition`) with structured output: `NEXT: auto|manual|done`, `SKILL: <skill-name>`, and `HINT` (manual mode). This centralizes next-skill routing logic in scripts instead of duplicating it across skill prose.
-- **Workflow output language**: Comet workflows now propagate the triggering user request language into OpenSpec and Superpowers steps via an explicit Output Language Rule, keeping generated proposals, designs, plans, verification reports, and archive notes readable in the user's language. Resuming an existing change preserves the dominant artifact language unless the user explicitly asks to switch ([#53](https://github.com/rpamis/comet/pull/53), [#37](https://github.com/rpamis/comet/issues/37)).
-- **Execution benchmark (Claude Code)**: Added `benchmark:execution`, a benchmark harness with three test phases: L1 (design doc generation from handoff context), L2 (build a note-board module from handoff context + run tests), and L3 (full workflow — implement a dictionary module from spec, run 10 vitest tests). Invokes Claude Code (`claude -p`) and measures actual test pass rate, token usage, retry count, duration, and cost. Compares `off` vs `beta` context compression modes across small/medium/large tiers. Supports `--phase l1|l2|l3|both|all` and `--dry-run` for deterministic verification. Extracted shared utilities (`spawnCapture`, `parseClaudeJson`, `buildClaudeArgs`, etc.) to `scripts/benchmark-utils.mjs`.
+- **Auto-transition config**: 在 `.comet.yaml` 和 `.comet/config.yaml` 项目默认配置中新增了 `auto_transition`（`true`|`false`），让团队可以选择 Comet 是自动推进到下一阶段 Skill，还是暂停等待手动切换。当 `auto_transition: false` 时，build/design/open/verify skill 在满足退出条件后会停止，并打印下一步的手动操作指引，而不是直接调用下一个 skill。包含状态机白名单、枚举校验以及 schema（`comet-yaml-validate.sh`）覆盖（[#74](https://github.com/rpamis/comet/pull/74)）。
+- **Deterministic next-step resolver**: 新增 `comet-state next <change-name>`，根据 `.comet.yaml`（`phase`、`workflow`、`auto_transition`）解析 guard 之后的路由逻辑，并输出结构化结果：`NEXT: auto|manual|done`、`SKILL: <skill-name>` 和 `HINT`（手动模式下）。这将下一步 skill 的路由逻辑集中到脚本中，避免在各 skill 文案中重复编写。
+- **Workflow output language**: Comet 工作流现在通过显式的输出语言规则，将触发用户请求的语言传播到 OpenSpec 和 Superpowers 步骤中，确保生成的提案、设计、计划、验证报告和归档说明都能以用户的语言呈现，保持可读性。恢复已有的 change 时，会保留产物的主要语言，除非用户明确要求切换（[#53](https://github.com/rpamis/comet/pull/53)、[#37](https://github.com/rpamis/comet/issues/37)）。
+- **Execution benchmark (Claude Code)**: 新增 `benchmark:execution`，一个包含三个测试阶段的基准测试框架：L1（基于交接上下文生成设计文档）、L2（基于交接上下文构建 note-board 模块并运行测试）和 L3（完整工作流——根据规格实现一个 dictionary 模块并运行 10 个 vitest 测试）。调用 Claude Code（`claude -p`），并测量实际的测试通过率、token 用量、重试次数、耗时和成本。在小/中/大规模下对比 `off` 与 `beta` 上下文压缩模式。支持 `--phase l1|l2|l3|both|all` 和 `--dry-run` 用于确定性验证。将共享工具函数（`spawnCapture`、`parseClaudeJson`、`buildClaudeArgs` 等）抽取到 `scripts/benchmark-utils.mjs`。
 
-- **Token optimization: TDD skill single load**: Build skill now loads `test-driven-development` skill once before the first task (instead of per-task), reducing ~44K tokens per 10-task workflow. Includes compaction recovery guidance to reload once on resume.
-- **Token optimization: brainstorming checkpoint**: Design skill now writes `brainstorm-summary.md` after user confirms design approach, providing a compaction recovery point that preserves confirmed decisions across context window compression.
-- **Token optimization: incremental brainstorming checkpoint**: Design skill now incrementally updates `brainstorm-summary.md` during brainstorming, preserving confirmed facts, candidate decisions, risks, testing notes, and pending questions before platform-driven context compaction can occur.
-- **Token optimization: active compaction gate**: Design skill now requires an active context compaction gate after `brainstorm-summary.md` is finalized and before creating the Design Doc, using the host platform's native compaction mechanism when available and falling back to a manual user prompt when it is not.
-- **Token optimization: plan creation subagent offload**: Build skill offloads `writing-plans` execution to a subagent, freeing main session context. Subagent reads Design Doc + tasks.md from files and returns the plan file path. Falls back to inline execution on subagent failure.
-- **Token optimization: verification skill dedup**: Verify skill loads `verification-before-completion` once before the light/full branch point instead of in each branch, eliminating redundant skill content.
-- **Token optimization: tasks.md incremental scan**: Build skill uses `grep` to find unchecked tasks instead of re-reading the entire `tasks.md` file after each task completion.
-- **Token optimization: hash on-demand read in verify**: Verify skill checks `handoff_hash` before re-reading OpenSpec artifacts. When hash matches, only `tasks.md` is skipped (proposal.md and design.md are still read for comparison checks). Uses new `comet-handoff.sh --hash-only` flag.
-- **`--hash-only` flag for comet-handoff.sh**: New backward-compatible flag outputs the context hash without generating handoff files, used by verify phase for hash comparison. Validates required files exist before computing hash.
-- **CodeGraph integration in comet init**: `comet init` now offers an optional step to install and configure CodeGraph (`@colbymchenry/codegraph`) for semantic code intelligence. It auto-detects supported platforms (Claude Code, Cursor, Codex, OpenCode, Gemini, Kiro, Antigravity), installs the CLI if missing, runs `codegraph install` for agent wiring, and initializes the project index. Skips gracefully under `--json` mode.
-- **Stale PR automation**: Added a scheduled and manually runnable GitHub Actions workflow that marks inactive pull requests stale after 90 days and closes them after another 30 days, helping keep long-idle review queues manageable.
-- **TDD mode field**: Added `tdd_mode` (`tdd`|`direct`) to `.comet.yaml` state machine so users choose whether to enforce TDD during build. When `tdd_mode: tdd`, subagent dispatches inject an explicit TDD hard constraint, bypassing implementer-prompt.md's conditional trigger. Addresses [#67](https://github.com/rpamis/comet/issues/67).
-- **subagent_dispatch field**: Added `subagent_dispatch` (`null`|`confirmed`) to `.comet.yaml` state machine, ensuring `build_mode: subagent-driven-development` can only leave the build phase after the platform's real background dispatch capability is confirmed.
-- **Verify retry limit**: Verify skill now enforces a mandatory user decision after 3 consecutive verify-fail cycles, preventing indefinite automated retry loops.
-- **Manual verify_mode override**: Users can override automatic verification scale assessment via `comet-state set <name> verify_mode <light|full>` when the auto-detected mode doesn't fit.
-- **Local context compression benchmark**: Added `benchmark:context`, a local Codex benchmark harness that creates matched `context_compression: off` and `beta` Comet fixtures, runs `codex exec` against each mode, and reports token savings, spec drift rate, task completion rate, parse success, and timing. Use `--dry-run` for deterministic non-Codex verification.
-- **Beta-gated context compression switch**: Project installs now create `.comet/config.yaml` with `context_compression: off`, allowing teams to opt new changes into beta spec projection by setting `context_compression: beta`. This switch controls only the OpenSpec handoff projection path (`spec-context.*`); the workflow token optimizations above are default-on and do not require beta mode.
-- **Beta spec projection handoff**: `/comet-design` can now use beta context compression to generate `spec-context.json` and `spec-context.md`, preserving OpenSpec requirement and scenario headings with source hashes so compact design handoffs reduce token load without weakening acceptance coverage.
+- **Token optimization: TDD skill single load**: build skill 现在在第一个任务之前只加载一次 `test-driven-development` skill（而不是每个任务都加载），在 10 个任务的工作流中可减少约 44K token。包含上下文压缩后的恢复指引，恢复时重新加载一次。
+- **Token optimization: brainstorming checkpoint**: design skill 现在在用户确认设计方案后会写入 `brainstorm-summary.md`，提供一个上下文压缩恢复点，在上下文窗口压缩过程中保留已确认的决策。
+- **Token optimization: incremental brainstorming checkpoint**: design skill 现在在头脑风暴过程中增量更新 `brainstorm-summary.md`，在平台驱动的上下文压缩发生之前，保留已确认的事实、候选决策、风险、测试说明和待解决问题。
+- **Token optimization: active compaction gate**: design skill 现在在 `brainstorm-summary.md` 定稿之后、创建设计文档之前，要求一个主动的上下文压缩检查点，优先使用宿主平台的原生压缩机制，不可用时回退为手动提示用户。
+- **Token optimization: plan creation subagent offload**: build skill 将 `writing-plans` 的执行卸载给子 agent，释放主会话的上下文。子 agent 从文件中读取设计文档和 tasks.md，并返回计划文件路径。子 agent 失败时回退为内联执行。
+- **Token optimization: verification skill dedup**: verify skill 现在在 light/full 分支判断之前只加载一次 `verification-before-completion`，而不是在每个分支中都加载，消除了冗余的 skill 内容。
+- **Token optimization: tasks.md incremental scan**: build skill 现在用 `grep` 查找未完成的任务，而不是在每次任务完成后重新读取整个 `tasks.md` 文件。
+- **Token optimization: hash on-demand read in verify**: verify skill 在重新读取 OpenSpec 产物之前先检查 `handoff_hash`。当哈希匹配时，仅跳过 `tasks.md`（proposal.md 和 design.md 仍会读取以进行比较检查）。使用新增的 `comet-handoff.sh --hash-only` 标志。
+- **`--hash-only` flag for comet-handoff.sh**: 新增向后兼容的标志，仅输出上下文哈希而不生成交接文件，供 verify 阶段进行哈希比对使用。在计算哈希之前会校验必需的文件是否存在。
+- **CodeGraph integration in comet init**: `comet init` 现在提供一个可选步骤来安装和配置 CodeGraph（`@colbymchenry/codegraph`），用于语义化代码智能。它会自动检测受支持的平台（Claude Code、Cursor、Codex、OpenCode、Gemini、Kiro、Antigravity），若 CLI 缺失则自动安装，运行 `codegraph install` 进行 agent 接线，并初始化项目索引。在 `--json` 模式下会优雅跳过。
+- **Stale PR automation**: 新增了一个定时触发且可手动运行的 GitHub Actions 工作流，将 90 天未活动的 pull request 标记为 stale，再过 30 天后关闭，帮助管理长期闲置的评审队列。
+- **TDD mode field**: 在 `.comet.yaml` 状态机中新增 `tdd_mode`（`tdd`|`direct`），让用户选择在构建时是否强制执行 TDD。当 `tdd_mode: tdd` 时，子 agent 调度时会注入显式的 TDD 硬约束，绕过 implementer-prompt.md 中的条件触发。解决 [#67](https://github.com/rpamis/comet/issues/67)。
+- **subagent_dispatch field**: 在 `.comet.yaml` 状态机中新增 `subagent_dispatch`（`null`|`confirmed`），确保 `build_mode: subagent-driven-development` 只有在平台真实的后台调度能力得到确认后，才能离开 build 阶段。
+- **Verify retry limit**: verify skill 现在在连续 3 次验证失败循环后强制要求用户决策，防止无限自动重试。
+- **Manual verify_mode override**: 当自动检测的模式不合适时，用户可通过 `comet-state set <name> verify_mode <light|full>` 覆盖自动验证规模评估。
+- **Local context compression benchmark**: 新增 `benchmark:context`，一个本地 Codex 基准测试框架，会创建匹配的 `context_compression: off` 和 `beta` Comet 测试用例，针对每种模式运行 `codex exec`，并报告 token 节省量、规格漂移率、任务完成率、解析成功率和耗时。使用 `--dry-run` 进行确定性的非 Codex 验证。
+- **Beta-gated context compression switch**: 项目安装现在会创建带有 `context_compression: off` 的 `.comet/config.yaml`，让团队可以通过设置 `context_compression: beta` 让新的 change 启用 beta 规格投影。此开关仅控制 OpenSpec 交接投影路径（`spec-context.*`）；上述工作流 token 优化默认开启，无需 beta 模式。
+- **Beta spec projection handoff**: `/comet-design` 现在可以使用 beta 上下文压缩来生成 `spec-context.json` 和 `spec-context.md`，保留 OpenSpec 的需求和场景标题及源哈希，使精简的设计交接在降低 token 负担的同时不削弱验收覆盖度。
 
 ### Changed
 
-- **executing-plans review gate**: When `build_mode` is `executing-plans`, the build phase now requires loading the Superpowers `requesting-code-review` skill and requesting code review at least once before the build→verify phase guard. CRITICAL findings must be fixed before verify; accepted non-CRITICAL findings must record acceptance rationale in a durable artifact. The build-exit checklist enforces this gate ([#76](https://github.com/rpamis/comet/pull/76), [#41](https://github.com/rpamis/comet/issues/41)).
-- **Phase advancement vs handoff wording**: Chinese and English Comet skills now consistently distinguish guard-driven phase advancement (`--apply`, always updates `phase`) from next-skill invocation control (`auto_transition`). Open/design/build/verify/hotfix/tweak guidance now routes through `comet-state next` for auto/manual handoff.
-- **预设连续性措辞**: Hotfix 和 tweak guidance 现在明确记录连续执行模式下的 `auto_transition: false` 例外，移除了围绕 "always continue" 行为的矛盾措辞。
-- **Verify hash-skip scoped to tasks.md only**: Full verification always reads `proposal.md` and `design.md` even when hash matches, ensuring goal-satisfaction and design-consistency checks have complete context.
-- **Design Doc creation stays in main session**: Design Doc is created inline (not offloaded to subagent) to preserve full brainstorming conversation context and prevent information loss for complex requirements.
-- **Subagent failure fallback**: Plan creation subagent offload includes explicit degraded fallback — if the subagent fails, the main session loads `writing-plans` inline.
-- **Beta spec verbatim projection**: Beta context compression now projects entire spec files verbatim (`cat`) instead of filtering by English keywords (GIVEN/WHEN/THEN/AND/BUT). This eliminates language-dependent matching, ensures zero acceptance-criteria drift for Chinese or non-English specs, and removes the fragile AWK filter entirely.
-- **JSON structural validation**: `comet-guard.sh` now validates `spec-context.json` structure (required fields: `change`, `phase`, `mode`, `files`, `context_hash`) and source file reference coverage, replacing the previous English-heading-based markdown check. Guard catches corrupted or incomplete JSON before phase transition.
-- **JSON file roles**: `spec-context.json` `files` array now includes a `role` field (`spec` for spec files, `supporting` for proposal/design/tasks), removing the language-dependent `projection` array entirely.
-- **--full warning in beta mode**: Running `comet-handoff.sh` with `--full` in beta mode now emits an explicit warning instead of silently ignoring the flag.
-- **CodeGraph step in comet update**: `comet update` now prompts to install/update CodeGraph alongside skill file updates, using the same platform detection and CLI installation flow.
-- **Rules and hooks distribution in comet update**: `comet update` now distributes anti-drift phase guard rules and hooks to all installed platforms alongside skill files, keeping rules and hooks in sync after a Comet upgrade.
-- **Archive confirmation gate**: Chinese `/comet-archive` now pauses for explicit user confirmation before running the archive script, giving users a final chance to adjust or re-run verification before main spec merge and change archival.
-- **English archive confirmation parity**: English Comet skills now match the confirmed Chinese archive-confirmation workflow, including `/comet-archive`, `/comet-verify`, `/comet`, hotfix, and tweak guidance.
-- **Archive reopen transition**: Added `comet-state transition <change-name> archive-reopen` so users who decline final archive confirmation can return from `phase: archive` to `phase: verify` for adjustment or re-verification without manually editing `.comet.yaml`.
-- **OpenSpec clarification gate**: Chinese and English `/comet-open` now require a confirmed requirements clarification summary before proposal, design, or tasks artifacts are created, preventing one Q&A turn from immediately generating a full OpenSpec change.
-- **PRD split preflight**: Chinese and English `/comet-open` now triage large PRDs before creating OpenSpec artifacts, allowing users to split independent capabilities into multiple Comet changes while keeping each accepted split on the `/comet-open` state-machine path. Addresses [#62](https://github.com/rpamis/comet/issues/62).
-- **Skill invocation wording guidance**: Added repository guidance in `CLAUDE.md` requiring new skill-trigger descriptions to use the existing "use the Skill tool to load..." wording and place context details after the skill loads.
-- **Anti-drift phase guard rule**: Added `.claude/rules/comet-phase-guard.md` that re-injects Comet phase awareness, skill invocation requirements, script execution requirements, user confirmation gates, and context compaction recovery instructions every conversation turn, preventing long-context attention drift from breaking the 5-phase workflow. Works on all platforms as a soft reminder.
-- **Anti-drift phase guard hook**: Added `comet-hook-guard.sh` PreToolUse hook (configured in `.claude/settings.local.json`) that hard-blocks file writes when the active Comet change is in `open`, `design`, or `archive` phase, providing a platform-specific hard enforcement layer that the model cannot bypass. Whitelists `openspec/*`, `docs/superpowers/*`, `.claude/*`, and `.comet/*` paths.
-- **Platform rules/hooks distribution in comet init**: `comet init` now distributes the anti-drift phase guard rule and hook-guard script to all supported platforms during initialization. Platform definitions were corrected: Cline uses `.clinerules/` at project root (not `.cline/rules/`), GitHub Copilot uses `.github/instructions/*.instructions.md` with `applyTo` frontmatter, Kiro uses `.kiro/steering/`, and Gemini CLI has no rules directory (uses GEMINI.md files). Added `rulesDir`/`rulesFormat` to 8 platforms that were missing it, and `supportsHooks`/`hookFormat` to 7 platforms. Hook installation supports 7 format variants: Claude Code, Gemini, Windsurf, Copilot, Qwen, Kiro, and Qoder.
-- **Systematic debugging gate**: Chinese and English build and hotfix skills now require loading Superpowers `systematic-debugging` when implementation-time crashes, unexpected behavior, test failures, or build failures appear, ensuring root-cause investigation and in-change regression tests happen before source fixes.
-- **Verification-before-completion gate**: Chinese and English `/comet-verify` now require loading Superpowers `verification-before-completion` before executing lightweight or full verification checks, enforcing evidence-based confirmation before any completion claims.
-- **Platform-neutral confirmation gates**: Chinese and English Comet skills and recovery messages now refer to the current platform's user input/confirmation mechanism instead of hard-coding `AskUserQuestion`, preventing Codex users from being directed to a tool that may not exist while preserving blocking user decisions.
-- **预设升级路径**: Hotfix 和 tweak skills 现在在升级到 full workflow 时包含 `set <name> phase design` 步骤，避免 workflow 切换后触发 comet-design 入口检查失败。
-- **Build-complete conditional field reset**: `build-complete` transition preserves `verification_report` and `branch_status` when the previous verify_result was `fail`, enabling verify-fail→build→build-complete re-verify cycles without data loss.
-- **Open phase recovery granularity**: Open phase recovery now distinguishes three states (all artifacts done / none done / partial) with specific recovery actions per state.
-- **50% scope threshold option**: Build skill now offers "continue in current change" as a third option when changes exceed 50% scope, avoiding forced change splitting.
-- **Worktree plan commit**: Build skill now explicitly instructs committing plan files before creating a worktree when using worktree isolation.
+- **executing-plans review gate**: 当 `build_mode` 为 `executing-plans` 时，build 阶段现在要求在 build→verify 阶段守卫之前至少加载一次 Superpowers 的 `requesting-code-review` skill 并请求一次代码评审。CRITICAL 级别的问题必须在 verify 之前修复；已接受的非 CRITICAL 问题必须在持久产物中记录接受理由。build 退出检查清单会强制执行此关卡（[#76](https://github.com/rpamis/comet/pull/76)、[#41](https://github.com/rpamis/comet/issues/41)）。
+- **Phase advancement vs handoff wording**: 中文和英文 Comet skill 现在一致地区分守卫驱动的阶段推进（`--apply`，始终更新 `phase`）与下一步 skill 调用控制（`auto_transition`）。open/design/build/verify/hotfix/tweak 的指引现在统一通过 `comet-state next` 来路由自动/手动交接。
+- **预设连续性措辞**: hotfix 和 tweak 指引现在明确记录连续执行模式下的 `auto_transition: false` 例外情况，移除了围绕 "always continue" 行为的矛盾措辞。
+- **Verify hash-skip scoped to tasks.md only**: 完整验证即使哈希匹配也始终读取 `proposal.md` 和 `design.md`，确保目标满足度和设计一致性检查拥有完整上下文。
+- **Design Doc creation stays in main session**: 设计文档以内联方式创建（不卸载给子 agent），以保留完整的头脑风暴对话上下文，防止复杂需求下信息丢失。
+- **Subagent failure fallback**: 计划创建的子 agent 卸载包含显式的降级回退——如果子 agent 失败，主会话会内联加载 `writing-plans`。
+- **Beta spec verbatim projection**: beta 上下文压缩现在按原样投影整个 spec 文件（`cat`），而不是按英文关键词（GIVEN/WHEN/THEN/AND/BUT）过滤。这消除了语言相关的匹配，确保中文或非英文 spec 的验收标准零漂移，并彻底移除了脆弱的 AWK 过滤器。
+- **JSON structural validation**: `comet-guard.sh` 现在校验 `spec-context.json` 的结构（必需字段：`change`、`phase`、`mode`、`files`、`context_hash`）以及源文件引用覆盖度，替代了之前基于英文标题的 markdown 检查。守卫会在阶段转换之前捕获损坏或不完整的 JSON。
+- **JSON file roles**: `spec-context.json` 的 `files` 数组现在包含 `role` 字段（spec 文件为 `spec`，proposal/design/tasks 为 `supporting`），彻底移除了依赖语言的 `projection` 数组。
+- **--full warning in beta mode**: 在 beta 模式下运行 `comet-handoff.sh --full` 现在会发出明确的警告，而不是静默忽略该标志。
+- **CodeGraph step in comet update**: `comet update` 现在会在更新 skill 文件的同时提示安装/更新 CodeGraph，使用与初始化相同的平台检测和 CLI 安装流程。
+- **Rules and hooks distribution in comet update**: `comet update` 现在会在更新 skill 文件的同时，将防漂移阶段守卫规则和 hook 分发到所有已安装的平台，确保 Comet 升级后规则和 hook 保持同步。
+- **Archive confirmation gate**: 中文 `/comet-archive` 现在在运行归档脚本之前会暂停以获取用户的明确确认，让用户在主 spec 合并和 change 归档之前有最后的机会进行调整或重新验证。
+- **English archive confirmation parity**: 英文 Comet skill 现在与已确认的中文归档确认工作流保持一致，包括 `/comet-archive`、`/comet-verify`、`/comet`、hotfix 和 tweak 指引。
+- **Archive reopen transition**: 新增 `comet-state transition <change-name> archive-reopen`，让拒绝最终归档确认的用户可以从 `phase: archive` 返回 `phase: verify` 进行调整或重新验证，无需手动编辑 `.comet.yaml`。
+- **OpenSpec clarification gate**: 中文和英文 `/comet-open` 现在要求在创建 proposal、design 或 tasks 产物之前，先确认一份需求澄清摘要，防止一轮问答就立即生成完整的 OpenSpec change。
+- **PRD split preflight**: 中文和英文 `/comet-open` 现在会在创建 OpenSpec 产物之前对大型 PRD 进行分拣，允许用户将独立的功能拆分为多个 Comet change，同时让每个被接受的拆分项保持在 `/comet-open` 的状态机路径上。解决 [#62](https://github.com/rpamis/comet/issues/62)。
+- **Skill invocation wording guidance**: 在 `CLAUDE.md` 中新增了仓库指引，要求新的 skill 触发描述使用既有的 "use the Skill tool to load..." 措辞，并在 skill 加载之后再放置上下文细节。
+- **Anti-drift phase guard rule**: 新增 `.claude/rules/comet-phase-guard.md`，在每轮对话中重新注入 Comet 阶段感知、skill 调用要求、脚本执行要求、用户确认关卡和上下文压缩恢复指引，防止长上下文注意力漂移破坏 5 阶段工作流。在所有平台上作为软提醒生效。
+- **Anti-drift phase guard hook**: 新增 `comet-hook-guard.sh` PreToolUse hook（配置在 `.claude/settings.local.json`），当当前 Comet change 处于 `open`、`design` 或 `archive` 阶段时硬性阻止文件写入，提供模型无法绕过的、平台特定的硬性执行层。将 `openspec/*`、`docs/superpowers/*`、`.claude/*` 和 `.comet/*` 路径加入白名单。
+- **Platform rules/hooks distribution in comet init**: `comet init` 现在在初始化期间将防漂移阶段守卫规则和 hook-guard 脚本分发到所有受支持的平台。修正了平台定义：Cline 使用项目根目录下的 `.clinerules/`（而非 `.cline/rules/`），GitHub Copilot 使用带 `applyTo` frontmatter 的 `.github/instructions/*.instructions.md`，Kiro 使用 `.kiro/steering/`，Gemini CLI 没有规则目录（使用 GEMINI.md 文件）。为 8 个缺少规则配置的平台新增了 `rulesDir`/`rulesFormat`，为 7 个平台新增了 `supportsHooks`/`hookFormat`。hook 安装支持 7 种格式变体：Claude Code、Gemini、Windsurf、Copilot、Qwen、Kiro 和 Qoder。
+- **Systematic debugging gate**: 中文和英文 build 及 hotfix skill 现在要求在实现阶段出现崩溃、意外行为、测试失败或构建失败时加载 Superpowers 的 `systematic-debugging`，确保在修复源码之前先进行根因分析并在当前 change 中编写回归测试。
+- **Verification-before-completion gate**: 中文和英文 `/comet-verify` 现在要求在执行轻量或完整验证检查之前加载 Superpowers 的 `verification-before-completion`，在任何完成声明之前强制执行基于证据的确认。
+- **Platform-neutral confirmation gates**: 中文和英文 Comet skill 及恢复消息现在引用当前平台的用户输入/确认机制，而不是硬编码 `AskUserQuestion`，避免 Codex 用户被指引去使用可能不存在的工具，同时保留阻塞性的用户决策。
+- **预设升级路径**: hotfix 和 tweak skill 现在在升级到 full workflow 时包含 `set <name> phase design` 步骤，避免 workflow 切换后触发 comet-design 入口检查失败。
+- **Build-complete conditional field reset**: `build-complete` 转换在前一次 verify_result 为 `fail` 时会保留 `verification_report` 和 `branch_status`，使 verify-fail→build→build-complete 的重新验证循环不丢失数据。
+- **Open phase recovery granularity**: open 阶段恢复现在区分三种状态（所有产物完成 / 无产物完成 / 部分完成），并为每种状态提供具体的恢复操作。
+- **50% scope threshold option**: build skill 现在在改动超过 50% 范围时提供"在当前 change 中继续"作为第三个选项，避免强制拆分 change。
+- **Worktree plan commit**: build skill 现在明确指示在使用 worktree 隔离时，先提交计划文件再创建 worktree。
 
 ### Removed
 
-- **openspec/config.yaml**: Removed unused example OpenSpec config file containing only placeholder comments.
+- **openspec/config.yaml**: 移除了未使用的示例 OpenSpec 配置文件（仅包含占位注释）。
 
 ### Fixed
 
-- **Subagent task persistence**: `/comet-build` now requires every subagent dispatch prompt to persist completed task checks in the Superpowers plan and, when mapped, the corresponding OpenSpec `tasks.md` item before committing. Build guard blocks unchecked Superpowers plan tasks, and build recovery reports both OpenSpec and plan progress before inspecting recent git history/diff or dispatching more work, preventing resume after interruption or context compression from re-running already completed subagent work ([#79](https://github.com/rpamis/comet/issues/79)).
+- **Subagent task persistence**: `/comet-build` 现在要求每个子 agent 调度提示在提交之前，将已完成的任务勾选持久化到 Superpowers 计划中，并在映射时更新对应的 OpenSpec `tasks.md` 条目。build 守卫会阻止未勾选的 Superpowers 计划任务，build 恢复在检查最近的 git 历史/diff 或调度更多工作之前，会同时报告 OpenSpec 和计划的进度，防止在打断或上下文压缩后恢复时重新运行已完成的子 agent 工作（[#79](https://github.com/rpamis/comet/issues/79)）。
 
-- **skip-all skipping uninstalled components**: `comet init` no longer treats a previously skipped component as already installed. Choosing skip-all now only skips components that are actually present, so uninstalled OpenSpec, Superpowers, Comet, or CodeGraph components are still offered for installation instead of being silently bypassed ([#73](https://github.com/rpamis/comet/pull/73)).
+- **skip-all skipping uninstalled components**: `comet init` 不再将之前跳过的组件视为已安装。选择 skip-all 现在只跳过实际存在的组件，因此未安装的 OpenSpec、Superpowers、Comet 或 CodeGraph 组件仍会被提示安装，而不是被静默跳过（[#73](https://github.com/rpamis/comet/pull/73)）。
 
-- **Update JSON output for rules/hooks**: `comet update --json` now includes rules and hooks distribution results alongside skill update results, with per-target error isolation so a single platform failure doesn't break the entire update output.
+- **Update JSON output for rules/hooks**: `comet update --json` 现在在 skill 更新结果之外还包含规则和 hook 的分发结果，并具有针对每个目标的错误隔离，使单个平台失败不会破坏整个更新输出。
 
-- **Duplicate YAML fields**: `replace_yaml_field` in `comet-state.sh` now deduplicates all fields after replacement, keeping only the last occurrence of each key. Previously, multiple `cmd_set` calls for the same field (e.g., during verify-fail → re-verify cycles) could leave duplicate lines in `.comet.yaml`, confusing downstream parsers. Fixes [#77](https://github.com/rpamis/comet/issues/77).
+- **Duplicate YAML fields**: `comet-state.sh` 中的 `replace_yaml_field` 现在在替换后对所有字段去重，仅保留每个键的最后一次出现。此前，对同一字段多次调用 `cmd_set`（例如在 verify-fail → 重新验证循环中）可能在 `.comet.yaml` 中留下重复行，干扰下游解析器。修复 [#77](https://github.com/rpamis/comet/issues/77)。
 
-- **Hook config format**: `installClaudeCodeHooks` and `.claude/settings.local.json` now use the correct `matcher` + `hooks: [{ type, command }]` array format instead of the flat `{ matcher, command, description }` format, fixing the `/doctor` schema validation error.
+- **Hook config format**: `installClaudeCodeHooks` 和 `.claude/settings.local.json` 现在使用正确的 `matcher` + `hooks: [{ type, command }]` 数组格式，替代了扁平的 `{ matcher, command, description }` 格式，修复了 `/doctor` 的 schema 校验错误。
 
-- **Archive delta merge**: `comet-archive.sh` now delegates archive spec updates to OpenSpec's delta merge semantics instead of copying change specs over main specs, preventing `ADDED/MODIFIED/REMOVED/RENAMED` section headings from leaking into stable specs. Addresses [#69](https://github.com/rpamis/comet/issues/69).
-- **Brainstorming depth**: Chinese and English `/comet-design` no longer tell Superpowers `brainstorming` to skip context exploration, so unclear goals, scope, non-goals, acceptance scenarios, or constraints must be clarified before a Design Doc is created.
-- **Command injection prevention**: `run_command_string()` in `comet-guard.sh` now rejects build/verify commands containing shell metacharacters (`;`, `|`, `&`, `$`, backtick), preventing command injection through `.comet.yaml` command fields.
-- **Path traversal prevention**: `comet-state.sh cmd_set` now validates path fields (design_doc, plan, verification_report, handoff_context, handoff_hash) for `..` traversal sequences before writing.
-- **Design guard enforcement**: Design guard now requires `design_doc` for full workflow (FAIL instead of WARN), preventing phase advance without a design document.
-- **branch_status preservation on verify-fail**: `verify-fail` transition no longer resets `branch_status`, keeping branch handling state across re-verify cycles.
-- **UTC date consistency**: All scripts now use `date -u +%Y-%m-%d` for `created_at`, `verified_at`, and archive naming, eliminating local/UTC date mismatches.
-- **macOS SCRIPT_DIR resolution**: All scripts use portable `$(cd "$(dirname "$0")" && pwd -P)` instead of `readlink -f` for cross-platform compatibility.
-- **Archive directory resolution fallback**: `comet-archive.sh resolve_archive_dir()` now searches by `*-$CHANGE` pattern when the exact UTC-based path doesn't match, fixing test reliability across timezone differences.
-- **Temp file permissions**: All `mktemp` calls now set `chmod 600` on temporary files before writing sensitive data.
-- **Pipe hash error propagation**: Hash computation in `comet-handoff.sh` and `comet-guard.sh` captures pipe output in variables before piping to hash stream, preventing silent failures under `pipefail`.
+- **Archive delta merge**: `comet-archive.sh` 现在将归档 spec 更新委托给 OpenSpec 的 delta 合并语义，而不是将 change spec 复制覆盖主 spec，防止 `ADDED/MODIFIED/REMOVED/RENAMED` 章节标题泄漏到稳定 spec 中。解决 [#69](https://github.com/rpamis/comet/issues/69)。
+- **Brainstorming depth**: 中文和英文 `/comet-design` 不再告诉 Superpowers 的 `brainstorming` 跳过上下文探索，因此不清晰的目标、范围、非目标、验收场景或约束必须在创建设计文档之前得到澄清。
+- **Command injection prevention**: `comet-guard.sh` 中的 `run_command_string()` 现在拒绝包含 shell 元字符（`;`、`|`、`&`、`$`、反引号）的 build/verify 命令，防止通过 `.comet.yaml` 的命令字段进行命令注入。
+- **Path traversal prevention**: `comet-state.sh cmd_set` 现在在写入之前校验路径字段（design_doc、plan、verification_report、handoff_context、handoff_hash）是否包含 `..` 遍历序列。
+- **Design guard enforcement**: design 守卫现在要求 full workflow 必须有 `design_doc`（FAIL 而非 WARN），防止在没有设计文档的情况下推进阶段。
+- **branch_status preservation on verify-fail**: `verify-fail` 转换不再重置 `branch_status`，在重新验证循环中保留分支处理状态。
+- **UTC date consistency**: 所有脚本现在使用 `date -u +%Y-%m-%d` 来设置 `created_at`、`verified_at` 和归档命名，消除了本地/UTC 日期不一致问题。
+- **macOS SCRIPT_DIR resolution**: 所有脚本使用可移植的 `$(cd "$(dirname "$0")" && pwd -P)` 替代 `readlink -f`，以保证跨平台兼容性。
+- **Archive directory resolution fallback**: `comet-archive.sh resolve_archive_dir()` 现在在精确的基于 UTC 的路径不匹配时，按 `*-$CHANGE` 模式搜索，修复了不同时区下的测试可靠性问题。
+- **Temp file permissions**: 所有 `mktemp` 调用现在在写入敏感数据之前对临时文件设置 `chmod 600`。
+- **Pipe hash error propagation**: `comet-handoff.sh` 和 `comet-guard.sh` 中的哈希计算现在先将管道输出捕获到变量中，再管道传递给哈希流，防止在 `pipefail` 下静默失败。
 
 ### Tests
 
-- **Auto-transition regression**: Added state-machine and skill coverage for `auto_transition` init defaults, enum validation, `.comet/config.yaml` project default propagation, schema validation, and the manual-transition vs auto-advance branching in build/design/open/verify skills ([#74](https://github.com/rpamis/comet/pull/74)).
-- **`comet-state next` regression**: Added shell-script coverage for next-step resolution across full/hotfix/tweak workflows, manual-handoff mode, archived completion (`NEXT: done`), and missing `.comet.yaml` failure behavior.
-- **Skill handoff wording regression update**: Updated skill-content assertions to validate next-driven handoff wording (`NEXT: auto|manual|done`) and synchronized Chinese/English expectation checks.
-- **Output language regression**: Added skill coverage that Comet propagates the triggering user request language into OpenSpec and Superpowers steps across the open, design, build, verify, hotfix, tweak, and archive skills ([#53](https://github.com/rpamis/comet/pull/53)).
-- **Review gate regression**: Added skill coverage that `executing-plans` build mode requires the `requesting-code-review` gate before the build→verify transition, plus updated init-e2e expectations ([#76](https://github.com/rpamis/comet/pull/76)).
-- **skip-all regression**: Added `comet init` coverage that skip-all only skips installed components and still offers uninstalled OpenSpec/Superpowers/Comet/CodeGraph components ([#73](https://github.com/rpamis/comet/pull/73)).
-- **`--hash-only` flag coverage**: New tests verify correct hash output, change-directory validation, required-file validation, and no handoff file regeneration.
-- **Context benchmark runner coverage**: New tests verify benchmark token-savings math, Codex JSONL usage/verdict parsing, and dry-run report generation without invoking Codex.
-- **Flaky test timeout fix**: Design guard test without design_doc now has explicit 20s timeout to prevent Windows bash startup flakiness.
-- **Chinese spec coverage**: Beta handoff test uses Chinese spec content to verify verbatim projection of all content (headings, descriptions, non-keyword steps) regardless of language.
-- **JSON corruption detection**: New test verifies guard blocks design exit when `spec-context.json` is structurally invalid.
-- **--full beta warning**: New test verifies the warning message and confirms beta files are still generated when `--full` is passed.
-- **Doctor CodeGraph check**: `comet doctor` now reports CodeGraph CLI availability and project initialization status (`.codegraph/` presence).
-- **Archive confirmation regression**: Added Chinese skill coverage that `/comet-archive` requires a final confirmation gate before executing the archive script.
+- **Auto-transition regression**: 新增了针对 `auto_transition` 初始化默认值、枚举校验、`.comet/config.yaml` 项目默认值传播、schema 校验，以及 build/design/open/verify skill 中手动切换与自动推进分支的状态机和 skill 覆盖测试（[#74](https://github.com/rpamis/comet/pull/74)）。
+- **`comet-state next` regression**: 新增了 shell 脚本覆盖测试，涵盖 full/hotfix/tweak 工作流、手动交接模式、已完成归档（`NEXT: done`）以及缺失 `.comet.yaml` 时的失败行为等场景下的下一步解析。
+- **Skill handoff wording regression update**: 更新了 skill 内容断言，以校验 next 驱动的交接措辞（`NEXT: auto|manual|done`），并同步了中英文期望检查。
+- **Output language regression**: 新增了 skill 覆盖测试，验证 Comet 将触发用户请求的语言传播到 open、design、build、verify、hotfix、tweak 和 archive 各 skill 中的 OpenSpec 和 Superpowers 步骤（[#53](https://github.com/rpamis/comet/pull/53)）。
+- **Review gate regression**: 新增了 skill 覆盖测试，验证 `executing-plans` 构建模式在 build→verify 转换之前需要 `requesting-code-review` 关卡，并更新了 init-e2e 的期望（[#76](https://github.com/rpamis/comet/pull/76)）。
+- **skip-all regression**: 新增了 `comet init` 覆盖测试，验证 skip-all 仅跳过已安装的组件，仍会提示安装未安装的 OpenSpec/Superpowers/Comet/CodeGraph 组件（[#73](https://github.com/rpamis/comet/pull/73)）。
+- **`--hash-only` flag coverage**: 新增测试验证正确的哈希输出、change 目录校验、必需文件校验以及不重新生成交接文件。
+- **Context benchmark runner coverage**: 新增测试验证基准测试的 token 节省计算、Codex JSONL 的用量/结论解析，以及在 dry-run 模式下不调用 Codex 即可生成报告。
+- **Flaky test timeout fix**: 没有 design_doc 的 design 守卫测试现在有明确的 20 秒超时，防止 Windows bash 启动抖动。
+- **Chinese spec coverage**: beta 交接测试使用中文 spec 内容，验证所有内容（标题、描述、非关键词步骤）无论何种语言都能按原样投影。
+- **JSON corruption detection**: 新增测试验证当 `spec-context.json` 结构无效时，守卫会阻止 design 退出。
+- **--full beta warning**: 新增测试验证警告消息，并确认在传入 `--full` 时仍会生成 beta 文件。
+- **Doctor CodeGraph check**: `comet doctor` 现在会报告 CodeGraph CLI 的可用性和项目初始化状态（`.codegraph/` 是否存在）。
+- **Archive confirmation regression**: 新增了中文 skill 覆盖测试，验证 `/comet-archive` 在执行归档脚本之前需要最终确认关卡。
 - **English archive confirmation regression**: 增加了英文 skill 覆盖，包含最终归档确认、归档重开指引和 hotfix/tweak 预设阻塞点。
-- **Phase write guard hook coverage**: 10 new tests for `comet-hook-guard.sh` covering phase-based write blocking (open/design/archive block, build/verify allow), whitelist paths (openspec, docs/superpowers, .claude), archived change bypass, and no-active-change passthrough.
-- **Archive reopen regression**: Added state-machine coverage for returning an unarchived change from archive confirmation back to verification and rejecting reopen attempts after `archived: true`.
-- **Archive spec merge regression**: Added shell-script coverage for archiving a delta spec without copying delta-only requirement section headings into the stable main spec.
-- **OpenSpec proposal regression**: Added Chinese and English skill coverage for the pre-artifact clarification gate, the default ban on one-shot `openspec-propose`, and preservation of the Superpowers brainstorming clarification flow.
-- **Skill authoring regression**: Added coverage that `CLAUDE.md` documents the required skill invocation wording pattern.
-- **Debug gate regression**: Added Chinese skill safeguard coverage for systematic-debugging invocation, minimal failing-test requirements, and keeping crash verification inside the current change.
-- **Confirmation mechanism regression**: Added coverage that Chinese workflow decision gates no longer hard-code `AskUserQuestion` and that recovery output points agents to a platform-neutral confirmation mechanism.
-- **PRD split workflow regression**: Added Chinese and English skill coverage for open-phase PRD split choices, `/comet-open` state initialization, repeated-triage prevention, split completion selection, and minimal resume guidance.
-- **tdd_mode state machine regression**: Added coverage for tdd_mode init defaults (null for full, direct for hotfix), enum validation, build-exit guard, hotfix bypass, and schema validation rejection of invalid values.
-- **Review fix regression**: Added coverage for conditional verification_report preservation on re-verify, branch_status preservation across verify-fail, path traversal rejection on design_doc, command injection rejection on build_command, and design guard enforcement for full workflow without design_doc.
-- **Context compression regression**: Added coverage for project config defaults, change-level `context_compression` snapshots, environment override during change initialization, beta spec projection generation, and guard rejection when beta projection misses requirement or scenario headings.
+- **Phase write guard hook coverage**: 针对 `comet-hook-guard.sh` 新增了 10 个测试，涵盖基于阶段的写入阻止（open/design/archive 阻止，build/verify 允许）、白名单路径（openspec、docs/superpowers、.claude）、已归档 change 的绕过，以及无活跃 change 时的放行。
+- **Archive reopen regression**: 新增了状态机覆盖测试，涵盖将未归档的 change 从归档确认返回到验证，以及在 `archived: true` 之后拒绝重开尝试。
+- **Archive spec merge regression**: 新增了 shell 脚本覆盖测试，涵盖归档 delta spec 时不将仅 delta 的需求章节标题复制到稳定主 spec 中。
+- **OpenSpec proposal regression**: 新增了中英文 skill 覆盖测试，涵盖产物创建前的澄清关卡、对一次性 `openspec-propose` 的默认禁止，以及对 Superpowers brainstorming 澄清流程的保留。
+- **Skill authoring regression**: 新增覆盖测试，验证 `CLAUDE.md` 中记录了必需的 skill 调用措辞模式。
+- **Debug gate regression**: 新增了中文 skill 防护覆盖测试，涵盖 systematic-debugging 的调用、最小失败测试要求，以及将崩溃验证保持在当前 change 内。
+- **Confirmation mechanism regression**: 新增覆盖测试，验证中文工作流决策关卡不再硬编码 `AskUserQuestion`，且恢复输出会指引 agent 使用平台无关的确认机制。
+- **PRD split workflow regression**: 新增了中英文 skill 覆盖测试，涵盖 open 阶段的 PRD 拆分选择、`/comet-open` 状态初始化、重复分拣阻止、拆分完成选择，以及最小恢复指引。
+- **tdd_mode state machine regression**: 新增覆盖测试，涵盖 tdd_mode 的初始化默认值（full 为 null，hotfix 为 direct）、枚举校验、build 退出守卫、hotfix 绕过，以及 schema 校验对非法值的拒绝。
+- **Review fix regression**: 新增覆盖测试，涵盖重新验证时的条件性 verification_report 保留、verify-fail 期间的 branch_status 保留、design_doc 的路径遍历拒绝、build_command 的命令注入拒绝，以及 full workflow 无 design_doc 时的 design 守卫强制执行。
+- **Context compression regression**: 新增覆盖测试，涵盖项目配置默认值、change 级别的 `context_compression` 快照、change 初始化期间的环境变量覆盖、beta spec 投影生成，以及 beta 投影缺少需求或场景标题时的守卫拒绝。
