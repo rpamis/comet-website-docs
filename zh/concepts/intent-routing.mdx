@@ -1,19 +1,19 @@
 ---
 title: "意图识别与路由"
-description: "了解 /comet 如何用 CometIntentFrame 把你的自然语言请求变成可解释的 full / hotfix / tweak / resume 路由，而不是靠经验规则猜测。"
+description: "了解 /comet 如何用结构化路由上下文把你的自然语言请求变成可解释的 full / hotfix / tweak / resume 路由，而不是靠经验规则猜测。"
 ---
 
 每次你输入 `/comet` 加一句话，Comet 都要做一个关键判断：这次到底该走哪条工作流？是完整的五阶段 `full`，还是快速修 bug 的 `hotfix`，还是 OpenSpec 链路的 `tweak`，又或者你是想恢复之前没做完的变更？
 
-0.4.0 起，这个判断不再依赖提示词里一长串"经验规则"。Comet 会把你的原话、仓库状态和风险信号整理成一个结构化的 **`CometIntentFrame`**（意图帧），再交给运行时评分，得到一个可解释、可复核的路由结果。这篇文章讲清楚这套机制怎么工作，以及它为什么这样设计。
+0.4.0 起，这个判断不再依赖提示词里一长串"经验规则"。Comet 会把你的原话、仓库状态和风险信号整理成一个结构化的 **路由上下文**（实现类型名为 `CometIntentFrame`），再交给运行时评分，得到一个可解释、可复核的路由结果。这篇文章讲清楚这套机制怎么工作，以及它为什么这样设计。
 
-## 为什么需要意图帧
+## 为什么需要路由上下文
 
 <Note>
-  一句话概括：意图帧让 <code>/comet</code> 的路由<strong>可解释、可复核、可恢复</strong>，而不是一个黑盒猜测。
+  一句话概括：路由上下文让 <code>/comet</code> 的路由<strong>可解释、可复核、可恢复</strong>，而不是一个黑盒猜测。
 </Note>
 
-在意图帧之前，`/comet` 入口靠的是 Skill 正文里的一段自然语言规则——"如果是 bug 就走 hotfix，如果是文案改动就走 tweak……"。这种做法有三个问题：
+在路由上下文之前，`/comet` 入口靠的是 Skill 正文里的一段自然语言规则——"如果是 bug 就走 hotfix，如果是文案改动就走 tweak……"。这种做法有三个问题：
 
 | 问题 | 表现 |
 | --- | --- |
@@ -21,7 +21,7 @@ description: "了解 /comet 如何用 CometIntentFrame 把你的自然语言请�
 | **不可复核** | 没有结构化的判断依据，无法在路由错的时候定位是哪个信号出了问题 |
 | **不可恢复** | 中断后重新进来，Agent 只能重新读一遍提示词，重新"猜"一次 |
 
-意图帧把"用户想干什么"变成一份**有字段、有证据、有置信度**的结构化数据。运行时不再信任 Agent 自己提的路由建议，而是**重新评分**后给出最终路由，并把分歧写进诊断日志。
+路由上下文把"用户想干什么"变成一份**有字段、有证据、有置信度**的结构化数据。运行时不再信任 Agent 自己提的路由建议，而是**重新评分**后给出最终路由，并把分歧写进诊断日志。
 
 ## 路由的六种结果
 
@@ -41,13 +41,13 @@ description: "了解 /comet 如何用 CometIntentFrame 把你的自然语言请�
 - 只有 `ask_user` 和 `out_of_scope` 需要**显式确认**——Comet 不会在没足够证据时替你硬选一条路。
 - `full`/`hotfix`/`tweak` 各自映射到一个确定的入口 Skill，而 `resume` 的下一步取决于你要恢复的那个变更当前停在哪一阶段。
 
-## 一帧里有什么
+## 路由上下文里有什么
 
-`CometIntentFrame` 由六个顶层部分组成。你可以把它想成一份"路由申请单"：
+这份路由上下文由六个顶层部分组成。你可以把它想成一份"路由申请单"：
 
 ```mermaid
 flowchart LR
-    U["你的原话<br/>utterance"] --> F["CometIntentFrame"]
+    U["你的原话<br/>utterance"] --> F["路由上下文<br/>CometIntentFrame"]
     R["仓库状态<br/>active changes 等"] --> F
     F --> I["intent<br/>高层意图 + 置信度"]
     F --> S["slots<br/>路由槽位"]
@@ -90,7 +90,7 @@ flowchart LR
 
 ## 运行时怎么评分
 
-Agent 填好意图帧后，运行时（`comet-intent.mjs`）会按一套**固定优先级**重新评分，给出最终 `route`。这套顺序是可解释路由的核心：
+Agent 整理好路由上下文后，运行时（`comet-intent.mjs`）会按一套**固定优先级**重新评分，给出最终 `route`。这套顺序是可解释路由的核心：
 
 ```mermaid
 flowchart TD
@@ -182,16 +182,16 @@ flowchart TD
 
 ## 这套机制对用户意味着什么
 
-对普通用户，你**不需要手写意图帧**——填帧和评分都是 `/comet` 内部自动完成的。你只需要知道：
+对普通用户，你**不需要手写路由上下文**——上下文整理和评分都是 `/comet` 内部自动完成的。你只需要知道：
 
 1. **说清楚你要干什么。** 越具体，路由越准。"修这个 bug"比"帮我看看"更容易命中 `hotfix`。
 2. **Comet 会问，而不是猜。** 如果证据不足或冲突，它会停下来确认，而不是把一条不确定的路走到底。
-3. **路由是可以事后追溯的。** 如果你觉得路由错了，意图帧和诊断信息记录了完整的判断依据。
+3. **路由是可以事后追溯的。** 如果你觉得路由错了，路由上下文和诊断信息记录了完整的判断依据。
 
 如果你是高级用户或贡献者，想看后端实际的路由输出，可以手工跑：
 
 ```bash
-# 把一个意图帧 JSON 交给运行时评分
+# 把一个路由上下文 JSON 交给运行时评分
 node "$COMET_INTENT" route '{"schema_version":"comet.intent.v1", ...}'
 # 或从 stdin 读
 node "$COMET_INTENT" route --stdin < frame.json
@@ -201,11 +201,11 @@ node "$COMET_INTENT" route --stdin < frame.json
 
 ## 和 `/comet-tweak` 的关系
 
-意图帧让 `/comet` 能自动路由到 `tweak`，那 `/comet-tweak` 这个独立命令还有用吗？
+路由上下文让 `/comet` 能自动路由到 `tweak`，那 `/comet-tweak` 这个独立命令还有用吗？
 
 有用，但定位不同：
 
-- **`/comet`**：通用入口，由意图帧决定走 `full`/`hotfix`/`tweak`/`resume`。适合不确定走哪条路时。
+- **`/comet`**：通用入口，由路由上下文决定走 `full`/`hotfix`/`tweak`/`resume`。适合不确定走哪条路时。
 - **`/comet-tweak`**：**tweak 专用**的 OpenSpec action 路径。你已经明确知道要做一次 OpenSpec 链路的中等改动，直接走它更快。
 
 换句话说，`/comet` 是"帮我判断该走哪条"，`/comet-tweak` 是"我已经知道要走 tweak"。完整的五阶段 `full` 仍然走 Superpowers 的 design/plan/build 路径。
