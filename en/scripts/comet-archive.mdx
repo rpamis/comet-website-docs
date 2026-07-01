@@ -1,117 +1,23 @@
 ---
-title: "comet-archive.sh — Automated Change Archive for Comet"
-sidebarTitle: "comet-archive.sh"
-description: "comet-archive.sh completes the Comet workflow in one command — validating state, syncing specs, annotating docs, moving the change, and setting archived: true."
+title: "comet-archive.mjs — change archive runtime"
+sidebarTitle: "comet-archive.mjs"
+description: "The archive runtime closes a verified Comet change, syncs accepted spec deltas, and preserves evidence."
 ---
 
-`comet-archive.sh` is the final step in the Comet workflow. It performs all archive operations in a single atomic command, ensuring delta specs are properly synced and no cleanup steps are missed. Running it on a change that does not meet prerequisites produces a clear fatal error rather than a partial archive.
+`comet-archive.mjs` is the final workflow step. It runs after verification passes and the branch or worktree status is handled.
 
-## Usage
+## What archive does
 
-```bash
-"$COMET_BASH" "$COMET_ARCHIVE" <change-name> [--dry-run]
-```
+- Confirms the workflow is in archive-ready state.
+- Syncs accepted delta specs into long-term spec history.
+- Preserves proposal, tasks, verification, and handoff evidence.
+- Marks the change archived.
+- Resets active workflow state so the next `/comet` can start cleanly.
 
-**Arguments:**
+## Dry-run mindset
 
-| Argument | Description |
-|----------|-------------|
-| `<change-name>` | The name of the change to archive |
-| `--dry-run` | Preview all steps without making any changes |
+Archive should be predictable. If required evidence is missing, it should report the blocker instead of producing a partial archive.
 
-## Prerequisites
+## After archive
 
-Archive enforces three hard entry conditions and exits immediately if any is not met:
-
-| Condition | Required value |
-|-----------|---------------|
-| `phase` | `archive` |
-| `verify_result` | `pass` |
-| `archived` | not `true` (change not already archived) |
-
-`phase: archive` and `verify_result: pass` are set by `comet-state.sh transition <name> verify-pass`, which `comet-guard.sh verify --apply` calls after all verify-phase checks pass. That transition itself requires `verification_report` to point to an existing file and `branch_status: handled` — so by the time `phase: archive` is reached, those conditions are already guaranteed.
-
-<Warning>
-Archive will also fail if the change is already archived (`archived: true`) or if the archive destination (`openspec/changes/archive/YYYY-MM-DD-<name>/`) already exists.
-</Warning>
-
-## What Archive Does
-
-Archive executes the following steps in order:
-
-<Steps>
-  <Step title="Validate entry state">
-    Reads `phase`, `verify_result`, and `archived` from `.comet.yaml`. Exits with a fatal error if any condition is not met.
-  </Step>
-  <Step title="Check archive target">
-    Verifies that `openspec/changes/archive/YYYY-MM-DD-<name>/` does not already exist to prevent accidental overwrites.
-  </Step>
-  <Step title="Sync delta specs → main specs">
-    For each `openspec/changes/<name>/specs/<capability>/spec.md`, copies the delta spec to `openspec/specs/<capability>/spec.md`. Creates the target directory if needed. If the main spec already exists and differs, the diff is printed to stderr before overwriting.
-  </Step>
-  <Step title="Annotate Design Doc frontmatter">
-    If `design_doc` is set and the file exists, inserts `archived-with: YYYY-MM-DD-<name>` and `status: final` into the YAML frontmatter.
-  </Step>
-  <Step title="Annotate Plan frontmatter">
-    If `plan` is set and the file exists, inserts `archived-with: YYYY-MM-DD-<name>` into the YAML frontmatter.
-  </Step>
-  <Step title="Move change to archive">
-    Moves `openspec/changes/<name>/` → `openspec/changes/archive/YYYY-MM-DD-<name>/`.
-  </Step>
-  <Step title="Set archived: true">
-    Calls `comet-state.sh transition YYYY-MM-DD-<name> archived` to set `archived: true` in the moved `.comet.yaml`.
-  </Step>
-</Steps>
-
-## Dry Run
-
-Use `--dry-run` to preview all steps without making any file system changes:
-
-```bash
-"$COMET_BASH" "$COMET_ARCHIVE" my-feature --dry-run
-```
-
-Example output:
-
-```
-=== Comet Archive: my-feature ===
-  [OK] Entry state verified
-  [OK] Archive target available
-  [DRY-RUN] Would sync: auth → openspec/specs/auth/spec.md
-  [DRY-RUN] Would sync: payments → openspec/specs/payments/spec.md
-  [DRY-RUN] Would annotate: docs/superpowers/specs/2026-06-01-my-feature-design.md
-  [DRY-RUN] Would annotate: docs/superpowers/plans/2026-06-01-my-feature.md
-  [DRY-RUN] Would move: openspec/changes/my-feature → openspec/changes/archive/2026-06-02-my-feature
-  [DRY-RUN] Would set archived: true in openspec/changes/archive/2026-06-02-my-feature/.comet.yaml
-
-Dry run complete. 7/7 steps would succeed.
-```
-
-Entry state validation runs even in dry-run mode — if the prerequisites are not met, the command exits with a fatal error before printing any dry-run steps.
-
-## Resulting File Layout
-
-After archive completes, the change and its associated documents are finalized:
-
-```
-openspec/
-├── changes/
-│   └── archive/
-│       └── 2026-06-02-my-feature/     ← moved from openspec/changes/my-feature/
-│           ├── .comet.yaml            ← archived: true
-│           ├── proposal.md
-│           ├── design.md
-│           ├── tasks.md
-│           └── specs/<capability>/spec.md
-└── specs/
-    └── <capability>/
-        └── spec.md                    ← overwritten from delta spec
-
-docs/superpowers/
-├── specs/2026-06-01-my-feature-design.md   ← archived-with: 2026-06-02-my-feature, status: final
-└── plans/2026-06-01-my-feature.md          ← archived-with: 2026-06-02-my-feature
-```
-
-<Note>
-Archive is typically invoked automatically by the AI agent after `/comet-verify` passes. You can also trigger it manually by running `/comet-archive` in your AI tool, or by calling the script directly as shown above.
-</Note>
+The active change is closed. Historical files remain available for future recovery, audit, and documentation.

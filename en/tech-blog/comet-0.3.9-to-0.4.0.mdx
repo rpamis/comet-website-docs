@@ -1,0 +1,97 @@
+---
+title: "From 0.3.9 to 0.4.0: why Comet rewrote its runtime"
+description: "0.4.0-beta.1 is a major Comet transition: Node runtime, routing context, Skill Creator, evals, dashboard, and split state."
+---
+
+Comet 0.3.9 was a solid five-phase workflow layer. It chained OpenSpec and Superpowers into a recoverable development pipeline guarded by Bash scripts. As usage grew, four limits became clear:
+
+- Windows users needed Git Bash or WSL.
+- Reusable Skill composition meant manually writing one `SKILL.md`.
+- Skill quality was hard to measure.
+- After interruption, `/comet` routing depended on the agent reading prose rules again.
+
+0.4.0-beta.1 is a systematic rebuild around those limits.
+
+<p align="center">
+  <img src="/assets/tech-blog-0-4-0-illustrations/01-runtime-rebuild-workbench.png" alt="Xiaoyu rebuilds Comet by replacing Bash parts with Node runtime, routing context, Skill platform, eval, and dashboard modules" width="800" />
+</p>
+
+<p align="center">0.4.0 turns Comet from a Bash workflow layer into a cross-platform workflow and Skill platform.</p>
+
+## 1. Why replace Bash with Node
+
+In 0.3.9, state transitions, guards, handoff, and archive logic lived in Bash scripts. The logic worked, but the shell requirement created friction on Windows and made path handling, CRLF behavior, and executable permissions fragile.
+
+0.4.0 rewrites the scripts as Node `.mjs` launchers backed by a shared TypeScript runtime. Each launcher is a self-contained esbuild bundle with dependencies inlined.
+
+| Motivation | 0.3.9 | 0.4.0 |
+| --- | --- | --- |
+| Cross-platform | Windows needed Git Bash/WSL | Node.js 20+ only |
+| Path reliability | Shell quoting and CRLF risk | Native Node handling |
+| Implementation consistency | Scattered shell logic | Shared TypeScript transition semantics |
+
+The key is one transition semantics table shared by `comet-state transition` and `comet-guard --apply`.
+
+<Info>
+  Existing `/comet*` command behavior remains the same. The runtime changed; the workflow contract did not.
+</Info>
+
+## 2. Why routing context exists
+
+0.3.9 routed `/comet` through prose rules in Skill text. That made routing hard to explain, review, and recover.
+
+0.4.0 turns “what the user wants” into structured routing context (`CometIntentFrame`) and lets the runtime rescore it in a fixed priority order.
+
+The trust model changes: the runtime does not trust the agent's proposed route. It trusts evidence: confidence, risk signals, repository context, and diagnostics. Risk signals take precedence over casual wording. If you ask for hotfix but change a public API, Comet pauses instead of taking an unsafe shortcut.
+
+See [intent recognition and routing](/en/concepts/intent-routing).
+
+## 3. Why Skill creation became a platform
+
+In 0.3.9, composing multiple Skills into a reusable package meant writing a single `SKILL.md`. That package could not carry dependencies, rules, hooks, review evidence, or distribution metadata.
+
+0.4.0 makes `/comet-any` generate a stable composed Skill Bundle: workflow protocol, resolved Skill source evidence, Engine runtime pieces, required scripts/rules/hooks, and platform-native files such as Claude Code custom agents.
+
+A reusable Skill package needs:
+
+1. Deterministic structure.
+2. Human-reviewable authored content.
+3. Release evidence tied to the current draft hash.
+
+That is why Skill Creator is a platform, not a prompt generator.
+
+## 4. Why eval and dashboard became first-class
+
+0.3.9 had no objective way to say whether a Skill was good. 0.4.0 adds `comet eval` with pass@k, pass^k, task profiles, rubric dimensions, cost attribution, and failure attribution.
+
+Dashboard solves a different problem: seeing where a change is stuck. It exposes phase progress, artifacts, tasks, verify state, risk signals, and Git context in a local read-only browser.
+
+Both share the same runtime evidence path as `comet status` and `comet doctor`.
+
+## 5. Why state split into three layers
+
+0.3.9 put user-readable workflow state and machine-owned runtime checkpoints into one `.comet.yaml`. That made accidental edits easy and polluted human-readable state with runtime details.
+
+0.4.0 splits state:
+
+| File | Owner | Contents |
+| --- | --- | --- |
+| `.comet.yaml` | User-readable | Workflow projection and `run_id` link |
+| `.comet/run-state.json` | Machine-owned | Current step, iteration, pending actions |
+| `.comet/state-events.jsonl` | Append-only audit | Successful transition records |
+
+Users can understand the current phase from `.comet.yaml`; machines manage the detailed run state atomically.
+
+## What it adds up to
+
+0.3.9 answered “how do we make one workflow recoverable?”
+
+0.4.0 answers “how do workflow and Skill authoring become a reliable platform?”
+
+- Runtime is cross-platform.
+- Routing is evidence-based.
+- Skills are composable, reviewable, and distributable.
+- Quality is measurable.
+- State is observable.
+
+See the [0.4.0-beta.1 changelog](/en/changelog/v0.4.0-beta.1) for the full change list.

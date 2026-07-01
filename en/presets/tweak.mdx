@@ -1,102 +1,93 @@
 ---
-title: "Comet Tweak Preset: Small Changes Without Full Planning"
-sidebarTitle: "Tweak"
-description: "The tweak preset skips brainstorming and the full plan, using a lightweight build and verification — ideal for copy, config, docs, and prompt edits."
+title: "tweak preset"
+description: "tweak is the OpenSpec-backed lightweight preset: open -> build -> verify -> archive, skipping brainstorming and full planning while treating delta spec as a first-class artifact."
 ---
 
-The tweak preset handles small, low-risk changes like copy edits, configuration tweaks, documentation updates, and prompt adjustments. It reuses Comet's open, build, verify, and archive capabilities — but skips brainstorming and the full implementation plan, keeping the process lean and fast.
+`tweak` is Comet's lightweight OpenSpec path. It runs `open -> build -> verify -> archive`, skips brainstorming and full planning, but treats **delta spec as a first-class artifact** and builds through OpenSpec apply.
 
-## When to Use Tweak
+<p align="center">
+  <img src="/assets/tweak-preset-illustrations/01-tweak-tuning-board.png" alt="Xiaoyu tunes a tweak board using a delta spec music sheet, apply knobs, full verify, and upgrade signals" width="800" />
+</p>
 
-Use `/comet-tweak` only when **all** of the following conditions are met:
+<p align="center">tweak is not a casual edit path; it uses delta spec and OpenSpec apply for bounded medium changes.</p>
 
-- The change is a local, non-capability adjustment: **copy, configuration, documentation, or prompt** edits
-- **Fewer than 5 files** are affected (typically no more than 4)
-- **No cross-module coordination** is required
-- **Fewer than 5 new test cases** are needed
-- Configuration changes involve only **value modifications** — no new config items are added or deleted
-- **No new capability, architecture changes, or interface changes** are introduced
-- **No delta spec** is needed (if an existing spec acceptance scenario is affected, upgrade to full)
+Use tweak for configuration changes, documentation or prompt improvements, behavior tuning, and brownfield changes that need a delta spec but do not require full deep design.
 
-When all conditions hold, tweak gives you the most lightweight path through the Comet workflow.
+<Tip>
+  Normally you only need <code>/comet</code>. When your request can fit into one OpenSpec change and does not need full design, routing prefers tweak automatically.
+</Tip>
 
-## Tweak Workflow
+## When to use it
 
+Use tweak when all of these are true:
+
+- The work fits one OpenSpec change.
+- You do not need a Superpowers Design Doc or full implementation plan.
+- There is no cross-module architectural coordination.
+- Scope is predictable.
+
+If you are unsure, start with tweak. Upgrade signals pause and let you move to full.
+
+## Relationship to full and hotfix
+
+| Dimension | tweak | full | hotfix |
+| --- | --- | --- | --- |
+| Goal | Adjust behavior or content | New capability, architecture, large requirement | Fix a bug |
+| Flow | open -> build -> verify -> archive | open -> design -> build -> verify -> archive | open -> build -> verify -> archive |
+| Build style | OpenSpec apply | Superpowers plan + execution choice | Direct task loop |
+| Delta spec | First-class artifact | Normal via PRD/spec design | Exception only |
+| Root-cause check | No | No | Yes |
+| Commit prefix | `tweak:` | Normal project convention | `fix:` |
+
+## Flow
+
+```mermaid
+flowchart TD
+    Start["Change description"] --> S1["Fast open"]
+    S1 --> Delta{"Affects existing spec?"}
+    Delta -->|yes| D["Create delta spec"]
+    Delta -->|no| S2["OpenSpec apply build"]
+    D --> S2
+    S2 --> Esc{"Upgrade signal?"}
+    Esc -->|yes| Stop["Pause: continue tweak or upgrade full"]
+    Esc -->|no| Guard["Build guard"]
+    Stop -->|continue| Guard
+    Stop -->|upgrade| Up["preset-escalate -> design"]
+    Guard --> V["Verify"]
+    V --> HasDelta{"Has delta spec?"}
+    HasDelta -->|yes| Full["force full verify"]
+    HasDelta -->|no| Light["light verify"]
+    Full --> Done{"Pass?"}
+    Light --> Done
+    Done -->|yes| Archive["Archive after confirmation"]
+    Done -->|no| Fix["Verification failure decision"]
 ```
-/comet-tweak
-  open → lightweight build → light verify → archive
-  (brainstorming and full plan skipped)
-```
 
-| Phase | What Happens |
-|-------|-------------|
-| **Open** | Streamlined artifacts — `proposal.md` (motivation + goals + scope), `design.md` (brief description, no solution comparison), `tasks.md` (no more than 3 tasks) |
-| **Lightweight Build** | Direct build (`build_mode: direct`) — tasks executed one by one, formatter and tests run per task, commits use `tweak:` prefix |
-| **Light Verify** | `comet-verify` scale assessment confirms lightweight path (≤ 3 tasks, ≤ 4 files, no delta spec, no new capability) |
-| **Archive** | Reuses `/comet-archive` after `verify_result: pass` is confirmed |
+## OpenSpec apply build
 
-## Starting a Tweak
+The apply path belongs to tweak. The agent must read `openspec instructions apply --change <name> --json`, consume listed context files, complete tasks, run relevant tests, and commit focused changes. Full workflow must not reuse this path.
 
-In your AI coding tool, describe the small change you want to make. Comet evaluates your description automatically:
+## Verification
 
-- If it meets tweak conditions, `/comet` **auto-routes** to `/comet-tweak` — you don't need to invoke it directly.
-- You can also invoke `/comet-tweak` directly to explicitly use the preset.
+If a tweak has a delta spec, verification is forced to full so OpenSpec consistency is checked. Without a delta spec, light verification is usually enough.
 
-Once invoked, the tweak workflow runs **continuously** without pausing for input — except at defined decision points (upgrade conditions and verification failures).
+## Upgrade signals
 
-## Upgrade Conditions
+Tweak pauses for qualitative signals such as cross-module coordination, need to split into multiple OpenSpec changes, schema change, public API change, or deep architecture issue. File count is a tripwire for user choice, not an automatic upgrade.
 
-<Warning>
-If any of the following conditions emerge during a tweak, Comet will pause and ask you to confirm an upgrade to the full workflow. Your explicit confirmation is required before the agent can continue.
-
-| Condition | Why It Triggers an Upgrade |
-|-----------|---------------------------|
-| Change involves **5 or more files** | Exceeds small change scope |
-| **Cross-module coordination** required | Requires cross-component coordination |
-| **5 or more new test cases** needed | Change complexity is rising |
-| Config item **additions or deletions** (not value changes) | Beyond local optimization |
-| **New capability** needed | Exceeds local optimization |
-| **Delta spec** needed (existing spec acceptance scenarios affected) | Must enter full workflow |
-
-Upgrade is confirmed interactively. If you decline, the tweak stops and Comet reports that the change has exceeded tweak scope.
-</Warning>
-
-## Preset Comparison
-
-| Aspect | Tweak | Hotfix | Full |
-|--------|-------|--------|------|
-| **Brainstorming** | Skipped | Skipped | Required |
-| **Full Implementation Plan** | Skipped | Skipped (transfers to `/comet-build` if tasks > 3) | Included |
-| **Verify Mode** | Light (5 quick checks) | Scale-assessed (light or full) | Full |
-| **Build Mode** | `direct` (default) | `direct` (default) | Chosen by user |
-| **Delta Spec** | Not allowed (triggers upgrade) | Optional (triggers full verify) | Supported |
-| **Typical Use** | Docs / copy / config / prompt | Bug fixes | Features / new capabilities |
-| **Max Files** | < 5 | < 3 | Unrestricted |
-| **Max Tasks** | ≤ 3 | ≤ 3 (else transfers to `/comet-build`) | Unrestricted |
-
-## Upgrading to Full Workflow
-
-When a tweak is confirmed to need upgrading, Comet follows this path:
-
-1. Updates the `workflow` field in `.comet.yaml` to `full`
-2. Loads the `comet-design` skill to supplement a full Design Doc on top of the existing tweak artifacts
-3. Proceeds normally through the full workflow from the design phase onward
-
-Your existing `proposal.md`, `design.md`, and `tasks.md` are preserved — you don't start over.
-
-## Phase Guards
-
-Tweak enforces the same guard transitions as the full workflow:
+Upgrade through:
 
 ```bash
-# Transition open → build
-"$COMET_BASH" "$COMET_GUARD" <change-name> open --apply
-
-# Transition build → verify
-"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
-
-# Transition verify → archive (handled by /comet-verify)
-"$COMET_BASH" "$COMET_GUARD" <change-name> verify --apply
+node "$COMET_STATE" transition <name> preset-escalate
 ```
 
-Guards validate exit conditions before advancing — a tweak cannot enter `verify` without `isolation` and `build_mode` set, and cannot archive without `verify_result: pass`.
+## Recovery
+
+Tweak is idempotent. After interruption, run `/comet`; it reads `.comet.yaml` and routes back to `/comet-tweak` when needed.
+
+## Next steps
+
+- [hotfix preset](/en/presets/hotfix)
+- [Auto-transition](/en/concepts/auto-transition)
+- [Decision points](/en/concepts/decision-points)
+- [Verify phase](/en/phases/verify)

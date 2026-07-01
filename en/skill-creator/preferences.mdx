@@ -1,0 +1,151 @@
+---
+title: "Skill preferences and real sources"
+description: "Configure .comet/skill-preferences.yaml, understand advisory and strict modes, preferenceHash drift, and resolved-skills.json source evidence."
+---
+
+<Info>
+  This is advanced configuration. You do not need it for first use. `/comet-any` can recommend defaults automatically. Read this when you want to hand-edit preferences or debug composition behavior.
+</Info>
+
+`.comet/skill-preferences.yaml` is a project-level preference file. It tells `/comet-any` which Skills this project prefers to reuse and how to handle missing, ambiguous, deviating, script, and hook cases.
+
+It is **not** a strict allowlist and **not** internal runtime state. You can write it by hand, commit it to the project, or let `/comet-any` create it after the first scan.
+
+<p align="center">
+  <img src="/assets/skill-creator-preferences-illustrations/01-preference-compass-scale.png" alt="Xiaoyu calibrates prefer, require, advisory, strict, and real source evidence with a compass and balance scale" width="800" />
+</p>
+
+<p align="center">Preferences express direction and hard constraints; real Skill sources still have to be resolved, not guessed by name.</p>
+
+## File location
+
+```text
+.comet/skill-preferences.yaml
+```
+
+It sits next to `.comet/config.yaml`.
+
+## Full shape
+
+```yaml
+version: 1
+mode: advisory
+
+prefer:
+  - brainstorming
+  - writing-plans
+  - systematic-debugging
+  - test-driven-development
+  - requesting-code-review
+  - verification-before-completion
+
+require:
+  - verification-before-completion
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: disclose
+  hooks: disclose
+```
+
+<Warning>
+  Top-level keys are limited to <code>version</code>, <code>mode</code>, <code>prefer</code>, <code>require</code>, and <code>policies</code>. Unknown fields produce warnings. <code>version</code> must be <code>1</code>.
+</Warning>
+
+## mode
+
+| Mode | Behavior | Best for |
+| --- | --- | --- |
+| `advisory` | Default. Can add goal-specific Skills if it explains the deviation. | Individuals and small teams. |
+| `strict` | Blocks on missing required Skills, ambiguity, forbidden scripts/hooks, or preference deviation. | Standardized teams. |
+
+## prefer and require
+
+`prefer` is an ordered list. `/comet-any` tries to respect it when composing a workflow.
+
+`require` lists Skills that must be satisfied. Missing or ambiguous required Skills block the plan.
+
+## policies
+
+| Policy | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `missing` | `ask` / `fail` | `ask` | Ask or fail when preferred Skills are missing. |
+| `ambiguous` | `ask` / `fail` | `ask` | Ask or fail when multiple sources match. |
+| `deviation` | `explain` / `fail` | `explain` | Explain or fail when order is not followed. |
+| `scripts` | `allow` / `disclose` / `deny` | `disclose` | Policy for generated or distributed scripts. |
+| `hooks` | `allow` / `disclose` / `deny` | `disclose` | Policy for generated or distributed hooks. |
+
+## Recommended starting point
+
+Use the example above if you are unsure. It prefers the Superpowers method chain and requires verification before completion.
+
+## Strict team example
+
+```yaml
+version: 1
+mode: strict
+
+prefer:
+  - writing-plans
+  - test-driven-development
+  - verification-before-completion
+
+require:
+  - verification-before-completion
+  - test-driven-development
+
+policies:
+  missing: fail
+  ambiguous: fail
+  deviation: fail
+  scripts: disclose
+  hooks: deny
+```
+
+## How preferences affect generation
+
+`/comet-any` uses preferences in this order:
+
+1. Read `.comet/skill-preferences.yaml`.
+2. If missing, scan platform Skill inventory and propose defaults.
+3. Resolve real local Skill content with `find-skill`.
+4. In advisory mode, add extra Skills when justified.
+5. In strict mode, block when required conditions are not met.
+
+<Warning>
+  `/comet-any` must not infer capability from names alone. It must read the final candidate <code>SKILL.md</code>, direct references, rules, scripts, and hooks.
+</Warning>
+
+## resolved-skills.json
+
+Generated packages include source evidence:
+
+```text
+reference/resolved-skills.json
+```
+
+It records two things:
+
+- `resolvedSkills`: real Skill source, hash, status (`available`, `missing`, `ambiguous`).
+- `workflow`: node-to-Skill bindings, required Skill calls, and output schemas.
+
+<Tip>
+  Review this file before publishing. It proves the composition was based on real local content and lets you trace each workflow node back to the Skill that implements it.
+</Tip>
+
+## preferenceHash drift
+
+Comet hashes the preference file and stores the `preferenceHash` in Skill Creator metadata. If preferences change after Factory initialization:
+
+| Mode | Drift behavior |
+| --- | --- |
+| `advisory` | Warn and ask whether to continue or regenerate. |
+| `strict` | Block until you choose continue or regenerate. |
+
+## Next steps
+
+- [Skill Creator workflow](/en/skill-creator/workflow)
+- [Publishing and distributing Skills](/en/skill-creator/publishing)
+- [Skill Creator overview](/en/skill-creator/overview)

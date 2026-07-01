@@ -1,81 +1,32 @@
 ---
-title: "Comet Automation Scripts: Guard, State, Handoff, Archive"
-sidebarTitle: "Overview"
-description: "Six shell scripts power Comet's workflow — guard enforces phase transitions, state manages .comet.yaml, handoff packages context, and archive closes changes."
+title: "Core script overview"
+description: "Understand the cross-platform Node scripts distributed with Comet Skills: state, guard, handoff, archive, and routing helpers, plus how .mjs launchers run on Windows, macOS, and Linux."
 ---
 
-Comet's reliability comes from a set of shell scripts that move workflow control out of AI prompt text and into testable, reusable tools. These scripts run on macOS, Linux, and Windows (Git Bash).
+Comet used to rely on shell scripts. The current runtime ships Node.js `.mjs` launchers so the same workflow can run on Windows, macOS, and Linux without requiring Git Bash or WSL.
 
-## Scripts
+## Why move from `.sh` to `.mjs`
 
-| Script | Purpose |
-|--------|---------|
-| `comet-env.sh` | Script discovery helper — exports bundled script paths (`COMET_GUARD`, `COMET_STATE`, `COMET_HANDOFF`, `COMET_ARCHIVE`, `COMET_YAML_VALIDATE`) |
-| `comet-guard.sh` | Phase transition guard — validates exit conditions, `--apply` auto-updates `.comet.yaml` |
-| `comet-handoff.sh` | Design handoff — generates deterministic context packages from OpenSpec artifacts with SHA256 tracing |
-| `comet-archive.sh` | One-command archive — validates state, syncs specs, moves to archive, updates status |
-| `comet-yaml-validate.sh` | Schema validator — validates `.comet.yaml` structure and field values |
-| `comet-state.sh` | Unified state management — init/set/get/check/scale |
+The shell implementation proved the workflow model, but it made Windows support fragile. Node launchers remove shell-path assumptions, improve JSON/YAML handling, and make runtime behavior easier to test.
 
-## Loading Scripts in Your Session
+## Script responsibilities
 
-Always locate scripts through `comet-env.sh` — never hardcode paths. Script locations vary by platform, install scope, and OS. Sourcing `comet-env.sh` once at the start of a session exports all script paths as environment variables.
+| Script area | Responsibility |
+| --- | --- |
+| state | Read and update `.comet.yaml` and runtime state. |
+| guard | Enforce phase transitions and required evidence. |
+| handoff | Package design/spec/task context and calculate hashes. |
+| archive | Close accepted changes and preserve history. |
+| routing | Classify `/comet` requests against the current project state. |
 
-```bash
-COMET_ENV="${COMET_ENV:-$(find . "$HOME"/.*/skills "$HOME/.config" "$HOME/.gemini" -path '*/comet/scripts/comet-env.sh' -type f -print -quit 2>/dev/null)}"
-if [ -z "$COMET_ENV" ]; then
-  echo "ERROR: comet-env.sh not found. Ensure the comet skill is installed." >&2
-  return 1
-fi
-. "$COMET_ENV"
-```
+## How scripts cooperate
 
-After sourcing `comet-env.sh`, the following environment variables are available in your session:
+1. routing decides the intended action;
+2. state reads the current workflow;
+3. guard validates whether the transition is allowed;
+4. handoff records evidence when moving from design to build;
+5. archive closes the change after verification.
 
-| Variable | Points to |
-|----------|-----------|
-| `$COMET_GUARD` | `comet-guard.sh` |
-| `$COMET_STATE` | `comet-state.sh` |
-| `$COMET_HANDOFF` | `comet-handoff.sh` |
-| `$COMET_ARCHIVE` | `comet-archive.sh` |
-| `$COMET_YAML_VALIDATE` | `comet-yaml-validate.sh` |
+## Where to find runtime evidence
 
-You should also validate that all variables were populated before proceeding:
-
-```bash
-if [ -z "$COMET_GUARD" ] || [ -z "$COMET_STATE" ] || [ -z "$COMET_HANDOFF" ] || [ -z "$COMET_ARCHIVE" ]; then
-  echo "ERROR: Comet scripts not found. Ensure the comet skill is installed." >&2
-  echo "Expected path pattern: */comet/scripts/comet-*.sh under project or platform skill directories" >&2
-  return 1
-fi
-```
-
-## Cross-Platform Note
-
-Comet resolves a usable bash executable through `COMET_BASH`. This variable is exported by `comet-env.sh` automatically after testing candidate executables — including Git Bash paths on Windows. The Windows WSL launcher (`System32/bash.exe`) is explicitly excluded.
-
-Always invoke scripts as:
-
-```bash
-"$COMET_BASH" "$COMET_GUARD" <args>
-"$COMET_BASH" "$COMET_STATE" <args>
-```
-
-Using `"$COMET_BASH"` rather than calling scripts directly ensures Windows Git Bash is handled correctly across all supported platforms.
-
-## Script Pages
-
-<CardGroup cols={2}>
-  <Card title="comet-guard.sh" icon="shield-check" href="/en/scripts/comet-guard">
-    Phase transition guard — validates exit conditions before advancing the workflow
-  </Card>
-  <Card title="comet-state.sh" icon="database" href="/en/scripts/comet-state">
-    Unified state management — the exclusive interface for reading and writing `.comet.yaml`
-  </Card>
-  <Card title="comet-handoff.sh" icon="arrow-right-arrow-left" href="/en/scripts/comet-handoff">
-    Design context handoff — generates SHA256-traced context packages from OpenSpec artifacts
-  </Card>
-  <Card title="comet-archive.sh" icon="box-archive" href="/en/scripts/comet-archive">
-    Automated archive — syncs delta specs, annotates documents, and closes the change
-  </Card>
-</CardGroup>
+Look in `.comet/`, the active OpenSpec change directory, Superpowers artifacts, and archive output. These files are the recovery source after chat context is lost.
