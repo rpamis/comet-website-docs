@@ -7,14 +7,14 @@ description: "通过共享 eval harness 评估本地 Skill 或 comet/eval.yaml�
 
 它为 Skill 提供发布前证据：能评估 `/comet-any` 的生成物，也能对本地 Skill 目录做早期冒烟。
 
-## 子命令
+## 命令形态
 
-`comet eval` 只有两个子命令：
+`comet eval` 是单入口命令。你把 Skill 目录、`SKILL.md` 或 `comet/eval.yaml` 作为 target 传入，再用选项决定是 collect 还是执行真实评估。
 
 | 命令 | 用途 | 是否执行模型任务 |
 | --- | --- | --- |
-| `comet eval collect` | 只做发现和预检查，不执行模型或 Docker 任务 | 否 |
-| `comet eval run` | 执行本地 eval，可生成 HTML 报告 | 是 |
+| `comet eval ./generated-skill/comet/eval.yaml --collect` | 只做发现和预检查，不执行模型或 Docker 任务 | 否 |
+| `comet eval ./generated-skill/comet/eval.yaml --html` | 执行本地 eval，可生成 HTML 报告 | 是 |
 
 <Note>
   还有一个名字相近的 <code>comet skill check</code>，它是<strong>完全不同的命令</strong>——检查某次 Engine Run 的 runtime checks，不是通用 Skill 评估。详见 <a href="/zh/eval/runtime">Runtime check</a>。
@@ -41,30 +41,29 @@ description: "通过共享 eval harness 评估本地 Skill 或 comet/eval.yaml�
 有 `comet/eval.yaml` 时（发布前完整评估）：
 
 ```bash
-comet eval collect --manifest ./generated-skill/comet/eval.yaml
-comet eval run --manifest ./generated-skill/comet/eval.yaml --html
+comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./generated-skill/comet/eval.yaml --html
 ```
 
 只有本地 Skill 目录时（早期冒烟）：
 
 ```bash
-comet eval run --skill-path ./my-skill --skill-name my-skill --quick
+comet eval ./my-skill --skill-name my-skill --quick
 ```
 
 <Tip>
-  先 <code>collect</code> 做低成本发现预检查，再 <code>run --html</code> 执行真实评估。<code>collect</code> 不消耗模型调用。
+  先加 <code>--collect</code> 做低成本发现预检查，再加 <code>--html</code> 执行真实评估。<code>--collect</code> 不消耗模型调用。
 </Tip>
 
 ## 命令选项
 
-### comet eval run
-
 ```bash
-comet eval run [options]
+comet eval [target] [options]
 ```
 
 | 选项 | 说明 | 默认值 |
 | --- | --- | --- |
+| `[target]` | 本地 Skill 目录、`SKILL.md` 或 `comet/eval.yaml` | 无 |
 | `--project <dir>` | 包含 `eval/` 的仓库根目录 | `.`（当前目录） |
 | `--manifest <path>` | `comet/eval.yaml` 路径 | 无 |
 | `--skill-path <path>` | 本地 Skill 目录或 `SKILL.md` | 无 |
@@ -74,14 +73,7 @@ comet eval run [options]
 | `--report-config <path>` | 自定义 report config 路径 | `--html` 时自动生成临时文件 |
 | `--html` | 生成 HTML 报告（同时产出 markdown） | 关闭 |
 | `--quick` | 使用默认 quick smoke task | 关闭 |
-
-### comet eval collect
-
-```bash
-comet eval collect [options]
-```
-
-支持 `--project`、`--manifest`、`--skill-path`、`--skill-name`、`--profile`、`--task`（不支持 `--html`、`--report-config`、`--quick`，因为只做发现）。
+| `--collect` | 只做发现和预检查，不执行模型或 Docker 任务 | 关闭 |
 
 ### `--manifest` 和 `--skill-path` 互斥
 
@@ -89,6 +81,7 @@ comet eval collect [options]
 
 - 只传 `--manifest`：评估 `comet/eval.yaml`。
 - 只传 `--skill-path`：评估本地 Skill 目录。
+- 传 `[target]`：CLI 会根据路径判断是 manifest 还是本地 Skill。
 - 两个都传或都不传：报错。
 
 ### 默认 task 和 profile
@@ -172,20 +165,20 @@ experiment id 格式是 `<task>_<YYYYMMDD_HHMMSS>`。详见[读取评估报告](
 - `comet eval`：共享 eval harness 的用户入口，评估一个 Skill 包或 `comet/eval.yaml`。
 - `comet skill check`：本地 Engine Run 的完成度检查，判断某个 run / change 是否满足 `comet/checks.yaml` 里的 runtime checks。
 
-如果你的问题是"这个 Skill 作为产品能力能不能通过评估"，用 `comet eval run`。如果你的问题是"这个正在运行的 deterministic Skill Run 是否缺 artifact 或状态"，才用 `comet skill check`。详见 [Runtime check](/zh/eval/runtime)。
+如果你的问题是"这个 Skill 作为产品能力能不能通过评估"，用 `comet eval`。如果你的问题是"这个正在运行的 deterministic Skill Run 是否缺 artifact 或状态"，才用 `comet skill check`。详见 [Runtime check](/zh/eval/runtime)。
 
 ## 用户最少需要记什么
 
 1. `/comet-any` 生成物优先用 `comet/eval.yaml`
-2. 先 `collect`，再 `run --html`
+2. 先 `--collect`，再 `--html`
 3. eval 结果是 `/comet-any` 发布 readiness 的证据，不是发布动作本身
 
 推荐命令：
 
 ```bash
-comet eval collect --manifest ./generated-skill/comet/eval.yaml
-comet eval run --manifest ./generated-skill/comet/eval.yaml --html
-comet publish next <name> --json
+comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./generated-skill/comet/eval.yaml --html
+comet creator next <name> --json
 ```
 
 ## 下一步

@@ -5,81 +5,54 @@ description: "了解高级 Bundle 后端命令，以及它和 /comet-any、comet
 
 `comet bundle` 是 `/comet-any` 和 `comet publish` 背后的**高级后端**。它创建平台无关的 Skill Bundle，把它们编译成原生平台 install plan，并能携带 Engine metadata、要求结构化 Eval 证据、人工批准后才能发布和分发。
 
-普通用户通常**不需要**直接使用它——`/comet-any` 会在内部调用这些命令。直接使用 Bundle CLI 的场景是**审计后端状态、调试平台 compile、capability gap 或 executable disclosure，或自动化集成**。
+普通用户通常**不需要**直接使用它。`/comet-any` 的创建、恢复和 authoring flow 由 [comet creator](/zh/cli/creator) 暴露；`comet publish` 暴露 review、approve、publish 和 distribute。直接使用 Bundle CLI 的场景是**审计后端状态、调试平台 compile、capability gap、eval evidence 或 executable disclosure**。
 
 ## 什么时候需要直接用
 
-- 排查 `/comet-any` 生成或恢复问题。
-- 审计 Bundle factory metadata（`planHash`、`preferenceHash`、resolved Skill 证据）。
+- 审计 Bundle draft 和编译输出。
 - 调试平台 compile、capability gap 或 executable disclosure。
+- 手工记录结构化 eval evidence。
 - 自动化集成需要 JSON 后端命令。
 
 ## 常见后端阶段
 
 ```mermaid
 flowchart LR
-  A["factory-guide / candidates"] --> B["factory-propose"]
-  B --> C["factory-init"]
-  C --> D["factory-resolve"]
-  D --> E["factory-generate"]
-  E --> AP["authoring-plan"]
-  AP --> AR["authoring-record"]
-  AR --> F["compile"]
-  F --> G["eval-plan"]
-  G --> H["eval-record"]
-  H --> I["review-summary"]
-  I --> J["review"]
-  J --> K["publish"]
-  K --> L["distribute"]
+  A["draft create / optimize"] --> B["compile"]
+  B --> C["eval-plan"]
+  C --> D["eval-record"]
+  D --> E["review-summary"]
+  E --> F["review"]
+  F --> G["publish"]
+  G --> H["distribute"]
 ```
 
-## Skill Creator 后端命令
+## Skill Creator 命令已移到 comet creator
 
-`/comet-any` 在内部通过这些命令维护确定性状态，你不需要手写 `.comet/bundle-*` 状态文件。
+0.4.0-beta.1 起，`comet creator` 是 Skill Creator 的用户 CLI 表面。下面这些旧的预发布 Bundle 别名不再是当前命令：
 
-```bash
-# 首次使用向导和恢复入口
-comet bundle factory-guide --project . --json
-
-# 候选发现
-comet bundle candidates --json
-
-# dry-run proposal，不写 Bundle state
-comet bundle factory-propose <name> --file <plan.json> --json
-
-# 写入确认后的 Factory state
-comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
-
-# 解决缺失或歧义候选
-comet bundle factory-resolve <name> --candidate <query> --source <root-or-hash> --json
-comet bundle factory-resolve <name> --candidate <query> --ignore-missing --reason <reason> --json
-
-# 生成 Bundle draft
-comet bundle factory-generate <name> --json
+```text
+comet bundle factory-*
+comet bundle authoring-*
+comet bundle list
+comet bundle status
 ```
 
-### factory-guide 返回的关键字段
+对应关系：
 
-- `preference`：当前项目级偏好，或建议写入 `.comet/skill-preferences.yaml` 的默认值（状态 `missing`/`present`/`invalid`）
-- `inventory`：平台 Skill inventory 摘要
-- `resumable`：可恢复的 Skill Creator / Bundle 状态列表
-- `nextQuestions`：首次使用或恢复时仍需确认的问题
-- `userMessage`：直接面向用户的 guide 文案
+| 旧预发布命令 | 当前命令 |
+| --- | --- |
+| `comet bundle factory-guide` | `comet creator guide` |
+| `comet bundle candidates` | `comet creator candidates` |
+| `comet bundle factory-propose` | `comet creator propose` |
+| `comet bundle factory-init` | `comet creator init` |
+| `comet bundle factory-resolve` | `comet creator resolve` |
+| `comet bundle factory-generate` | `comet creator generate` |
+| `comet bundle authoring-plan` | `comet creator authoring-plan` |
+| `comet bundle authoring-record` | `comet creator authoring-record` |
+| `comet bundle list/status` | `comet creator list/status` |
 
-### factory-propose 返回的关键字段
-
-- `userSummary`：给用户看的组合方案摘要
-- `skillCreatorSummary`：Skill Creator 方案（含 workflow contract 摘要）
-- `actions`：至少包含 `confirm-generate`、`revise-proposal`、`cancel`（`confirm-generate` 仅当 `canGenerate === true` 时出现）
-- `proposalHash`：确认 proposal 的哈希
-- `blockers` / `warnings`：带前缀码（`[candidate]`、`[composition]`、`[policy]`、`[deviation]`）
-- `canGenerate`：无 blocker 时为 true
-
-<Info>
-  <code>proposalHash</code> 由 Skill Creator metadata 记录并在后端校验，用户不需要把它作为 CLI 参数传入。<code>factory-init</code> 会把规范化 plan 固化到 <code>.comet/bundle-factory-plans/&lt;name&gt;/plan.json</code>，并记录 <code>planHash</code> 和 <code>preferenceHash</code>。
-</Info>
-
-## 创作协议命令（authoring）
+## 创作协议（authoring）
 
 0.4.0-beta.1 起，`/comet-any` 生成的 Skill 不再是薄确定性外壳，而是携带真实人工创作内容。这通过**创作协议**（authoring protocol）实现：一个确定性的 lane DAG，每个 lane 输出经过 schema 校验，最后做一次多票 Skill 评审。
 
@@ -103,22 +76,10 @@ flowchart LR
 | `skill-core` | 节点 Skill 正文 | 节点创作 |
 | `skill-review` | skill-review | 多票评审（barrier） |
 
-### authoring-plan
+运行创作协议时请用 `comet creator authoring-plan` 和 `comet creator authoring-record`。这些命令会：
 
-```bash
-comet bundle authoring-plan <name> --depth quick --json
-comet bundle authoring-plan <name> --depth full --json
-```
-
-返回创作计划：要跑哪些 lane、每个 lane 的预期产出、深度（`quick` 只覆盖必要 lane，`full` 覆盖全部）。计划本身不执行任何创作。
-
-### authoring-record
-
-```bash
-comet bundle authoring-record <name> --lane <id> --file <lane-output.json> --json
-```
-
-校验并记录某个 lane 的产出：
+- 返回创作计划：要跑哪些 lane、每个 lane 的预期产出、深度（`quick` 只覆盖必要 lane，`full` 覆盖全部）。
+- 校验并记录某个 lane 的产出。
 
 - **schema 校验**：lane 输出 JSON 必须符合该 lane 的 schema（status ∈ `DONE`/`DONE_WITH_CONCERNS`/`NEEDS_CONTEXT`/`BLOCKED`，artifacts、findings、evidence 等字段齐全）。
 - **claim 校验**：lane 声称产出哪些内容（claims），实际产物文件必须存在且匹配。
@@ -140,10 +101,6 @@ comet bundle authoring-record <name> --lane <id> --file <lane-output.json> --jso
 # 手动创建或优化 draft（排障或显式优化时）
 comet bundle draft create <name> --default-locale en --json
 comet bundle draft optimize <bundle> --name <name> --json
-
-# 查看状态
-comet bundle list --json
-comet bundle status <name> --json
 
 # 编译到参考平台
 comet bundle compile <name> --platform <id> --json
@@ -171,11 +128,12 @@ comet bundle eval-record <name> --result <file> --json
 
 ### eval-record
 
-结果必须绑定当前 Bundle hash。校验规则：
+结果必须绑定当前 draft hash 和当前 eval manifest hash。校验规则：
 
-- `result.bundleHash !== state.currentHash` → 只写文件，不推进状态。
-- 否则校验 stable control plane，断言每个 entry Skill 恰好出现一次。
-- 全部通过（`result.passed`、所有 entry passed、`compilePassed`、`safetyPassed`）→ status 推进到 `eval-passed`。
+- `result.schemaVersion !== 2` 或 `result.provider !== "comet-eval"` → 拒绝。
+- `result.draftHash !== state.currentHash` → 只写文件，不推进状态。
+- `result.evalManifestHash` 不等于当前生成的 `comet/eval.yaml` hash → 只写文件，不推进状态。
+- 全部通过（`result.passed` 且 `failures` 为空）→ status 推进到 `eval-passed`。
 - 否则回退到 `draft`，清除 review/ready/conflict。
 
 eval-result JSON 的 schema 见[发布和分发 Skill · eval-record 证据契约](/zh/skill-creator/publishing#eval-record-证据契约)。
@@ -208,15 +166,7 @@ comet bundle distribute <name> --platform <id> --scope project --json
 | `--json` | 输出结构化 JSON |
 | `--platform <id>` | 目标平台（可多次传） |
 | `--scope <project\|global>` | 分发范围 |
-| `--file <path>` | plan.json 路径 |
-| `--confirmed-proposal` | 确认 proposal 后初始化 |
-| `--candidate <query>` | 候选查询 |
-| `--source <root-or-hash>` | 候选来源 |
-| `--ignore-missing` | 忽略缺失候选（需配合 `--reason`） |
-| `--reason <text>` | 原因说明 |
 | `--level <quick\|full>` | eval 工作量级别 |
-| `--depth <quick\|full>` | 创作深度（`authoring-plan`） |
-| `--lane <id>` | 创作 lane id（`authoring-record`，必填） |
 | `--result <path>` | eval 结果文件路径 |
 | `--approve` / `--reject` | 批准或拒绝 |
 | `--reviewer <name>` | 评审人 |
@@ -229,10 +179,11 @@ comet bundle distribute <name> --platform <id> --scope project --json
 
 ## Bundle 和 publish 的关系
 
-`comet publish` 是用户入口，复用 Bundle 后端的状态和 readiness 契约，但不引入第二个状态模型。`comet bundle` 是高级后端，直接操作内部状态。
+`comet creator` 是创建和恢复入口，`comet publish` 是发布入口。`comet bundle` 是高级后端，直接操作内部状态。
 
 | 命令 | 定位 | 适合谁 |
 | --- | --- | --- |
+| `comet creator` | 创建状态和恢复入口 | 普通用户、自动化 |
 | `comet publish` | 用户发布入口 | 普通用户 |
 | `comet bundle` | 高级 Bundle 后端 | 审计、调试、自动化集成 |
 
@@ -243,5 +194,6 @@ comet bundle distribute <name> --platform <id> --scope project --json
 ## 下一步
 
 - [comet publish](/zh/cli/publish) — 用户发布入口
+- [comet creator](/zh/cli/creator) — `/comet-any` 创建状态和恢复入口
 - [Skill Creator 概览](/zh/skill-creator/overview) — `/comet-any` 如何在内部使用 Bundle
 - [发布和分发 Skill](/zh/skill-creator/publishing) — readiness 和分发流程

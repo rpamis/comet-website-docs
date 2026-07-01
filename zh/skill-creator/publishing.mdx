@@ -25,7 +25,7 @@ flowchart LR
 | 状态 | 含义 | 进入条件 |
 | --- | --- | --- |
 | `draft` | 刚生成，还没验证 | `/comet-any` 生成完成 |
-| `eval-passed` | 有当前 hash 的 eval 证据 | `comet eval run --html` 通过且 hash 匹配 |
+| `eval-passed` | 有当前 hash 的 eval 证据 | `comet eval ... --html` 通过且 hash 匹配 |
 | `review-approved` | 人工批准当前 hash | `comet publish approve` |
 | `ready` | 满足所有发布门禁 | review summary 为 publishable |
 | `published` | 已发布可安装候选 | `comet publish run` |
@@ -54,12 +54,12 @@ readiness 有四种面向用户的结论：
 
 ## 推荐流程
 
-`comet publish` 是普通用户面对 `/comet-any` 产物的发布入口。它复用 Bundle 后端，但把命令组织成 readiness、review、approval、publish 和 distribute。
+`comet publish` 是普通用户面对 `/comet-any` 产物的发布入口。它只处理 eval 证据就绪后的 review、approval、publish 和 distribute。创建状态、恢复状态和唯一下一步由 `comet creator` 负责。
 
 ```mermaid
 flowchart LR
-    A["/comet-any 生成"] --> B["comet eval run --html"]
-    B --> C["comet publish status / next"]
+    A["/comet-any 生成"] --> B["comet eval --html"]
+    B --> C["comet creator status / next"]
     C --> D["comet publish review"]
     D --> E["comet publish approve"]
     E --> F["comet publish run"]
@@ -70,14 +70,11 @@ flowchart LR
 ## 用户命令
 
 ```bash
-# 列出可恢复 candidate
-comet publish list --project . --json
-
 # 查看完整 readiness 和阻塞项
-comet publish status my-skill --project . --json
+comet creator status my-skill --project . --json
 
 # 只想知道下一步该跑什么
-comet publish next my-skill --project . --json
+comet creator next my-skill --project . --json
 
 # 生成评审摘要
 comet publish review my-skill --platform claude --json
@@ -112,10 +109,10 @@ comet publish distribute my-skill --platform claude --scope project --skip-capab
 
 | 你想做什么 | 用哪个命令 | 输出重点 |
 | --- | --- | --- |
-| 看完整 readiness、blocker、warning 和 evidence | `comet publish status <name>` | 完整状态和恢复上下文 |
-| 从中断流程恢复，只想知道现在跑什么 | `comet publish next <name>` | 单个推荐动作、命令、原因和是否需要用户确认 |
+| 看完整 readiness、blocker、warning 和 evidence | `comet creator status <name>` | 完整状态和恢复上下文 |
+| 从中断流程恢复，只想知道现在跑什么 | `comet creator next <name>` | 单个推荐动作、命令、原因和是否需要用户确认 |
 
-`comet publish next` 不暴露后端 Bundle 命令。它会把后端 next action 翻译成普通用户命令，例如 `comet publish review ...`、`comet publish approve ...`，或提示你回到 `/comet-any` 解决候选、确认方案、重新生成。
+`comet creator next` 不暴露后端 Bundle 命令。它会把后端 next action 翻译成普通用户命令，例如 `comet eval ... --html`、`comet publish review ...`、`comet publish approve ...`，或提示你回到 `/comet-any` 解决候选、确认方案、重新生成。
 
 ## 阻塞码（blocker codes）
 
@@ -123,17 +120,19 @@ readiness blockers 会阻止 publish。每个 blocker 都有一个**前缀码**�
 
 | 阻塞码 | 含义 | 恢复建议 |
 | --- | --- | --- |
-| `[candidate]` | 还有未解决的缺失/歧义候选 | 回到 `/comet-any` 选择来源，或让 `comet publish next` 给出恢复命令 |
+| `[candidate]` | 还有未解决的缺失/歧义候选 | 回到 `/comet-any` 选择来源，或让 `comet creator next` 给出恢复命令 |
 | `[preference]` | （strict）required Skill 缺失/歧义；偏好漂移 | 确认偏好或重新生成 |
 | `[proposal]` | proposal 未确认 | 回到 `/comet-any` 查看并确认组合方案 |
 | `[composition]` | composition 有 issue（cycle、unresolved-choice 等） | 修复组合方案 |
 | `[control-plane]` | 稳定控制面校验失败 | 检查 required capability set 是否完整 |
+| `[authoring]` | 生成物仍有 `AUTHORING PENDING` 或 substance 节点没写完 | 完成对应 authoring lane，再记录输出 |
 | `[draft]` | 缺少 `currentHash` | 重新生成 draft |
-| `[eval]` | 缺少/失败/对应旧 hash 的 Eval 证据 | 重新跑 `comet eval run --html` |
+| `[eval]` | 缺少/失败/对应旧 hash 的 Eval 证据 | 重新跑 `comet eval ... --html` |
+| `[agent]` | Claude Code custom agent 没出现在平台预览里 | 重新跑 Claude 平台分发预览 |
 | `[publish]` | status `ready` 但没有 ready metadata | 重新走 review 流程 |
 
 <Note>
-  每个 blocker 都带 <code>nextAction: { label, command }</code>，直接给出恢复建议。想看完整上下文用 <code>comet publish status</code>；只想复制下一条用户命令时，用 <code>comet publish next</code>。
+  每个 blocker 都带 <code>nextAction: { label, command }</code>，直接给出恢复建议。想看完整上下文用 <code>comet creator status</code>；只想复制下一条用户命令时，用 <code>comet creator next</code>。
 </Note>
 
 ### Warning（非阻塞）
@@ -143,6 +142,7 @@ readiness blockers 会阻止 publish。每个 blocker 都有一个**前缀码**�
 - `[preference]` advisory 模式下的偏好漂移
 - `[review]` approval 对应旧 hash
 - `[capability]` optional 能力缺口
+- `[agent]` 平台 agent 预览缺失
 - `[executable]` 可执行披露待确认
 
 ## 评审摘要
@@ -198,37 +198,35 @@ preview 是**强制检查**，不是可选附加项。它会展示：
 
 ```json
 {
-  "schemaVersion": 1,
-  "provider": "native-skill-creator",
+  "schemaVersion": 2,
+  "provider": "comet-eval",
   "level": "quick",
-  "bundleHash": "<64 位 hex SHA-256>",
-  "entries": [
-    { "id": "<entry skill id>", "passed": true, "passRate": 1.0, "evidence": ["..."] }
-  ],
-  "bundle": { "compilePassed": true, "safetyPassed": true, "evidence": ["..."] },
-  "benchmark": {
-    "cases": 6,
-    "baselinePassRate": 0.5,
-    "withSkillPassRate": 0.9,
-    "tokenCount": 12000,
-    "durationMs": 30000
-  },
+  "draftHash": "<64 位 hex SHA-256>",
+  "evalManifestHash": "<64 位 hex SHA-256>",
+  "tasks": ["authoring-skill-smoke"],
+  "treatments": ["CONTROL", "COMET_FULL"],
+  "passAtK": { "authoring-skill-smoke": 1 },
+  "weightedScore": { "authoring-skill-smoke": 0.92 },
+  "instabilityGap": { "authoring-skill-smoke": 0 },
+  "failures": [],
+  "reports": ["eval/local/logs/experiments/example/summary.html"],
   "passed": true,
-  "summary": "..."
+  "summary": "All quality gates passed."
 }
 ```
 
 <Warning>
-  <code>bundleHash</code> 必须是 64 位 hex SHA-256 且等于当前 <code>currentHash</code>。<code>full</code> 级别必须提供 <code>variance</code>。每个 entry Skill 必须恰好出现一次。普通用户不需要手写这个文件——<code>/comet-any</code> 会通过 <code>comet eval</code> 自动产出。
+  <code>draftHash</code> 必须等于当前 <code>currentHash</code>，<code>evalManifestHash</code> 必须等于当前生成的 <code>comet/eval.yaml</code> hash。旧 hash 或旧 manifest 的证据会被保留到磁盘，但不能推进 readiness。普通用户不需要手写这个文件——<code>/comet-any</code> 会通过 <code>comet eval</code> 自动产出。
 </Warning>
 
 ## Bundle 和 publish 的关系
 
-`comet publish` 是用户入口。`comet bundle` 是高级后端，负责确定性状态、hash、readiness、publish 和 distribute。除非排障或审计，你不需要直接操作 Bundle 状态文件。
+`comet creator` 是创建和恢复入口，`comet publish` 是发布入口。`comet bundle` 是高级后端，负责确定性状态、hash、readiness、publish 和 distribute。除非排障或审计，你不需要直接操作 Bundle 状态文件。
 
 | 命令 | 定位 | 适合谁 |
 | --- | --- | --- |
-| `comet publish` | 用户发布入口 | 普通用户 |
+| `comet creator` | 创建状态和恢复入口 | 普通用户、自动化 |
+| `comet publish` | 用户发布入口 | 普通用户、自动化 |
 | `comet bundle` | 高级 Bundle 后端 | 审计、调试、自动化集成 |
 
 需要排查后端状态时可以参考 [comet bundle](/zh/cli/bundle)。

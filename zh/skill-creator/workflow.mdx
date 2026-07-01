@@ -13,8 +13,8 @@ description: "从准备偏好到恢复、生成、评估、评审、发布和分
 
 ```text
 /comet-any 创建
-  → comet eval collect / run（验证）
-  → comet publish status / next（看 readiness 和唯一下一步）
+  → comet eval --collect / --html（验证）
+  → comet creator status / next（看 readiness 和唯一下一步）
   → comet publish review / approve / run（发布）
   → comet publish distribute --preview / distribute（分发）
 ```
@@ -65,7 +65,7 @@ flowchart LR
 - approval 是否仍匹配当前 hash
 
 <Info>
-  想看后端具体返回什么字段，可以手工跑 <code>comet bundle factory-guide --project . --json</code>。它会返回 <code>preference</code>、<code>inventory</code>、<code>resumable</code>、<code>nextQuestions</code>、<code>userMessage</code>。
+  想看后端具体返回什么字段，可以手工跑 <code>comet creator guide --project . --json</code>。它会返回 <code>preference</code>、<code>inventory</code>、<code>resumable</code>、<code>nextQuestions</code>、<code>userMessage</code>。
 </Info>
 
 ## 2. 运行首次使用向导
@@ -110,10 +110,10 @@ flowchart LR
 
 ```bash
 # 指定来源解决歧义
-comet bundle factory-resolve <name> --candidate <query> --source <root-or-hash> --json
+comet creator resolve <name> --candidate <query> --source <root-or-hash> --json
 
 # 或显式忽略缺失（必须给原因）
-comet bundle factory-resolve <name> --candidate <query> --ignore-missing --reason "<reason>" --json
+comet creator resolve <name> --candidate <query> --ignore-missing --reason "<reason>" --json
 ```
 
 ## 6. 读取真实候选实现
@@ -155,13 +155,13 @@ comet bundle factory-resolve <name> --candidate <query> --ignore-missing --reaso
 
 ```bash
 # dry-run proposal，不写 Bundle state
-comet bundle factory-propose <name> --file <plan.json> --json
+comet creator propose <name> --file <plan.json> --json
 
 # 写入确认后的 Factory state
-comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
+comet creator init <name> --file <plan.json> --confirmed-proposal --json
 ```
 
-`factory-init` 会把规范化 plan 固化到 `.comet/bundle-factory-plans/<name>/plan.json`，并记录 `planHash` 和 `preferenceHash`。
+`comet creator init` 会把规范化 plan 固化到 `.comet/bundle-factory-plans/<name>/plan.json`，并记录 `planHash` 和 `preferenceHash`。
 
 ### plan.json 结构
 
@@ -238,7 +238,7 @@ comet bundle factory-init <name> --file <plan.json> --confirmed-proposal --json
 
 多步骤、需要恢复、需要 guardrails、需要 runtime checks 或包含脚本副作用的生成物，会生成 Engine Package。轻量单步 Skill（`engineMode: none`）可以不启用 Engine，但会失去 Run 恢复和 runtime check。
 
-生成的 Engine 四件套：`comet/skill.yaml`、`comet/guardrails.yaml`、`comet/checks.yaml`、`comet/eval.yaml`。Engine 机制的完整说明见[Skill 与 Engine](/zh/skill-creator/engine)。
+生成的 Engine 四件套：`comet/skill.yaml`、`comet/guardrails.yaml`、`comet/checks.yaml`、`comet/eval.yaml`。其中 `comet/eval.yaml` 会携带当前 draft hash 占位、推荐任务、baseline treatments、质量门禁、必需 Output Schema 和预期 evidence。Engine 机制的完整说明见[Skill 与 Engine](/zh/skill-creator/engine)。
 
 ## 12. 编译和校验
 
@@ -268,22 +268,22 @@ comet bundle eval-plan <name> --level full --json
 
 ## 14. 记录评估证据
 
-实际执行评估（这一步对应 `comet eval`）并把证据绑定到当前 hash：
+实际执行评估（这一步对应 `comet eval`）并把证据绑定到当前 draft hash 和当前 eval manifest hash：
 
 ```bash
-# 记录 eval 证据（result JSON 必须绑定当前 Bundle hash）
+# 记录 eval 证据（result JSON 必须绑定当前 draft hash 和 eval manifest hash）
 comet bundle eval-record <name> --result <file> --json
 ```
 
-只有 `result.passed`、所有 entry 通过、`compilePassed`、`safetyPassed` 全满足，状态才会推进到 `eval-passed`；否则回退到 `draft` 并清除 review/ready/conflict。
+`eval-record` 只接受 `schemaVersion: 2`、`provider: "comet-eval"` 的结果。只有 `passed: true` 且 `failures` 为空，状态才会推进到 `eval-passed`；否则回退到 `draft` 并清除 review/ready/conflict。
 
 <Warning>
-  证据 <code>bundleHash</code> 不等于当前 <code>currentHash</code> 时，只写文件不推进状态。旧 hash 证据可以保留在磁盘，但不能推进状态。
+  证据 <code>draftHash</code> 不等于当前 <code>currentHash</code>，或 <code>evalManifestHash</code> 不等于当前生成的 <code>comet/eval.yaml</code> hash 时，只写文件不推进状态。旧证据可以保留在磁盘，但不能推进状态。
 </Warning>
 
 ## 15. 评审、批准、发布
 
-发布前先看 readiness 和下一步。`comet publish status` 展示完整 readiness、blocker、warning 和 evidence；`comet publish next` 只返回一条用户应该执行的下一步命令。`/comet-any` 会基于评审摘要展示 entry Skill、internal Skill、`planHash`、`preferenceHash`、真实 Skill 证据、推荐调用顺序、偏离项和原因、能力缺口、可执行披露、Eval 结果摘要，以及 `Readiness:`、`Blockers:`、`Warnings:`、`Evidence:`。
+发布前先看 readiness 和下一步。`comet creator status` 展示完整 readiness、blocker、warning 和 evidence；`comet creator next` 只返回一条用户应该执行的下一步命令。`/comet-any` 会基于评审摘要展示 entry Skill、internal Skill、`planHash`、`preferenceHash`、真实 Skill 证据、推荐调用顺序、偏离项和原因、能力缺口、可执行披露、Eval 结果摘要，以及 `Readiness:`、`Blockers:`、`Warnings:`、`Evidence:`。
 
 ```bash
 # 评审摘要
@@ -381,8 +381,8 @@ policies:
 
 ```bash
 # 评估
-comet eval collect --manifest ./generated-skill/comet/eval.yaml
-comet eval run --manifest ./generated-skill/comet/eval.yaml --html
+comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./generated-skill/comet/eval.yaml --html
 
 # 评审、批准、发布
 comet publish review review-helper --platform claude --json
@@ -400,7 +400,7 @@ comet publish distribute review-helper --platform claude --scope project --json
 2. `.comet/skill-preferences.yaml` 是项目级偏好，可以手写，也可以由 `/comet-any` 生成。
 3. 生成前必须先看**组合方案**，确认后才会写 Bundle draft。
 4. **Eval 是发布前证据**，不是发布动作。
-5. 用 `comet publish status` 看完整 readiness，用 `comet publish next` 看唯一推荐下一步；你不需要手写内部 Bundle 状态。
+5. 用 `comet creator status` 看完整 readiness，用 `comet creator next` 看唯一推荐下一步；你不需要手写内部 Bundle 状态。
 
 ## 下一步
 
