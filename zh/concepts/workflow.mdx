@@ -258,20 +258,35 @@ openspec/changes/archive/YYYY-MM-DD-<change-name>/
 
 `comet-archive.mjs ... --dry-run` 可以预览归档流程而不真正执行 OpenSpec，用 `[DRY-RUN]` 标记标注，报告多少步会成功。
 
-## 自动检测怎么工作
+## `/comet` 如何判断入口
 
-每次调用 `/comet`，Comet 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。
+每次调用 `/comet`，Comet 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。入口判断不再只靠提示词里的经验规则；Comet 会把用户原话、active change 列表和风险信号整理成 `CometIntentFrame`，再交给运行时评分得到最终 route。
+
+从用户视角，你只需要知道这些结果：
+
+| route | 什么时候出现 | 下一步 |
+| --- | --- | --- |
+| `full` | 新能力、public API、schema、跨模块或架构变更 | 进入 `/comet-open` |
+| `hotfix` | 修已有异常、回归或错误行为，且没有新增能力/API/schema/跨模块风险 | 进入 `/comet-hotfix` |
+| `tweak` | 文案、配置、文档、prompt 或单一 OpenSpec change 的轻中量修改 | 进入 `/comet-tweak` |
+| `resume` | 用户明确继续某个 active change | 读取该 change 的 `.comet.yaml` 并恢复阶段 |
+| `ask_user` | 置信度不足、多个 active change、证据缺失或用户显式路径与风险信号冲突 | 暂停让你选择 |
+| `out_of_scope` | 你只是提问，没有要求启动或恢复工作流 | 不初始化 change |
 
 ```mermaid
 flowchart TD
-  A["调用 /comet"] --> B["检测 hotfix/tweak 预设"]
-  B --> C["openspec list --json"]
-  C --> D["读取 .comet.yaml"]
-  D --> E{"阶段和证据一致?"}
-  E -->|一致| F["路由到当前阶段 Skill"]
-  E -->|不一致| G["用 guard/status 修正或诊断"]
-  G --> F
+  A["调用 /comet"] --> B["openspec list --json"]
+  B --> C["填写 CometIntentFrame"]
+  C --> D["运行时评分 route"]
+  D --> E{"route?"}
+  E -->|full| F["/comet-open"]
+  E -->|hotfix| G["/comet-hotfix"]
+  E -->|tweak| H["/comet-tweak"]
+  E -->|resume| I["读取 .comet.yaml 并恢复"]
+  E -->|ask_user| J["停顿点：让用户选择"]
 ```
+
+`CometIntentFrame` 让路由可解释：如果 Comet 没有足够证据证明某条路径安全，它会问你，而不是把 `hotfix`、`tweak` 或 `full` 猜到底。
 
 ## 用户会在哪些地方参与
 

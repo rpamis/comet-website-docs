@@ -18,25 +18,26 @@ description: "深入理解 /comet-any（Skill Creator）如何用 Workflow Contr
 | **用户层** | 三种起点 + `保留 / 新增 / 替换 / 关闭` 的调整词汇 + 每个节点的职责说明 | 所有用户 |
 | **内部层** | Bundle、Factory、composition、Workflow Protocol、resolved-skills.json | 仅审计/排障时查看 |
 
-**用户唯一需要记住的入口是 `/comet-any`**。CLI（`comet bundle`、`comet publish`）是它的确定性后端，普通用户不需要手动操作。
+**用户唯一需要记住的入口是 `/comet-any`**。需要恢复创建状态时用 `comet creator`；进入发布后用 `comet publish`；`comet bundle` 只作为高级后端保留给审计和排障。
 
 ## 主线
 
 ```text
-/comet-any 创建  →  comet eval 验证  →  comet publish 发布和分发
+/comet-any 创建  →  comet eval 验证  →  comet creator 查状态  →  comet publish 发布和分发
 ```
 
 展开后的完整链路：
 
 ```text
 /comet-any 创建
-  → comet eval collect / run（验证）
+  → comet eval --collect / --html（验证）
+  → comet creator status / next（readiness 和唯一下一步）
   → comet publish review / approve / run（发布）
   → comet publish distribute --preview（强制预览）
   → comet publish distribute（真实分发）
 ```
 
-`comet bundle` 是高级 Bundle 后端，负责确定性状态、hash、readiness、publish 和 distribute；`comet skill` 是底层 Skill 工具，适合本地调试和 Engine Run。它们都**不是**普通用户创建 Skill 的主入口。
+`comet creator` 是 `/comet-any` 的恢复和创建状态表面；`comet bundle` 是高级 Bundle 后端；`comet skill` 是底层 Skill 工具，适合本地调试和 Engine Run。它们都**不是**普通用户创建 Skill 的主入口。
 
 ## 三种起点
 
@@ -200,9 +201,9 @@ description: "深入理解 /comet-any（Skill Creator）如何用 Workflow Contr
 5. 把目标编译成 **Workflow Contract**（Workflow Nodes、Skill Bindings、Output Schemas、Guardrails、Handoffs）。
 6. **校验** Workflow Contract（control 不能 override、producer override 要 satisfy、Output Schema 要存在等）。
 7. 先展示 **Skill Creator 方案确认页**，用户确认后才写 draft。
-8. 生成 entry Skill、每个节点的内部 Skill、`reference/workflow-protocol.json` 和 scripts。
+8. 通过 authoring lane 生成 entry Skill、每个节点的内部 Skill、`reference/workflow-protocol.json`、scripts 和平台 agent 定义。
 9. 生成 `comet/eval.yaml` 评估清单（Engine 启用时还有 Engine Package）。
-10. 进入 readiness、review、approval、publish 和 distribute。
+10. 通过 `comet creator status/next` 查看 readiness，再进入 review、approval、publish 和 distribute。
 
 ```mermaid
 flowchart TD
@@ -221,7 +222,7 @@ flowchart TD
     K -->|修改| I
     K -->|取消| End["不写状态"]
     K -->|确认生成| L["生成 Skill 包<br/>+ workflow-protocol.json"]
-    L --> M["comet eval collect → run --html"]
+    L --> M["comet eval --collect → --html"]
     M --> N{"评估通过?"}
     N -->|否| F
     N -->|是| O["comet publish review → approve → run"]
@@ -261,6 +262,7 @@ flowchart TD
       recovery.md                     # 恢复路径
       skill-review.md                 # 作者自审
       authoring-lanes.json            # 创作车道记录（含 protocolHash）
+      subagents/                      # 便携子代理角色说明
     scripts/                          # required control plane
       workflow-state.mjs
       workflow-guard.mjs
@@ -268,6 +270,7 @@ flowchart TD
       comet-plan.mjs
       comet-check.mjs
       comet-hook-guard.mjs
+    agents/claude/                    # Claude Code custom agents（目标平台支持时分发）
   rules/                              # required control plane
   hooks/                              # required control plane（portable hook descriptor）
 ```
@@ -291,11 +294,12 @@ flowchart TD
 
 ### 必需能力集合（required capability set）
 
-稳定组合 Skill Bundle 的 required capability set 是 `skills / scripts / rules / hooks / references`：
+稳定组合 Skill Bundle 的 required capability set 是 `skills / scripts / rules / hooks / references / agents`：
 
 - `skills`：入口 Skill 和各节点内部 Skill。
 - `scripts / rules / hooks`：**required control plane**，不是可随意删除的附属文件。它们负责状态推进、守卫、移交的确定性。
 - `references`：真实来源证据和创作审计。
+- `agents`：平台原生 agent 定义。Claude Code 分发会把生成的 custom agents 写到目标平台预览里。
 
 `hooks/*.yaml` 是 **Comet portable hook descriptor**，只有通过 `comet publish distribute` 编译到目标平台配置后才会生效。
 
@@ -315,6 +319,7 @@ flowchart TD
 - producer override 必须声明 `satisfies` 的 Output Schema。
 - control 节点普通模式不得 override。
 - eval、review、publish readiness 必须读取**同一份** `workflow-protocol.json`。
+- 生成物不能残留 `AUTHORING PENDING` 标记；入口 Decision Core 或 substance 节点没写完会阻塞发布。
 - 子代理 Handoff 必须要求子代理加载 Required Skill Call 并回传 evidence。
 - 脚本只读取 protocol 和 state，不把 Skill 名称当成校验依据。
 - **Eval 被跳过或失败** → 永远不进入 ready。
@@ -333,6 +338,7 @@ flowchart TD
 | `control-node-override` | control 节点普通模式被 override |
 | `producer-missing-output-schema` | producer override 没有声明 satisfies 的 Output Schema |
 | `missing-output-schema` | 节点引用了未定义的 Output Schema |
+| `orphan-output-schema` | Output Schema 已定义，但没有挂到任何 Workflow Node |
 | `duplicate-node` | 重复定义了相同 id 的节点 |
 | `disabled-required-node` | 必需节点被 disable（只有 optional 节点能 disable） |
 
