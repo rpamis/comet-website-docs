@@ -1,155 +1,47 @@
 ---
-title: "Comet .comet.yaml State Management Field Reference"
-sidebarTitle: "State Management"
-description: "Reference for .comet.yaml: field definitions, state machine constraints, and bash transition commands for Comet's resumable five-phase workflow state."
+title: "State and configuration"
+description: "Understand .comet.yaml, .comet/config.yaml, configuration precedence, environment overrides, and what users can safely edit."
 ---
 
-Comet's state machine uses two YAML files per change. One is owned by OpenSpec and tracks the formal spec lifecycle. The other is owned by Comet and tracks everything the workflow engine needs to know: which phase the change is in, how it should be built, whether verification passed, and whether the change has been archived. Together, they let an agent resume a long-running change exactly where it left off — even after the AI coding session is closed and reopened.
+Comet separates human-readable workflow state from machine-managed runtime evidence.
 
-## Decoupled State Files
+## Three state layers plus config
 
-| File | Owner | Purpose |
-|------|-------|---------|
-| `.openspec.yaml` | OpenSpec | Spec lifecycle metadata, change identity, and status annotations managed by OpenSpec Skills |
-| `.comet.yaml` | Comet | Workflow phase, execution mode (`build_mode`, `isolation`), verification status, artifact paths, and archive state managed by Comet scripts |
+| File | Role | Who owns it |
+| --- | --- | --- |
+| `.comet.yaml` | Current workflow, phase, change id, mode, and user-visible metadata | Human-readable, Comet-updated |
+| `.comet/run-state.json` | Runtime checkpoints and machine evidence | Machine-managed |
+| OpenSpec and Superpowers artifacts | Proposal, spec deltas, design docs, plans, and archive history | Workflow artifacts |
+| `.comet/config.yaml` | Project defaults | User-configurable |
 
-Both files live inside the change directory at `openspec/changes/<name>/`. Keeping them separate means OpenSpec operations never corrupt Comet workflow state, and Comet state updates never interfere with OpenSpec's spec-lifecycle logic. Agents should treat `.comet.yaml` as read-only from the perspective of direct editing — all writes go through `comet-state.sh`.
+## Configuration precedence
 
-## The `.comet.yaml` File
+Effective behavior is resolved in this order:
 
-A fully-populated `.comet.yaml` looks like this:
+1. explicit command flags;
+2. environment variables;
+3. `.comet/config.yaml` project defaults;
+4. package defaults.
 
-```yaml
-workflow: full
-phase: build
-build_mode: subagent-driven-development
-build_pause: null
-isolation: branch
-verify_mode: null
-design_doc: docs/superpowers/specs/YYYY-MM-DD-topic-design.md
-plan: docs/superpowers/plans/YYYY-MM-DD-feature.md
-base_ref: a1b2c3d4e5f6...
-verify_result: pending
-verification_report: null
-branch_status: pending
-created_at: 2026-05-26
-verified_at: null
-archived: false
-direct_override: false
-build_command: null
-verify_command: null
-handoff_context: openspec/changes/<name>/.comet/handoff/design-context.json
-handoff_hash: <sha256>
-```
+## `auto_transition`
 
-### Core Fields
+`auto_transition` controls whether Comet may advance phases automatically when the required evidence is present.
 
-| Field | Allowed values | Meaning |
-|-------|---------------|---------|
-| `workflow` | `full`, `hotfix`, `tweak` | Which workflow preset this change uses. Set at init and drives routing decisions throughout the pipeline. |
-| `phase` | `open`, `design`, `build`, `verify`, `archive` | The current workflow phase. Initialized to `open` by `comet-state.sh init`; advanced only by guard transitions. |
-| `build_mode` | `subagent-driven-development`, `tdd`, `direct`, or `null` | The Superpowers execution method chosen by the user during the build phase. Must be set before `build → verify` transition. |
-| `build_pause` | `plan-ready`, `null` | Internal build-phase pause marker. See [The build_pause Field](#the-build_pause-field) below. |
-| `isolation` | `branch`, `worktree`, `null` | Workspace isolation method. `hotfix` and `tweak` default to `branch`; `full` workflow leaves this `null` until the user selects it in Phase 3. Must be resolved before `build → verify`. |
-| `verify_mode` | `light`, `full`, `null` | Verification thoroughness. `tweak` uses `light`; `full` workflow and `hotfix` use `full`. |
-| `verify_result` | `pending`, `pass`, `fail` | Result of the most recent verification run. `pass` gates the archive phase; `fail` triggers a blocking user decision. |
-| `verification_report` | File path or `null` | Path to the written verification report file. Must point to an existing file before `verify-pass` transition is allowed. |
-| `branch_status` | `pending`, `handled` | Whether branch operations (merge, close, or carry-forward) have been completed. Must be `handled` before verify can pass. |
-| `archived` | `true`, `false` | Whether the change has completed the archive phase. Once `true`, the workflow is complete and the directory has moved to the archive tree. |
-| `verified_at` | ISO timestamp or `null` | Timestamp written by `comet-state.sh` when the `verify-pass` transition is applied. |
-| `created_at` | Date string (`YYYY-MM-DD`) or `null` | Change creation date, auto-set by `comet-state.sh init`. |
+## `.comet.yaml` field groups
 
-### Artifact Path Fields
+| Group | Examples |
+| --- | --- |
+| Workflow and phase | `workflow`, `phase`, `change_id` |
+| Execution mode | classic workflow, hotfix, tweak |
+| Verification and branch | expected checks and branch metadata |
+| Paths | links to OpenSpec, Superpowers, and archive artifacts |
+| Time and archive | timestamps and archive markers |
+| Machine-managed hints | fields Comet updates and users should not hand-edit casually |
 
-| Field | Allowed values | Meaning |
-|-------|---------------|---------|
-| `design_doc` | File path or `null` | Path to the Superpowers Design Doc (technical RFC) produced in Phase 2. Written by `comet-design` after brainstorming completes. |
-| `plan` | File path or `null` | Path to the Superpowers implementation plan produced in Phase 3. Written when the plan file is generated. |
-| `base_ref` | Git commit SHA or `null` | Git commit SHA recorded at change init. Used for scale assessment when no plan exists. |
-| `handoff_context` | File path or `null` | Path to the design-context JSON package generated by `comet-handoff.sh` when leaving Phase 2. Used to pass traceable OpenSpec context into Superpowers. |
-| `handoff_hash` | SHA-256 hex string or `null` | Hash of the handoff context file, recorded by `comet-handoff.sh`. Guard validates this hash before the build phase begins. |
+## State-machine constraints
 
-### Optional and Override Fields
+Comet does not treat phase as a free-form note. Transitions must follow allowed events such as proposal approval, design approval, build completion, verify failure, or archive completion.
 
-| Field | Allowed values | Meaning |
-|-------|---------------|---------|
-| `direct_override` | `true`, `false` | Allows `build_mode: direct` in a `full` workflow. Must be explicitly set to `true`; guard blocks `direct` mode in full workflows without this flag. |
-| `build_command` | Shell command string or `null` | Project build command. If set, `comet-guard.sh` runs it first during build-phase validation and prints failure output. |
-| `verify_command` | Shell command string or `null` | Project verification command. Verify guard runs this first; falls back to `build_command` if absent. |
+## Boundary between workflow state and run state
 
-## State Machine Constraints
-
-<Warning>
-The following constraints are **hard rules** enforced by both `comet-guard.sh` and `comet-state.sh`. Attempts to advance past a phase without meeting these conditions will produce a `[HARD STOP]` error with actionable suggestions.
-
-- **`isolation` must be `branch` or `worktree`** before the `build → verify` transition is allowed. A `null` value blocks the transition.
-- **`build_mode` must be selected** (non-null) before the `build → verify` transition is allowed.
-- **`build_mode: direct` in a `full` workflow requires `direct_override: true`**. Without this flag, guard rejects the transition. `hotfix` and `tweak` presets may use `direct` freely.
-- **`verification_report` must point to an existing file** before the `verify-pass` transition is allowed. A `null` value or a path to a non-existent file blocks the transition.
-- **`branch_status` must be `handled`** before verify can pass. Branch operations cannot be skipped.
-- **`build_pause: plan-ready` must not be written to `build_mode`**. It is a pause marker, not an execution mode. See below.
-</Warning>
-
-## The `build_pause` Field
-
-`build_pause` is a special marker used exclusively inside the build phase to record an intentional mid-phase pause. It is **not an execution mode** and must never be assigned to `build_mode`.
-
-| Value | Meaning |
-|-------|---------|
-| `null` | No pause in progress. Normal build execution. |
-| `plan-ready` | The implementation plan has been generated. The user has chosen to pause here — typically to switch AI models before beginning execution — and has not yet selected `isolation` or `build_mode`. |
-
-**When resuming a `plan-ready` pause:**
-
-1. Comet detects `build_pause: plan-ready` and confirms the plan file exists at the path in `plan`.
-2. The existing plan is reused as-is. It is **not regenerated**.
-3. The user is prompted to choose `isolation` and `build_mode` to continue.
-4. Once both are selected, `build_pause` is cleared to `null` and execution resumes.
-
-If `build_pause: plan-ready` is set but the plan file is missing, Comet enters a corrupted-state recovery flow and may regenerate the plan.
-
-## How State Transitions Work
-
-Agents advance `.comet.yaml` through state transitions using `comet-state.sh`. Direct YAML editing is not permitted — all state writes go through this script to ensure schema validity, enum correctness, and consistent field co-updates.
-
-In practice, most transitions are triggered automatically by `comet-guard.sh --apply` at phase exits. The `--apply` flag instructs the guard to validate exit conditions and, if they pass, call `comet-state.sh transition` internally. You can also trigger transitions directly when needed:
-
-```bash
-"$COMET_BASH" "$COMET_STATE" transition <change-name> open-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> design-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> build-complete
-"$COMET_BASH" "$COMET_STATE" transition <change-name> verify-pass
-"$COMET_BASH" "$COMET_STATE" transition <change-name> verify-fail
-"$COMET_BASH" "$COMET_STATE" transition <archive-name> archived
-```
-
-Each transition event maps to a set of field updates:
-
-| Event | Effect on `.comet.yaml` |
-|-------|------------------------|
-| `open-complete` | Sets `phase: design` |
-| `design-complete` | Sets `phase: build`, writes `handoff_context` and `handoff_hash` |
-| `build-complete` | Sets `phase: verify` |
-| `verify-pass` | Sets `verify_result: pass`, writes `verified_at` timestamp |
-| `verify-fail` | Sets `verify_result: fail` |
-| `archived` | Sets `archived: true`, `phase: archive` |
-
-`$COMET_BASH` and `$COMET_STATE` are environment variables exported by `comet-env.sh`. Always source that helper first and use the variables throughout the session rather than hardcoding script paths:
-
-```bash
-COMET_ENV="$(find . "$HOME"/.*/skills "$HOME/.config" "$HOME/.gemini" \
-  -path '*/comet/scripts/comet-env.sh' -type f -print -quit 2>/dev/null)"
-. "$COMET_ENV"
-
-# Now use $COMET_GUARD, $COMET_STATE, $COMET_HANDOFF, $COMET_ARCHIVE
-"$COMET_BASH" "$COMET_GUARD" <change-name> build --apply
-```
-
-### Guard vs. Direct Transition
-
-| Method | When to use |
-|--------|-------------|
-| `comet-guard.sh <name> <phase> --apply` | End of a phase — validates exit conditions first, then applies the transition |
-| `comet-state.sh transition <name> <event>` | Direct state update when guard validation is not needed (e.g., recovery flows, script internals) |
-
-The guard is the authoritative exit check. Calling `comet-state.sh transition` directly bypasses validation and should only be done when the calling context has already verified preconditions independently.
+`.comet.yaml` should stay readable and useful to humans. Detailed checkpoint data belongs in run state, where the runtime can manage it without polluting the main workflow file.

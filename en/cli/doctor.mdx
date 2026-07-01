@@ -1,127 +1,37 @@
 ---
-title: "comet doctor — Diagnose Your Comet Installation"
-sidebarTitle: "comet doctor"
-description: "comet doctor checks installation health — working dirs, installed skills, bundled scripts, and .comet.yaml files. Each result is pass, warn, or fail."
+title: "comet doctor"
+description: "Diagnose Comet installation health, platform directories, runtime scripts, Skills, hooks, and active change state."
 ---
 
-`comet doctor` runs a suite of health checks on your Comet installation, helping you diagnose missing skills, misconfigured state files, or broken script paths.
+`comet doctor` is the health-check entry point. It covers both installation health and workflow state.
 
-## Usage
+## Basic usage
 
 ```bash
 comet doctor [path]
 ```
 
-`path` defaults to `.` (the current directory) when omitted.
+| Option | Description |
+| --- | --- |
+| `--json` | Output structured diagnostics. |
+| `--scope <scope>` | Diagnose `auto`, `project`, or `global` scope. |
 
-## Checks Performed
+## What it checks
 
-`comet doctor` runs the following checks in order:
+- Project-level and global installation.
+- Target platform Skill directories.
+- Comet Skills, rules, Node runtime scripts, and hooks.
+- The active change `.comet.yaml`.
+- Current step, runtime mode, and missing evidence.
 
-| Check | What it verifies |
-|---|---|
-| **openspec CLI** | Whether the `openspec` command is available on `PATH`, and if so, which version is installed. |
-| **Working directories** | Whether `docs/superpowers/specs/` and `docs/superpowers/plans/` exist inside the project (skipped for `--scope global`). |
-| **Skills per platform** | For each detected platform (project and/or global), whether all files listed in the Comet skill manifest are present. Reports the number of missing files if any. |
-| **Scripts present** | Whether the bundled Comet shell scripts (e.g. `comet-guard.sh`, `comet-state.sh`) are accessible from the installed package assets. |
-| **`.comet.yaml` validity** | For each change directory under `openspec/changes/`, whether the top-level keys in `.comet.yaml` are all recognised field names. Unknown or misspelled keys are reported as `fail`. |
+## Troubleshooting order
 
-## Check Result Levels
-
-| Status | Icon | Meaning |
-|---|---|---|
-| `pass` | `✓` | The check completed successfully — no action needed. |
-| `warn` | `⚠` | Not critical, but worth addressing (e.g. `openspec` CLI is not installed). |
-| `fail` | `✗` | Something is broken and should be fixed before continuing (e.g. unknown field in `.comet.yaml`). |
-
-## Example Output
-
+```mermaid
+flowchart TD
+  A["comet status looks wrong"] --> B["comet doctor"]
+  B --> C{"Install problem?"}
+  C -->|yes| D["comet update or rerun init"]
+  C -->|no| E{"Change state problem?"}
+  E -->|yes| F["Restore the evidence named by diagnostics"]
+  E -->|no| G["Return to /comet"]
 ```
-Comet Doctor (scope: auto)
-
-  ✓ openspec CLI: installed (1.2.0)
-  ✓ working directories: present
-  ✓ skills: Claude Code (project): complete (8 files)
-  ⚠ skills: Cursor (project): missing 2: comet-build/SKILL.md, comet-verify/SKILL.md
-  ✓ scripts executable: OK (6 scripts)
-  ✓ .comet.yaml: my-feature: valid
-  ✗ .comet.yaml: old-change: unknown field(s): custom_flag
-```
-
-If `openspec` is not installed, the CLI check produces a `warn` result with an install hint:
-
-```
-  ⚠ openspec CLI: not installed — install with: npm install -g @fission-ai/openspec@latest
-```
-
-## Flags
-
-<ParamField query="--json" type="boolean">
-  Output all check results as structured JSON instead of formatted text. See [JSON output](#json-output) below.
-</ParamField>
-
-<ParamField query="--scope" type="string">
-  Scope to diagnose. Accepted values: `auto` (default), `project`, or `global`.
-
-  - `auto` — Checks both project and global scopes (skips global if the project path equals the home directory).
-  - `project` — Checks only the project directory; includes the working-directories check.
-  - `global` — Checks only the global (home) directory; skips the working-directories check.
-</ParamField>
-
-## JSON Output
-
-```bash
-comet doctor --json
-```
-
-```json
-{
-  "scope": "auto",
-  "results": [
-    {
-      "check": "openspec CLI",
-      "status": "warn",
-      "message": "not installed — install with: npm install -g @fission-ai/openspec@latest"
-    },
-    {
-      "check": "working directories",
-      "status": "pass",
-      "message": "present"
-    },
-    {
-      "check": "skills: Claude Code (project)",
-      "status": "pass",
-      "message": "complete (8 files)"
-    },
-    {
-      "check": "skills: Cursor (project)",
-      "status": "warn",
-      "message": "missing 2: comet-build/SKILL.md, comet-verify/SKILL.md"
-    },
-    {
-      "check": "scripts executable",
-      "status": "pass",
-      "message": "OK (6 scripts)"
-    },
-    {
-      "check": ".comet.yaml: my-feature",
-      "status": "pass",
-      "message": "valid"
-    }
-  ]
-}
-```
-
-## Valid `.comet.yaml` Fields
-
-`comet doctor` validates the following top-level keys in each `.comet.yaml` state file. Any key not in this list is flagged as `fail`:
-
-```
-workflow          phase             build_mode        isolation
-verify_mode       verify_result     design_doc        plan
-verification_report  branch_status  archived          verified_at
-```
-
-<Tip>
-  If `comet doctor` reports missing skills on a platform, re-run [`comet init`](/en/cli/init) to restore them. Use `--overwrite` to force-replace existing files.
-</Tip>

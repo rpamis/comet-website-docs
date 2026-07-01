@@ -1,0 +1,120 @@
+---
+title: "CI/CD integration"
+description: "Use comet status --json and comet doctor --json in CI/CD for install health gates, phase reports, and state checks."
+---
+
+Comet CLI commands support structured JSON output and non-interactive mode for automation. In CI/CD, use them for install integrity checks, change status reports, and pre-merge state gates without involving an agent platform.
+
+## Automation-friendly scenarios
+
+| Scenario | Command | Notes |
+| --- | --- | --- |
+| CI initialization | `comet init --yes --json` | Non-interactive install; skips interactive CodeGraph setup. |
+| Install health gate | `comet doctor --json` | Checks Skills, scripts, working directories, and change state. |
+| Change phase report | `comet status --json` | Reports active change phase, progress, and next step. |
+| PR check | `comet doctor --json` | Blocks damaged state from entering main. |
+
+<p align="center">
+  <img src="/assets/cicd-integration-illustrations/01-ci-gate-json-checks.png" alt="Xiaoyu feeds status and doctor JSON tickets into a CI gate that passes or blocks a pull request" width="800" />
+</p>
+
+<p align="center">CI should run install and state gates. Do not put agent-dependent or human-decision workflows into the pipeline.</p>
+
+## comet doctor --json
+
+`comet doctor` checks project/global installation, platform Skill integrity, scripts, working directories, and active change state.
+
+```json
+{
+  "scope": "auto",
+  "results": [
+    { "check": "Comet CLI", "status": "pass", "message": "installed" },
+    { "check": "openspec CLI", "status": "warn", "message": "not installed" },
+    { "check": ".comet.yaml: add-login", "status": "pass", "message": "valid" }
+  ]
+}
+```
+
+| status | Meaning | CI behavior |
+| --- | --- | --- |
+| `pass` | Check passed | Continue |
+| `warn` | Non-blocking issue | Continue or warn |
+| `fail` | Blocking issue | Stop |
+
+## Use doctor as a CI gate
+
+```bash
+RESULT=$(comet doctor --json)
+echo "$RESULT" | jq -r '.results[] | select(.status == "fail") | .check + ": " + .message'
+if echo "$RESULT" | jq -e '.results[] | select(.status == "fail")' > /dev/null; then
+  echo "Comet doctor reported failures — blocking CI"
+  exit 1
+fi
+```
+
+## comet status --json
+
+`comet status --json` returns active changes with fields such as `phase`, `nextCommand`, `tasksCompleted`, `tasksTotal`, `verifyResult`, and `runtimeEval`.
+
+Use it for reports:
+
+```bash
+comet status --json | jq -r '.[] | "\(.name): phase=\(.phase) tasks=\(.tasksCompleted)/\(.tasksTotal) next=\(.nextCommand)"'
+```
+
+## CI initialization
+
+```bash
+comet init --yes --scope project --language zh --json
+```
+
+`--yes` chooses safe defaults, and `--json` suppresses interactive output.
+
+A typical GitHub Actions sequence is:
+
+```yaml
+- name: Install Comet
+  run: npm install -g @rpamis/comet
+
+- name: Init project
+  run: comet init --yes --scope project --language zh --json
+
+- name: Verify install health
+  run: |
+    comet doctor --json > doctor-report.json
+    if jq -e '.results[] | select(.status == "fail")' doctor-report.json > /dev/null; then
+      cat doctor-report.json
+      exit 1
+    fi
+
+- name: Report change status
+  run: comet status --json || true
+```
+
+## What not to run in CI
+
+| Operation | Why not |
+| --- | --- |
+| `/comet`, `/comet-open`, and other Skills | Require an agent platform. |
+| `comet eval ... --html` | Runs real model tasks and consumes time/tokens. |
+| `comet publish approve` | Requires human review. |
+
+## FAQ
+
+<Accordion title="status returns an empty array">
+There are no active changes, or the change lacks `.comet.yaml` and was skipped. Use `/comet` in an agent platform to bring it under Comet state.
+</Accordion>
+
+<Accordion title="Should warn block CI?">
+Usually no. `warn` often means optional tooling is absent. `fail` is the blocking status.
+</Accordion>
+
+<Accordion title="Is JSON output stable?">
+Yes. The JSON shape for status and doctor is part of the CLI contract.
+</Accordion>
+
+## Next steps
+
+- [comet status](/en/cli/status)
+- [comet doctor](/en/cli/doctor)
+- [Existing project setup](/en/guides/existing-project)
