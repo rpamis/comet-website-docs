@@ -1,0 +1,125 @@
+---
+title: "Comet 与业界实践对照"
+description: "Comet 的运行时、工作流、评估、Skill 创作与分发分别对应业界的哪些实践。本文不展开这些文章的细节，而是按维度列出 Comet 的每项做法及其对应的业界参考，作为延伸阅读的索引。"
+---
+
+Comet 的设计并非凭空产生。在评估方法论、Skill 创作与分发、运行时与工作流这几个方面，业界已有相关实践和讨论。**Comet 开始设计时部分文章尚未发布；接近完成时，我们发现 Comet 的许多做法与这些实践方向一致**，部分做法则是 Comet 针对工作流 Skill 场景所做的延伸。
+
+这篇文章按维度列出 Comet 的每项做法，标注它和哪篇业界文章对应，并在文末给出参考文献。文章不展开这些参考文章的内部细节——如果你希望了解 Comet 评估的具体机制，看[评估：Skill 演进的罗盘](/zh/eval/why-eval)和[Comet 怎么用评估驱动 Skill 演进](/zh/eval/eval-driven-evolution)；本文的作用是提供一份"Comet 做法对应哪些业界参考"的索引。
+
+## 一、评估方法论
+
+Comet eval 评估的对象是"绑定到 Agent 上的 Skill 是否有效"，而非模型本身的能力。这个定位决定了它在评测对象、对照方式、指标设计和交互形态上的做法。
+
+### 评测对象：Skill 的增量价值，而非模型能力
+
+Comet 用 **treatment 体系（`CONTROL` 无 Skill 基线 vs `COMET_FULL` 注入完整 Skill 栈）做有/无对照，在同一任务、同一隔离环境下测量 Skill 的边际效果**。这个思路——把 Skill 作为一等评测对象、用配对实验测量"加 Skill 是否改善"——**与 SkillsBench 的定位一致**<sup>[1]</sup>。Comet 的评估实验在设计上参考了 LangChain 的实践文章<sup>[2]</sup>，后者同样强调，评估 skill 实际上是在评估"agent + skill 这个系统能否有效使用 skill 信息"。
+
+### 多轮交互：双 Agent 自动模拟用户
+
+工作流 Skill 在决策点会暂停等待用户，评测需要能自动跑完整个交互过程。Comet 用 **双 Agent 自动交互（被测 Agent 跑 Skill，用户模拟 Agent 在决策点回复）** 解决这个问题。**用 Agent 模拟用户、使评测无人值守地跑完整条工作流的做法，在阿里的 Harness 工程方案中有相同理念**<sup>[3]</sup>。
+
+### 指标设计：rubric 多维评分 + 能力/可靠性分离
+
+Comet 的 **rubric 把质量拆成多个维度，每个维度由二元检查项组成，加权汇总**。这种"用客观可校验的二元信号替代主观打分"的做法，**与 SWE-bench、SWE-bench Pro、τ-bench、HumanEval 等评测的方法论一致**<sup>[5][6][7]</sup>。Comet 文档中 rubric 评分方法论部分明确对齐了 Galileo、Hebbia、τ-bench 等实践。
+
+Comet 同时使用 pass@k（能力上限）和 pass^k（可靠性下限）区分"能做到"和"每次都能做到"。pass@k 采用 HumanEval 的无偏估计器<sup>[7]</sup>。值得注意的是，SkillsBench 出于确定性考虑，未使用 pass@k，而是采用固定 3 次重复的均值通过率——这是 Comet 与它在指标选择上的一个差异点。
+
+### Harness 工程化：环境隔离与可观测
+
+Comet 用 **Docker 隔离每个任务、pytest 驱动、自动生成报告**。**把评测本身当作需要工程化的系统（环境隔离、任务调度、结果采集、报告生成）的做法，在腾讯的大规模 Agent 评测实践**<sup>[4]</sup>**和阿里的 Harness 工程方案**<sup>[3]</sup>**中都有体现**。Comet 的 LangSmith 集成复用同一套本地任务套件，把评估接入企业级可观测平台，**这一可观测平台集成的思路同样参考自 LangChain 的实践**<sup>[2]</sup>。
+
+### Skill 触发保障：调用证据作为硬门禁
+
+如果模型未调用 Skill，评测的实际上是裸模型。LangChain 的实践文章直接指出这个问题——即使加入提示词，调用率也仅约 70%<sup>[2]</sup>。Comet 的做法是 **通过 CLAUDE.md 契约、PreToolUse hook 和 stream-json 调用证据解析，把 Skill 调用作为硬门禁**。这是 Comet 针对该问题提出的工程方案，参考文章指出了问题的存在。
+
+### 对照小结
+
+| Comet 做法 | 对应的业界参考 |
+| --- | --- |
+| Skill 增量价值作为评测对象 | SkillsBench<sup>[1]</sup>、LangChain<sup>[2]</sup> |
+| 双 Agent 模拟用户、多轮交互 | 阿里 Harness 方案<sup>[3]</sup> |
+| rubric 二元检查项 + 加权汇总 | SWE-bench<sup>[5]</sup>、SWE-bench Pro<sup>[6]</sup>、τ-bench、HumanEval<sup>[7]</sup> |
+| pass@k 能力上限估计 | HumanEval 无偏估计器<sup>[7]</sup> |
+| Docker 隔离 + Harness 工程化 | 腾讯<sup>[4]</sup>、阿里<sup>[3]</sup> |
+| LangSmith 可观测平台集成 | LangChain<sup>[2]</sup> |
+| Skill 调用率问题与应对 | LangChain（问题指出）<sup>[2]</sup> |
+| eval 检测 + hook 拦截（门禁外置） | 阿里云开发者社区<sup>[8]</sup>、阿里技术<sup>[9]</sup> |
+
+## 二、运行时与工作流
+
+### 跨平台 Node 运行时
+
+0.4.0 把 7 个 Bash 脚本重写为 Node `.mjs` 启动器，背后由共享 TypeScript 运行时支撑，使 Windows 用户不再需要 Git Bash/WSL。跨平台运行时是 agent 框架的常见工程议题，本文未逐一列出该维度的参考文章，Comet 的具体做法可参考 [0.3.9 到 0.4.0 的运行时重构](/zh/tech-blog/comet-0.3.9-to-0.4.0)。
+
+### 可恢复工作流与状态分层
+
+Comet 把每个变更的状态拆成三层：用户可读的 `.comet.yaml`、机器管理的 `run-state.json`、追加式审计日志 `state-events.jsonl`。中断后能从检查点精确恢复，而非让 Agent 重新猜测上下文。可恢复性是 Comet 工作流的核心设计，详见[状态管理](/zh/concepts/state-management)。状态持久化与恢复是工作流引擎的通用议题，本文未逐一列出该维度的参考文章。
+
+### 意图识别与槽位提取
+
+Comet 把"用户想做什么"结构化为意图帧（`CometIntentFrame`），其中包含意图分类（intent，带置信度）、实体抽取（entities）、槽位填充（slots，如 `requested_action`、`workflow_candidate`、`scope`、`public_api_change` 等风险信号），再由运行时按固定优先级重新评分决定路由。这是自然语言理解（NLU）和任务型对话系统的**业界主流技术**——意图识别（intent classification）和槽位填充（slot filling）是工业级对话系统（智能客服、语音助手、任务机器人）的标准方法。Comet 把这套成熟技术应用到 AI 编码工作流的路由上，将路由从"自然语言规则猜测"升级为"结构化证据 + 固定优先级评分"。详见[意图识别与路由](/zh/concepts/intent-routing)。
+
+### 门禁外置：eval 检测 + hook 拦截
+
+Comet 的阶段守护由两层机制撑起：`comet-guard` 和 `comet-state transition` 共享同一份 TypeScript 转移语义表，任一阶段条件不满足则流程不前进（**确定性校验，而非建议**）；PreToolUse hook（`comet-hook-guard.mjs`）在工具调用执行前拦截，守护阶段边界和危险操作（**运行时硬约束，而非事后审计**）。这个 **"eval 检测 + hook 拦截"的稳定性支点，与阿里云开发者社区的 harness 分层实践一致**<sup>[8]</sup>——该文明确指出"让 harness 真正稳定的不是规则本身，而是验证机制"，并用 G1–G8 门禁墙（确定性校验、阻断而非建议）+ hook 拦截（实时围栏）描述了同一思路。
+
+这一"门禁外置"的判断有研究支撑：验证反馈质量（Effective Feedback Compute）对 agent 成功率方差的解释力达 R²=0.94–0.99，远高于原始 token 消耗和工具调用（R²=0.33–0.42）<sup>[8]</sup>——即决定可靠性的不是预算多少，而是检查多严。**这与 Comet 把 eval 证据作为发布门禁、用 hook 做运行时硬约束的设计动机一致**。**阿里技术的 Harness Engineering 实践进一步把这套体系概括为约束机制、反馈闭环与结构化 Rubric 评估的完整闭环**<sup>[9]</sup>，**与 Comet 的"造 → 评 → 发布"闭环对应**。
+
+## 三、Skill 创作与分发
+
+### 组合任意 Skill 成可分发 Bundle
+
+`/comet-any` 把任意 Skill 组合成稳定的 Skill Bundle，带 workflow protocol、resolved skill evidence、Engine 四件套和 required 控制面。`/comet-any` 的完整链路是"创建 → 评估 → review → publish → distribute"，分发前强制 preview。这是 Comet 针对"让用户造出可复用、可评审、可分发的 Skill 包"这一需求的方案，详见[Skill Creator 完整流程](/zh/skill-creator/workflow)。
+
+业界的 skill 生态（如 Anthropic 的 Agent Skills 和通用 `skills add` CLI）提供了 skill 的定义格式和安装机制。Comet 在此基础上增加了组合、确定性 Bundle、发布证据链和分发 preview。该维度的业界参考以各 skill 生态的官方文档为主，本文未逐一列出。
+
+### 发布门禁：eval 证据绑定 draft hash
+
+Comet 把 **eval 证据作为 publish 的强制门禁**——没有当前 draft hash 的 eval 证据、eval 失败、或证据对应旧 hash，都不能 publish。**把评估结果接入发布流程、用证据约束发布决策的做法，源自 LangChain"用评估迭代 skill"的思路**<sup>[2]</sup>。Comet 的延伸在于把这种约束实现为绑定 hash 的硬门禁，而非软性建议。
+
+## 四、Comet 的延伸与尚未解决的问题
+
+对照的目的不是证明 Comet 全面对齐业界——本文未对所有维度逐一列出参考文章，有些问题 Comet 也未完全解决。
+
+**Comet 的延伸**（业界有相关讨论，Comet 做了进一步工程化）：
+
+- 双 Agent 交互 + 调用证据硬门禁，确保 Skill 被真实调用；
+- 状态三层分层，把可恢复性从概念落到具体文件契约；
+- 意图识别与槽位提取，把 NLU 主流技术应用到 AI 编码工作流路由；
+- 发布门禁绑定 draft hash，使 eval 证据成为硬约束。
+
+**尚未解决的问题**（SkillsBench 等也承认，领域仍处早期）：
+
+- 绑定 Skill 的评测至今没有金标准<sup>[1]</sup>；
+- Skill 注入增加上下文长度，增益的归因仍不纯净<sup>[1]</sup>；
+- 用户模拟的真实性、LLM-as-judge 的可靠性、长周期工作流的评测覆盖，都是开放问题<sup>[1]</sup>。
+
+这些问题的参考文章已在文末列出，建议作为延伸阅读。
+
+## 参考文献
+
+1. Li, X., et al. *SkillsBench: Benchmarking How Well Agent Skills Work Across Diverse Tasks*. arXiv preprint arXiv:2602.12670, 2026. \[[论文链接](https://arxiv.org/abs/2602.12670)\]
+
+2. Xu, R. *Evaluating Skills*. LangChain Blog, 2026-03-05. \[[原文链接](https://www.langchain.com/blog/evaluating-skills)\]
+
+3. 阿里技术. *基于顶级 Agent（Claude Code）的 Harness 工程搭建式业务 Agent 评测方案*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/n9zkbKTi3Q1j-L2vgmO1Vw)\]
+
+4. 腾讯技术工程. *AI Agent & Skill 测评方案及落地实践*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/PUbGqheJhFMmb6hGj1ZtOw)\]
+
+5. Jimenez, C. E., et al. *SWE-bench: Can Language Models Resolve Real-World GitHub Issues?* ICLR, 2024. \[[论文链接](https://arxiv.org/abs/2310.06770)\]
+
+6. Deng, X., et al. *SWE-Bench Pro: Can AI Agents Solve Long-Horizon Software Engineering Tasks?* arXiv preprint arXiv:2509.16941, 2025. \[[论文链接](https://arxiv.org/abs/2509.16941)\]
+
+7. Chen, M., et al. *Evaluating Large Language Models Trained on Code* (HumanEval). arXiv preprint arXiv:2107.03374, 2021. \[[论文链接](https://arxiv.org/abs/2107.03374)\]
+
+8. 阿里云开发者社区. *AI 不缺智商缺纪律：给 Claude Code 装上 harness，让长程任务稳定落地*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/2kWi0Fld09fNMVIUg9ddKQ)\]
+
+9. 阿里技术. *Harness Engineering：长程自动化 AI Coding / Skills 开发实践*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/mSjb20PDsfiK88C9AQB7og)\]
+
+## 延伸阅读
+
+- [从 0.3.9 到 0.4.0：Comet 怎么从工作流层长成 Skill 平台](/zh/tech-blog/comet-0.3.9-to-0.4.0) — Comet 自身的架构演进
+- [评估：Skill 演进的罗盘](/zh/eval/why-eval) — 评估方法论详解
+- [Comet 怎么用评估驱动 Skill 演进](/zh/eval/eval-driven-evolution) — 评估的开放难题与 Comet 的工程方案
+- [评分指标与双 Agent 评测](/zh/eval/scoring) — rubric 维度细则与 pass@k/pass^k 公式
