@@ -31,3 +31,7 @@
 
 {/* Define what should and shouldn't be documented */}
 {/* Example: Don't document internal admin features */}
+
+## 网站修改规范
+
+先修改中文，用户同意后才能修改英文

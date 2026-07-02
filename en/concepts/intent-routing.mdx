@@ -1,11 +1,13 @@
 ---
 title: "Intent recognition and routing"
-description: "Learn how /comet turns your natural-language request into an explainable full / hotfix / tweak / resume route with structured routing context."
+description: "Intent recognition and slot extraction are the core of /comet routing: learn how Comet identifies your intent, extracts routing slots, and scores them with a fixed-priority order to produce an explainable route."
 ---
 
-Every time you type `/comet` plus a sentence, Comet has to answer one question: which workflow should this request use? Should it start the full five-phase workflow, run a fast bug fix, use the OpenSpec-backed tweak path, resume an existing change, or stop and ask you?
+Every time you type `/comet` plus a sentence, Comet has to answer one question: which workflow should this request use? That decision is driven by two things: **intent recognition** and **slot extraction**.
 
-Starting in 0.4.0, that decision no longer depends on a long list of natural-language heuristics in the Skill text. Comet organizes your utterance, repository state, and risk signals into a structured **routing context** (implemented as `CometIntentFrame`), then lets the runtime rescore it and produce an explainable route.
+**Intent recognition** answers "what do you want to do": start a new change, fix an existing bug, make a light adjustment, resume an in-progress change, or just ask a question? **Slot extraction** breaks your utterance and repository state into structured routing signals — action, workflow candidate, risk flags — each labeled with its source, ready for the runtime to score with a fixed priority order.
+
+Starting in 0.4.0, this mechanism (implemented as `CometIntentFrame`) replaces the natural-language heuristics in Skill text and makes routing **explainable, reviewable, and recoverable**.
 
 <p align="center">
   <img src="/assets/intent-routing-illustrations/01-routing-context-triage.png" alt="Xiaoyu checks the utterance, repository state, and risk signals on a routing-context triage board before selecting the final route" width="800" />
@@ -42,7 +44,9 @@ Routing context turns “what the user wants” into structured data with fields
 
 Comet asks when it cannot prove a path is safe. It does not force an uncertain request into `full`, `hotfix`, or `tweak`.
 
-## What the context contains
+## Intent recognition and slot extraction
+
+The two core inputs to the routing decision are `intent` (intent recognition) and `slots` (slot extraction), together with supporting fields in `CometIntentFrame` — the structure the runtime scores to produce a final route:
 
 ```mermaid
 flowchart LR
@@ -69,7 +73,11 @@ flowchart LR
 | `evidence` | Source-labeled snippets that support key judgments. |
 | `proposed_route` | The agent's candidate route. The runtime still reviews it. |
 
-### Risk slots
+### Intent recognition (`intent`)
+
+`intent` has two sub-fields: **`name`** (intent type: `start_new_change` / `fix_bug` / `make_tweak` / `resume_change` / `ask_question` / `unknown`) and **`confidence`** (a 0–1 score). When confidence falls below 0.7, the runtime routes directly to `ask_user` — it will not gamble on an ambiguous intent.
+
+### Slot extraction (`slots`)
 
 | Slot | Routing tendency |
 | --- | --- |
@@ -84,6 +92,10 @@ flowchart LR
 </Warning>
 
 ## Runtime scoring order
+
+<Note>
+  **This fixed-priority order is the core of explainable routing.** Each step has a clear condition, and disagreements are written to diagnostics for later review.
+</Note>
 
 1. Low confidence -> `ask_user`.
 2. Multiple active changes with no target -> `ask_user`.
