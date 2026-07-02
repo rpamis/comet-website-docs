@@ -1,40 +1,164 @@
 ---
-title: "Eval reports"
-description: "Read comet eval HTML reports, summary metrics, report.json, and failure attribution to decide what to fix next."
+title: "Reading eval reports (advanced)"
+description: "Learn about the report locations, experiment id, key fields, failure attribution, rubric scoring, and next-step decisions produced by comet eval --html."
 ---
 
-Eval reports turn raw runs into release evidence.
+<Info>
+  This is advanced content. Come here to check failure attribution when a report fails. For day-to-day evaluation, the "You only need to focus on three things when reading reports" section in [Quickstart](/en/eval/quickstart) is enough.
+</Info>
+
+`comet eval ... --html` generates a browsable report. You don't need to read the underlying logs line by line — look at results, attribution, and artifacts first, then decide the next step.
+
+## Report location
+
+`--html` asks the report to produce both markdown and HTML. The CLI output includes `Experiment` and `Report path`, commonly at:
+
+```text
+eval/local/logs/experiments/<experiment-id>/summary.html
+```
+
+The actual format of `<experiment-id>` is `<experiment_name>_<YYYYMMDD_HHMMSS>`, for example `authoring_skill_smoke_20260625_143000`. The experiment name comes from the task name of the first parameterized test (`-` converted to `_`, defaulting to `experiment` when there are no tests).
+
+If the CLI output shows a placeholder, use the `Experiment` value from the same output to look it up. You can also find the corresponding experiment by browsing this directory:
+
+```text
+eval/local/logs/experiments/
+```
+
+## Report directory structure
+
+<Tree>
+  <Tree.Folder name="eval/local/logs/experiments/<experiment-id>/" defaultOpen>
+    <Tree.File name="summary.md" />
+    <Tree.File name="summary.html" />
+    <Tree.File name="metadata.json" />
+    <Tree.Folder name="events/" />
+    <Tree.Folder name="raw/" />
+    <Tree.Folder name="reports/" />
+    <Tree.Folder name="artifacts/" />
+  </Tree.Folder>
+</Tree>
+
+- `reports/<treatment>_rep<n>_report.json`: the complete result of each run, including `passed`, `checks_passed[]`, `checks_failed[]`, `events_summary` (tokens/cost/skills_invoked/failure_attribution).
+- `metadata.json`: `experiment_id`, `started_at`, `completed_at`, `total_runs`, `total_passed`, `treatments[]`, `report_outputs`.
+
+## What to read first
+
+Once you open the report, prioritize these kinds of information rather than reading the underlying logs line by line:
+
+- **Whether the evaluation passed** (top of summary / CLI output)
+- **Failure attribution** — harness, workflow, task, or model
+- Whether the failed cases are related to the Skill's goal
+- Whether any expected artifact is missing (hard check)
+- Whether it's a path, manifest, or environment problem
+- Whether token / cost / duration are abnormal
 
 <p align="center">
   <img src="/assets/eval-reports-illustrations/01-summary-report-attribution.png" alt="Xiaoyu follows summary, report.json, and failure attribution clues to decide the next action" width="800" />
 </p>
 
-## Main files
+<p align="center">Read the summary first, then inspect individual reports, and finally use failure attribution to decide the next step</p>
 
-| File | Purpose |
+## Failure attribution
+
+The output of `comet eval ... --html` reports failure attribution: the report buckets failures into harness, workflow, task, and model. The attribution logic decides in order:
+
+| Attribution | Trigger condition | Meaning |
+| --- | --- | --- |
+| `harness` | required skill was never invoked; or generic profile with no skill run | Environment/dependency/path problem — the Skill never actually ran |
+| `task` | check involves artifact path / validator / task directory | Task definition or fixture problem |
+| `workflow` | check involves `.comet.yaml`/guard/state/transition/archive; or skill invocation contract failed | The Skill flow didn't meet expectations |
+| `model` | default fallback (task failed after observable workflow execution) | Unstable model behavior |
+
+## Rubric scoring (informational)
+
+The report contains `[RUBRIC] <dim>: <score> - <reason>` lines and an aggregated `RubricAvg` column. This is an **informational** score — it doesn't directly determine pass/fail. The dimensions differ by profile:
+
+| Profile | Main dimensions |
 | --- | --- |
-| `summary.html` | Human-readable report. |
-| `report.json` | Machine-readable metrics and run details. |
-| Run logs | Per-attempt trace and artifacts. |
+| `generic` | completion、skill_invocation、artifact_presence、instruction_following、interaction_compliance、efficiency、safety_boundary |
+| `comet-workflow` | main_flow、gate_guard、skill_invocation、spec_drift、completion、efficiency、decision_point_compliance、artifact_quality、recovery_resilience |
+| `authoring-skill` | completion、generated_package、resolved_skill_evidence、engine_contract、workflow_route_conformance、authoring_lanes、review_gate、review_readiness、skill_invocation、artifact_presence、safety_boundary |
 
-## What to read first
+### Rubric columns in summary.md
 
-1. Overall pass rates.
-2. `pass@k` vs `pass^k` gap.
-3. Rubric dimension scores.
-4. Failure attribution.
-5. Per-run traces for representative failures.
+The Results table has one row per treatment, with columns in this order: `Checks` → individual rubric dimension columns → `RubricAvg` → `Turns/Duration/Tools/Tokens/Cost`.
 
-## How to act on failures
+- **Dimension columns**: for a single run, shows that dimension's score (0.00–1.00); for multiple runs (reps), shows the mean.
+- **RubricAvg**: the **simple average** of all dimension scores for that run (including the `weighted_score` row) — a summary for quick horizontal comparison, computed differently from the `weighted_score` that each rubric produces using its own weights.
+- **weighted_score**: the weighted total score output by the rubric itself (`Σ(dimension score × weight)/Σ(weights)`), appearing as a column.
 
-| Attribution | First action |
+### Aggregation when reps > 1
+
+When you use `--count N` to run multiple repetitions, the summary adds an **"Aggregated by Treatment"** table: `Reps Passed` (number of passing repetitions), `Checks`, `Avg Turns/Duration`, `Tokens`, `Cost`, `Skills`, `Scripts`. Each repetition's pass/fail (zero `checks_failed` means pass) is aggregated and used to compute pass@k.
+
+<Note>
+  Rubric is a <strong>diagnostic tool</strong>, not a <strong>pass condition</strong>. Actual pass/fail is determined by validators (expected artifacts, test_scripts) and whether the "required skill was invoked." A low rubric score with all checks passing still counts as a pass.
+</Note>
+
+## pass@k / pass^k (comparison reports)
+
+pass@k / pass^k is not in `summary.md` but in the **comparison report** (`comparison_report.md`, produced by `compare_baselines.py`) under the `## pass@k / pass^k — capability vs reliability` section:
+
+- **pass@k**: probability of at least one success out of k runs (capability ceiling)
+- **pass^k**: probability of all k runs succeeding (reliability floor)
+- **gap (pass@k − pass^k)**: instability — can do it, but can't guarantee doing it right every time
+
+Multiple repetitions (`--count`) are required for this to be meaningful; a single run can only compute k=1. For the full formulas, meanings, and how to read the comparison table, see [Scoring metrics and dual-Agent evaluation](/en/eval/scoring).
+
+## How to decide the next step
+
+| Report signal | Meaning | Next step |
+| --- | --- | --- |
+| Manifest read failed | Path or file doesn't exist | Fix `comet/eval.yaml` or the path |
+| `harness` attribution | Environment, dependencies, Docker, network | Check Docker, `ANTHROPIC_API_KEY`, `claude` CLI |
+| `workflow` attribution | Skill execution flow didn't meet expectations | Go back to `/comet-any` to refine the Skill |
+| `task` attribution | Task definition, validation condition, or fixture problem | Check the eval task definition and fixture |
+| `model` attribution | Unstable model behavior or tool usage | Re-run or reduce reliance on non-deterministic behavior |
+| Missing expected artifact | Task didn't produce the expected file | Check the task definition or Skill output logic |
+
+## How to tell which stage failed
+
+### collect failed
+
+Check first:
+
+- Whether the manifest path is correct
+- Whether `comet/eval.yaml` exists
+- Whether the recommended tasks in the manifest exist
+- Whether you're in the Comet repository root or passed the correct `--project`
+
+### run failed
+
+First look at the failure attribution in the report and locate it by the buckets above. Then inspect `events_summary` in `reports/<treatment>_rep<n>_report.json`:
+
+- `skills_invoked` is empty → harness attribution, the Skill didn't run
+- `files_created` is missing the expected artifact → the Skill didn't produce the expected file
+- `total_tokens` is abnormally low → the Skill may have terminated early
+
+### "Instant pass" in evaluation
+
+Almost certainly the environment wasn't ready and the suite was skipped. Check Docker, API key, `claude` CLI.
+
+### HTML report not found
+
+First check the `Experiment` and `Report path` in the CLI output. If the path contains a placeholder, use the actual experiment id to look it up in the `eval/local/logs/experiments/` directory.
+
+## How reports enter the release process
+
+**Do not** manually edit Bundle state, and **do not** manually write report paths into internal JSON. Let `/comet-any` or the Bundle backend record eval results, and let `comet creator status` read readiness.
+
+Rules for eval evidence entering readiness:
+
+| Situation | Can publish? |
 | --- | --- |
-| `harness` | Fix eval setup or environment. |
-| `task` | Clarify task or validation. |
-| `workflow` | Fix Skill instructions or runtime contract. |
-| `model` | Re-run, tune prompt, or change model if justified. |
+| No eval evidence | No |
+| Eval failed | No |
+| Eval evidence corresponds to an old hash | No |
+| Eval passed and hash matches | Can proceed to review / publish decision |
 
 ## Next steps
 
-- [Scoring](/en/eval/scoring)
-- [Eval configuration](/en/eval/configuration)
+- [Runtime check](/en/eval/runtime) — Distinguishing `comet eval` and `comet skill check`
+- [comet eval command](/en/cli/eval) — Complete options and subcommand reference
+- [Publishing and distributing Skills](/en/skill-creator/publishing) — How eval evidence drives readiness

@@ -1,42 +1,120 @@
 ---
 title: "comet dashboard"
-description: "Start a local read-only browser dashboard for active and archived changes, phase progress, artifacts, tasks, and risks."
+description: "Start a local read-only browser dashboard to view active and archived changes, phase progress, artifacts, tasks, and risks."
 ---
+
+`comet dashboard` launches a **local read-only** browser dashboard that lets you visually inspect all OpenSpec changes in your project: active and archived changes, five-phase progress, artifact checklists, task summaries, verify status, next-step recommendations, and Git snapshots.
+
+It is **read-only** — it never modifies any files, so you can launch it safely at any time.
+
+<Info>
+  This page is the command reference for <code>comet dashboard</code>. To learn about the dashboard UI layout, artifact grouping, task donut charts, light/dark themes, and screenshots, see <a href="/en/dashboard/overview">Dashboard overview</a>.
+</Info>
 
 ## Quick start
 
+Run it from the root of a project that contains changes:
+
 ```bash
-comet dashboard .
+comet dashboard
 ```
 
-The command starts a local server and opens a browser view for the current repository.
+By default it starts at `http://localhost:4321` and automatically opens the browser. The terminal will show:
 
-## Options
+```text
+Comet Dashboard running at http://localhost:4321
+Press Ctrl+C to stop.
+```
 
-| Option | Purpose |
-| --- | --- |
-| `--host` | Bind to a specific host. |
-| `--port` | Choose a port. |
-| `--no-open` | Start the server without opening a browser. |
-| `--json` | Print machine-readable startup information. |
-
-### Script and CI usage
-
-Use `--json` and `--no-open` when automation needs the URL without launching a browser.
+## Command options
 
 ```bash
-comet dashboard . --no-open --json
+comet dashboard [path] [options]
+```
+
+| Option | Description |
+| --- | --- |
+| `[path]` | Project path (default `.`) |
+| `--port <port>` | HTTP port (default `4321`, auto-increments if occupied) |
+| `--no-open` | Do not open the browser automatically |
+| `--json` | Print a one-time snapshot and exit (does not start the server) |
+
+<Info>
+  When <code>--port</code> is occupied, it automatically searches upward for an available port (up to 50 retries). <code>--port 0</code> lets the system assign one. The port must be an integer from 0–65535, otherwise an error is raised.
+</Info>
+
+### Script / CI usage
+
+Print a one-time JSON snapshot without starting the server:
+
+```bash
+comet dashboard . --json
+```
+
+Specify a port and skip auto-open (useful for remote development):
+
+```bash
+comet dashboard . --port 4399 --no-open
 ```
 
 ## What the dashboard shows
 
-- active change;
-- current phase and mode;
-- workflow files;
-- project configuration;
-- proposal, spec, design, implementation, verification, and archive links;
-- risk codes for missing artifacts or ambiguous state.
+The dashboard reads `openspec/changes/` (active) and `openspec/changes/archive/` (archived) in a **read-only, best-effort** manner: a single broken change won't blank out the whole page (errors are isolated and skipped).
 
-## Safety
+### Project-level information
 
-The dashboard is read-only. Use the CLI or `/comet` for state-changing actions.
+- Project name, path, and generation time
+- Summary: number of active changes, archived count, verify failures, incomplete tasks, and dirty file count
+- Git snapshot: branch, HEAD, dirty file list, and recent commits
+
+### Per change
+
+- Name, status (active/archived), path, and update time
+- Workflow and **phases** (open/design/build/verify/archive) — shown as a lifecycle step bar
+- Task completion (completed/total, incomplete items, per-section) — shown as a donut chart
+- Artifacts **grouped by source** (OpenSpec / Superpowers / Comet), with presence status shown within each group (generated/not generated/not required)
+- Artifact presence (proposal, design, tasks, plan, verifyReport, cometYaml) + content preview (max 256 KiB, with file size and update time metadata)
+- Verify result (pending/pass/fail/unknown) and summary
+- **Next step** (active changes only): recommended slash commands and the reasoning
+- Risk items (info/warning/error levels + recovery suggestions)
+
+### Risk codes
+
+| Risk code | Meaning |
+| --- | --- |
+| `MISSING_COMET_YAML` | change is missing `.comet.yaml` |
+| `UNKNOWN_PHASE` | phase is not recognized |
+| `TASKS_MISSING` | tasks file is missing |
+| `TASKS_INCOMPLETE` | tasks are incomplete |
+| `VERIFY_FAILED` | verify failed |
+| `VERIFY_PENDING` | verify has not run yet |
+| `ARTIFACT_MISSING` | a critical artifact is missing |
+| `ARCHIVE_METADATA_MISSING` | archive metadata is missing |
+| `GIT_DIRTY` | (project-level) the working tree has uncommitted changes |
+
+## Auto-refresh and theme
+
+The front end auto-refreshes every **30 seconds**. There is also a manual refresh button, a search box, and tabs (active/archived/all). The artifact drawer includes a lightweight Markdown renderer.
+
+The top-right toolbar has a **light/dark theme toggle**: on first visit it follows the system preference (`prefers-color-scheme`); once you manually switch, the choice is persisted to `localStorage`. See [Dashboard overview · Theme toggle](/en/dashboard/overview#theme-toggle-light-dark).
+
+## Demo mode
+
+Append `?demo` to the URL to load demo data (without reading real changes), handy for previewing the UI:
+
+```text
+http://localhost:4321/?demo
+```
+
+## Security
+
+- The server binds only to `127.0.0.1` (localhost) and is not exposed externally.
+- Static file serving has path traversal protection.
+- Artifact previews have a size limit (256 KiB; larger ones are marked `truncated`).
+- The artifact drawer locks background scrolling when open (fixed positioning) to prevent layout shifts.
+
+## Next steps
+
+- [Dashboard overview](/en/dashboard/overview) — dashboard UI, artifact grouping, theme toggle, and screenshots
+- [comet status](/en/cli/status) — command-line view of active change status
+- [comet doctor](/en/cli/doctor) — installation and health diagnostics

@@ -1,22 +1,157 @@
 ---
-title: "Eval runtime and skill check boundary"
-description: "Understand the difference between comet eval quality evidence and comet skill check runtime-completeness checks."
+title: "Runtime Check (Advanced)"
+description: "Distinguish comet eval and comet skill check, understand the local completeness check of a specific Skill run, the checks.yaml format, and pending action recovery."
 ---
 
-`comet eval` and `comet skill check` are related but not interchangeable.
+<Info>
+  This is advanced content, mainly for advanced users who need to debug Skill runs (Engine Runs). If you only do `comet eval` (authoring-time evaluation), you can skip this page.
+</Info>
+
+Comet has two types of eval. Their names are similar but their purposes are different — **don't mix them**.
+
+## Comparison
+
+| Command | What it evaluates | Question it's suited for | Is it publish evidence? | Which file it reads |
+| --- | --- | --- | --- | --- |
+| `comet eval` | Skill bundle or `comet/eval.yaml` | Can this Skill pass a product-level evaluation | **Yes** | `comet/eval.yaml` |
+| `comet skill check` | A specific Skill run | Is this run missing artifacts or state | No | `comet/checks.yaml` |
 
 <p align="center">
-  <img src="/assets/eval-runtime-illustrations/01-comet-eval-skill-eval-boundary.png" alt="Xiaoyu separates comet eval publish evidence from comet skill check run-completeness inspection" width="800" />
+  <img src="/assets/eval-runtime-illustrations/01-comet-eval-skill-eval-boundary.png" alt="Little fish separating comet eval's publish evidence and comet skill check's run-completeness check onto two workbenches" width="800" />
 </p>
 
-| Command | Checks | Use for |
-| --- | --- | --- |
-| `comet eval` | Task success, rubric quality, reliability, attribution. | Release evidence. |
-| `comet skill check` | Whether a specific Engine Run satisfies runtime checks. | Run health and debugging. |
+<p align="center">comet eval produces publish evidence; comet skill check only checks whether a specific Skill run is complete</p>
 
-Use eval before publishing. Use skill check while debugging or resuming an Engine Run.
+## Why Two Types
+
+`comet eval` is aimed at "can this Skill, as a product capability, pass the evaluation". It executes real model tasks through a shared eval harness and produces pre-release evidence.
+
+`comet skill check` is aimed at "is this Skill run complete". It only checks whether the current run satisfies the runtime checks in `comet/checks.yaml`, **executing no model tasks** and **producing no publish evidence**.
+
+The two serve different stages: `comet skill check` checks completeness during a Skill run, while `comet eval` verifies product capability before release.
+
+## Runtime Check Format
+
+Runtime checks are defined in the Skill bundle's `comet/checks.yaml` (or `comet/evals.yaml` — choose one of the two; they cannot coexist). `/comet-any` artifacts default to `checks.yaml`.
+
+```yaml
+# comet/checks.yaml
+runtime:
+  - id: completed
+    scope: completion
+    type: state_equals
+    field: status
+    equals: completed
+```
+
+Fields of each runtime check:
+
+| Field | Description |
+| --- | --- |
+| `id` | Check identifier |
+| `scope` | `progress` (on demand) / `step` (after each outcome) / `completion` (when the Run completes) |
+| `type` | `artifact_exists` or `state_equals` |
+| `artifact` | The artifact key to check when `artifact_exists` |
+| `field` / `equals` | When `state_equals`, checks whether the Run state field equals the specified value |
+
+### Two Check Types
+
+| Type | How it judges |
+| --- | --- |
+| `artifact_exists` | The corresponding artifact exists in the artifacts store |
+| `state_equals` | A field of the Run state equals the specified value |
+
+### Three Scopes
+
+| scope | When it runs | Trigger |
+| --- | --- | --- |
+| `step` | Runs automatically after each submitted action outcome | Automatic |
+| `completion` | Runs automatically when the Run reaches completed | Automatic |
+| `progress` | Runs on demand | `comet skill check --scope progress` |
+
+## comet skill check Example
+
+Runtime checks are typically used together with `comet skill run` and `comet skill continue`:
+
+```bash
+# Start a Skill run
+comet skill run my-skill --run-id demo-run --project .
+
+# The Agent executes the pending action, then submits the result with resume
+comet skill continue --run-id demo-run --status succeeded --summary "Done"
+
+# Check the completeness of this Skill run
+comet skill check --run-id demo-run --scope completion --json
+```
+
+You can also bind an OpenSpec change directory:
+
+```bash
+comet skill run my-skill --change ./changes/demo
+comet skill continue --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
+comet skill check --change ./changes/demo --scope completion
+```
+
+A Run can bind a `--change` directory, or use `--run-id` to place it under `.comet/runs/<run-id>`. `run` supports deterministic Skills; adaptive execution requires Agent candidates.
+
+## When You Need Runtime Checks
+
+Skill runs (Engine Runs) typically appear in these scenarios:
+
+- The Skill has multi-step state.
+- It needs pending action and resume.
+- It needs to check whether an artifact exists.
+- It needs guardrails or recovery semantics.
+- The Skill is Engine-enabled (`/comet-any` enables Engine by default for multi-step or high-risk artifacts).
+
+Engine-enabled artifacts write `comet/checks.yaml` and `comet/eval.yaml`:
+
+- `comet/checks.yaml`: runtime checks, used by `comet skill check`.
+- `comet/eval.yaml`: eval manifest, used by `comet eval`.
+
+## Text-Mode Recovery Prompts
+
+In text mode, `comet skill` prints `Pending action` and `Next:` recovery prompts directly, so you don't have to guess the next step yourself after a paused Run or a failed check.
+
+For example, `run` output:
+
+```text
+Run: demo-run
+Status: paused
+Current step: collect-evidence
+Pending action: collect-evidence (tool, step collect-evidence)
+Runtime checks: 1
+Next: complete the pending action, then run comet skill continue
+```
+
+When a check fails it prompts:
+
+```text
+Next: record the missing artifact/state and rerun comet skill check
+```
+
+Each `PASS`/`FAIL` carries evidence, e.g. `PASS completed: state.status = completed` or `FAIL report-exists: artifact report(missing) not found`.
+
+## How to Choose
+
+- Your question is "can this Skill, as a product capability, pass the evaluation":
+
+  ```bash
+  comet eval ./generated-skill/comet/eval.yaml --html
+  ```
+
+- Your question is "is this Skill run missing artifacts or state":
+
+  ```bash
+  comet skill check --run-id <run-id> --scope completion
+  ```
+
+<Warning>
+  When preparing to publish a Skill, <strong>do not</strong> only run <code>comet skill check</code>. Publish readiness requires the general <code>comet eval</code> evidence. <code>comet skill check</code> only checks the completeness of a specific Skill run; it is not a general Skill evaluation.
+</Warning>
 
 ## Next steps
 
-- [Eval overview](/en/eval/overview)
-- [comet skill](/en/cli/skill)
+- [comet skill command](/en/cli/skill) — complete Skill bundle and Run tool reference
+- [comet eval command](/en/cli/eval) — complete evaluation options
+- [Skill and Engine (Advanced)](/en/skill-creator/engine) — understand Skill Run (Engine Run) semantics, pending action, immutable snapshots

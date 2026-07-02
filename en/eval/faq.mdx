@@ -1,19 +1,110 @@
 ---
-title: "Eval FAQ"
-description: "Common questions about comet eval, collect mode, pass metrics, task setup, and publish evidence."
+title: "Evaluating Any Skill FAQ"
+description: "Answers to common questions about the two comet eval entry points, the collect/run distinction, environment preparation, failure attribution, reports, and publish evidence."
 ---
 
+Common questions about the `comet eval` evaluation system, environment preparation, report interpretation, and publish evidence.
+
+## Basic Concepts
+
 <AccordionGroup>
-  <Accordion title="Should I run --collect first?">
-    Yes. It catches discovery and configuration issues without spending model tokens.
+  <Accordion title="What exactly does comet eval evaluate">
+    `comet eval` executes real model tasks through a shared eval harness to verify whether a Skill, as a product capability, can pass evaluation, producing pre-release evidence. It wraps pytest, the task registry, profiles, and report generation — you don't need to assemble parameters by hand. See [Evaluation System Overview](/en/eval/overview).
   </Accordion>
-  <Accordion title="What is the difference between pass@k and pass^k?">
-    pass@k means at least one attempt passed. pass^k means every attempt passed.
+
+  <Accordion title="What is the difference between comet eval and comet skill check">
+    `comet eval` evaluates a Skill's product capability and produces pre-release evidence (reads `comet/eval.yaml`). `comet skill check` checks whether a specific Skill run is missing artifacts or state, does not execute model tasks, and does not produce publish evidence (reads `comet/checks.yaml`). Publish readiness only requires `comet eval`. See [Runtime check](/en/eval/runtime).
   </Accordion>
-  <Accordion title="Can eval failures come from the harness?">
-    Yes. Check failure attribution before changing the Skill.
+
+  <Accordion title="Do I need to know pytest or Docker">
+    No. `comet eval` wraps the underlying details — you only need to know whether to use `--manifest` or `--skill-path`. The underlying details are handled by the harness. See [Eval harness](/en/eval/harness).
   </Accordion>
-  <Accordion title="Do generated Skills need a custom task?">
-    Usually no. `/comet-any` generated packages include `comet/eval.yaml`.
+
+  <Accordion title="What do you mean by two evaluation systems">
+    Authoring-time evaluation (`comet eval`, reads `comet/eval.yaml`) and runtime checks (`comet skill check`, reads `comet/checks.yaml`). The former is publish evidence; the latter is run-completeness checking. See [Evaluation System Overview · Two Evaluation Systems](/en/eval/overview#two-evaluation-systems-do-not-confuse-them).
+  </Accordion>
+</AccordionGroup>
+
+## Environment Preparation
+
+<AccordionGroup>
+  <Accordion title="What environment do I need to run eval">
+    You need `uv`, Python 3.11+, Docker, and `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`). The core Comet runtime does not need these — only `comet eval` does. For full preparation steps, see [Evaluation Quickstart · What You Need to Prepare Before Running](/en/eval/quickstart#what-you-need-to-prepare-before-running).
+  </Accordion>
+
+  <Accordion title="The eval &quot;passes&quot; instantly but it doesn't feel like it really ran">
+    Almost certainly the environment is not ready: Docker isn't running, there's no API key, or the `claude` CLI isn't on PATH. In these cases the harness will **skip** rather than fail. Confirm the environment is ready first.
+  </Accordion>
+
+  <Accordion title="How do I install uv">
+    macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. Windows PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`. `uv` will automatically manage Python versions and `eval/.venv`.
+  </Accordion>
+
+  <Accordion title="How do I configure the API key">
+    `export ANTHROPIC_API_KEY=sk-ant-...`, or configure it in `eval/.env` (the harness loads it automatically). Use `ANTHROPIC_AUTH_TOKEN` for proxy-type credentials (BigModel / OpenRouter).
+  </Accordion>
+</AccordionGroup>
+
+## Two Entry Points
+
+<AccordionGroup>
+  <Accordion title="Should I use --manifest or --skill-path">
+    If you have `comet/eval.yaml` (usually a `/comet-any` artifact), use `--manifest` — this is the complete pre-release evaluation. If you only have a local Skill directory and are still in early debugging, use `--skill-path --quick`. To enter publish readiness you must use `--manifest`. The two are mutually exclusive.
+  </Accordion>
+
+  <Accordion title="What is --quick and what is the default task">
+    `--quick` is used with `--skill-path`; it selects the `generic-skill-smoke` task by default, suitable for low-cost early smoke testing. It is not equivalent to complete pre-release evidence — you still need the manifest path when preparing to publish.
+  </Accordion>
+
+  <Accordion title="Why collect first, then run">
+    `collect` only does discovery pre-checks (validates manifest, tasks, paths), consumes no model calls, has the lowest cost, and is suitable for troubleshooting right after generating a Skill. `run` executes the real evaluation. Collecting first can quickly surface configuration problems and avoid wasting model calls. See [Quickstart](/en/eval/quickstart).
+  </Accordion>
+
+  <Accordion title="What is the difference between authoring-skill and generic profile">
+    `authoring-skill` (11-dimension rubric, `maxTurns=8` outer round-trips under `auto_user`) is for `/comet-any` generated Skills and checks generated package completeness, resolved-skills evidence, Engine contract, workflow route conformance, authoring lanes, review gate, etc. `generic` (7-dimension rubric, single-turn by default) is for generic Skill smoke testing. See [Evaluation System Overview · Profile System](/en/eval/overview#profile-system).
+  </Accordion>
+</AccordionGroup>
+
+## Reports and Failures
+
+<AccordionGroup>
+  <Accordion title="Where to find the report">
+    The CLI output prints `Report path`, usually `eval/local/logs/experiments/<experiment-id>/summary.html`. The experiment id format is `<task>_<YYYYMMDD_HHMMSS>`. See [Reading Evaluation Reports](/en/eval/reports).
+  </Accordion>
+
+  <Accordion title="The evaluation failed, how do I tell where the problem is">
+    Look at the failure attribution in the report. `harness` indicates an environment/dependency/path problem, `workflow` indicates the Skill flow didn't meet expectations, `task` indicates a task definition/fixture problem, and `model` indicates unstable model behavior. The attribution determines what you should fix. See [Reading Evaluation Reports](/en/eval/reports).
+  </Accordion>
+
+  <Accordion title="collect errors saying it can't find the manifest">
+    Check whether the path is correct and confirm the `comet/eval.yaml` file exists. If you're not in the Comet repo root directory, add `--project <dir>` to point to the correct root.
+  </Accordion>
+
+  <Accordion title="Should I rerun after a model attribution failure">
+    `model` attribution means the model behavior or tool usage was unstable — rerunning usually helps. If it fails repeatedly, consider reducing the Skill's reliance on non-deterministic behavior.
+  </Accordion>
+
+  <Accordion title="The Rubric score is very low but all checks passed, does it count as a pass">
+    It counts as a pass. The rubric is an **informational** score (`[RUBRIC]` lines and `RubricAvg`) and does not directly determine pass or fail. The real pass/fail is determined by the validators and required Skill invocations. A low rubric score is a diagnostic signal you can use to improve the Skill, but it doesn't affect the publish gate.
+  </Accordion>
+</AccordionGroup>
+
+## Publish Evidence
+
+<AccordionGroup>
+  <Accordion title="Does passing eval mean I can publish">
+    Passing eval is only one of the conditions. `/comet-any` or the backend will incorporate eval evidence into readiness: no evidence, failures, or matching an old hash all prevent publishing. Only passing with a matching hash lets you proceed to review/publish. See [Evaluation System Overview](/en/eval/overview).
+  </Accordion>
+
+  <Accordion title="What does it mean that eval evidence matches an old hash">
+    It means the Skill was modified after the last evaluation (the draft hash changed), so the old evaluation result is no longer valid. You need to rerun `comet eval ... --html` to generate evidence bound to the current hash.
+  </Accordion>
+
+  <Accordion title="Can I manually write the report path into the publish status">
+    No. `/comet-any` records structured evidence through the Bundle backend. Manually editing Bundle state or internal JSON will break the hash binding and readiness validation.
+  </Accordion>
+
+  <Accordion title="Can quick smoke be used as publish evidence">
+    No. `--skill-path --quick` is only early smoke testing with limited coverage. Before publishing you must generate `comet/eval.yaml` via `/comet-any`, then run the full evaluation with `--manifest`.
   </Accordion>
 </AccordionGroup>
