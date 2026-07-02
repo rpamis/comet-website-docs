@@ -1,0 +1,125 @@
+---
+title: "Comet vs Industry Practices"
+description: "How Comet's runtime, workflow, evaluation, Skill authoring, and distribution correspond to industry practices. This article does not expand on the details of these articles but lists Comet's practices by dimension along with their corresponding industry references, serving as an index for further reading."
+---
+
+Comet's design did not come from nowhere. In areas such as evaluation methodology, Skill authoring and distribution, runtime, and workflow, the industry already had related practices and discussions. **When Comet began being designed, some of these articles had not yet been published; near completion, we found that many of Comet's practices align with the directions of these practices**, while some practices are extensions Comet made for the workflow Skill scenario.
+
+This article lists each of Comet's practices by dimension, noting which industry article it corresponds to, and provides references at the end. The article does not expand on the internal details of these reference articles—if you want to understand the specific mechanisms of Comet evaluation, see [Evaluation: The Compass for Skill Evolution](/en/eval/why-eval) and [How Comet Uses Evaluation to Drive Skill Evolution](/en/eval/eval-driven-evolution); this article's role is to provide an index of "which industry references correspond to Comet's practices."
+
+## 1. Evaluation Methodology
+
+What Comet eval evaluates is "whether a Skill bound to an Agent is effective," not the capability of the model itself. This positioning determines its approach to evaluation targets, comparison methods, metric design, and interaction models.
+
+### Evaluation Target: The Incremental Value of a Skill, Not Model Capability
+
+Comet uses **the treatment system (`CONTROL` no-Skill baseline vs `COMET_FULL` injecting the full Skill stack) for with/without comparison, measuring the marginal effect of the Skill on the same task and in the same isolated environment**. This idea—treating the Skill as a first-class evaluation object and using paired experiments to measure "whether adding the Skill improves things"—**aligns with the positioning of SkillsBench**<sup>[1]</sup>. Comet's evaluation experiments were designed with reference to LangChain's practice article<sup>[2]</sup>, which similarly emphasizes that evaluating a skill is actually evaluating "whether the agent + skill system can effectively use the skill's information."
+
+### Multi-turn Interaction: Dual-Agent Automatic User Simulation
+
+A workflow Skill pauses at decision points waiting for the user, and the evaluation needs to be able to automatically run through the entire interaction process. Comet uses **dual-Agent automatic interaction (the subject Agent runs the Skill, the user-simulating Agent responds at decision points)** to solve this problem. **The approach of using an Agent to simulate the user and run the evaluation unattended through the entire workflow shares the same philosophy as Alibaba's Harness engineering solution**<sup>[3]</sup>.
+
+### Metric Design: rubric Multi-dimensional Scoring + Capability/Reliability Separation
+
+Comet's **rubric breaks quality into multiple dimensions, each composed of binary check items, weighted and summarized**. This approach of "replacing subjective scoring with objective, verifiable binary signals" **is consistent with the methodology of SWE-bench, SWE-bench Pro, τ-bench, HumanEval, and other evaluations**<sup>[5][6][7]</sup>. The rubric scoring methodology section of Comet's documentation explicitly aligns with practices such as Galileo, Hebbia, and τ-bench.
+
+Comet simultaneously uses pass@k (capability ceiling) and pass^k (reliability floor) to distinguish "can do it" from "can do it every time." pass@k uses the unbiased estimator from HumanEval<sup>[7]</sup>. Notably, SkillsBench, for determinism reasons, does not use pass@k but instead uses the mean pass rate over a fixed 3 repeats—this is a point of difference between Comet and it in metric choice.
+
+### Harness Engineering: Environment Isolation and Observability
+
+Comet uses **Docker to isolate each task, pytest-driven execution, and auto-generated reports**. **The approach of treating evaluation itself as a system requiring engineering (environment isolation, task scheduling, result collection, report generation) is reflected in both Tencent's large-scale Agent evaluation practice**<sup>[4]</sup> **and Alibaba's Harness engineering solution**<sup>[3]</sup>. Comet's LangSmith integration reuses the same local task suite, connecting evaluation to an enterprise-grade observability platform; **this observability platform integration approach is also referenced from LangChain's practice**<sup>[2]</sup>.
+
+### Skill Trigger Assurance: Invocation Evidence as a Hard Gate
+
+If the model does not invoke the Skill, the evaluation is actually testing the bare model. LangChain's practice article directly points out this problem—even with prompts added, the invocation rate is only about 70%<sup>[2]</sup>. Comet's approach is **to make Skill invocation a hard gate through the CLAUDE.md contract, PreToolUse hook, and stream-json invocation evidence parsing**. This is the engineering solution Comet proposes for this problem; the reference article points out the existence of the problem.
+
+### Comparison Summary
+
+| Comet practice | Corresponding industry reference |
+| --- | --- |
+| Skill incremental value as evaluation target | SkillsBench<sup>[1]</sup>, LangChain<sup>[2]</sup> |
+| Dual-Agent user simulation, multi-turn interaction | Alibaba Harness solution<sup>[3]</sup> |
+| rubric binary check items + weighted summary | SWE-bench<sup>[5]</sup>, SWE-bench Pro<sup>[6]</sup>, τ-bench, HumanEval<sup>[7]</sup> |
+| pass@k capability ceiling estimation | HumanEval unbiased estimator<sup>[7]</sup> |
+| Docker isolation + Harness engineering | Tencent<sup>[4]</sup>, Alibaba<sup>[3]</sup> |
+| LangSmith observability platform integration | LangChain<sup>[2]</sup> |
+| Skill invocation rate problem and response | LangChain (problem identification)<sup>[2]</sup> |
+| eval detection + hook interception (externalized gating) | Alibaba Cloud Developer Community<sup>[8]</sup>, Alibaba Technology<sup>[9]</sup> |
+
+## 2. Runtime and Workflow
+
+### Cross-platform Node Runtime
+
+0.4.0 rewrote 7 Bash scripts into Node `.mjs` launchers, backed by a shared TypeScript runtime, so Windows users no longer need Git Bash/WSL. Cross-platform runtime is a common engineering topic for agent frameworks; this article does not list reference articles for this dimension one by one. For Comet's specific approach, see [the runtime refactor from 0.3.9 to 0.4.0](/en/tech-blog/comet-0.3.9-to-0.4.0).
+
+### Resumable Workflow and State Layering
+
+Comet splits each change's state into three layers: the user-readable `.comet.yaml`, the machine-managed `run-state.json`, and the append-only audit log `state-events.jsonl`. After an interruption, it can precisely resume from a checkpoint rather than letting the Agent re-guess the context. Resumability is a core design of Comet's workflow; see [State Management](/en/concepts/state-management). State persistence and recovery is a general topic for workflow engines; this article does not list reference articles for this dimension one by one.
+
+### Intent Recognition and Slot Filling
+
+Comet structures "what the user wants to do" into an intent frame (`CometIntentFrame`), which contains intent classification (intent, with confidence), entity extraction (entities), and slot filling (slots, such as `requested_action`, `workflow_candidate`, `scope`, `public_api_change` and other risk signals), then the runtime re-scores by fixed priority to decide routing. This is a **mainstream industry technique** in natural language understanding (NLU) and task-oriented dialogue systems—intent classification and slot filling are standard methods in industrial-grade dialogue systems (intelligent customer service, voice assistants, task bots). Comet applies this mature set of techniques to AI coding workflow routing, upgrading routing from "natural language rule guessing" to "structured evidence + fixed-priority scoring." See [Intent Recognition and Routing](/en/concepts/intent-routing).
+
+### Externalized Gating: eval Detection + hook Interception
+
+Comet's stage guarding is supported by two layers of mechanisms: `comet-guard` and `comet-state transition` share the same TypeScript transition semantics table—if any stage condition is not met, the flow does not advance (**deterministic validation, not advice**); the PreToolUse hook (`comet-hook-guard.mjs`) intercepts before tool call execution, guarding stage boundaries and dangerous operations (**runtime hard constraint, not after-the-fact audit**). This **"eval detection + hook interception" stability fulcrum is consistent with the layered harness practice from the Alibaba Cloud Developer Community**<sup>[8]</sup>—that article explicitly states "what makes a harness truly stable is not the rules themselves but the validation mechanism," and describes the same idea with a G1–G8 gate wall (deterministic validation, blocking rather than advising) + hook interception (real-time fencing).
+
+This judgment of "externalized gating" is supported by research: the quality of verification feedback (Effective Feedback Compute) explains agent success rate variance at R²=0.94–0.99, far higher than raw token consumption and tool calls (R²=0.33–0.42)<sup>[8]</sup>—that is, what determines reliability is not how much budget there is, but how strict the checks are. **This is consistent with Comet's design motivation of using eval evidence as a publish gate and hooks as runtime hard constraints.** **Alibaba Technology's Harness Engineering practice further summarizes this system as a complete loop of constraint mechanisms, feedback loops, and structured rubric evaluation**<sup>[9]</sup>, **corresponding to Comet's "build → evaluate → publish" loop**.
+
+## 3. Skill Authoring and Distribution
+
+### Composing Any Skills into a Distributable Bundle
+
+`/comet-any` composes any Skills into a stable Skill Bundle, with a workflow protocol, resolved skill evidence, the Engine quartet, and a required control plane. The full `/comet-any` chain is "create → evaluate → review → publish → distribute," with a mandatory preview before distribution. This is Comet's solution for the need to "let users build reusable, reviewable, distributable Skill packages"; see [Skill Creator Full Workflow](/en/skill-creator/workflow).
+
+Industry skill ecosystems (such as Anthropic's Agent Skills and the general `skills add` CLI) provide the skill definition format and installation mechanism. Comet adds composition, deterministic Bundles, a publish evidence chain, and distribution preview on top of this. Industry references for this dimension are primarily the official documentation of each skill ecosystem; this article does not list them one by one.
+
+### Publish Gate: eval Evidence Bound to draft hash
+
+Comet makes **eval evidence a mandatory gate for publish**—without eval evidence for the current draft hash, with eval failure, or with evidence corresponding to an old hash, publishing is not allowed. **The approach of connecting evaluation results to the publish process and using evidence to constrain publish decisions stems from LangChain's idea of "iterating skills with evaluation"**<sup>[2]</sup>. Comet's extension is implementing this constraint as a hash-bound hard gate rather than soft advice.
+
+## 4. Comet's Extensions and Unresolved Problems
+
+The purpose of comparison is not to prove that Comet fully aligns with industry—this article does not list reference articles for every dimension one by one, and some problems are not fully solved by Comet either.
+
+**Comet's extensions** (industry has related discussion; Comet has done further engineering):
+
+- Dual-Agent interaction + invocation evidence hard gate, ensuring the Skill is actually invoked;
+- Three-layer state layering, turning resumability from concept into concrete file contracts;
+- Intent recognition and slot filling, applying mainstream NLU techniques to AI coding workflow routing;
+- Publish gate bound to draft hash, making eval evidence a hard constraint.
+
+**Unresolved problems** (SkillsBench and others also acknowledge; the field is still early):
+
+- There is no gold standard yet for evaluating bound Skills<sup>[1]</sup>;
+- Skill injection increases context length, so attribution of gains remains impure<sup>[1]</sup>;
+- The realism of user simulation, the reliability of LLM-as-judge, and evaluation coverage of long-horizon workflows are all open problems<sup>[1]</sup>.
+
+Reference articles for these problems are listed at the end and recommended as further reading.
+
+## References
+
+1. Li, X., et al. *SkillsBench: Benchmarking How Well Agent Skills Work Across Diverse Tasks*. arXiv preprint arXiv:2602.12670, 2026. \[[Paper link](https://arxiv.org/abs/2602.12670)\]
+
+2. Xu, R. *Evaluating Skills*. LangChain Blog, 2026-03-05. \[[Original link](https://www.langchain.com/blog/evaluating-skills)\]
+
+3. Alibaba Technology. *Evaluation Solution for Business Agents Based on Harness Engineering Built with a Top-Tier Agent (Claude Code)*. WeChat Official Account Platform, 2026. \[[Original link](https://mp.weixin.qq.com/s/n9zkbKTi3Q1j-L2vgmO1Vw)\]
+
+4. Tencent Technology Engineering. *AI Agent & Skill Evaluation Solutions and Implementation Practices*. WeChat Official Account Platform, 2026. \[[Original link](https://mp.weixin.qq.com/s/PUbGqheJhFMmb6hGj1ZtOw)\]
+
+5. Jimenez, C. E., et al. *SWE-bench: Can Language Models Resolve Real-World GitHub Issues?* ICLR, 2024. \[[Paper link](https://arxiv.org/abs/2310.06770)\]
+
+6. Deng, X., et al. *SWE-Bench Pro: Can AI Agents Solve Long-Horizon Software Engineering Tasks?* arXiv preprint arXiv:2509.16941, 2025. \[[Paper link](https://arxiv.org/abs/2509.16941)\]
+
+7. Chen, M., et al. *Evaluating Large Language Models Trained on Code* (HumanEval). arXiv preprint arXiv:2107.03374, 2021. \[[Paper link](https://arxiv.org/abs/2107.03374)\]
+
+8. Alibaba Cloud Developer Community. *AI Lacks Discipline, Not IQ: Putting a harness on Claude Code to Make Long-Horizon Tasks Land Stably*. WeChat Official Account Platform, 2026. \[[Original link](https://mp.weixin.qq.com/s/2kWi0Fld09fNMVIUg9ddKQ)\]
+
+9. Alibaba Technology. *Harness Engineering: Long-Horizon Automated AI Coding / Skills Development Practice*. WeChat Official Account Platform, 2026. \[[Original link](https://mp.weixin.qq.com/s/mSjb20PDsfiK88C9AQB7og)\]
+
+## Further Reading
+
+- [From 0.3.9 to 0.4.0: How Comet Grew from a Workflow Layer into a Skill Platform](/en/tech-blog/comet-0.3.9-to-0.4.0) — Comet's own architectural evolution
+- [Evaluation: The Compass for Skill Evolution](/en/eval/why-eval) — Detailed evaluation methodology
+- [How Comet Uses Evaluation to Drive Skill Evolution](/en/eval/eval-driven-evolution) — Open problems in evaluation and Comet's engineering solutions
+- [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) — Detailed rubric dimensions and pass@k/pass^k formulas

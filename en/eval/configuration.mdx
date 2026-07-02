@@ -1,41 +1,43 @@
 ---
-title: "Configure evals and custom tasks"
-description: "Define eval tasks with task.toml, instruction.md, validation scripts, Dockerfiles, treatments, profiles, and interaction modes."
+title: "Configuring Evaluations and Custom Tasks"
+description: "Define an eval task from scratch: task.toml, instruction.md, validation scripts and Dockerfile, configure treatment, profile and interaction modes, and let comet eval evaluate your own Skill."
 ---
 
-`comet eval` can evaluate built-in tasks and any local Skill out of the box. When you want to measure a Skill against your own scenario, define a custom task.
+`comet eval` works out of the box to evaluate built-in tasks and any local Skill. But when you want to evaluate **how your own Skill performs in your own scenario**, you need a custom task. This article walks you through the entire process step by step: from defining a task, to configuring an evaluation profile, to running a report.
 
 <Info>
-  If you have not run evals yet, start with [Eval quickstart](/en/eval/quickstart). This page assumes `comet eval --collect` already works.
+  If you haven't run an eval yet, first read [Evaluating Any Skill · Quickstart](/en/eval/quickstart) to set up the environment. This article assumes you can already run <code>comet eval --collect</code> successfully.
 </Info>
 
-## Eval configuration at a glance
+## The Big Picture of Eval Configuration
 
-A full eval run combines three inputs:
+A complete eval is assembled from three parts, and understanding their division of labor is the foundation of customization:
 
 <p align="center">
-  <img src="/assets/eval-configuration-illustrations/01-eval-experiment-bench.png" alt="Xiaoyu places Task, Treatment, and Profile cards into a run tray and organizes score, report, and failure attribution outputs" width="800" />
+  <img src="/assets/eval-configuration-illustrations/01-eval-experiment-bench.png" alt="Little fish placing Task, Treatment and Profile configuration cards into the run tray, and organizing score, report and failure attribution outputs" width="800" />
 </p>
 
-<p align="center">Task decides what to test, Treatment decides what to inject, and Profile/Rubric decides how to score it.</p>
+<p align="center">Task decides what to test, Treatment decides what to inject, Profile and Rubric decide how to score</p>
 
 ```mermaid
 flowchart LR
-    T["Task<br/>what scenario"] --> R["Eval run"]
-    TR["Treatment<br/>which Skills"] --> R
-    P["Profile + Rubric<br/>how to score"] --> R
-    R --> REP["Report<br/>pass@k, scores, attribution"]
+    T["Task<br/>What scenario to test"] --> R["An eval run"]
+    TR["Treatment<br/>Which Skills to inject"] --> R
+    P["Profile + Rubric<br/>How to score"] --> R
+    R --> REP["Report<br/>pass@k, dimension scores, failure attribution"]
 ```
 
-| Config | Question answered | Location |
+| Configuration | Question it answers | Location |
 | --- | --- | --- |
-| **Task** | What scenario is being tested? What artifacts must exist? How is success validated? | `local/tasks/<name>/` |
-| **Treatment** | Which Skills are injected for this run? | `local/treatments/` |
-| **Profile + Rubric** | Which scoring dimensions apply? | `[evaluation]` in `task.toml` |
+| **Task** | What scenario to test? What to produce? How to verify correctness? | `local/tasks/<name>/` |
+| **Treatment** | Which Skills to inject in this run (including the no-Skill baseline)? | `local/treatments/` |
+| **Profile + Rubric** | Which dimensions to score by? | `[evaluation]` in task.toml |
+
+Let's explain each one below.
 
 ## Define a Task
 
-A task lives under `local/tasks/` and has four files:
+Each task is a directory under `local/tasks/` containing four files:
 
 <Tree>
   <Tree.Folder name="local/tasks/my-task/" defaultOpen>
@@ -50,113 +52,272 @@ A task lives under `local/tasks/` and has four files:
   </Tree.Folder>
 </Tree>
 
-### task.toml
+<Note>
+  The task directory convention comes from the eval harness (<code>eval/</code>), not your business repo. Custom tasks live under <code>eval/local/tasks/</code> in the Comet repo and are registered in <code>eval/local/tasks/index.yaml</code>.
+</Note>
+
+### 1. Write `task.toml`
+
+`task.toml` is the core configuration of a task, divided into four sections:
 
 ```toml
 [metadata]
 name = "my-task"
 description = "Create a markdown result file"
-difficulty = "medium"
-category = "generic"
+difficulty = "medium"           # easy / medium / hard
+category = "generic"            # generic or comet
 default_treatments = ["CONTROL"]
 
 [environment]
 description = "Validation environment"
 dockerfile = "environment/Dockerfile"
-timeout_sec = 600
+timeout_sec = 600               # Docker execution timeout (seconds)
 
 [validation]
-test_scripts = ["test_my_task.py"]
-target_artifacts = ["result.md"]
-timeout = 120
+test_scripts = ["test_my_task.py"]   # Validation scripts run inside Docker
+target_artifacts = ["result.md"]     # Expected artifacts (existence check)
+timeout = 120                        # Validation script timeout (seconds)
 
 [evaluation]
-profile = "generic"
-expected_artifacts = ["result.md"]
-required_skills = ["my-skill"]
-require_skill_invocation = true
+profile = "generic"                       # Evaluation profile
+expected_artifacts = ["result.md"]        # Artifacts checked by the rubric
+required_skills = ["my-skill"]            # Skills that must be invoked
+require_skill_invocation = true           # Produces a hard failure when not invoked
+
+# Custom rubric criteria (passed to the LLM judge, optional)
 rubric_criteria = [
-  "Output includes error handling",
-  "Code follows project naming conventions",
+    "Output includes error handling",
+    "Code follows project naming conventions",
 ]
 
 [interaction]
-mode = "none"
-max_turns = 12
+mode = "none"                   # none (single-turn) or auto_user (multi-turn simulation)
+max_turns = 12                  # Outer round-trip limit between subject/simulator under auto_user
 ```
 
-| Block | Purpose |
+The role of each section:
+
+| Section | Role |
 | --- | --- |
-| `[metadata]` | Identity, category, difficulty, default treatments. |
-| `[environment]` | Docker validation environment. |
-| `[validation]` | Scripts and target artifacts used to decide pass/fail. |
-| `[evaluation]` | Profile, required Skill calls, expected artifacts, custom criteria. |
-| `[interaction]` | Single-turn or simulated multi-turn mode. |
+| `[metadata]` | Task identity. `category = "comet"` or a name starting with `comet-` will be automatically inferred as the `comet-workflow` profile |
+| `[environment]` | What Docker environment the validation runs in, and the timeout |
+| `[validation]` | Which scripts to validate with, which artifacts are expected |
+| `[evaluation]` | Which profile to score with, which Skills must be invoked, custom judging criteria |
+| `[interaction]` | Single-turn or multi-turn simulated interaction |
+
+#### Key fields in `[evaluation]`
+
+These fields directly determine the scoring result and deserve separate explanation:
+
+| Field | Role |
+| --- | --- |
+| `profile` | Select the rubric: `generic` (7 dimensions) / `comet-workflow` (9 dimensions) / `authoring-skill` (11 dimensions). See [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) for dimension details |
+| `expected_artifacts` | The `artifact_presence` dimension of the rubric checks whether these artifacts exist (supports glob) |
+| `required_skills` | Lists Skills that must be invoked; the `skill_invocation` dimension scores based on this |
+| `require_skill_invocation` | When set to `true`, a required Skill not being invoked produces a **hard failure** (the run is directly judged as not passed) |
+| `rubric_criteria` | Custom judging criteria, passed to the LLM judge as additional dimensions (`custom_0`, `custom_1`...) |
 
 <Warning>
-  `require_skill_invocation = true` is useful but strict. It requires a real Skill invocation from the event trace. If the Skill name is wrong or not injected, every run fails.
+  <code>require_skill_invocation: true</code> is useful but use it with caution: it requires the agent to have <strong>actually invoked</strong> the specified Skill (read from Claude Code events, not inferred from artifacts). If your Skill name is misspelled or not injected, every run will hard-fail.
 </Warning>
 
-### instruction.md
+### 2. Write `instruction.md`
 
-This is the prompt given to the subject agent. It can use template variables such as `{run_id}`.
+This is the task instruction for the agent, supporting template variables like `{run_id}`:
 
-### Validation script
+```markdown
+Create a file `result.md` in the current workspace.
 
-Validation runs inside Docker and writes `_test_results.json`. A run passes when the failed list is empty.
+Requirements:
+- Include the heading `# My Task Result`
+- Describe your implementation approach
+- Include at least three key points
+```
 
-### Dockerfile
+### 3. Write the validation script
 
-The Dockerfile provides the validation runtime and dependencies. Keep it minimal and deterministic.
+The validation script runs inside Docker and writes results to `_test_results.json`. This is the source of truth for "did this run get it right":
+
+```python
+from pathlib import Path
+from scaffold.python.validation.core import write_test_results
+
+def main():
+    passed = []
+    failed = []
+
+    # Check whether the artifact exists
+    result = Path("result.md")
+    if not result.exists():
+        write_test_results({"passed": [], "failed": ["result.md missing"]})
+        return
+
+    text = result.read_text(encoding="utf-8")
+
+    # Check the content
+    if "# My Task Result" in text:
+        passed.append("heading present")
+    else:
+        failed.append("heading missing")
+
+    write_test_results({"passed": passed, "failed": failed})
+
+if __name__ == "__main__":
+    main()
+```
+
+The definition of a "pass" for a run is clear: the `failed` list reported by the validation script is empty. Both `pass@k` and `pass^k` are based on this judgment.
+
+### 4. Write the Dockerfile
+
+The Dockerfile provides the runtime and dependencies needed for validation. A minimal example:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /workspace
+# Install dependencies needed by the validation script (if any)
+# COPY requirements.txt .
+# RUN pip install -r requirements.txt
+```
+
+The code produced by the agent and your validation script run inside the built image.
+
+### 5. Register the task
+
+Finally, register it in `local/tasks/index.yaml`:
+
+```yaml
+tasks:
+  - name: my-task
+    category: generic
+    default_treatments:
+      - CONTROL
+    description: My custom task
+```
+
+Once registered, you can run it with `--task my-task`.
 
 ## Configure Treatment
 
-Treatment answers “which Skills are injected?”
+Treatment answers "which Skills to inject in this run". Located at `local/treatments/`:
 
 ```yaml
+# local/treatments/common/control.yaml
 CONTROL:
   description: "No-Skill baseline"
   skills: []
+
+# local/treatments/comet/comet_full_040_beta.yaml
+COMET_FULL_040_BETA:
+  description: "Full Comet workflow"
+  skills:
+    - name: comet
+      skill: 040-beta/comet
+      variant: all
+      base: benchmarks
 ```
 
-Compare `CONTROL` against your Skill treatment to measure the value added by the Skill.
+| Treatment | Meaning |
+| --- | --- |
+| `CONTROL` | **No-Skill baseline** — no Skill injected, tests the agent's bare capability floor |
+| `COMET_FULL_040_BETA` | Injects the full Comet workflow Skill bundle |
+| Custom | Inject your own Skill to compare "with Skill vs without Skill" |
+
+<Tip>
+  The standard approach for a comparative experiment is <code>CONTROL</code> (no Skill) vs your Skill treatment. The difference between the two is the gain your Skill brings.
+</Tip>
 
 ## Choose a Profile
 
-| Profile | Best for | Dimensions | Interaction |
-| --- | --- | --- | --- |
-| `generic` | Any generic Skill smoke test | 7 | `none` |
-| `comet-workflow` | Classic `/comet` workflow | 9 | `auto_user` |
-| `authoring-skill` | `/comet-any` generated packages | 11 | `auto_user` |
+The profile determines which rubric to score with. Choosing the wrong profile makes the dimension scores meaningless:
 
-Profile resolution order is command line -> manifest -> task config -> `generic`.
-
-## auto_user mode
-
-Workflow Skills need decisions. `auto_user` runs two agents: the subject agent and a user simulator. The simulator replies at decision points until the run completes or hits `max_turns`.
-
-## Run a custom eval
-
-```bash
-comet eval --task my-task --collect
-comet eval --task my-task --treatment MY_SKILL --html
+```mermaid
+flowchart LR
+    Q["What is your Skill?"] --> Q1{"Type"}
+    Q1 -->|"Generic single-file Skill"| G["generic<br/>7 dimensions, single-turn"]
+    Q1 -->|"Comet five-phase workflow"| CW["comet-workflow<br/>9 dimensions, multi-turn"]
+    Q1 -->|"/comet-any generated bundle"| AS["authoring-skill<br/>11 dimensions, multi-turn"]
 ```
 
-Then inspect the generated summary report, `pass@1`, `pass^k`, dimension scores, and failure attribution.
+| Profile | Suitable for | Dimensions | Interaction mode |
+| --- | --- | --- | --- |
+| `generic` | Smoke-testing any generic Skill | 7 | `none` (single-turn) |
+| `comet-workflow` | Classic `/comet` five-phase | 9 | `auto_user` (multi-turn) |
+| `authoring-skill` | `/comet-any` artifacts | 11 | `auto_user` (multi-turn) |
 
-## Evaluate a generated Skill
+<Note>
+  Profile resolution priority: <code>--profile</code> override &gt; manifest's <code>skill.profile</code> &gt; task's <code>evaluation.profile</code> &gt; <code>generic</code>. Comet-type tasks (<code>category = "comet"</code>) are automatically inferred as <code>comet-workflow</code>.
+</Note>
 
-`/comet-any` packages include `comet/eval.yaml`:
+For the dimensions, weights and checking logic of the three rubrics, see [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring).
+
+## Multi-turn interaction: `auto_user` mode
+
+A single-turn task (`mode: none`) runs only once, suitable for simple scenarios of "give an instruction and see the result". But workflow-type Skills need to **pause at decision points, ask the user, and continue after receiving a reply** — single-turn can't test this.
+
+`auto_user` mode solves this: it uses **two Agents interacting automatically** — one runs the Skill under test (subject), the other simulates the user replying at decision points (simulator).
+
+```mermaid
+sequenceDiagram
+    participant S as Subject Agent<br/>(runs the Skill under test)
+    participant SIM as Simulator Agent<br/>(simulates the user)
+    S->>S: Read instruction, start executing
+    S-->>SIM: Reach a decision point, request user confirmation
+    SIM-->>S: Simulated reply (approve / pick default / move forward)
+    S->>S: Continue executing the next phase
+    S-->>SIM: Another decision point
+    SIM-->>S: Simulated reply
+    S->>S: Complete (or reach the max_turns outer round-trip limit)
+```
+
+The simulator's behavior is controlled by a prompt file. It reads `eval/simulator-instruction.md` by default, and you can point `BENCH_SIMULATOR_PROMPT_FILE` to your own version to simulate "a more demanding user" or "a user who asks for clarification":
 
 ```bash
+export BENCH_SIMULATOR_PROMPT_FILE=my-simulator-prompt.md
+```
+
+`max_turns` controls the loop limit (`comet-workflow` typically 12 outer round-trips, `authoring-skill` typically 8 outer round-trips). It is not the number of internal messages or tool calls of the Agent under test; one outer round-trip means the Agent under test reaches a decision point, the user simulator replies, and the Agent under test continues with `--resume`. Hitting a "complete" signal (such as `archive complete`) ends the loop early.
+
+## A complete custom evaluation from scratch
+
+Putting the above steps together, to evaluate your own Skill from scratch:
+
+```bash
+# 1. Define the task (the four files above + register in index.yaml)
+
+# 2. First collect to troubleshoot, without consuming tokens
+comet eval --task my-task --collect
+
+# 3. Run for real (inject your Skill treatment)
+comet eval --task my-task --treatment MY_SKILL --html
+
+# 4. View the report
+# eval/local/logs/experiments/<experiment-id>/summary.html
+```
+
+In the report, focus on three things:
+
+1. **`pass@1` and `pass^k`**: capability ceiling vs reliability floor. See [Scoring Metrics](/en/eval/scoring#core-metrics-passk--passk).
+2. **Rubric dimension scores**: which dimension dragged you down?
+3. **Failure attribution** (`harness`/`workflow`/`task`/`model`): is the failure a Skill problem, or a task/environment problem?
+
+## Evaluating `/comet-any` generated bundles
+
+A Skill bundle generated by `/comet-any` comes with its own `comet/eval.yaml` manifest, so you don't need to hand-write a task.toml. Just run with the manifest:
+
+```bash
+# Discovery pre-check
 comet eval ./generated-skill/comet/eval.yaml --collect
+
+# Real evaluation
 comet eval ./generated-skill/comet/eval.yaml --html
 ```
 
-The manifest selects the `authoring-skill` profile and recommended tasks.
+The manifest automatically selects the `authoring-skill` profile, injects recommended tasks and quality gates. For the complete manifest format, see [Evaluation System Overview](/en/eval/overview#eval-manifest).
 
 ## Next steps
 
-- [Scoring metrics and dual-agent evaluation](/en/eval/scoring)
-- [Eval overview](/en/eval/overview)
-- [comet eval command](/en/cli/eval)
+- [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) — dimensions, weights and pass@k/pass^k of the three rubrics
+- [Evaluation System Overview](/en/eval/overview) — manifest format, profile system and task system
+- [comet eval command](/en/cli/eval) — complete command-line argument reference

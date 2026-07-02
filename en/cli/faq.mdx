@@ -1,35 +1,104 @@
 ---
 title: "CLI FAQ"
-description: "Answers for comet init/status/doctor/update, platform installation, Skill management, and CI integration."
+description: "Answers to common questions about comet init/status/doctor/update, platform installation, Skill management, and CI integration."
 ---
 
-## Install and initialization
+Frequently asked questions about the Comet CLI commands, installation, health checks, and platform support.
 
-### Do I install globally or per project?
+## Installation & initialization
 
-Install the CLI globally with npm, then use `comet init` inside each project that should use Comet.
+<AccordionGroup>
+  <Accordion title="Will comet init overwrite my existing configuration?">
+    No. When it detects existing components, `comet init` lets you choose to overwrite or skip. Hooks are merged non-destructively, preserving your existing hooks. In `--yes` mode, existing components are skipped by default; use `--overwrite` to force a refresh. See [comet init · How to read the install summary](/en/cli/init#how-to-read-the-install-summary).
+  </Accordion>
 
-### Should Skills be project-level or global?
+  <Accordion title="What does it mean when a platform shows failed (12 files, 1 failed) in the install summary?">
+    That platform had a file copy failure (for example, a Skill or script file wasn't installed). Since 0.4.0-beta.1, partial failures are no longer masked as success — the platform is marked `failed` with a failure count instead of reporting a half-installed state as success. Missing critical files like `comet-hook-guard.mjs` will silently break the phase guard and must be fixed first. Re-run `comet init` or `comet update` to fill in the missing files. See [comet init · How to read the install summary](/en/cli/init#how-to-read-the-install-summary).
+  </Accordion>
 
-Prefer project-level install for team repositories. Use global install for personal defaults across many projects.
+  <Accordion title="The hook reports [COMET-HOOK] crash with exit code 2 when writing files — what should I do?">
+    When `comet-hook-guard.mjs` itself crashes (corrupt bundle, import failure, unexpected exception), it **fails closed**: it prints a `[COMET-HOOK] crash: ...` diagnostic message and blocks the write with exit code 2, instead of letting it through with an ambiguous exit code. This means the phase guard itself is broken — usually an incomplete installation (missing script files). Run `comet doctor` first to check installation health, and re-run `comet init`/`comet update` to fill in missing files if needed.
+  </Accordion>
 
-## State and diagnostics
+  <Accordion title="Does it run on Windows? Do I still need Git Bash?">
+    Since 0.4.0-beta.1, all scripts run through Node.js, so Windows no longer requires Bash, Git Bash, or WSL. macOS, Linux, and Windows use the same set of commands.
+  </Accordion>
 
-### When should I use `comet status`?
+  <Accordion title="How do I choose between project-level and global installation?">
+    Project scope is suited for team projects (config is written to the repository for easy collaboration), while global scope is suited for personal default environments (written to the user directory, shared across projects). When unsure, start with project scope. See [CLI quickstart](/en/cli/quickstart).
+  </Accordion>
 
-Use it when you need the current phase, change id, mode, archive state, or recovery hint.
+  <Accordion title="Which platforms does comet init support?">
+    31 AI coding platforms, including Claude Code, Codex, Cursor, Windsurf, GitHub Copilot, and more. `comet init` auto-detects existing platform directories in the project and pre-selects them. See [Supported platforms](/en/platforms).
+  </Accordion>
+</AccordionGroup>
 
-### When should I use `comet doctor`?
+## Status & diagnostics
 
-Use it when platform files, Skill installation, hooks, or runtime assets look broken.
+<AccordionGroup>
+  <Accordion title="What's the difference between comet status and comet doctor?">
+    `comet status` shows the current phase and next-step command for active changes — it's the first command for everyday recovery. `comet doctor` performs a full installation health check (Skills, scripts, working directory, change status), suitable for troubleshooting when `status` shows something abnormal.
+  </Accordion>
 
-## Upgrade and uninstall
+  <Accordion title="Should I worry about a doctor warn?">
+    A `warn` usually doesn't block (for example, openspec CLI not installed but the project doesn't depend on it), while a `fail` is blocking (for example, a Skill is missing or state is corrupted). We recommend prioritizing `fail` items. See [comet doctor](/en/cli/doctor).
+  </Accordion>
 
-```bash
-npm install -g @rpamis/comet@latest
-comet update
-```
+  <Accordion title="comet status shows the wrong phase">
+    Run `comet doctor` first to check for a malformed `.comet.yaml` or missing evidence. After fixing, re-run status. For troubleshooting abnormal state, see [State corruption and recovery](/en/guides/state-recovery).
+  </Accordion>
+</AccordionGroup>
 
-## Skill, eval, and publish commands
+## Upgrade & uninstall
 
-Use `comet creator` for `/comet-any` recovery, `comet eval` for scoring, and `comet publish` for release readiness.
+<AccordionGroup>
+  <Accordion title="How do I upgrade Comet">
+    First upgrade the npm package, then refresh the installed Skill files, and finally confirm health:
+
+    ```bash
+    npm install -g @rpamis/comet@latest
+    comet update --scope project --language zh
+    comet doctor
+    ```
+  </Accordion>
+
+  <Accordion title="Will uninstalling delete my code or OpenSpec changes?">
+    No. `comet uninstall` only removes Comet-managed Skills, rules, and hooks, preserving your OpenSpec changes, design documents, implementation plans, and project code. See [comet uninstall](/en/cli/uninstall).
+  </Accordion>
+
+  <Accordion title="Should I use update or init?">
+    After upgrading the version, use `comet update` to refresh Skills/rules/scripts. `comet init` is for first-time installation or adding new platforms. Both preserve user configuration non-destructively.
+  </Accordion>
+</AccordionGroup>
+
+## Skill, evaluation, and publishing commands
+
+<AccordionGroup>
+  <Accordion title="Should I use comet skill or /comet-any?">
+    For creating reusable Skills, prefer `/comet-any`, which invokes the CLI backend internally. `comet skill` is a low-level tool suited for local debugging, advanced Skill runs, and package management. See [comet skill](/en/cli/skill).
+  </Accordion>
+
+  <Accordion title="What's the difference between comet eval and comet skill check?">
+    `comet eval` evaluates a Skill's product capability and produces pre-release evidence. `comet skill check` checks whether a single Skill run has missing artifacts or state and does not produce release evidence. Release readiness only requires `comet eval`. See [comet eval](/en/cli/eval).
+  </Accordion>
+
+  <Accordion title="Should I use comet bundle or comet publish?">
+    Regular users use `comet publish` (the user publishing entry point). `comet bundle` is an advanced backend, used directly only for troubleshooting backend state, auditing, or automation integration. See [comet publish](/en/cli/publish).
+  </Accordion>
+</AccordionGroup>
+
+## CI/CD
+
+<AccordionGroup>
+  <Accordion title="How do I install non-interactively in CI?">
+    Use `--yes --json` to skip all prompts:
+
+    ```bash
+    comet init --yes --scope project --language zh --json
+    ```
+  </Accordion>
+
+  <Accordion title="Is the --json output stable to parse?">
+    Yes. The JSON structure of `status` and `doctor` is part of the CLI contract. For CI gates, we recommend only exiting non-zero on `doctor` `fail`. See [CI/CD integration](/en/guides/cicd-integration).
+  </Accordion>
+</AccordionGroup>

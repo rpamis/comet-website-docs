@@ -1,34 +1,188 @@
 ---
 title: "comet skill"
-description: "Manage local Comet Skill packages and debug advanced deterministic Engine runs."
+description: "Manage local Comet Skill packages and debug advanced Skill runs."
 ---
+
+`comet skill` is the low-level Skill package and Skill run (Engine Run) tool. It discovers explicit Skill directories, project overrides under `.comet/skills/`, and built-in Skills, and provides local Skill package management plus advanced run debugging.
+
+For regular users creating reusable Skills, prefer [`/comet-any`](/en/skill-creator/overview). `comet skill run` / `comet skill continue` are better suited for debugging advanced Skill runs.
 
 ## Subcommands
 
 | Command | Purpose |
 | --- | --- |
-| `comet skill add` | Add or install a local Skill package. |
-| `comet skill show` | Inspect Skill package metadata. |
-| `comet skill run` | Start an advanced deterministic Engine run. |
-| `comet skill continue` | Continue or submit results to a run. |
-| `comet skill check` | Run targeted checks for a Skill. |
+| `comet skill add <path>` | Install a local Skill into the project Skill pool |
+| `comet skill show <skill>` | View Skill content, source, and metadata |
+| `comet skill run <skill>` | Start an advanced Skill run |
+| `comet skill continue` | Submit the outcome of a pending action or resume a Run |
+| `comet skill check` | Check the runtime checks of the current Run |
+
+All subcommands support `--json`.
 
 ## Common options
 
-| Option | Purpose |
-| --- | --- |
-| `--cwd` | Choose the working directory. |
-| `--json` | Emit machine-readable output. |
-| `--verbose` | Include additional diagnostics. |
+| Option | Description | Applicable commands |
+| --- | --- | --- |
+| `--project <dir>` | Project root directory (default `.`) | All |
+| `--json` | Output structured JSON | All |
+| `--overwrite` | Overwrite an existing project Skill | `add` |
+| `--change <dir>` | Bind an OpenSpec change directory (mutually exclusive with `--run-id`) | `run`, `continue`, `check` |
+| `--run-id <id>` | Store Run state in `.comet/runs/<run-id>` (mutually exclusive with `--change`) | `run`, `continue`, `check` |
+| `--confirm <key=value>` | Pass a confirmation parameter | `run`, `continue` |
+| `--status <succeeded\|failed>` | Submit the action outcome status | `continue` |
+| `--summary <text>` | Outcome summary (required with `--status`) | `continue` |
+| `--artifact <key=value>` | Submit an artifact (used with `--status`) | `continue` |
+| `--state <key=value>` | Submit state (used with `--status`) | `continue` |
+| `--upgrade <skill>` | Upgrade the current Run to a new Skill version | `continue` |
+| `--scope <progress\|step\|completion>` | Runtime check scope (default `progress`) | `check` |
+
+<Info>
+  <code>--change</code> and <code>--run-id</code> are mutually exclusive: a single Run can only bind to one of them. <code>--change</code> binds to an OpenSpec change directory, while <code>--run-id</code> stores independent Run state in <code>.comet/runs/&lt;run-id&gt;</code>.
+</Info>
+
+## Package management
+
+### add
+
+```bash
+comet skill add ./my-skill --project .
+comet skill add ./my-skill --project . --overwrite
+```
+
+Copies the Skill to `.comet/skills/<name>` (symbolic links are rejected; an atomic rename with backup is used). Project Skills **override** built-in Skills by name; invalid overrides **fail closed** (error directly, instead of silently falling back to the built-in).
+
+### show
+
+```bash
+comet skill show my-skill --project .
+```
+
+Parses the Skill and returns the name, version, source, root directory, content hash, steps, guardrails, and runtime checks.
+
+## Skill discovery order
+
+`resolveSkill` looks in the following order and stops at the first match:
+
+1. **explicit** — the selector points to an existing directory and is loaded directly. A non-existent path errors out and does not continue searching.
+2. **project** — `<projectRoot>/.comet/skills/<selector>`, **takes precedence over built-in**, so a project can override a built-in Skill by name.
+3. **builtin** — `assets/skills/<selector>`.
+4. None found → **fail closed**, no silent fallback.
+
+<Warning>
+  A bare name must match <code>^[A-Za-z0-9][A-Za-z0-9._-]*$</code>. When a project Skill overrides a built-in Skill by name and the project Skill is invalid, it fails directly instead of falling back to the built-in. This avoids the "you think you're using your custom version but are silently using the built-in" problem.
+</Warning>
 
 ## Run lifecycle
 
-`run` creates a run record, validates inputs, and prepares deterministic execution state.
+### run: starting
 
-`continue` resumes a run or records a result after an external agent step.
+```bash
+# Bind to an OpenSpec change directory
+comet skill run my-skill --change ./changes/demo
 
-`check` runs targeted validation without going through a full eval harness.
+# Or use a standalone run-id
+comet skill run my-skill --run-id demo-run --project .
+```
+
+On startup it does the following:
+
+1. Rejects adaptive packages (for now).
+2. Rejects an already-existing Run (in change mode, a directory can only have one Run).
+3. **Creates an immutable snapshot** — freezes the entire Skill package into `.comet/skill-snapshots/<hash>/`, with the hash locked to the Run's `skillHash`.
+4. Initializes Run state: `currentStep = entry`, `status = running`.
+5. Records a `run_started` trajectory event.
+6. `decide` resolves the entry step, constructs the first action, runs it through guardrails, writes the pending action, and sets `status = waiting`.
+
+### continue: submit an outcome or resume
+
+With an outcome (actual progress):
+
+```bash
+comet skill continue --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
+```
+
+```bash
+comet skill continue --run-id demo-run --project . --status succeeded --summary "Done"
+```
+
+Without an outcome (inspect / re-decide):
+
+```bash
+comet skill continue --change ./changes/demo
+```
+
+Upgrade the current Run to a new Skill version:
+
+```bash
+comet skill continue --change ./changes/demo --upgrade my-skill --project .
+```
+
+Upgrades have strict guards: there must be no pending action, the Skill name must match, the orchestration mode must match, and the current step must still exist in the new version. After an upgrade, a `state_migrated` event is recorded.
+
+<Warning>
+  <code>--upgrade</code> cannot be combined with <code>--status</code>, <code>--summary</code>, <code>--artifact</code>, or <code>--state</code>. <code>--summary</code>, <code>--artifact</code>, and <code>--state</code> must be used together with <code>--status</code>.
+</Warning>
+
+### check: on-demand check
+
+```bash
+comet skill check --change ./changes/demo --scope completion
+```
+
+```bash
+comet skill check --run-id demo-run --project . --scope completion
+```
+
+`--scope` can be `progress`, `step`, or `completion` (default `progress`). It reads the runtime checks from `comet/checks.yaml`.
+
+<Warning>
+  <code>comet skill check</code> only checks the completeness of a single Skill run, not a general Skill evaluation. To evaluate a Skill's product capability, use <a href="/en/cli/eval">comet eval</a>. See <a href="/en/eval/runtime">Runtime check</a>.
+</Warning>
 
 ## Run state storage
 
-Run state belongs under `.comet/` and is machine-managed. Do not hand-edit it unless you are debugging with a clear rollback path.
+Run state is machine-owned — **do not edit it manually**. Only `run_id` is mirrored into `.comet.yaml`.
+
+| runnerMode | Storage location | Characteristics |
+| --- | --- | --- |
+| `change` | `<changeDir>/.comet/` | Bound to an OpenSpec change directory; one Run per directory |
+| `standalone` | `<projectRoot>/.comet/runs/<runId>/` | Independent Run, addressed by runId; multiple Runs coexist |
+
+Associated files (all within the change/run directory):
+
+| File | Contents |
+| --- | --- |
+| `.comet/run-state.json` | Run state (currentStep, pending, status, etc.) |
+| `.comet/pending-action.json` | The currently pending action |
+| `.comet/trajectory.jsonl` | Append-only trajectory audit log |
+| `.comet/context.md` | Current Agent context |
+| `.comet/artifacts.json` | Mapping of produced artifacts |
+
+All file IO is sandboxed within the change/run directory, rejecting absolute paths, `~`, drive letters, and `..` path traversal. Writes are atomic (write to tmp then rename).
+
+## Recovery hints in text mode
+
+In text mode, `comet skill` prints `Pending action` and `Next:` recovery hints directly, so you don't have to guess the next step yourself after a paused Run or a failed eval.
+
+For example, `run` output:
+
+```text
+Run: demo-run
+Status: paused
+Current step: collect-evidence
+Pending action: collect-evidence (tool, step collect-evidence)
+Runtime checks: 1
+Next: complete the pending action, then run comet skill continue
+```
+
+When `check` fails, it suggests:
+
+```text
+Next: record the missing artifact/state and rerun comet skill check
+```
+
+## Next steps
+
+- [Skill and Engine (advanced)](/en/skill-creator/engine) — understand the semantics of Skill packages and Skill runs (Engine Run), pending actions, and immutable snapshots
+- [Runtime check](/en/eval/runtime) — distinguishing `comet skill check` from `comet eval`
+- [Skill Creator overview](/en/skill-creator/overview) — the main entry point for creating reusable Skills
