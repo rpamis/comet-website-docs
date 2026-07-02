@@ -1,11 +1,13 @@
 ---
 title: "意图识别与路由"
-description: "了解 /comet 如何用结构化路由上下文把你的自然语言请求变成可解释的 full / hotfix / tweak / resume 路由，而不是靠经验规则猜测。"
+description: "意图识别和槽位提取是 /comet 路由的核心：了解 Comet 如何识别你的意图、提取路由槽位，再用固定优先级的评分顺序得出可解释的路由结果。"
 ---
 
-每次你输入 `/comet` 加一句话，Comet 都要做一个关键判断：这次到底该走哪条工作流？是完整的五阶段 `full`，还是快速修 bug 的 `hotfix`，还是 OpenSpec 链路的 `tweak`，又或者你是想恢复之前没做完的变更？
+每次你输入 `/comet` 加一句话，Comet 都要做一个关键判断：这次到底该走哪条工作流？这个判断由两件事驱动——**意图识别**和**槽位提取**。
 
-0.4.0 起，这个判断不再依赖提示词里一长串"经验规则"。Comet 会把你的原话、仓库状态和风险信号整理成一个结构化的 **路由上下文**（实现类型名为 `CometIntentFrame`），再交给运行时评分，得到一个可解释、可复核的路由结果。这篇文章讲清楚这套机制怎么工作，以及它为什么这样设计。
+**意图识别**回答"你想干什么"：启动新变更、修已有 bug、做轻量调整、恢复进行中的变更，还是只是在提问？**槽位提取**把你的原话和仓库状态拆解成结构化的路由信号——动作、候选流程、风险标记——每条信号都带来源标注，供运行时按固定优先级评分。
+
+0.4.0 起，这套机制（实现为 `CometIntentFrame`）取代了 Skill 正文里的自然语言经验规则，让路由结果变得**可解释、可复核、可恢复**。
 
 <p align="center">
   <img src="/assets/intent-routing-illustrations/01-routing-context-triage.png" alt="小鱼在路由上下文分诊台核对用户原话、仓库状态和风险信号，再把请求拨到最终 route" width="800" />
@@ -47,9 +49,9 @@ description: "了解 /comet 如何用结构化路由上下文把你的自然语�
 - 只有 `ask_user` 和 `out_of_scope` 需要**显式确认**——Comet 不会在没足够证据时替你硬选一条路。
 - `full`/`hotfix`/`tweak` 各自映射到一个确定的入口 Skill，而 `resume` 的下一步取决于你要恢复的那个变更当前停在哪一阶段。
 
-## 路由上下文里有什么
+## 意图识别与槽位提取
 
-这份路由上下文由六个顶层部分组成。你可以把它想成一份"路由申请单"：
+路由决策的核心输入是 `intent`（意图识别）和 `slots`（槽位提取），两者连同其余字段构成 `CometIntentFrame`——运行时用这份结构评分并给出最终路由：
 
 ```mermaid
 flowchart LR
@@ -76,7 +78,11 @@ flowchart LR
 | `evidence` | 支撑关键判断的证据片段，每条标注来源（`user`/`repo`/`state`） |
 | `proposed_route` | Agent 提交的候选路由——**只是建议，运行时会复核** |
 
-### 关键的路由槽位（slots）
+### 意图识别（`intent`）
+
+`intent` 包含两个子字段：**`name`**（意图类型：`start_new_change` / `fix_bug` / `make_tweak` / `resume_change` / `ask_question` / `unknown`）和 **`confidence`**（0–1 的置信度评分）。置信度低于 0.7 时，运行时直接路由到 `ask_user`——宁可停下来问，不依赖模糊意图冒险选路。
+
+### 槽位提取（`slots`）
 
 槽位里最影响路由的是几个**风险信号**布尔值。它们决定了"这事是不是该老老实实走完整流程"：
 
@@ -96,31 +102,27 @@ flowchart LR
 
 ## 运行时怎么评分
 
-Agent 整理好路由上下文后，运行时（`comet-intent.mjs`）会按一套**固定优先级**重新评分，给出最终 `route`。这套顺序是可解释路由的核心：
+Agent 整理好路由上下文后，运行时（`comet-intent.mjs`）会按一套**固定优先级**重新评分，给出最终 `route`。
+
+<Note>
+  **这套固定优先级顺序，就是可解释路由的核心。** 每一步都有明确的判断条件，分歧写入诊断日志，方便事后追溯。
+</Note>
 
 ```mermaid
 flowchart TD
-    Start(["运行时评分开始"]) --> C1{"意图置信度<br/>≥ 0.7？"}
-    C1 -->|否| AU1["ask_user<br/>置信度不足"]
-    C1 -->|是| C2{"恢复/继续 +<br/>有多个 active change<br/>且未指定 change_id？"}
-    C2 -->|是| AU2["ask_user<br/>多个变更需指定"]
-    C2 -->|否| C3{"恢复 + 指定了<br/>有效的 change_id？"}
-    C3 -->|是| RES["resume"]
-    C3 -->|否| C4{"只是提问，<br/>没要求执行工作流？"}
-    C4 -->|是| OOS["out_of_scope"]
-    C4 -->|否| C5{"显式流程<br/>与风险信号冲突？"}
-    C5 -->|是| AU3["ask_user<br/>流程与风险冲突"]
-    C5 -->|否| C6{"用户明确<br/>指定了流程？"}
-    C6 -->|是| WF["走显式流程<br/>full/hotfix/tweak"]
-    C6 -->|否| C7{"命中风险信号？"}
-    C7 -->|是| FULL1["full"]
-    C7 -->|否| C8{"修 bug +<br/>有 workflow 证据？"}
-    C8 -->|是| HF["hotfix"]
-    C8 -->|否| C9{"小改 + 有<br/>tweak 证据？"}
-    C9 -->|是| TW["tweak"]
-    C9 -->|否| C10{"有 workflow_candidate<br/>且有证据？"}
-    C10 -->|是| WF2["走候选流程"]
-    C10 -->|否| AU4["ask_user<br/>证据不足或歧义"]
+    A(["运行时评分开始"]) --> B{"① 置信度 ≥ 0.7<br/>且无歧义？"}
+    B -->|否| AU1["ask_user"]
+    B -->|是| C{"② 明确意图<br/>resume / out_of_scope？"}
+    C -->|是| CLEAR["resume / out_of_scope"]
+    C -->|否| D{"③ 显式流程<br/>与风险信号冲突？"}
+    D -->|是| AU2["ask_user"]
+    D -->|否| E{"④ 用户显式指定<br/>了流程？"}
+    E -->|是| WF["full / hotfix / tweak"]
+    E -->|否| F{"⑤ 命中风险信号<br/>或有 workflow 证据？"}
+    F -->|"风险信号"| FULL["full"]
+    F -->|"bug 证据"| HF["hotfix"]
+    F -->|"tweak 证据"| TW["tweak"]
+    F -->|"证据不足"| AU3["ask_user"]
 ```
 
 这套顺序回答了几个常见的"为什么路由成这样"的疑问：
