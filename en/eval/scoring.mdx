@@ -144,7 +144,24 @@ The `RubricAvg` column in the report is the **simple mean** (sum/len) of all dim
 
 Enable by setting `BENCH_LLM_JUDGE=1`. By default, Comet's final `weighted_score` is a rule score, not LLM-as-judge. Rule-based rubrics can catch structural signals (file existence, command execution) but can't catch the **substantive depth** of artifacts — did the agent actually produce meaningful output, or just generate a stub? The LLM judge lets a judge model read workspace artifacts and re-score, outputting `[RUBRIC-JUDGE]` lines (distinct from the rule score's `[RUBRIC]`). Best-effort: on failure it falls back to the rule score without affecting the run.
 
-The judge runs on the host (not inside Docker) by reusing the same `claude` CLI + proxy as the subject Agent, introducing no new dependencies. Use `BENCH_JUDGE_MODEL` or `ANTHROPIC_MODEL` to specify the judge model.
+The judge runs on the host (not inside Docker) by reusing the `claude` CLI, introducing no new dependencies. Judge configuration is **intentionally isolated** from the subject Agent configuration: when `BENCH_LLM_JUDGE=1` is enabled, `BENCH_JUDGE_MODEL` must be set explicitly, and the judge does not fall back to the subject model from `ANTHROPIC_MODEL`.
+
+The judge subprocess first clears inherited subject `ANTHROPIC_*` provider settings, then maps the dedicated judge settings into its own Claude CLI invocation:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `BENCH_JUDGE_MODEL` | Required. Judge model, passed both to `claude --model` and the subprocess `ANTHROPIC_MODEL` |
+| `BENCH_JUDGE_AUTH_TOKEN` | Optional. Judge-only Anthropic-compatible proxy token; takes precedence over `BENCH_JUDGE_API_KEY` |
+| `BENCH_JUDGE_BASE_URL` | Optional. Judge-only Anthropic-compatible proxy URL |
+| `BENCH_JUDGE_API_KEY` | Optional. Judge-only Anthropic API key; not passed to the subprocess when an auth token is set |
+
+This avoids the "same model as both contestant and judge" problem: the subject Agent can keep using its own `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, and token, while the judge must declare its model and provider separately. If `BENCH_LLM_JUDGE=1` is enabled without `BENCH_JUDGE_MODEL`, the report records:
+
+```text
+[RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
+```
+
+That skipped state is not marked as `enabled_and_successful`, and the judge model is not invoked.
 
 Different profiles cover different dimensions:
 
