@@ -146,16 +146,16 @@ Enable by setting `BENCH_LLM_JUDGE=1`. By default, Comet's final `weighted_score
 
 The judge runs on the host (not inside Docker) by reusing the `claude` CLI, introducing no new dependencies. Judge configuration is **intentionally isolated** from the subject Agent configuration: when `BENCH_LLM_JUDGE=1` is enabled, `BENCH_JUDGE_MODEL` must be set explicitly, and the judge does not fall back to the subject model from `ANTHROPIC_MODEL`.
 
-The judge subprocess first clears inherited subject `ANTHROPIC_*` provider settings, then maps the dedicated judge settings into its own Claude CLI invocation:
+When `BENCH_JUDGE_BASE_URL` and `BENCH_JUDGE_AUTH_TOKEN` / `BENCH_JUDGE_API_KEY` are configured, the judge first calls Anthropic Messages HTTP directly (`/v1/messages`). Without a dedicated judge endpoint, it falls back to the host `claude` CLI, clears inherited subject `ANTHROPIC_*` provider settings, then maps the dedicated judge settings into its own CLI invocation:
 
 | Environment variable | Purpose |
 | --- | --- |
-| `BENCH_JUDGE_MODEL` | Required. Judge model, passed both to `claude --model` and the subprocess `ANTHROPIC_MODEL` |
+| `BENCH_JUDGE_MODEL` | Required. Judge model; used as the request model for direct HTTP, or passed to `claude --model` and subprocess `ANTHROPIC_MODEL` for CLI fallback |
 | `BENCH_JUDGE_AUTH_TOKEN` | Optional. Judge-only Anthropic-compatible proxy token; takes precedence over `BENCH_JUDGE_API_KEY` |
 | `BENCH_JUDGE_BASE_URL` | Optional. Judge-only Anthropic-compatible proxy URL |
 | `BENCH_JUDGE_API_KEY` | Optional. Judge-only Anthropic API key; not passed to the subprocess when an auth token is set |
 
-This avoids the "same model as both contestant and judge" problem: the subject Agent can keep using its own `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, and token, while the judge must declare its model and provider separately. If `BENCH_LLM_JUDGE=1` is enabled without `BENCH_JUDGE_MODEL`, the report records:
+This avoids the "same model as both contestant and judge" problem: the subject Agent can keep using its own `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, and token, while the judge must declare its model and provider separately. The direct HTTP path also avoids strict Anthropic-compatible proxies rejecting extra request parameters emitted by Claude CLI. If `BENCH_LLM_JUDGE=1` is enabled without `BENCH_JUDGE_MODEL`, the report records:
 
 ```text
 [RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
