@@ -18,11 +18,46 @@ Comet 的 eval 不只给出"通过/失败"，而是**指标驱动**的评测：�
 | **RubricAvg**（报告列） | 该次运行的维度均分 | 诊断性 | 否 |
 | **pass@k** | k 次里至少成功一次的概率（能力上限） | 分布性 | 否 |
 | **pass^k** | k 次全部成功的概率（可靠性下限） | 分布性 | 否 |
+| **工作流契约检查** | 被测 Skill 是否真的按契约触发 | 硬判定 | 是（缺必需 Skill 会失败） |
 | **任务校验器通过/失败** | 这次实现到底对不对 | 硬判定 | 是（决定 pass/fail） |
 
 <Note>
-  <strong>关键区分</strong>：rubric 评分和 pass@k/pass^k 都是<strong>信息性指标</strong>，用于诊断和对比；真正的<strong>通过/失败</strong>由任务校验器（<code>target_artifacts</code> 存在性 + <code>test_scripts</code>）决定。一次运行"通过"的定义是<strong>任务校验器零失败</strong>（<code>checks_failed == []</code>）。
+  <strong>关键区分</strong>：rubric 的维度分和 pass@k/pass^k 都是<strong>信息性指标</strong>，用于诊断和对比；真正的<strong>通过/失败</strong>看 <code>checks_failed == []</code>。大多数失败来自任务校验器（<code>target_artifacts</code> 存在性 + <code>test_scripts</code>），但 profile 也会把必需 Skill 未触发这类工作流契约问题写入 <code>checks_failed</code>。
 </Note>
+
+## 证据从哪里来
+
+Comet eval 的运行证据来自 **Claude CLI 自己输出的 stream-json**，不是从终端文本里猜，也不是让另一个模型回忆总结。
+
+单轮评测会在 Docker 里的任务目录直接运行被测 Agent：
+
+```bash
+claude -p "$prompt" \
+  --dangerously-skip-permissions \
+  --output-format stream-json \
+  --verbose
+```
+
+eval harness 保存这次运行的原始 `stdout` / `stderr`，再逐行解析 `stdout` 里的 JSONL 事件。解析器会提取：
+
+- `result` 事件里的 `duration_ms`、`num_turns`、token 和 cost
+- `tool_use` 事件里的工具调用
+- `Bash` 命令，作为 `commands_run`
+- `Write` / `Edit` 文件路径，作为 `files_created` / `files_modified`
+- `Skill` 调用，作为 `skills_invoked`
+- 对应的 `tool_result` 输出，挂回原工具调用
+
+所以报告里的 `Skills invoked`、`commands_run`、`tool_calls`、`files_created`、token/cost 等，都是从 Claude CLI 的结构化事件流整理出来的可观测行为日志。
+
+<Warning>
+  stream-json 仍然只是<strong>可观测行为日志</strong>。它适合统计工具调用、命令、Skill 调用、文件变化和成本；它不包含模型内部推理，也不能证明某个内部决策的因果链。schema 变化、坏 JSON 行、CLI 版本变化都可能影响解析，因此 raw stdout/stderr 会保留下来供审计。
+</Warning>
+
+### 轨迹和事件流不是一回事
+
+Comet Classic runtime 自己也会写 `.comet/trajectory*.jsonl`，记录状态推进，例如 `state_transitioned`。这类 trajectory 是恢复能力的证据之一，rubric 会在 `recovery_resilience` 里检查它是否存在。
+
+但 pass@k / pass^k 不从 trajectory 计算，rubric 的大部分维度也不是只看 trajectory。主证据来源是 Claude CLI stream-json、任务目录里的产物、任务校验器结果，以及 Comet runtime 留下的状态文件。
 
 ## rubric 评分
 
@@ -47,7 +82,7 @@ eval 内置三套 rubric，对应三种 profile：
 
 ### comet-workflow rubric（9 维）
 
-评估经典五阶段工作流。**这套 rubric 永远不产生硬失败**（始终返回空失败列表）。
+评估经典五阶段工作流。九个 `[RUBRIC]` 维度分本身是诊断性分数；但 profile 仍会检查工作流契约：如果没有真实触发 `comet`、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill 或 Superpowers 依赖 Skill，会产生硬失败。
 
 | 维度 | 权重 | 检查什么 |
 | --- | --- | --- |
@@ -55,7 +90,7 @@ eval 内置三套 rubric，对应三种 profile：
 | `main_flow` | 1.5 | 五阶段（open→design→build→verify→archive）有多少阶段留下证据 |
 | `gate_guard` | 1.5 | 是否用了 `comet-guard` / `transition` / `--apply` |
 | `artifact_quality` | 1.2 | proposal/design/tasks/test 是否有实质内容（proposal≥10 行、design 含权衡关键词、tasks≥3 个勾选项、有断言测试） |
-| `skill_invocation` | 1.0 | comet 入口和子 Skill 是否按序调用（6 个核心 Skill；dispatcher 先调用有 +0.10 加成，封顶 1.0） |
+| `skill_invocation` | 1.0 | 是否真实观测到 comet 入口、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill、Superpowers 依赖 Skill，且入口先于阶段 Skill |
 | `spec_drift` | 1.0 | build 期改的 delta spec 是否在归档前 reconcile（没动 spec 则中性 1.0） |
 | `decision_point_compliance` | 1.0 | 是否在决策点暂停问用户而非自动决策（ask 调用数 ≥ mutation 数的一半） |
 | `recovery_resilience` | 1.0 | 中断后是否正确保留和恢复状态（checkpoint/trajectory/context/pending/.comet.yaml 五项） |
@@ -107,7 +142,7 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 
 ### LLM-as-judge 覆盖（可选）
 
-设 `BENCH_LLM_JUDGE=1` 启用。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物的实质深度**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
+设 `BENCH_LLM_JUDGE=1` 启用。默认情况下，Comet 的最终 `weighted_score` 是规则分，不是 LLM-as-judge。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物的实质深度**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
 
 judge 在宿主机（不在 Docker 内）通过复用被测 Agent 同款的 `claude` CLI + proxy 运行，不引入新依赖。可用 `BENCH_JUDGE_MODEL` 或 `ANTHROPIC_MODEL` 指定裁判模型。
 
@@ -168,7 +203,7 @@ flowchart LR
 
 ### 怎么得到多次运行
 
-`--count N`（pytest 选项）把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果。这 N 个布尔值就是 pass@k/pass^k 的输入。
+`--count N`（pytest 选项）把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果。对比报告先过滤出 analysis set：明确的环境或运行器噪声会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
 
 ```bash
 # 重复 5 次，让 pass@k/pass^k 有意义
@@ -214,6 +249,8 @@ flowchart TD
 ```
 
 循环最多 `max_turns` 次外层往返（comet-workflow 通常 12 次，authoring-skill 通常 8 次），命中"完成"（`archive complete` / `workflow complete` / `all 5 phases` 等）则提前结束。
+
+每一轮被测 Agent 都用 `--output-format stream-json --verbose` 运行。loop 驱动只把每轮被测 Agent 的 stream-json stdout 拼接起来给 harness 解析；用户模拟 Agent 的一次性回复不会进入主事件流。因此事件统计反映的是 subject Agent 的可观测行为，而不是 simulator 的行为。
 
 <Note>
   <code>max_turns</code> 不是被测 Agent 内部真实工作轮数，也不是工具调用次数。一次外层往返指：被测 Agent 跑到决策点，用户模拟 Agent 回复，然后被测 Agent 用 <code>--resume</code> 继续。同一次往返内部仍可能包含多条 assistant 消息、工具调用和文件操作。
