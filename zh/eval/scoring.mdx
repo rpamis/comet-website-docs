@@ -144,7 +144,24 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 
 设 `BENCH_LLM_JUDGE=1` 启用。默认情况下，Comet 的最终 `weighted_score` 是规则分，不是 LLM-as-judge。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物的实质深度**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
 
-judge 在宿主机（不在 Docker 内）通过复用被测 Agent 同款的 `claude` CLI + proxy 运行，不引入新依赖。可用 `BENCH_JUDGE_MODEL` 或 `ANTHROPIC_MODEL` 指定裁判模型。
+judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**故意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
+
+裁判子进程会先清除继承来的主 `ANTHROPIC_*` provider 设置，再把独立裁判配置映射给自己的 Claude CLI 调用：
+
+| 环境变量 | 用途 |
+| --- | --- |
+| `BENCH_JUDGE_MODEL` | 必填。裁判模型，同时传给 `claude --model` 和子进程 `ANTHROPIC_MODEL` |
+| `BENCH_JUDGE_AUTH_TOKEN` | 可选。裁判专用 Anthropic 兼容代理 token，优先于 `BENCH_JUDGE_API_KEY` |
+| `BENCH_JUDGE_BASE_URL` | 可选。裁判专用 Anthropic 兼容代理地址 |
+| `BENCH_JUDGE_API_KEY` | 可选。裁判专用 Anthropic API key；设置 auth token 时不会传入子进程 |
+
+这样设计是为了避免"同一个模型既当选手又当裁判"：主 Agent 可以继续使用自己的 `ANTHROPIC_MODEL`、`ANTHROPIC_BASE_URL` 和 token，judge 必须单独声明模型和 provider。若开启了 `BENCH_LLM_JUDGE=1` 但缺少 `BENCH_JUDGE_MODEL`，报告会写入：
+
+```text
+[RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
+```
+
+这种 skipped 状态不会被标记为 `enabled_and_successful`，也不会调用裁判模型。
 
 不同 profile 覆盖的维度不同：
 
