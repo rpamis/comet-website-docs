@@ -146,16 +146,16 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 
 judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**故意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
 
-裁判子进程会先清除继承来的主 `ANTHROPIC_*` provider 设置，再把独立裁判配置映射给自己的 Claude CLI 调用：
+如果配置了 `BENCH_JUDGE_BASE_URL` 和 `BENCH_JUDGE_AUTH_TOKEN` / `BENCH_JUDGE_API_KEY`，judge 会优先直接调用 Anthropic Messages HTTP（`/v1/messages`）。没有专用 judge endpoint 时，才回退到宿主机 `claude` CLI，并在子进程里清除继承来的主 `ANTHROPIC_*` provider 设置，再把独立裁判配置映射给自己的 CLI 调用：
 
 | 环境变量 | 用途 |
 | --- | --- |
-| `BENCH_JUDGE_MODEL` | 必填。裁判模型，同时传给 `claude --model` 和子进程 `ANTHROPIC_MODEL` |
+| `BENCH_JUDGE_MODEL` | 必填。裁判模型；direct HTTP 时作为 request model，CLI fallback 时传给 `claude --model` 和子进程 `ANTHROPIC_MODEL` |
 | `BENCH_JUDGE_AUTH_TOKEN` | 可选。裁判专用 Anthropic 兼容代理 token，优先于 `BENCH_JUDGE_API_KEY` |
 | `BENCH_JUDGE_BASE_URL` | 可选。裁判专用 Anthropic 兼容代理地址 |
 | `BENCH_JUDGE_API_KEY` | 可选。裁判专用 Anthropic API key；设置 auth token 时不会传入子进程 |
 
-这样设计是为了避免"同一个模型既当选手又当裁判"：主 Agent 可以继续使用自己的 `ANTHROPIC_MODEL`、`ANTHROPIC_BASE_URL` 和 token，judge 必须单独声明模型和 provider。若开启了 `BENCH_LLM_JUDGE=1` 但缺少 `BENCH_JUDGE_MODEL`，报告会写入：
+这样设计是为了避免"同一个模型既当选手又当裁判"：主 Agent 可以继续使用自己的 `ANTHROPIC_MODEL`、`ANTHROPIC_BASE_URL` 和 token，judge 必须单独声明模型和 provider。direct HTTP 路径也能避开某些严格 Anthropic 兼容代理不接受 Claude CLI 额外请求参数的问题。若开启了 `BENCH_LLM_JUDGE=1` 但缺少 `BENCH_JUDGE_MODEL`，报告会写入：
 
 ```text
 [RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
