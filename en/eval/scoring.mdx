@@ -18,11 +18,46 @@ Comet's eval doesn't just give "pass/fail" — it's **metric-driven** evaluation
 | **RubricAvg** (report column) | Mean dimension score for that run | Diagnostic | No |
 | **pass@k** | Probability of at least one success out of k (capability ceiling) | Distributional | No |
 | **pass^k** | Probability of all k succeeding (reliability floor) | Distributional | No |
+| **Workflow contract checks** | Whether the tested Skill actually triggered as contracted | Hard judgment | Yes (missing required Skills fails) |
 | **Task validator pass/fail** | Whether this implementation is actually correct | Hard judgment | Yes (decides pass/fail) |
 
 <Note>
-  <strong>Key distinction</strong>: rubric scores and pass@k/pass^k are all <strong>informational metrics</strong>, for diagnosis and comparison; the real <strong>pass/fail</strong> is determined by the task validators (<code>target_artifacts</code> existence + <code>test_scripts</code>). The definition of a "pass" for a run is <strong>zero task validator failures</strong> (<code>checks_failed == []</code>).
+  <strong>Key distinction</strong>: rubric dimension scores and pass@k/pass^k are <strong>informational metrics</strong>, for diagnosis and comparison; the real <strong>pass/fail</strong> is <code>checks_failed == []</code>. Most failures come from task validators (<code>target_artifacts</code> existence + <code>test_scripts</code>), but profiles can also write workflow-contract failures, such as missing required Skills, into <code>checks_failed</code>.
 </Note>
+
+## Where the Evidence Comes From
+
+Comet eval evidence comes from **stream-json emitted directly by the Claude CLI**. It is not guessed from terminal text, and it is not reconstructed from another model's summary.
+
+Single-turn evaluation runs the subject Agent directly inside the task directory in Docker:
+
+```bash
+claude -p "$prompt" \
+  --dangerously-skip-permissions \
+  --output-format stream-json \
+  --verbose
+```
+
+The eval harness saves raw `stdout` / `stderr`, then parses JSONL events from `stdout` line by line. The parser extracts:
+
+- `duration_ms`, `num_turns`, tokens, and cost from `result` events
+- Tool calls from `tool_use` events
+- `Bash` commands as `commands_run`
+- `Write` / `Edit` paths as `files_created` / `files_modified`
+- `Skill` calls as `skills_invoked`
+- Matching `tool_result` output attached back to the original tool call
+
+So report fields such as `Skills invoked`, `commands_run`, `tool_calls`, `files_created`, token/cost, and duration are organized from Claude CLI's structured event stream.
+
+<Warning>
+  stream-json is still an <strong>observable behavior log</strong>. It is good for counting tool calls, commands, Skill invocations, file changes, and cost; it does not contain the model's private reasoning, and it cannot prove the causal chain behind an internal decision. Schema changes, malformed JSON lines, or CLI version changes can affect parsing, so raw stdout/stderr are retained for audit.
+</Warning>
+
+### Trajectory and Event Stream Are Different
+
+The Comet Classic runtime also writes `.comet/trajectory*.jsonl`, recording state progression such as `state_transitioned`. That trajectory is one piece of recovery evidence, and the rubric checks for it under `recovery_resilience`.
+
+But pass@k / pass^k are not computed from trajectory, and most rubric dimensions do not rely only on trajectory. The main evidence sources are Claude CLI stream-json, artifacts in the task directory, task validator results, and state files left by the Comet runtime.
 
 ## rubric Scoring
 
@@ -47,7 +82,7 @@ eval has three built-in rubrics, corresponding to three profiles:
 
 ### comet-workflow rubric (9 dimensions)
 
-Evaluates the classic five-phase workflow. **This rubric never produces a hard failure** (always returns an empty failure list).
+Evaluates the classic five-phase workflow. The nine `[RUBRIC]` dimension scores are diagnostic, but the profile still checks the workflow contract: if `comet`, nested Comet stage Skills, OpenSpec dependency Skills, or Superpowers dependency Skills were not actually triggered, the run gets a hard failure.
 
 | Dimension | Weight | What it checks |
 | --- | --- | --- |
@@ -55,7 +90,7 @@ Evaluates the classic five-phase workflow. **This rubric never produces a hard f
 | `main_flow` | 1.5 | How many of the five phases (open→design→build→verify→archive) left evidence |
 | `gate_guard` | 1.5 | Whether `comet-guard` / `transition` / `--apply` were used |
 | `artifact_quality` | 1.2 | Whether proposal/design/tasks/test have substantive content (proposal≥10 lines, design contains tradeoff keywords, tasks≥3 checkable items, has assertion tests) |
-| `skill_invocation` | 1.0 | Whether the comet entry and sub-Skills were called in order (6 core Skills; dispatcher called first gives +0.10 bonus, capped at 1.0) |
+| `skill_invocation` | 1.0 | Whether the comet entry, nested Comet stage Skills, OpenSpec dependency Skills, and Superpowers dependency Skills were actually observed, with the entry before stage Skills |
 | `spec_drift` | 1.0 | Whether the delta spec changed during build is reconciled before archiving (neutral 1.0 if spec untouched) |
 | `decision_point_compliance` | 1.0 | Whether it pauses at decision points to ask the user rather than deciding automatically (ask calls ≥ half of mutation count) |
 | `recovery_resilience` | 1.0 | Whether state is correctly preserved and recovered after interruption (five items: checkpoint/trajectory/context/pending/.comet.yaml) |
@@ -107,7 +142,7 @@ The `RubricAvg` column in the report is the **simple mean** (sum/len) of all dim
 
 ### LLM-as-judge Override (Optional)
 
-Enable by setting `BENCH_LLM_JUDGE=1`. Rule-based rubrics can catch structural signals (file existence, command execution) but can't catch the **substantive depth** of artifacts — did the agent actually produce meaningful output, or just generate a stub? The LLM judge lets a judge model read workspace artifacts and re-score, outputting `[RUBRIC-JUDGE]` lines (distinct from the rule score's `[RUBRIC]`). Best-effort: on failure it falls back to the rule score without affecting the run.
+Enable by setting `BENCH_LLM_JUDGE=1`. By default, Comet's final `weighted_score` is a rule score, not LLM-as-judge. Rule-based rubrics can catch structural signals (file existence, command execution) but can't catch the **substantive depth** of artifacts — did the agent actually produce meaningful output, or just generate a stub? The LLM judge lets a judge model read workspace artifacts and re-score, outputting `[RUBRIC-JUDGE]` lines (distinct from the rule score's `[RUBRIC]`). Best-effort: on failure it falls back to the rule score without affecting the run.
 
 The judge runs on the host (not inside Docker) by reusing the same `claude` CLI + proxy as the subject Agent, introducing no new dependencies. Use `BENCH_JUDGE_MODEL` or `ANTHROPIC_MODEL` to specify the judge model.
 
@@ -168,7 +203,7 @@ flowchart LR
 
 ### How to Get Multiple Runs
 
-`--count N` (a pytest option) repeats each `(task, treatment)` combination N times, producing N independent pass/fail results. These N booleans are the input to pass@k/pass^k.
+`--count N` (a pytest option) repeats each `(task, treatment)` combination N times, producing N independent pass/fail results. The comparison report first filters to the analysis set: clear environment or runner noise is excluded, while flagged runs still participate in the main statistics and are called out. Those N booleans in the analysis set are the input to pass@k/pass^k.
 
 ```bash
 # Repeat 5 times to make pass@k/pass^k meaningful
@@ -214,6 +249,8 @@ flowchart TD
 ```
 
 The loop runs up to `max_turns` outer round-trips (comet-workflow typically 12, authoring-skill typically 8), ending early when "complete" is hit (`archive complete` / `workflow complete` / `all 5 phases`, etc.).
+
+Every subject Agent turn also runs with `--output-format stream-json --verbose`. The loop driver only concatenates the subject Agent's stream-json stdout for the harness to parse; the user simulator Agent's one-shot replies do not enter the main event stream. As a result, event statistics reflect the subject Agent's observable behavior, not the simulator's behavior.
 
 <Note>
   <code>max_turns</code> is not the number of real internal working turns of the subject Agent, nor the number of tool calls. One outer round-trip means: the subject Agent runs to a decision point, the user simulator Agent replies, then the subject Agent continues with <code>--resume</code>. Within the same round-trip there may still be multiple assistant messages, tool calls, and file operations.
