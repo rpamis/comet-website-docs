@@ -1,0 +1,174 @@
+---
+title: "Comet 基线真实评估实验"
+description: "整理 2026-07-05 的 Comet LangSmith 基线对比报告，说明如何阅读 CONTROL、0.4.0 beta 和 0.3.9 冻结基线在任务完成、workflow 质量、pass@k/pass^k、成本和失败归因上的差异。"
+---
+
+本文整理一次真实的 Comet workflow 基线评估实验。目标不是介绍功能，而是展示一份对比报告应如何阅读：先确认数据范围，再看任务结果、可靠性指标、rubric 维度、成本和失败归因。
+
+<Note>
+  本文基于这次实验的报告快照。报告中的 <code>CONTROL</code> 是无 Comet Skill 的业务完成基线，不要求产出 Comet workflow artifact。因此它适合做业务完成对照，不适合用来判断 Comet workflow 是否被正确执行。
+</Note>
+
+## 实验范围
+
+这次实验比较三个 treatment：
+
+| Treatment | 含义 | 用途 |
+| --- | --- | --- |
+| `CONTROL` | 不注入 Comet Skill | 业务完成基线 |
+| `COMET_FULL_040_BETA` | 当前 0.4.0 beta Comet workflow Skill 栈 | 待评估版本 |
+| `COMET_FULL_039` | 0.3.9 冻结基线 | 回归对照 |
+
+实验包含 16 个 Comet workflow 任务。每个 treatment 纳入 80 次 analysis run，相当于每个任务约 5 次重复运行。报告同时统计任务结果、rubric 维度、`pass@k` / `pass^k`、成本、运行时开销和 run-level failed checks。
+
+| Treatment | Raw runs | Analysis set | Flagged | Excluded |
+| --- | ---: | ---: | ---: | ---: |
+| `CONTROL` | 80 | 80 | 79 | 0 |
+| `COMET_FULL_040_BETA` | 80 | 80 | 80 | 0 |
+| `COMET_FULL_039` | 80 | 80 | 80 | 0 |
+
+<Warning>
+  <code>flagged</code> 运行仍被纳入 analysis set。它表示这次运行完成了，但报告标出了 harness、task 或可观测性风险。读结论时应同时查看 headline metric 和 failed checks。
+</Warning>
+
+## 核心读数
+
+报告给出的 verdict 是：`COMET_FULL_040_BETA` 的综合 workflow 分数为 `0.89`，高于 `COMET_FULL_039` 的 `0.82`，且没有维度退步超过 `0.05` 的容忍线。
+
+同时，strict overall pass 显示另一层信号：`COMET_FULL_040_BETA` 为 `71/80`，低于 `COMET_FULL_039` 的 `76/80`。这个差异主要来自 run-level workflow contract failure，而不是任务矩阵中的业务失败。
+
+| 观察项 | `COMET_FULL_040_BETA` | `COMET_FULL_039` | 解读 |
+| --- | ---: | ---: | --- |
+| 任务矩阵 PASS 数 | 16/16 | 15/16 | 0.4.0 beta 没有出现任务级失败 |
+| strict overall pass | 71/80 | 76/80 | 0.4.0 beta 的 run-level contract failure 更多 |
+| business pass | 79/80 | 79/80 | 两者业务完成率接近 |
+| workflow pass | 79/80 | 80/80 | 0.3.9 在该口径下略高 |
+| weighted overall | 0.89 | 0.82 | 0.4.0 beta 的加权 workflow 质量更高 |
+| 平均成本/运行 | $1.3689 | $1.4323 | 0.4.0 beta 成本略低 |
+
+因此，这份报告需要分口径阅读：0.4.0 beta 在加权 workflow 质量、状态恢复和部分流程证据上高于 0.3.9；同时，run-level Skill 调用契约仍需要继续检查。
+
+## pass@k 和 pass^k
+
+`pass@k` 表示 k 次尝试中至少一次成功的概率，用来观察能力上限。`pass^k` 表示 k 次尝试全部成功的概率，用来观察可靠性下限。
+
+| Metric | Treatment | pass@1 | pass@5 | pass^1 | pass^5 | pass/fail |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| overall | `CONTROL` | 1.00 | 1.00 | 1 | 1 | 80/80 |
+| overall | `COMET_FULL_040_BETA` | 0.89 | 1.00 | 0 | 0 | 71/80 |
+| overall | `COMET_FULL_039` | 0.95 | 1.00 | 0 | 0 | 76/80 |
+| business | `COMET_FULL_040_BETA` | 0.99 | 1.00 | 0 | 0 | 79/80 |
+| business | `COMET_FULL_039` | 0.99 | 1.00 | 0 | 0 | 79/80 |
+| workflow | `COMET_FULL_040_BETA` | 0.99 | 1.00 | 0 | 0 | 79/80 |
+| workflow | `COMET_FULL_039` | 1.00 | 1.00 | 1 | 1 | 80/80 |
+
+这里的主要信号是 gap：`COMET_FULL_040_BETA` 的 `pass@5` 为 `1.00`，但 `pass^5` 为 `0`。这表示多次尝试中可以观察到成功，但连续稳定成功还没有达到。
+
+## 任务结果
+
+任务矩阵反映业务任务是否通过：
+
+| 任务结果 | `CONTROL` | `COMET_FULL_040_BETA` | `COMET_FULL_039` |
+| --- | ---: | ---: | ---: |
+| PASS 任务数 | 16 | 16 | 15 |
+| FAIL 任务数 | 0 | 0 | 1 |
+
+唯一任务级失败出现在 `COMET_FULL_039` 的 `comet-api-cache-ttl`。在任务结果口径下，0.4.0 beta 覆盖了全部 16 个任务。
+
+但任务矩阵只回答"任务是否完成"。它不回答 Skill 是否按预期触发、是否保留了足够的 workflow 证据、是否稳定遵守决策点。因此还需要继续看 rubric 和 failed checks。
+
+## Rubric 维度
+
+0.4.0 beta 的加权分更高，主要来自 `main_flow`、`gate_guard` 和 `recovery_resilience`：
+
+| Dimension | `COMET_FULL_040_BETA` | `COMET_FULL_039` | 差值 |
+| --- | ---: | ---: | ---: |
+| `main_flow` | 0.99 | 0.89 | +0.10 |
+| `gate_guard` | 0.69 | 0.53 | +0.17 |
+| `recovery_resilience` | 1.00 | 0.56 | +0.44 |
+| `efficiency` | 0.89 | 0.87 | +0.03 |
+| `artifact_quality` | 0.98 | 0.97 | +0.02 |
+| `spec_drift` | 0.74 | 0.72 | +0.01 |
+| `skill_invocation` | 0.97 | 0.99 | -0.02 |
+| `decision_point_compliance` | 0.55 | 0.57 | -0.02 |
+| **Overall** | **0.89** | **0.82** | **+0.07** |
+
+`recovery_resilience` 是本次差值最高的维度。它说明 0.4.0 beta 在中断恢复、状态保留和恢复证据上得分更高。
+
+`decision_point_compliance` 和 `skill_invocation` 没有改善。它们对应两个后续检查方向：决策点是否稳定暴露给用户，以及依赖 Skill 的调用证据是否稳定进入报告。
+
+## 成本和运行时
+
+0.4.0 beta 的总 token、总成本和平均成本低于 0.3.9：
+
+| Treatment | Runs | Tokens | Cost | Avg tokens/run | Avg cost/run |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `COMET_FULL_040_BETA` | 80 | 160,469,054 | $109.5089 | 2,005,863 | $1.3689 |
+| `COMET_FULL_039` | 80 | 169,147,047 | $114.5833 | 2,114,338 | $1.4323 |
+
+运行时开销接近，但工具调用数有差异：
+
+| Treatment | Avg turns/run | Avg duration/run | Avg tool calls/run |
+| --- | ---: | ---: | ---: |
+| `COMET_FULL_040_BETA` | 48.5 | 182s | 82.9 |
+| `COMET_FULL_039` | 44.0 | 182s | 96.0 |
+
+这表示 0.4.0 beta 平均轮数更高，但工具调用数更少，整体耗时与 0.3.9 基本一致。
+
+## Failed checks
+
+run-level failed checks 主要集中在 Skill 调用契约：
+
+| Treatment | Failed checks | 主要类型 | 含义 |
+| --- | ---: | --- | --- |
+| `COMET_FULL_040_BETA` | 10 | harness + workflow | 一次目标 `comet` Skill 未被观测到；多次 Superpowers / OpenSpec 依赖 Skill 未触发 |
+| `COMET_FULL_039` | 5 | workflow | 多次 Superpowers / OpenSpec 依赖 Skill 未触发 |
+
+这类失败不一定等同于业务任务失败。它表示报告没有稳定观察到预期的 Skill 调用证据。对 workflow Skill 来说，这仍然重要，因为评估不仅检查最终结果，也检查过程是否可追踪、可恢复。
+
+## LLM judge overlay
+
+LLM judge 重新阅读 artifact 后，对三个定性维度给出独立评分：
+
+| Dimension | `COMET_FULL_040_BETA` | `COMET_FULL_039` |
+| --- | ---: | ---: |
+| `artifact_quality` | 0.88 | 0.90 |
+| `spec_drift` | 0.82 | 0.84 |
+| `main_flow` | 0.99 | 1.00 |
+
+这组读数说明，规则型 rubric 观察到 0.4.0 beta 的流程和恢复证据更好；但从 artifact 内容质量看，0.4.0 beta 与 0.3.9 接近，部分维度略低。后续优化可以同时关注两类信号：结构化流程证据，以及 proposal、design、tasks、verify artifact 的内容密度。
+
+## 如何使用这份结果
+
+可以把这份报告作为一次基线读数，而不是单一通过/失败结论。
+
+| 读数 | 建议 |
+| --- | --- |
+| `weighted overall` 高于 0.3.9 | 可以认为 workflow 质量维度有改善 |
+| strict overall pass 低于 0.3.9 | 需要检查 run-level contract failure |
+| 任务矩阵全部 PASS | 业务任务层面未观察到回归 |
+| `pass@5 = 1.00` 且 `pass^5 = 0` | 需要继续提高重复运行稳定性 |
+| `recovery_resilience` 提升明显 | 状态恢复方向可以继续保留 |
+| `decision_point_compliance` 偏低 | 需要检查决策点暂停和用户确认行为 |
+
+如果要继续推进 0.4.0 beta，优先检查两类问题：依赖 Skill 调用证据是否稳定进入 stream-json，以及决策点是否稳定要求用户确认。修复后，应使用同一组任务和相同重复次数重跑对比，避免把任务差异或样本差异当成版本差异。
+
+## 原始报告
+
+下面嵌入原始 HTML 报告快照。它包含完整图表、任务矩阵、来源证据、raw vs analysis sensitivity、failed checks 和 LLM judge overlay。
+
+<Frame caption="Comet 基线对比原始 HTML 报告快照">
+  <iframe
+    src="/assets/eval-reports/comet-baseline-20260705/comparison_report.html"
+    title="Comet 基线真实评估实验原始报告"
+    className="w-full rounded-xl"
+    height="720"
+    loading="lazy"
+  ></iframe>
+</Frame>
+
+## 下一步
+
+- [评分指标与双 Agent 评测](/zh/eval/scoring) - 理解 `pass@k`、`pass^k`、rubric 和 LLM judge。
+- [读取评估报告](/zh/eval/reports) - 学会从 summary、report JSON 和 failed checks 定位问题。
+- [Eval harness](/zh/eval/harness) - 理解评估如何运行、如何收集 stream-json 证据。
