@@ -1,0 +1,174 @@
+---
+title: "Comet baseline evaluation experiment"
+description: "Read the July 5, 2026 Comet LangSmith baseline comparison report across CONTROL, 0.4.0 beta, and the frozen 0.3.9 baseline for task outcomes, workflow quality, pass@k/pass^k, cost, and failure attribution."
+---
+
+This page summarizes a real Comet workflow baseline evaluation. It shows how to read a comparison report: confirm the data scope first, then inspect task outcomes, reliability metrics, rubric dimensions, cost, and failure attribution.
+
+<Note>
+  This page is based on one report snapshot. In the report, <code>CONTROL</code> is a business-completion baseline without the Comet Skill. It does not require Comet workflow artifacts, so it is useful as a business baseline but not as evidence that the Comet workflow executed correctly.
+</Note>
+
+## Experiment scope
+
+This experiment compares three treatments:
+
+| Treatment | Meaning | Purpose |
+| --- | --- | --- |
+| `CONTROL` | No Comet Skill injected | Business-completion baseline |
+| `COMET_FULL_040_BETA` | Current 0.4.0 beta Comet workflow Skill stack | Version under evaluation |
+| `COMET_FULL_039` | Frozen 0.3.9 baseline | Regression baseline |
+
+The experiment includes 16 Comet workflow tasks. Each treatment has 80 runs in the analysis set, which is roughly 5 repeated runs per task. The report covers task outcomes, rubric dimensions, `pass@k` / `pass^k`, cost, runtime overhead, and run-level failed checks.
+
+| Treatment | Raw runs | Analysis set | Flagged | Excluded |
+| --- | ---: | ---: | ---: | ---: |
+| `CONTROL` | 80 | 80 | 79 | 0 |
+| `COMET_FULL_040_BETA` | 80 | 80 | 80 | 0 |
+| `COMET_FULL_039` | 80 | 80 | 80 | 0 |
+
+<Warning>
+  <code>flagged</code> runs are still included in the analysis set. They completed, but the report marked harness, task, or observability risk. Read headline metrics together with failed checks.
+</Warning>
+
+## Key readings
+
+The report verdict says `COMET_FULL_040_BETA` has an overall workflow score of `0.89`, above `COMET_FULL_039` at `0.82`, with no dimension regressing beyond the `0.05` tolerance.
+
+Strict overall pass shows another signal: `COMET_FULL_040_BETA` is `71/80`, lower than `COMET_FULL_039` at `76/80`. This difference mainly comes from run-level workflow contract failures, not business failures in the task outcome matrix.
+
+| Observation | `COMET_FULL_040_BETA` | `COMET_FULL_039` | Reading |
+| --- | ---: | ---: | --- |
+| Task-matrix PASS count | 16/16 | 15/16 | 0.4.0 beta has no task-level failure |
+| Strict overall pass | 71/80 | 76/80 | 0.4.0 beta has more run-level contract failures |
+| Business pass | 79/80 | 79/80 | Business completion is similar |
+| Workflow pass | 79/80 | 80/80 | 0.3.9 is slightly higher by this measure |
+| Weighted overall | 0.89 | 0.82 | 0.4.0 beta has higher weighted workflow quality |
+| Average cost/run | $1.3689 | $1.4323 | 0.4.0 beta costs slightly less |
+
+Read the report by metric family: 0.4.0 beta is higher on weighted workflow quality, recovery, and some process-evidence dimensions; run-level Skill invocation contracts still need inspection.
+
+## pass@k and pass^k
+
+`pass@k` is the probability that at least one of k attempts succeeds. It is a capability ceiling. `pass^k` is the probability that all k attempts succeed. It is a reliability floor.
+
+| Metric | Treatment | pass@1 | pass@5 | pass^1 | pass^5 | pass/fail |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| overall | `CONTROL` | 1.00 | 1.00 | 1 | 1 | 80/80 |
+| overall | `COMET_FULL_040_BETA` | 0.89 | 1.00 | 0 | 0 | 71/80 |
+| overall | `COMET_FULL_039` | 0.95 | 1.00 | 0 | 0 | 76/80 |
+| business | `COMET_FULL_040_BETA` | 0.99 | 1.00 | 0 | 0 | 79/80 |
+| business | `COMET_FULL_039` | 0.99 | 1.00 | 0 | 0 | 79/80 |
+| workflow | `COMET_FULL_040_BETA` | 0.99 | 1.00 | 0 | 0 | 79/80 |
+| workflow | `COMET_FULL_039` | 1.00 | 1.00 | 1 | 1 | 80/80 |
+
+The main signal is the gap: `COMET_FULL_040_BETA` has `pass@5 = 1.00` but `pass^5 = 0`. Success is observable across repeated attempts, but all-attempt reliability is not yet reached.
+
+## Task outcomes
+
+The task matrix reflects whether the business task passed:
+
+| Task outcome | `CONTROL` | `COMET_FULL_040_BETA` | `COMET_FULL_039` |
+| --- | ---: | ---: | ---: |
+| PASS tasks | 16 | 16 | 15 |
+| FAIL tasks | 0 | 0 | 1 |
+
+The only task-level failure is `comet-api-cache-ttl` under `COMET_FULL_039`. By task outcome, 0.4.0 beta covers all 16 tasks.
+
+The task matrix only answers whether the task completed. It does not answer whether the Skill was invoked as expected, whether enough workflow evidence was preserved, or whether decision points were handled consistently. Use rubric dimensions and failed checks for those questions.
+
+## Rubric dimensions
+
+0.4.0 beta has a higher weighted score, mainly from `main_flow`, `gate_guard`, and `recovery_resilience`:
+
+| Dimension | `COMET_FULL_040_BETA` | `COMET_FULL_039` | Delta |
+| --- | ---: | ---: | ---: |
+| `main_flow` | 0.99 | 0.89 | +0.10 |
+| `gate_guard` | 0.69 | 0.53 | +0.17 |
+| `recovery_resilience` | 1.00 | 0.56 | +0.44 |
+| `efficiency` | 0.89 | 0.87 | +0.03 |
+| `artifact_quality` | 0.98 | 0.97 | +0.02 |
+| `spec_drift` | 0.74 | 0.72 | +0.01 |
+| `skill_invocation` | 0.97 | 0.99 | -0.02 |
+| `decision_point_compliance` | 0.55 | 0.57 | -0.02 |
+| **Overall** | **0.89** | **0.82** | **+0.07** |
+
+`recovery_resilience` has the largest delta in this report. It shows higher scoring for interruption recovery, state preservation, and recovery evidence in 0.4.0 beta.
+
+`decision_point_compliance` and `skill_invocation` did not improve. They point to two follow-up checks: whether decision points are reliably surfaced to the user, and whether dependency Skill invocation evidence reliably enters the report.
+
+## Cost and runtime
+
+0.4.0 beta has lower total tokens, total cost, and average cost than 0.3.9:
+
+| Treatment | Runs | Tokens | Cost | Avg tokens/run | Avg cost/run |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `COMET_FULL_040_BETA` | 80 | 160,469,054 | $109.5089 | 2,005,863 | $1.3689 |
+| `COMET_FULL_039` | 80 | 169,147,047 | $114.5833 | 2,114,338 | $1.4323 |
+
+Runtime overhead is close, while tool calls differ:
+
+| Treatment | Avg turns/run | Avg duration/run | Avg tool calls/run |
+| --- | ---: | ---: | ---: |
+| `COMET_FULL_040_BETA` | 48.5 | 182s | 82.9 |
+| `COMET_FULL_039` | 44.0 | 182s | 96.0 |
+
+0.4.0 beta uses more average turns, fewer tool calls, and roughly the same elapsed time as 0.3.9.
+
+## Failed checks
+
+Run-level failed checks are concentrated around Skill invocation contracts:
+
+| Treatment | Failed checks | Main type | Meaning |
+| --- | ---: | --- | --- |
+| `COMET_FULL_040_BETA` | 10 | harness + workflow | One target `comet` Skill invocation was not observed; Superpowers / OpenSpec dependency Skills were not invoked in multiple runs |
+| `COMET_FULL_039` | 5 | workflow | Superpowers / OpenSpec dependency Skills were not invoked in multiple runs |
+
+These failures are not always the same as business task failures. They mean the report did not reliably observe expected Skill invocation evidence. For workflow Skills, this matters because evaluation checks the final result and whether the process is traceable and recoverable.
+
+## LLM judge overlay
+
+The LLM judge reread artifacts and independently scored three qualitative dimensions:
+
+| Dimension | `COMET_FULL_040_BETA` | `COMET_FULL_039` |
+| --- | ---: | ---: |
+| `artifact_quality` | 0.88 | 0.90 |
+| `spec_drift` | 0.82 | 0.84 |
+| `main_flow` | 0.99 | 1.00 |
+
+These readings show that the rule-based rubric observes better process and recovery evidence in 0.4.0 beta; artifact content quality is close to 0.3.9 and slightly lower on some dimensions. Future changes can consider both signals: structured workflow evidence and the information density of proposal, design, tasks, and verify artifacts.
+
+## How to use these results
+
+Treat this report as a baseline reading, not as a single pass/fail conclusion.
+
+| Reading | Suggested use |
+| --- | --- |
+| `weighted overall` is higher than 0.3.9 | Treat workflow-quality dimensions as improved |
+| Strict overall pass is lower than 0.3.9 | Inspect run-level contract failures |
+| All task-matrix rows pass | No business-task regression was observed |
+| `pass@5 = 1.00` and `pass^5 = 0` | Continue improving repeated-run reliability |
+| `recovery_resilience` improved | Preserve the state-recovery direction |
+| `decision_point_compliance` is low | Check decision-point pauses and user-confirmation behavior |
+
+If you continue 0.4.0 beta work, check two areas first: whether dependency Skill invocation evidence reliably enters stream-json, and whether decision points reliably ask for user confirmation. After changes, rerun the comparison with the same tasks and repetition count so task or sample differences do not look like version differences.
+
+## Raw report
+
+The embedded HTML report snapshot includes the full charts, task matrix, source evidence, raw vs analysis sensitivity, failed checks, and LLM judge overlay.
+
+<Frame caption="Comet baseline comparison raw HTML report snapshot">
+  <iframe
+    src="/assets/eval-reports/comet-baseline-20260705/comparison_report.html"
+    title="Comet baseline evaluation experiment raw report"
+    className="w-full rounded-xl"
+    height="720"
+    loading="lazy"
+  ></iframe>
+</Frame>
+
+## Next steps
+
+- [Scoring metrics and two-agent evaluation](/en/eval/scoring) - Understand `pass@k`, `pass^k`, rubric scoring, and LLM judge.
+- [Reading eval reports](/en/eval/reports) - Learn how to use summary output, report JSON, and failed checks.
+- [Eval harness](/en/eval/harness) - Understand how evaluation runs and how stream-json evidence is collected.
