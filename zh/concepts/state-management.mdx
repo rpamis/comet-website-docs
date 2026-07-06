@@ -9,6 +9,7 @@ Comet 的恢复能力来自文件化状态。理解用户可读状态、机器�
 
 | 目标 | 看哪里 | 建议 |
 | --- | --- | --- |
+| 设置工作流产物语言 | `.comet/config.yaml` 的 `language` | 只支持 `en` 或 `zh-CN`，影响新 change |
 | 设置默认上下文压缩 | `.comet/config.yaml` 的 `context_compression` | 项目级默认，影响新 change |
 | 设置默认审查强度 | `.comet/config.yaml` 的 `review_mode` | full workflow 默认走 `standard` |
 | 设置是否自动衔接下一阶段 | `.comet/config.yaml` 的 `auto_transition` | 想手动控制阶段时设为 `false` |
@@ -26,7 +27,7 @@ flowchart LR
   A[".comet.yaml<br/>每个 change 一个"] --> B["用户可见工作流投影<br/>phase / build_mode / verify_result"]
   C[".comet/run-state.json<br/>每个 change 或 run 一个"] --> D["machine-owned Run state<br/>currentStep / pending / artifacts"]
   E[".comet/state-events.jsonl<br/>每个 change 一个"] --> F["追加式转换审计<br/>event / source / effects"]
-  H[".comet/config.yaml<br/>项目级，全局一份"] --> I["项目默认值<br/>context_compression / review_mode / auto_transition"]
+  H[".comet/config.yaml<br/>项目级，全局一份"] --> I["项目默认值<br/>language / context_compression / review_mode / auto_transition"]
   B --> G["status / doctor / guard"]
   D --> G
   F --> G
@@ -56,7 +57,11 @@ flowchart LR
 
 ### 生成的内容
 
+选择中文 Skill 时，项目级安装会生成类似配置：
+
 ```yaml
+# language: en | zh-CN
+language: zh-CN
 # context_compression: off | beta
 context_compression: off
 # review_mode: off | standard | thorough
@@ -65,10 +70,11 @@ review_mode: standard
 auto_transition: true
 ```
 
-### 三个配置项
+### 四个配置项
 
 | 配置项 | 允许值 | 默认值 | 含义 |
 | --- | --- | --- | --- |
+| `language` | `en` \| `zh-CN` | 由 `comet init` 选择的 Skill 语言映射；`--yes` 默认为 `en` | 控制 OpenSpec、Superpowers、验证报告、归档说明等工作流产物的主语言 |
 | `context_compression` | `off` \| `beta` | `off` | 控制 design→build 交接时的上下文压缩。详见[上下文压缩机制](/zh/concepts/context-compression) |
 | `review_mode` | `off` \| `standard` \| `thorough` | `standard`（full workflow 默认） | 控制代码审查强度。详见[代码审查机制](/zh/concepts/review-mode) |
 | `auto_transition` | `true` \| `false` | `true` | 阶段推进后是否自动调用下一个阶段 Skill。详见[自动推进机制](/zh/concepts/auto-transition) |
@@ -76,6 +82,30 @@ auto_transition: true
 <Note>
   项目配置的值在创建新 change 时<strong>快照</strong>到该 change 的 <code>.comet.yaml</code>。之后修改项目配置不影响已有 change——这保证每个 change 的行为是确定的。
 </Note>
+
+### 产物语言和 Skill 语言的区别
+
+`comet init` 里的"Skill 语言"会决定安装中文还是英文版 Comet Skill，同时也会写入项目级 `language`：
+
+| init 选择 | 安装的 Skill | `.comet/config.yaml` |
+| --- | --- | --- |
+| `English` / `--language en` | 英文 Skill | `language: en` |
+| `中文` / `--language zh` | 中文 Skill | `language: zh-CN` |
+
+之后新建 change 时，Comet 会把项目级 `language` 快照到 `openspec/changes/<name>/.comet.yaml`。OpenSpec proposal、design、tasks、Superpowers 设计/计划、验证报告和 archive 说明都会按这个配置输出，而不是按某次触发请求的语言临时判断。
+
+如果你在中英文混合会话里继续同一个 change，Comet 会读取该 change 的 `language`，保持产物语言稳定。要切换已有 change 的产物语言，用状态命令改 change 级字段：
+
+```bash
+node "$COMET_STATE" set <change-name> language en
+node "$COMET_STATE" set <change-name> language zh-CN
+```
+
+<Warning>
+  项目级和 change 级语言值只接受 <code>en</code> 或 <code>zh-CN</code>。<code>zh</code> 只用于 <code>comet init --language zh</code> 的 CLI 选择，不是 <code>.comet/config.yaml</code> 的合法值。
+</Warning>
+
+Comet guard 会检查关键工作流产物的主语言。如果配置是 `zh-CN`，但 `proposal.md`、`tasks.md`、`design.md` 等明显以英文为主，guard 会阻止阶段推进；配置是 `en` 时也会阻止明显中文为主的产物。代码块会被排除在判断之外，所以命令、路径、hash 或日志不会误导语言检查。
 
 ## 配置优先级
 
@@ -88,7 +118,7 @@ change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > �
 | 层级 | 说明 | 设置方式 |
 | --- | --- | --- |
 | change 级 `.comet.yaml` | 最高优先级。change 创建时从项目配置快照，之后由 `/comet` 流转 | 由 `/comet` 阶段 Skill 写入 |
-| 环境变量 | 仅在 change 级字段为空时生效，适合 CI/CD 临时覆盖 | `export COMET_AUTO_TRANSITION=true` |
+| 环境变量 | 仅在 change 级字段为空时生效，适合 CI/CD 临时覆盖 | `export COMET_AUTO_TRANSITION=true` / `export COMET_LANGUAGE=zh-CN` |
 | 项目级 `.comet/config.yaml` | change 级为空、环境变量也未设时的回退 | 手写或 init 生成 |
 | 默认值 | 最后回退 | 见上表 |
 
@@ -120,6 +150,7 @@ export COMET_AUTO_TRANSITION=true
 | 字段 | 类型 / 允许值 | 含义 |
 | --- | --- | --- |
 | `workflow` | `full` \| `hotfix` \| `tweak` | 工作流预设 |
+| `language` | `en` \| `zh-CN` | 产物主语言。创建 change 时从 `.comet/config.yaml` 快照，用于约束 OpenSpec / Superpowers / 验证报告 / 归档说明 |
 | `phase` | `open` \| `design` \| `build` \| `verify` \| `archive` | 当前阶段。init 设为 `open`，guard 推进 |
 | `auto_transition` | `true` \| `false` | 是否自动调用下一个 Skill |
 
@@ -232,6 +263,7 @@ openspec/changes/<name>/.comet/state-events.jsonl
 
 | 环境变量 | 用途 | 适用场景 |
 | --- | --- | --- |
+| `COMET_LANGUAGE` | 覆盖 language（change 级为空时生效） | CI/CD 或临时指定新 change 的产物语言 |
 | `COMET_AUTO_TRANSITION` | 覆盖 auto_transition（change 级为空时生效） | CI/CD 或临时覆盖 |
 | `COMET_CONTEXT_COMPRESSION` | 覆盖 context_compression（change 级为空时生效） | 临时测试压缩模式 |
 | `COMET_REVIEW_MODE` | 覆盖 review_mode 默认解析（resolver 层） | 临时指定审查模式 |
@@ -239,7 +271,7 @@ openspec/changes/<name>/.comet/state-events.jsonl
 | `COMET_OPENSPEC` | 指定 openspec CLI 路径（默认 `openspec`） | 自定义 OpenSpec 安装位置 |
 
 <Note>
-  <code>COMET_AUTO_TRANSITION</code>、<code>COMET_FORCE_PHASE</code>、<code>COMET_OPENSPEC</code> 是用户可用的环境变量。<code>COMET_CONTEXT_COMPRESSION</code> 和 <code>COMET_REVIEW_MODE</code> 存在于解析层但未在用户文档中正式记录，主要用于内部和测试。
+  <code>COMET_LANGUAGE</code>、<code>COMET_AUTO_TRANSITION</code>、<code>COMET_FORCE_PHASE</code>、<code>COMET_OPENSPEC</code> 是用户可用的环境变量。<code>COMET_CONTEXT_COMPRESSION</code> 和 <code>COMET_REVIEW_MODE</code> 存在于解析层但未在用户文档中正式记录，主要用于内部和测试。
 </Note>
 
 ## 怎么配置
@@ -249,6 +281,7 @@ openspec/changes/<name>/.comet/state-events.jsonl
 编辑 `.comet/config.yaml`：
 
 ```yaml
+language: zh-CN
 context_compression: beta
 review_mode: thorough
 auto_transition: true
@@ -259,6 +292,7 @@ auto_transition: true
 ### 临时覆盖（环境变量）
 
 ```bash
+export COMET_LANGUAGE=zh-CN
 export COMET_AUTO_TRANSITION=false
 ```
 

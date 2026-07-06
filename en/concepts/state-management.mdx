@@ -3,40 +3,102 @@ title: "State and configuration"
 description: "Understand .comet.yaml, .comet/config.yaml, configuration precedence, environment overrides, and what users can safely edit."
 ---
 
-Comet separates human-readable workflow state from machine-managed runtime evidence.
+Comet's recovery model comes from file-based state. Understanding user-readable state, machine-managed runtime evidence, and project defaults helps you recover interrupted work without relying on chat memory.
 
-## Three state layers plus config
+## Where to look first
 
-| File | Role | Who owns it |
+| Goal | Look at | Recommendation |
 | --- | --- | --- |
-| `.comet.yaml` | Current workflow, phase, change id, mode, and user-visible metadata | Human-readable, Comet-updated |
-| `.comet/run-state.json` | Runtime checkpoints and machine evidence | Machine-managed; written automatically by the runtime and not meant for manual editing |
-| OpenSpec and Superpowers artifacts | Proposal, spec deltas, design docs, plans, and archive history | Workflow artifacts |
-| `.comet/config.yaml` | Project defaults | User-configurable |
+| Set workflow artifact language | `language` in `.comet/config.yaml` | Only `en` or `zh-CN`; affects new changes |
+| Set default context compression | `context_compression` in `.comet/config.yaml` | Project default; affects new changes |
+| Set default review strength | `review_mode` in `.comet/config.yaml` | Full workflow defaults to `standard` |
+| Set whether the next phase runs automatically | `auto_transition` in `.comet/config.yaml` | Set to `false` when you want manual phase control |
+| Check current change progress | `openspec/changes/<name>/.comet.yaml` | Human-readable; safe to inspect |
+| Diagnose abnormal progress | `comet status` / `comet doctor` | Prefer commands over hand-editing state |
+
+## Project defaults: `.comet/config.yaml`
+
+For a project-level English install, Comet generates a config like this:
+
+```yaml
+# language: en | zh-CN
+language: en
+# context_compression: off | beta
+context_compression: off
+# review_mode: off | standard | thorough
+review_mode: standard
+# auto_transition: true | false
+auto_transition: true
+```
+
+### Four configuration fields
+
+| Field | Allowed values | Default | Meaning |
+| --- | --- | --- | --- |
+| `language` | `en` \| `zh-CN` | Mapped from the Skill language selected during `comet init`; `--yes` defaults to `en` | Controls the primary language of OpenSpec, Superpowers, verification report, and archive artifacts |
+| `context_compression` | `off` \| `beta` | `off` | Controls context compression during the design-to-build handoff |
+| `review_mode` | `off` \| `standard` \| `thorough` | `standard` for full workflow | Controls code review strength |
+| `auto_transition` | `true` \| `false` | `true` | Controls whether Comet invokes the next phase Skill automatically after phase advancement |
+
+<Note>
+  Project config values are <strong>snapshotted</strong> into each new change's <code>.comet.yaml</code>. Changing project config later does not change existing changes. This keeps each change deterministic.
+</Note>
+
+### Artifact language versus Skill language
+
+The "Skill language" selected in `comet init` decides whether Comet installs English or Chinese Comet Skills. It also writes the project-level artifact language:
+
+| init selection | Installed Skill | `.comet/config.yaml` |
+| --- | --- | --- |
+| `English` / `--language en` | English Skills | `language: en` |
+| `中文` / `--language zh` | Chinese Skills | `language: zh-CN` |
+
+When a new change is created, Comet snapshots project-level `language` into `openspec/changes/<name>/.comet.yaml`. OpenSpec proposal, design, tasks, Superpowers design/plan artifacts, verification reports, and archive notes follow this configured language instead of guessing from whichever request triggered the workflow.
+
+If you continue the same change in a mixed English/Chinese session, Comet reads the change-level `language` and keeps artifacts stable. To switch an existing change's artifact language, change the change-level field:
+
+```bash
+node "$COMET_STATE" set <change-name> language en
+node "$COMET_STATE" set <change-name> language zh-CN
+```
+
+<Warning>
+  Project-level and change-level language values only accept <code>en</code> or <code>zh-CN</code>. <code>zh</code> is only a <code>comet init --language zh</code> CLI selection value; it is not valid inside <code>.comet/config.yaml</code>.
+</Warning>
+
+Comet guard checks the dominant language of key workflow artifacts. If the configured value is `en` but `proposal.md`, `tasks.md`, or `design.md` are clearly Chinese-dominant, guard blocks phase advancement. The reverse is also true for `zh-CN`. Fenced code blocks are ignored, so commands, paths, hashes, or logs do not skew the check.
 
 ## Configuration precedence
 
-Effective behavior is resolved in this order:
+Each field is resolved in this order:
 
-1. explicit command flags;
-2. environment variables;
-3. `.comet/config.yaml` project defaults;
-4. package defaults.
+```text
+change-level .comet.yaml field > environment variable > project-level .comet/config.yaml > default
+```
 
-## `auto_transition`
+| Layer | Description | Set by |
+| --- | --- | --- |
+| Change-level `.comet.yaml` | Highest priority. Snapshotted from project config when the change is created, then updated by `/comet` phase Skills | Comet |
+| Environment variables | Used only when the change-level field is empty; useful for CI/CD overrides | `export COMET_AUTO_TRANSITION=true` / `export COMET_LANGUAGE=zh-CN` |
+| Project-level `.comet/config.yaml` | Fallback when no change-level field or environment override exists | User or init |
+| Default | Last fallback | See the table above |
 
-`auto_transition` controls whether Comet may advance phases automatically when the required evidence is present.
+## Change state: `.comet.yaml`
 
-## `.comet.yaml` field groups
+Each active OpenSpec change has one:
 
-| Group | Examples |
-| --- | --- |
-| Workflow and phase | `workflow`, `phase`, `change_id` |
-| Execution mode | classic workflow, hotfix, tweak |
-| Verification and branch | expected checks and branch metadata |
-| Paths | links to OpenSpec, Superpowers, and archive artifacts |
-| Time and archive | timestamps and archive markers |
-| Machine-managed hints | fields Comet updates and users should not hand-edit casually |
+```text
+openspec/changes/<name>/.comet.yaml
+```
+
+Important user-visible fields include:
+
+| Field | Type / values | Meaning |
+| --- | --- | --- |
+| `workflow` | `full` \| `hotfix` \| `tweak` | Workflow preset |
+| `language` | `en` \| `zh-CN` | Primary artifact language, snapshotted from `.comet/config.yaml` when the change is created |
+| `phase` | `open` \| `design` \| `build` \| `verify` \| `archive` | Current phase |
+| `auto_transition` | `true` \| `false` | Whether the next Skill is called automatically |
 
 ## State-machine constraints
 
@@ -45,3 +107,30 @@ Comet does not treat phase as a free-form note. Transitions must follow allowed 
 ## Boundary between workflow state and run state
 
 `.comet.yaml` should stay readable and useful to humans. Detailed checkpoint data belongs in run state, where the runtime can manage it without polluting the main workflow file.
+
+## Environment overrides
+
+| Environment variable | Purpose | Typical use |
+| --- | --- | --- |
+| `COMET_LANGUAGE` | Overrides language when the change-level field is empty | CI/CD or temporarily setting the artifact language for a new change |
+| `COMET_AUTO_TRANSITION` | Overrides auto_transition when the change-level field is empty | CI/CD or temporary manual control |
+| `COMET_FORCE_PHASE` | Repair-only escape hatch for phase correction | Recovery with explicit human intent |
+| `COMET_OPENSPEC` | Sets the OpenSpec CLI path | Custom OpenSpec install location |
+
+## How to configure
+
+Edit `.comet/config.yaml`:
+
+```yaml
+language: en
+context_compression: beta
+review_mode: thorough
+auto_transition: true
+```
+
+For a temporary override:
+
+```bash
+export COMET_LANGUAGE=zh-CN
+export COMET_AUTO_TRANSITION=false
+```
