@@ -45,7 +45,7 @@ description: "深入理解 /comet-any（Skill Creator）如何用 Workflow Contr
 
 | 起点（用户层） | Skill Creator 意图 | 含义 | 典型场景 |
 | --- | --- | --- | --- |
-| **基于 Comet 现有 Skill 的五阶段定制** | `customize-comet` | 在 `/comet` 受保护边界内做增量调整 | 给 `/comet` 加一个评审环节、要求用组件库 |
+| **基于 Comet 现有 Skill 的五阶段定制** | `customize-comet` | 在 `/comet` 受保护边界内做增量调整 | 给 `/comet` 增加 `grill-me` 需求澄清 Skill |
 | **创建全新 workflow Skill** | `new-skill` | 从目标描述生成新的 workflow-kernel | 沉淀一个团队专属流程 |
 | **整理已有 Skill** | `upgrade-existing` | 把现有 Skill 整理成可发布标准包 | 把散乱的 Skill 规范化 |
 
@@ -58,7 +58,7 @@ description: "深入理解 /comet-any（Skill Creator）如何用 Workflow Contr
 | **Workflow Node** | 流程中的可恢复节点，例如 `open`、`design`、`plan`、`execute`、`review`、`verify`、`archive` |
 | **Node Responsibility** | 该节点在 Agent workflow 里承担的职责，用来解释它为什么存在、要产出什么、能否替换 |
 | **Skill Binding** | 某个节点的实现 Skill 或辅助 Skill |
-| **Required Skill Call** | 要求节点内**必须调用**某个 Skill，但**不替换**节点的实现。例如要求 `execute` 必须调用 `elementui` |
+| **Required Skill Call** | 要求节点内**必须调用**某个 Skill，但**不替换**节点的实现。例如要求 `open` 必须调用 `grill-me` 澄清需求 |
 | **Output Schema** | 节点必须产出的文件、状态或 evidence。脚本、eval、readiness 只认 Output Schema，不认 Skill 名字 |
 | **Guardrail** | 阻断或放行节点推进的检查 |
 | **Handoff** | 子代理或跨节点交接时必须带回的 evidence |
@@ -130,35 +130,25 @@ description: "深入理解 /comet-any（Skill Creator）如何用 Workflow Contr
   producer 节点做 <code>override</code> 时，必须在 <code>satisfies</code> 里声明它满足哪个 Output Schema。例如替换 <code>design</code> 实现，必须 <code>satisfies: ["comet.design.v1"]</code>，否则校验会报 <code>producer-missing-output-schema</code>。
 </Tip>
 
-## 方案示例：给 /comet 加组件库和白盒审查
+## 方案示例：给 /comet 增加 grill-me 需求澄清
 
-下面这个 `plan.json` 用 Required Skill Call 给 `execute`/`subagent-execute` 加组件库、给 `review` 加白盒审查——**不替换任何节点实现**：
+下面这个 `plan.json` 用 Required Skill Call 在 `open` 节点强制调用 `grill-me`，让 `/comet` 在进入设计前先把需求问清楚——**不替换任何节点实现**：
 
 ```json
 {
-  "goal": "基于 Comet 现有 Skill 的五阶段定制，要求组件库和白盒审查。",
+  "goal": "基于 Comet 现有 Skill 的五阶段定制，在 open 节点加入 grill-me 澄清需求。",
   "skillCreatorIntent": "customize-comet",
   "workflow": {
     "kind": "comet-five-phase-overlay",
-    "name": "team-comet",
-    "goal": "要求组件库和白盒审查。",
+    "name": "comet-with-grill-me",
+    "goal": "在 open 节点要求调用 grill-me 澄清需求。",
     "nodes": {
-      "execute": {
+      "open": {
         "requiredSkillCalls": [
           {
-            "skill": "elementui",
-            "reason": "Use project component library during direct implementation."
+            "skill": "grill-me",
+            "reason": "在创建 OpenSpec change 前澄清目标、边界和验收标准。"
           }
-        ]
-      },
-      "subagent-execute": {
-        "requiredSkillCalls": [
-          { "skill": "elementui", "scope": "handoff" }
-        ]
-      },
-      "review": {
-        "requiredSkillCalls": [
-          { "skill": "whitebox-code-standard", "scope": "review" }
         ]
       }
     }
@@ -166,7 +156,7 @@ description: "深入理解 /comet-any（Skill Creator）如何用 Workflow Contr
 }
 ```
 
-关键点：`execute`/`subagent-execute`/`review` 的实现 Skill 没变，只是在节点内部**强制调用**额外 Skill，并通过 Handoff / Output Schema 收回 evidence。
+关键点：`open` 的实现 Skill 没变，只是在节点内部**强制调用**额外 Skill，并通过 Output Schema 收回澄清 evidence。
 
 ### 自定义节点（workflow-kernel）
 

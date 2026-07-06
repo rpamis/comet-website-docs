@@ -264,6 +264,130 @@ flowchart LR
 
 三套 rubric 的维度、权重和检查逻辑见[评分指标与双 Agent 评测](/zh/eval/scoring)。
 
+## 配置 LLM-as-judge
+
+LLM-as-judge 是可选的质量覆盖层。它不会替代规则型 `[RUBRIC]` 分，也不会直接改变 `weighted_score`。它会让一个独立的裁判模型读取本次运行产物，追加 `[RUBRIC-JUDGE]` 分数，帮助你判断规则分没有覆盖到的"产物是否有实质内容"。
+
+适合在这些场景启用：
+
+- 你要评估文档、方案、代码解释、设计稿等难以用脚本完全判断的产物。
+- 你已经有基础校验脚本，但想知道产物是不是只有空壳或模板化内容。
+- 你要在对比报告里查看规则分和 judge 分之间的差异。
+
+<Info>
+  judge 配置和被测 Agent 配置是隔离的。被测 Agent 可以继续使用 <code>ANTHROPIC_MODEL</code>、<code>ANTHROPIC_BASE_URL</code> 和自己的 token；judge 必须显式配置 <code>BENCH_JUDGE_MODEL</code>，避免同一个配置同时扮演"选手"和"裁判"。
+</Info>
+
+### 1. 在 `eval/.env` 启用 judge
+
+把 judge 变量写进 Comet 仓库的 `eval/.env`：
+
+```bash
+# eval/.env
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+```
+
+`BENCH_LLM_JUDGE=1` 是开关；`BENCH_JUDGE_MODEL` 是必填项。只打开开关但不设置模型时，报告会写入 skipped 状态：
+
+```text
+[RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
+```
+
+### 2. 选择 judge 的认证方式
+
+如果你的本机 `claude` CLI 已经能在宿主机上认证，可以只设置 `BENCH_JUDGE_MODEL`。harness 会在宿主机上调用 `claude` CLI 运行 judge。
+
+如果你想让 judge 使用独立的 Anthropic 兼容代理，配置专用 endpoint 和 token：
+
+```bash
+# eval/.env
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+BENCH_JUDGE_BASE_URL=https://your-anthropic-compatible-endpoint
+BENCH_JUDGE_AUTH_TOKEN=your-judge-token
+```
+
+也可以用 API key：
+
+```bash
+# eval/.env
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+BENCH_JUDGE_BASE_URL=https://your-anthropic-compatible-endpoint
+BENCH_JUDGE_API_KEY=your-judge-api-key
+```
+
+优先级是：
+
+| 配置 | 行为 |
+| --- | --- |
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_AUTH_TOKEN` | 优先走 Anthropic Messages HTTP；HTTP header 使用 bearer token |
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY` | 优先走 Anthropic Messages HTTP；HTTP header 使用 API key |
+| 只设置 `BENCH_JUDGE_MODEL` | 回退到宿主机 `claude` CLI |
+
+<Note>
+  如果同时设置 <code>BENCH_JUDGE_AUTH_TOKEN</code> 和 <code>BENCH_JUDGE_API_KEY</code>，auth token 优先。judge 子进程会清除继承来的主 <code>ANTHROPIC_*</code> provider 变量，再映射 <code>BENCH_JUDGE_*</code>，所以不要指望它自动复用被测 Agent 的 provider 配置。
+</Note>
+
+### 3. 给 generic task 添加自定义 judge 标准
+
+通用 Skill（`generic` / `authoring-skill`）默认会让 judge 输出三个维度：
+
+| 维度 | 判断什么 |
+| --- | --- |
+| `task_completion` | 是否满足任务要求、产物是否存在且正确、基础校验是否通过 |
+| `output_quality` | 产物是否完整、有结构、有实质内容 |
+| `instruction_adherence` | 是否遵守指令、约束和工具使用边界 |
+
+如果你的 task 还有特定质量标准，把它们写进 `task.toml` 的 `[evaluation]`：
+
+```toml
+[evaluation]
+profile = "generic"
+expected_artifacts = ["result.md"]
+required_skills = ["my-skill"]
+require_skill_invocation = true
+rubric_criteria = [
+  "输出解释了关键取舍，而不是只列步骤",
+  "错误处理覆盖输入为空和外部命令失败两种情况",
+]
+```
+
+这些标准会作为额外 judge 维度输出，名称是 `custom_0`、`custom_1`。它们只影响 `[RUBRIC-JUDGE]` 覆盖层，不替代你的验证脚本。
+
+`comet-workflow` profile 使用另一套 judge 维度：`artifact_quality`、`spec_drift`、`main_flow`。它们用于复核工作流产物深度、spec 是否漂移、五阶段主流程是否完整。
+
+### 4. 运行并确认 judge 生效
+
+先用 `--collect` 确认 task、manifest 和路径都能发现：
+
+```bash
+comet eval ./generated-skill/comet/eval.yaml --collect
+```
+
+再跑真实评估：
+
+```bash
+comet eval ./generated-skill/comet/eval.yaml --html
+```
+
+打开 `Report path` 指向的报告，在每次运行的 checks 里查找 `[RUBRIC-JUDGE]` 行。成功时会看到类似：
+
+```text
+[RUBRIC-JUDGE] output_quality: 0.75 - cites concrete artifact content
+[RUBRIC-JUDGE] instruction_adherence: 1.00 - follows stated constraints
+[RUBRIC-JUDGE] status: enabled_and_successful
+```
+
+如果只看到 skipped 或 failed，按下面排查：
+
+| 现象 | 常见原因 | 处理 |
+| --- | --- | --- |
+| `BENCH_JUDGE_MODEL is required` | 开了 `BENCH_LLM_JUDGE=1`，但没设 `BENCH_JUDGE_MODEL` | 补上 `BENCH_JUDGE_MODEL` |
+| `(judge error: HTTP ...)` | judge endpoint、token 或模型名不匹配 | 检查 `BENCH_JUDGE_BASE_URL`、token、模型名 |
+| 没有 `[RUBRIC-JUDGE]` 行 | 没有启用 `BENCH_LLM_JUDGE=1`，或这次没有跑到 profile rubric | 确认 `eval/.env` 被加载，并先解决前面的 harness/task 失败 |
+
 ## 多轮交互：`auto_user` 模式
 
 单轮 task（`mode: none`）只跑一次，适合"给个指令看结果"的简单场景。但工作流类 Skill 需要在**决策点暂停、问用户、拿到回复后继续**——单轮测不了。

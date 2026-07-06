@@ -252,6 +252,130 @@ flowchart LR
 
 For the dimensions, weights and checking logic of the three rubrics, see [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring).
 
+## Configure LLM-as-judge
+
+LLM-as-judge is an optional quality coverage layer. It does not replace rule-based `[RUBRIC]` scores and does not directly change `weighted_score`. It lets an independent judge model read the run artifacts and append `[RUBRIC-JUDGE]` scores, helping you catch cases where rule checks miss whether the artifact has real substance.
+
+Use it when:
+
+- You evaluate documents, plans, code explanations, designs, or other artifacts that are hard to judge completely with scripts.
+- You already have validation scripts, but want to know whether the artifact is empty, shallow, or template-like.
+- You want comparison reports to show the gap between rule scores and judge scores.
+
+<Info>
+  Judge configuration is isolated from the subject Agent configuration. The subject Agent can keep using <code>ANTHROPIC_MODEL</code>, <code>ANTHROPIC_BASE_URL</code>, and its own token. The judge must explicitly set <code>BENCH_JUDGE_MODEL</code> so the same configuration does not silently act as both contestant and judge.
+</Info>
+
+### 1. Enable judge in `eval/.env`
+
+Add judge variables to the Comet repository's `eval/.env`:
+
+```bash
+# eval/.env
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+```
+
+`BENCH_LLM_JUDGE=1` is the switch. `BENCH_JUDGE_MODEL` is required. If you enable the switch without setting a model, the report records a skipped status:
+
+```text
+[RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
+```
+
+### 2. Choose judge authentication
+
+If the local host `claude` CLI is already authenticated, you can set only `BENCH_JUDGE_MODEL`. The harness calls the host `claude` CLI for judge runs.
+
+If you want the judge to use an independent Anthropic-compatible proxy, configure a dedicated endpoint and token:
+
+```bash
+# eval/.env
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+BENCH_JUDGE_BASE_URL=https://your-anthropic-compatible-endpoint
+BENCH_JUDGE_AUTH_TOKEN=your-judge-token
+```
+
+You can also use an API key:
+
+```bash
+# eval/.env
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+BENCH_JUDGE_BASE_URL=https://your-anthropic-compatible-endpoint
+BENCH_JUDGE_API_KEY=your-judge-api-key
+```
+
+Priority:
+
+| Configuration | Behavior |
+| --- | --- |
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_AUTH_TOKEN` | Prefer Anthropic Messages HTTP; the HTTP header uses the bearer token |
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY` | Prefer Anthropic Messages HTTP; the HTTP header uses the API key |
+| Only `BENCH_JUDGE_MODEL` | Fall back to the host `claude` CLI |
+
+<Note>
+  If both <code>BENCH_JUDGE_AUTH_TOKEN</code> and <code>BENCH_JUDGE_API_KEY</code> are set, the auth token wins. The judge subprocess clears inherited main <code>ANTHROPIC_*</code> provider variables before mapping <code>BENCH_JUDGE_*</code>, so do not expect it to reuse the subject Agent provider configuration automatically.
+</Note>
+
+### 3. Add custom judge criteria for generic tasks
+
+Generic Skills (`generic` / `authoring-skill`) make the judge output three default dimensions:
+
+| Dimension | What it judges |
+| --- | --- |
+| `task_completion` | Whether the task requirements are satisfied, artifacts exist and are correct, and basic validation passed |
+| `output_quality` | Whether the artifact is complete, structured, and substantive |
+| `instruction_adherence` | Whether the run followed instructions, constraints, and tool boundaries |
+
+If your task has task-specific quality criteria, put them in `[evaluation]` in `task.toml`:
+
+```toml
+[evaluation]
+profile = "generic"
+expected_artifacts = ["result.md"]
+required_skills = ["my-skill"]
+require_skill_invocation = true
+rubric_criteria = [
+  "The output explains key tradeoffs instead of only listing steps",
+  "Error handling covers empty input and external command failure",
+]
+```
+
+These criteria are emitted as additional judge dimensions named `custom_0`, `custom_1`. They only affect the `[RUBRIC-JUDGE]` coverage layer and do not replace your validation scripts.
+
+The `comet-workflow` profile uses a different judge dimension set: `artifact_quality`, `spec_drift`, and `main_flow`. These dimensions review workflow artifact depth, whether the spec drifted, and whether the five-phase main flow completed.
+
+### 4. Run and confirm judge output
+
+First use `--collect` to confirm tasks, manifests, and paths can be discovered:
+
+```bash
+comet eval ./generated-skill/comet/eval.yaml --collect
+```
+
+Then run the real evaluation:
+
+```bash
+comet eval ./generated-skill/comet/eval.yaml --html
+```
+
+Open the report printed in `Report path` and look for `[RUBRIC-JUDGE]` lines in each run's checks. A successful run looks like this:
+
+```text
+[RUBRIC-JUDGE] output_quality: 0.75 - cites concrete artifact content
+[RUBRIC-JUDGE] instruction_adherence: 1.00 - follows stated constraints
+[RUBRIC-JUDGE] status: enabled_and_successful
+```
+
+If you only see skipped or failed, use this table:
+
+| Symptom | Common cause | Fix |
+| --- | --- | --- |
+| `BENCH_JUDGE_MODEL is required` | `BENCH_LLM_JUDGE=1` is set, but `BENCH_JUDGE_MODEL` is missing | Add `BENCH_JUDGE_MODEL` |
+| `(judge error: HTTP ...)` | Judge endpoint, token, or model name does not match | Check `BENCH_JUDGE_BASE_URL`, token, and model name |
+| No `[RUBRIC-JUDGE]` lines | `BENCH_LLM_JUDGE=1` is not enabled, or this run did not reach profile rubric scoring | Confirm `eval/.env` is loaded and fix earlier harness/task failures first |
+
 ## Multi-turn interaction: `auto_user` mode
 
 A single-turn task (`mode: none`) runs only once, suitable for simple scenarios of "give an instruction and see the result". But workflow-type Skills need to **pause at decision points, ask the user, and continue after receiving a reply** — single-turn can't test this.
