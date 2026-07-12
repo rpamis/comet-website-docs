@@ -1,32 +1,41 @@
 ---
-title: "Core script overview"
-description: "Understand the cross-platform Node scripts distributed with Comet Skills: state, guard, handoff, archive, and routing helpers, plus how .mjs launchers run on Windows, macOS, and Linux."
+title: "Classic command overview"
+description: "Use stable comet state, guard, handoff, and archive commands for workflow state, phase checks, context handoff, and archive."
 ---
 
-Comet used to rely on shell scripts. The current runtime ships Node.js `.mjs` launchers so the same workflow can run on Windows, macOS, and Linux without requiring Git Bash or WSL.
+Comet's Classic commands are the runtime foundation of the five-phase workflow. Users, agents, and automation should prefer the stable top-level CLI:
 
-## Why switch from `.sh` to `.mjs`
+```bash
+comet state <subcommand>
+comet guard <change-name> <phase> [--apply]
+comet handoff <change-name> [options]
+comet archive <change-name> [--dry-run]
+```
 
-The shell implementation proved the workflow model, but it made Windows support fragile. Node launchers remove shell-path assumptions, improve JSON/YAML handling, and make runtime behavior easier to test.
+| Public command | Responsibility | Reference |
+| --- | --- | --- |
+| `comet state` | Select the current change, read and transition state, record command evidence, and resolve the next Skill. | [comet state](/en/scripts/comet-state) |
+| `comet guard` | Check phase requirements; `--apply` advances only after all checks pass. | [comet guard](/en/scripts/comet-guard) |
+| `comet handoff` | Generate design/build context or calculate the handoff hash. | [comet handoff](/en/scripts/comet-handoff) |
+| `comet archive` | Complete the OpenSpec merge and archive after final confirmation. | [comet archive](/en/scripts/comet-archive) |
 
-## Script responsibilities
+## Packaged launchers
 
-| Script area | Responsibility |
-| --- | --- |
-| state | Read and update `.comet.yaml` and runtime state. |
-| guard | Enforce phase transitions and required evidence. |
-| handoff | Package design/spec/task context and calculate hashes. |
-| archive | Close accepted changes and preserve history. |
-| routing | Classify `/comet` requests against the current project state. |
+Comet moved from Bash scripts to Node `.mjs` launchers so the same workflow works on Windows, macOS, and Linux without Git Bash or WSL. The packaged command launchers are thin wrappers that import the generated `comet-runtime.mjs` in the same directory. The runtime bundles its dependencies and does not rely on the project's `node_modules`; launchers and runtime must stay on the same version.
 
-## How scripts cooperate
+<Note>
+  The <code>comet-*.mjs</code> files remain compatibility and troubleshooting entrypoints. Normal instructions should use the stable top-level CLI above.
+</Note>
 
-1. routing decides the intended action;
-2. state reads the current workflow;
-3. guard validates whether the transition is allowed;
-4. handoff records evidence when moving from design to build;
-5. archive closes the change after verification.
+## How the commands cooperate
 
-## Where to find runtime evidence
+```mermaid
+flowchart LR
+  A["YAML state validation"] --> B["comet guard<br/>check phase requirements"]
+  B --> C{"--apply?"}
+  C -->|yes| D["comet state transition<br/>advance + audit"]
+  C -->|no| E["report only"]
+  D --> F["comet state next<br/>resolve next Skill"]
+```
 
-Look in `.comet/`, the active OpenSpec change directory, Superpowers artifacts, and archive output. These files are the recovery source after chat context is lost.
+State remains split across human-readable `.comet.yaml`, machine-owned `.comet/run-state.json`, and append-only `.comet/state-events.jsonl`. Use `comet status`, `comet doctor`, or `comet dashboard` for normal inspection.

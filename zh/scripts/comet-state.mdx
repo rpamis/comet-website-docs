@@ -1,20 +1,43 @@
 ---
-title: "comet-state"
-description: "读取、设置和转换 .comet.yaml，并解析下一步 Skill。"
+title: "comet state"
+description: "选择当前 change，读取和转换 .comet.yaml，记录命令证据，并解析下一步 Skill。"
 ---
 
-`comet-state.mjs` 负责 `.comet.yaml` 状态操作。它是 Comet 恢复能力的核心之一。
+`comet state` 是 Classic 状态的稳定公开命令。它负责当前 change 选择、`.comet.yaml` 状态操作、命令证据和下一步解析。
+
+## 选择当前 change
+
+当多个 active change 共存时，进入明确的工作目标后先执行：
+
+```bash
+comet state select <change-name>
+comet state current
+comet state clear-selection
+```
+
+选择记录会绑定当前 branch/worktree。切换分支、worktree，或目标 change 已归档后，旧选择会被视为失效，源码写入守卫会要求重新选择。只有一个 active change 时可以自动归属；多个 change 时不会猜测。
 
 ## 常见操作
 
 ```bash
-node "$COMET_STATE" transition <change-name> open-complete
-node "$COMET_STATE" transition <change-name> design-complete
-node "$COMET_STATE" transition <change-name> build-complete
-node "$COMET_STATE" transition <change-name> verify-pass
-node "$COMET_STATE" transition <change-name> verify-fail
-node "$COMET_STATE" next <change-name>
+comet state transition <change-name> open-complete
+comet state transition <change-name> design-complete
+comet state transition <change-name> build-complete
+comet state transition <change-name> verify-pass
+comet state transition <change-name> verify-fail
+comet state next <change-name>
 ```
+
+## 记录自定义项目命令证据
+
+项目无法从 npm、Maven 或 Cargo 自动推断 build/verify 命令时，先真实运行项目命令，再记录退出结果：
+
+```bash
+comet state record-check <change-name> build --command "make release" --exit-code 0
+comet state record-check <change-name> verify --command "./scripts/verify" --exit-code 0 --cwd packages/api
+```
+
+记录内容会绑定当前 Run、命令、工作目录和退出码，供 guard 审计。它不是跳过 build 或 verify 的开关；不要记录没有实际执行的命令。
 
 ## next 输出
 
@@ -28,4 +51,8 @@ node "$COMET_STATE" next <change-name>
 
 ## 状态约束
 
-`comet-state` 会拒绝非法状态转换，例如 full workflow 在缺少 build 必选字段时离开 build。它也会保护 machine-owned Run 字段，避免用户手工误改。
+`comet state` 会拒绝非法状态转换，例如 full workflow 在缺少 build 必选字段时离开 build。它也会保护 machine-owned Run 字段，避免用户手工误改。
+
+<Note>
+  安装包仍包含 <code>comet-state.mjs</code> 兼容 launcher，但普通使用和 Agent 指令应优先采用 <code>comet state</code>。
+</Note>

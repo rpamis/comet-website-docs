@@ -16,6 +16,18 @@ Comet's recovery model comes from file-based state. Understanding user-readable 
 | Check current change progress | `openspec/changes/<name>/.comet.yaml` | Human-readable; safe to inspect |
 | Diagnose abnormal progress | `comet status` / `comet doctor` | Prefer commands over hand-editing state |
 
+## Current change selection
+
+`.comet/current-change.json` stores the Comet change explicitly selected for the current branch/worktree. It removes source-write ambiguity when multiple active changes exist; it does not replace each change's `.comet.yaml`.
+
+```bash
+comet state select <change-name>
+comet state current
+comet state clear-selection
+```
+
+A single active change may be attributed automatically. Multiple active changes require explicit selection. Branch/worktree switches, an archived target, or an invalid selection fail closed and require a new `select`. Do not hand-edit the selection file.
+
 ## Project defaults: `.comet/config.yaml`
 
 For a project-level English install, Comet generates a config like this:
@@ -62,9 +74,11 @@ When a new change is created, Comet snapshots project-level `language` into `ope
 If you continue the same change in a mixed English/Chinese session, Comet reads the change-level `language` and keeps artifacts stable. To switch an existing change's artifact language, change the change-level field:
 
 ```bash
-node "$COMET_STATE" set <change-name> language en
-node "$COMET_STATE" set <change-name> language zh-CN
+comet state set <change-name> language en
+comet state set <change-name> language zh-CN
 ```
+
+Global `comet init` and `comet update` persist the selected artifact language in `~/.comet/config.yaml`. New workflows prefer project `.comet/config.yaml`; only projects without a language setting fall back to the global default. A repository can therefore override the user's cross-project preference.
 
 <Warning>
   Project-level and change-level language values only accept <code>en</code> or <code>zh-CN</code>. <code>zh</code> is only a <code>comet init --language zh</code> CLI selection value; it is not valid inside <code>.comet/config.yaml</code>.
@@ -77,7 +91,7 @@ Comet guard checks the dominant language of key workflow artifacts. If the confi
 Each supported project default is resolved in this order:
 
 ```text
-change-level .comet.yaml field > environment variable > project-level .comet/config.yaml > default
+change-level .comet.yaml field > environment variable > project-level .comet/config.yaml > global language default > built-in default
 ```
 
 | Layer | Description | Set by |
@@ -85,6 +99,7 @@ change-level .comet.yaml field > environment variable > project-level .comet/con
 | Change-level `.comet.yaml` | Highest priority. Snapshotted from project config when the change is created, then updated by `/comet` phase Skills | Comet |
 | Environment variables | Used only when the change-level field is empty; useful for CI/CD overrides | `export COMET_AUTO_TRANSITION=true` / `export COMET_LANGUAGE=zh-CN` |
 | Project-level `.comet/config.yaml` | Fallback when no change-level field or environment override exists | User or init |
+| Global `~/.comet/config.yaml` | Cross-project fallback for `language` only; project config wins | Global init/update |
 | Default | Last fallback | See the table above |
 
 ## Change state: `.comet.yaml`
@@ -103,9 +118,10 @@ Important user-visible fields include:
 | `language` | `en` \| `zh-CN` | Primary artifact language, snapshotted from `.comet/config.yaml` when the change is created |
 | `phase` | `open` \| `design` \| `build` \| `verify` \| `archive` | Current phase |
 | `auto_transition` | `true` \| `false` | Whether the next Skill is called automatically |
+| `archive_confirmation` | `null` \| `pending` \| `confirmed` | Machine-owned final approval; a mutating archive requires `confirmed` |
 
 <Warning>
-  <code>build_command</code> and <code>verify_command</code> have been removed. They are no longer valid change-state fields, and Comet rejects them as unknown fields instead of reading them as compatibility settings. The build guard uses built-in project build detection, such as <code>npm run build</code>, Maven, or Cargo when detected.
+  <code>build_command</code> and <code>verify_command</code> have been removed. The build guard detects npm, Maven, or Cargo commands. When it cannot infer an entrypoint, run the real command and record it with <code>comet state record-check &lt;change&gt; &lt;build|verify&gt; --command "..." --exit-code 0</code>. Recorded evidence cannot replace actual execution.
 </Warning>
 
 ## State-machine constraints

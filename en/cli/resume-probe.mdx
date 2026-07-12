@@ -1,0 +1,66 @@
+---
+title: "Resume probe (comet resume-probe)"
+description: "Read-only detection of whether the current request should resume an active Comet workflow."
+---
+
+The resume probe is a read-only step exposed as `comet resume-probe`. It reads active changes, `.comet.yaml`, the current phase, worktree state, and the user request, then decides whether resuming an existing Comet workflow is appropriate.
+
+It does not modify a change, advance a phase, choose between multiple changes, or execute the returned next command.
+
+## Basic usage
+
+```bash
+comet resume-probe . --utterance "continue the login refactor"
+```
+
+Read the request from standard input:
+
+```bash
+echo "continue the login refactor" | comet resume-probe . --stdin --json
+```
+
+| Option | Purpose |
+| --- | --- |
+| `--utterance <text>` | Pass the user request directly. |
+| `--stdin` | Read the request from standard input. |
+| `--json` | Return structured output for agents, hooks, and automation. |
+| `--no-workflow-work` | Treat the request as informational instead of workflow work. |
+| `--already-in-comet-flow` | Return `out_of_scope` when the turn is already inside Comet. |
+
+## Understand the result
+
+| `action` | Meaning | Next step |
+| --- | --- | --- |
+| `auto_resume` | One clearly related active change exists and it is not at a decision point. | The agent may route to the `/comet-*` command in JSON field `nextCommand`. |
+| `ask_user` | Multiple changes, dirty files, damaged state, or a user decision prevents automatic resume. | Show the reason and ask before continuing. |
+| `out_of_scope` | The user opted out, the turn is already in Comet, or the request is informational and unrelated. | Handle the request normally without entering Comet. |
+| `none` | No active change exists. | Do not resume; invoke `/comet` explicitly to start new work. |
+
+Text output includes `confidence`, `reason`, and, when available, `change`, `phase`, and `next`. In JSON output, the command field is named `nextCommand`; JSON also includes evidence so the caller can explain the result.
+
+## Cases that require confirmation
+
+- More than one active change exists and the request does not name one.
+- The worktree contains uncommitted files that need attribution.
+- The active OpenSpec change has missing or invalid Comet state.
+- The workflow is at plan-ready, verification failure, final archive confirmation, or another decision point.
+- The request appears unrelated to the only active change.
+
+<Warning>
+  <code>ask_user</code> is not a command failure. It means the available evidence is insufficient or the workflow is waiting for a user decision.
+</Warning>
+
+## Related commands
+
+| Command | Purpose |
+| --- | --- |
+| `/comet` | Explicitly start or resume a workflow and route to the correct phase. |
+| `comet resume-probe` | Probe for a safe resume before entering the workflow. |
+| `comet status` | Inspect active changes, evidence, and recommended next actions. |
+| `comet doctor` | Diagnose installation, environment, or damaged state. |
+
+## Next steps
+
+- [Resume interrupted work](/en/guides/resuming-workflow)
+- [Broken state and recovery](/en/guides/state-recovery)
+- [comet status](/en/cli/status)

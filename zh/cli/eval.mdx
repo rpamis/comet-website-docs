@@ -7,6 +7,19 @@ description: "通过共享 eval harness 评估本地 Skill 或 comet/eval.yaml�
 
 它为 Skill 提供发布前证据：能评估 `/comet-any` 的生成物，也能对本地 Skill 目录做早期冒烟。
 
+## `/comet-any` 生成物可以直接评估
+
+Skill Factory 生成的 `comet/eval.yaml` 可能把 `metadata.draftHash` 写为 `<current-bundle-hash>`。这是“运行时绑定当前 draft”的占位值，不需要你手工替换。
+
+`comet eval` 在 collect/run 前会：
+
+1. 找到 manifest 所在 Bundle 的 `bundle.yaml`。
+2. 读取并计算当前 Bundle draft hash。
+3. 在系统临时目录创建一份已绑定 hash 的 eval manifest。
+4. 用临时 manifest 启动评估，完成后清理临时文件。
+
+源 `comet/eval.yaml`、Bundle 和 Skill 文件不会被改写。找不到所属 Bundle，或当前 draft 无法加载/计算 hash 时，命令会点名 manifest 和失败上下文，而不是用错误的旧 hash 继续。
+
 ## 命令形态
 
 `comet eval` 是单入口命令。你把 Skill 目录、`SKILL.md` 或 `comet/eval.yaml` 作为 target 传入，再用选项决定是 collect 还是执行真实评估。
@@ -142,6 +155,7 @@ experiment id 格式是 `<task>_<YYYYMMDD_HHMMSS>`。详见[读取评估报告](
 - `comet/eval.yaml` 是否存在
 - manifest 里推荐的 task 是否存在
 - 当前是否在 Comet 仓库根目录或传了正确 `--project`
+- `<current-bundle-hash>` 所在 manifest 是否仍位于包含 `bundle.yaml` 的 Bundle draft 中
 
 ### run 失败
 
@@ -153,6 +167,8 @@ experiment id 格式是 `<task>_<YYYYMMDD_HHMMSS>`。详见[读取评估报告](
 | `workflow` | Skill 执行流程没有达到预期 | 回到 `/comet-any` 优化 Skill |
 | `task` | 任务定义、验证条件或 fixture 问题 | 检查 eval 任务定义和 fixture |
 | `model` | 模型行为、工具使用或不稳定输出问题 | 重跑或降低对非确定行为的依赖 |
+
+如果 CLI 明确报告 `Eval harness is missing`，说明 npm 包中的随包 harness 不完整，优先重新安装 `@rpamis/comet` 或显式传入 `--project <repository-root>`。如果报告 `uv is not installed or not in PATH`，随包 harness 已找到，只需要安装或修复 `uv`；两类问题不要混为一谈。
 
 ### HTML 报告没找到
 

@@ -4,7 +4,7 @@ sidebarTitle: "comet status"
 description: "comet status displays active OpenSpec changes, task progress, and the recommended next workflow command. Use --json for machine-readable output."
 ---
 
-`comet status` gives you a snapshot of your project's Comet workflow state — showing active changes, how many tasks are complete, and which command to run next.
+`comet status` gives you a read-only snapshot of active Comet-managed and plain OpenSpec changes, task progress, runtime evidence, and the appropriate next command.
 
 ## Usage
 
@@ -19,15 +19,18 @@ comet status
 ```
 Active Changes:
 
-  1. my-feature [phase: build [3/7 tasks]]
+  1. my-feature [Comet] [phase: build [3/7 tasks]]
      workflow: full | build_mode: subagent-driven-development
      plan:   docs/superpowers/plans/2024-06-01-my-feature.md
      next: /comet-build
 
-  2. quick-fix [phase: verify [5/5 tasks]]
+  2. quick-fix [Comet] [phase: verify [5/5 tasks]]
      workflow: full | build_mode: direct
      verify_result: pending
      next: /comet-verify
+
+  3. docs-only [OpenSpec] [plain change [2/2 tasks]]
+     recommended archive: openspec archive docs-only -y
 ```
 
 Each entry shows:
@@ -43,7 +46,29 @@ Each entry shows:
 | `verify_result` | Verification outcome (`pending`, `pass`, `fail`) — shown only in the `verify` phase. |
 | `next` | The Comet skill command to run next. |
 
-Only non-archived changes appear. Changes where `.comet.yaml` is missing or `archived: true` are excluded.
+## Mixed Comet and OpenSpec changes
+
+One project may contain both Comet-managed changes and plain OpenSpec changes. Status labels them separately instead of forcing plain OpenSpec work into the Classic five-phase lifecycle.
+
+| Change type | State source | Archive command when ready |
+| --- | --- | --- |
+| Comet-managed | `.comet.yaml` and Classic runtime evidence | `comet archive <change-name>` |
+| Plain OpenSpec | OpenSpec artifacts and task completion | `openspec archive <change-name> -y` |
+
+Only archive-ready entries show a recommendation. Invalid state, incomplete tasks, or failed verification continue to show recovery guidance.
+
+## Multiple active Comet changes
+
+With one active Comet change, source work can be attributed automatically. With multiple active changes, select the intended target first:
+
+```bash
+comet state select <change-name>
+comet state current
+```
+
+Selection is tied to the current branch/worktree. Switches and stale selections require a new `select`; the source-write guard does not guess.
+
+Only non-archived changes appear. A directory without `.comet.yaml` appears as a plain OpenSpec change rather than being silently excluded.
 
 ## Flags
 
@@ -66,7 +91,7 @@ comet status --json
       "phase": "build",
       "buildMode": "subagent-driven-development",
       "isolation": "branch",
-      "verifyMode": "null",
+      "verifyMode": null,
       "verifyResult": "pending",
       "designDoc": null,
       "plan": "docs/superpowers/plans/2024-06-01-my-feature.md",

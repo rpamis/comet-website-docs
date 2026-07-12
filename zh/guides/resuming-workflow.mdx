@@ -19,6 +19,21 @@ description: "会话中断、上下文压缩或换设备后，通常只需要重
   <strong>恢复不需要先跑 <code>comet status</code> 或 <code>comet doctor</code>。</strong>那两个是诊断命令，只在<strong>看起来有问题</strong>时才用（CLI/Skill 装坏了、change 不路由、证据对不上）。正常恢复就是 <code>/comet</code> 一步到位。
 </Tip>
 
+## 也可以直接说“继续”
+
+0.4.0-beta.4 起，`comet init` 和 `comet update` 会把一段 Comet 恢复说明合并进项目的 `AGENTS.md` 和 `CLAUDE.md`。Agent 收到“继续刚才的登录重构”这类自然语言请求时，可以先做一次只读恢复探测（CLI 命令为 `comet resume-probe`），再决定是否进入现有 workflow。
+
+| 场景 | 探测结果 |
+| --- | --- |
+| 只有一个相关 active change，状态完整且不在决策点 | 返回 `auto_resume`，按建议阶段继续 |
+| 有多个 active change、未提交改动或需要用户选择 | 返回 `ask_user`，先让你确认 |
+| 只是问问题、明确不走 Comet，或当前已在 Comet 流程内 | 返回 `out_of_scope`，不重复进入 workflow |
+| 没有 active Comet change | 返回 `none`，不执行恢复 |
+
+这段说明只约束 Comet 的恢复探测，并会保留文件中已有的用户规则。它不会把所有后续请求强行路由到 Comet，也不会绕过已有决策点。你仍然可以随时显式输入 `/comet`；这是最直接、最确定的恢复方式。
+
+详见[恢复探测命令](/zh/cli/resume-probe)。
+
 ## 为什么 /comet 能直接恢复
 
 `/comet` 的恢复能力来自三个机制：
@@ -43,6 +58,8 @@ description: "会话中断、上下文压缩或换设备后，通常只需要重
 | 无活跃 change | `/comet-open` |
 
 只要有**一个**活跃 change，`/comet` 会自动选中它；有**多个**时列出清单让你选一个。
+
+如果通过自然语言恢复，多个 active change 不会被自动猜测；恢复探测会返回 `ask_user`，等待你点名目标。
 
 ## 换设备/换平台也能恢复
 
@@ -69,7 +86,7 @@ description: "会话中断、上下文压缩或换设备后，通常只需要重
 这是 0.4.0-beta.1 渐进式加载带来的确定性保证：每个子 Skill 进入时都会先通过 `comet/reference/scripts.md` 定位脚本，然后跑自己那个阶段的**入口检查或恢复检查**，而不是从对话历史推断阶段。
 
 ```bash
-node "$COMET_STATE" check <change-name> <phase> --recover
+comet state check <change-name> <phase> --recover
 ```
 
 - 如果检查发现实际的 phase、workflow 或证据属于**另一个** Skill，按脚本输出和 `/comet` 路由规则切换——**不要在错误的阶段里继续写状态**。
@@ -148,6 +165,7 @@ comet doctor        # 诊断安装、环境、Skill 完整性
 
 ## 下一步
 
+- [恢复探测命令](/zh/cli/resume-probe) — 了解自然语言恢复前的只读探测
 - [状态损坏与恢复](/zh/guides/state-recovery) — `/comet` 路由不对或状态坏了怎么办
 - [项目文件结构](/zh/guides/project-structure) — 状态都存在哪些文件里
 - [自动推进机制](/zh/concepts/auto-transition) — 恢复后的自动衔接
