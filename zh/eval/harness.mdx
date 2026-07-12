@@ -7,7 +7,18 @@ description: "深入理解 Comet 如何封装本地 eval harness，harness 目�
   这是进阶内容。日常评估只需要[快速上手](/zh/eval/quickstart)里的两条命令。这里讲的是 harness 内部机制，适合排查问题或理解 profile/task 选择。
 </Tip>
 
-Comet 的 eval harness 真实位于 Comet 仓库的 `eval/` 目录。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke，让你不需要手工切目录或拼 pytest 参数。
+Comet 的 eval harness 随 npm 包按版本分发。普通安装直接运行 `comet eval` 时，CLI 默认使用当前 `@rpamis/comet` 包中的 `eval/`；在 Comet 源码仓库开发或需要自定义 harness 时，可以用 `--project <repository-root>` 显式选择该仓库的 `eval/`。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke，让你不需要手工切目录或拼 pytest 参数。
+
+## harness 定位与故障边界
+
+CLI 会先确认 eval 根目录包含 `pyproject.toml` 和任务入口，再检查 `uv`。因此错误顺序可以直接帮助定位问题：
+
+| 错误 | 说明 | 处理 |
+| --- | --- | --- |
+| `Eval harness is missing at ...` | 当前 npm 包不完整，或 `--project` 指向的仓库没有有效 `eval/` | 重新安装 `@rpamis/comet`，或修正 `--project` |
+| `uv is not installed or not in PATH` | harness 已找到，但本机缺少 Python 启动工具 | 安装 `uv` 并确认 PATH |
+
+npm 用户不需要另外 clone Comet 仓库来获得 harness；包版本与 harness 版本保持一致。
 
 ## harness 目录结构
 
@@ -68,6 +79,12 @@ uv run pytest local/tests/tasks/test_tasks.py [参数]
 两者共用同一套参数构建逻辑（`buildEvalArgs`），唯一区别是 collect 加 `--collect-only`，普通执行加 `-v`。`--report-config`、`--html`、`--quick` 用于真实评估路径。
 
 ## manifest 模式
+
+### generated manifest 的 draft hash
+
+manifest 的 `metadata.draftHash` 为 `<current-bundle-hash>` 时，CLI 会定位上层 `bundle.yaml`、计算当前 draft hash，并在系统临时目录写入一份运行时 manifest。Skill source 会解析为稳定绝对路径；评估结束后临时目录会被清理。
+
+原 manifest 和 Bundle 不会被修改。占位值只适用于仍位于 Bundle draft 内的 generated manifest；离开 Bundle 后应使用具体、可验证的 draft hash。
 
 `--manifest` 适合 `/comet-any` 生成物，或任何带 `comet/eval.yaml` 的 Skill 包：
 

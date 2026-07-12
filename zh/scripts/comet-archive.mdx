@@ -1,20 +1,20 @@
 ---
-title: "comet-archive"
+title: "comet archive"
 description: "完成 OpenSpec archive、主 spec 校验、frontmatter 标注和归档收尾。"
 ---
 
-`comet-archive.mjs` 是归档阶段的确定性入口。它把通过验证的 change 合并 delta spec 到主 spec 并移入 OpenSpec archive 目录，自己做前后校验。
+`comet archive` 是归档阶段的稳定、确定性入口。真实归档会把通过验证且已获最终确认的 change 合并 delta spec 到主 spec，并移入 OpenSpec archive 目录；`--dry-run` 可以在最终确认前安全预览。
 
 ## 基本形式
 
 ```bash
-node "$COMET_ARCHIVE" <change-name>
+comet archive <change-name>
 ```
 
 预览（不真正执行 OpenSpec）：
 
 ```bash
-node "$COMET_ARCHIVE" <change-name> --dry-run
+comet archive <change-name> --dry-run
 ```
 
 ## 它会做什么
@@ -23,14 +23,16 @@ node "$COMET_ARCHIVE" <change-name> --dry-run
 
 1. **校验 change 名**（kebab-case）。
 2. **定位 change 目录**，如果已被之前的归档移走，扫描 archive 目录恢复。
-3. **校验入口状态**：`phase` 必须是 `archive`，`verify_result` 必须是 `pass`。
+3. **校验共同入口状态**：`phase` 必须是 `archive`，`verify_result` 必须是 `pass`。
 4. **检查归档目标可用**：`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在。
-5. **写 pending action checkpoint**，支持归档中断后恢复。
-6. **调用 OpenSpec archive**：`openspec archive <change> --yes`，执行 delta→主 spec 合并（按 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 语义）并移动 change 目录。
-7. **解析归档目录**：重新定位 OpenSpec 实际放的位置（日期前缀可能变化）。
-8. **校验主 spec 干净**：扫描 `openspec/specs/*/spec.md`，残留 delta-only 标题就 FATAL。
-9. **标注 frontmatter**：design doc 加 `archived-with` 和 `status: final`，plan 加 `archived-with`。幂等设计。
-10. **更新归档状态**：设置 `archived: true`，Run 状态转为 `completed`，清除 pending action。
+5. **处理执行模式**：`--dry-run` 到此只报告预览，不要求最终确认、不写 pending action；真实归档要求 `archive_confirmation: confirmed`。
+6. **写 pending action checkpoint**，支持真实归档中断后恢复。
+7. **调用 OpenSpec archive**：`openspec archive <change> --yes`，执行 delta→主 spec 合并（按 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 语义）并移动 change 目录。
+8. **解析归档目录**：重新定位 OpenSpec 实际放的位置（日期前缀可能变化）。
+9. **校验主 spec 干净**：扫描 `openspec/specs/*/spec.md`，残留 delta-only 标题就 FATAL。
+10. **标注并完成状态**：幂等标注 design doc/plan，设置 `archived: true`，Run 转为 `completed`，清除 pending action。
+
+Design Doc 和 Plan 的归档注释可以安全重复执行，不会重复追加字段，并会保留正常的 Markdown 文件结尾，避免产生 `git diff --check` 格式错误。
 
 ## 不自动提交
 
@@ -67,7 +69,12 @@ delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 OpenSpec 原生概念�
 ## 重要边界
 
 - 不要手工把 change 标记为 archived。手工 transition 容易造成状态和文件位置不一致。
-- 归档成功后不要再跑 `comet-guard <name> archive`——活跃目录已不存在，guard 会报错。归档完整性由退出码和归档目录状态判断。
+- 用户确认通过 `comet state transition <name> archive-confirm` 写入 machine-owned 确认状态；重新打开会清除旧确认。不要直接编辑字段伪造批准。
+- 归档成功后不要再跑 `comet guard <name> archive`——活跃目录已不存在，guard 会报错。归档完整性由退出码和归档目录状态判断。
+
+<Note>
+  已归档的 Design Doc、Plan 和验证报告仍从项目根的 <code>docs/superpowers/</code> 解析，因此可以继续在 Dashboard 中查看。安装包保留 <code>comet-archive.mjs</code> 兼容 launcher，但普通使用应优先采用 <code>comet archive</code>。
+</Note>
 
 ## 下一步
 

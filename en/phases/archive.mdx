@@ -1,86 +1,64 @@
 ---
-title: "Phase 5: Archive — Sync Specs and Close the Change"
+title: "Phase 5: Archive"
 sidebarTitle: "Archive"
-description: "The Archive phase syncs delta specs to main specs, annotates design doc and plan frontmatter, moves the change to archive, and marks the workflow complete."
+description: "Confirm final approval, merge the OpenSpec delta, annotate workflow artifacts, and close the change."
 ---
 
-The Archive phase closes the loop. After verification passes and the branch is handled, `/comet-archive` runs a single script that syncs your delta specs into the canonical main specs, annotates the Design Doc and plan with their final status, moves the change directory to a dated archive folder, and marks the workflow complete. One command, fully automated — no manual document syncing required.
+Archive closes the spec lifecycle. After verification passes and branch handling is complete, Comet shows the irreversible actions and waits for final user approval before mutating specs or moving the change.
 
-## Trigger
-
-Run `/comet-archive` directly, or let `/comet` auto-dispatch after Phase 4 completes.
-
-## Owner
-
-**OpenSpec** — the archive phase is handled entirely by `comet-archive.sh`, which operates on OpenSpec's change and spec directory structure.
+<Tip>
+  Normally, invoke <code>/comet</code>. It routes a verified change to <code>/comet-archive</code>. Call the phase Skill directly only when automatic transition is disabled or you are resuming an archive-phase change.
+</Tip>
 
 ## Prerequisites
 
-Both conditions must be true before the archive phase can begin. The entry check enforces these as hard prerequisites:
+- `phase: archive`
+- `verify_result: pass`
+- `branch_status: handled`
 
-- `verify_result: pass` in `.comet.yaml`
-- `branch_status: handled` in `.comet.yaml`
+## Final confirmation
 
-If either condition is not met, the entry check reports the specific failure and stops.
+The user chooses one of three paths:
 
-## What `comet-archive.sh` Does
+| Choice | Result |
+| --- | --- |
+| Confirm archive | Runs `comet state transition <name> archive-confirm`, then executes `comet archive`. |
+| Adjust or verify again | Runs `archive-reopen`, returns to verify, and clears the old confirmation. |
+| Not yet | Leaves the change in archive without mutation. |
 
-<Steps>
-  <Step title="Validates entry state">
-    The script checks that `phase: archive`, `verify_result: pass`, and `archived: false` are all set in `.comet.yaml`. If validation fails, it reports the specific field mismatch and exits with a non-zero code.
-  </Step>
-  <Step title="Syncs delta specs to main specs">
-    Each delta spec at `openspec/changes/<name>/specs/<capability>/spec.md` is copied to (overwrites) the canonical main spec at `openspec/specs/<capability>/spec.md`. Before overwriting, the script prints a unified diff preview so you can confirm exactly what will change. This is the moment delta specs graduate to become the project's canonical specifications.
-  </Step>
-  <Step title="Annotates design doc frontmatter">
-    The Design Doc at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` receives `archived-with` and `status` annotations in its frontmatter, recording that this design was completed and archived as part of this change.
-  </Step>
-  <Step title="Annotates plan frontmatter">
-    Similarly, the implementation plan at `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` receives `archived-with` frontmatter annotations, closing the link between the plan and the archived change.
-  </Step>
-  <Step title="Moves the change to the archive directory">
-    The active change directory at `openspec/changes/<name>/` is moved to `openspec/changes/archive/YYYY-MM-DD-<name>/`. The date prefix makes the archive chronologically browsable.
-  </Step>
-  <Step title="Marks the change as archived">
-    The script updates `archived: true` in the moved `.comet.yaml` via `comet-state transition <archive-name> archived`. The workflow is now complete.
-  </Step>
-</Steps>
+`archive_confirmation` is machine-owned. A real archive requires `confirmed`; direct field edits cannot fabricate approval.
 
-## Dry Run
-
-Before executing the archive, you can preview exactly what the script will do — diffs, paths to be moved, frontmatter changes — without writing anything:
+## Preview before confirmation
 
 ```bash
-"$COMET_BASH" "$COMET_ARCHIVE" "<change-name>" --dry-run
+comet archive "<change-name>" --dry-run
 ```
 
-Dry run is especially useful when multiple delta specs are being synced and you want to review the diffs before committing to the overwrite.
+Dry-run requires archive phase and passing verification, but does not require final confirmation, write a pending checkpoint, call OpenSpec, or modify files.
 
-## After Archive
+## Execute archive
 
-The change is complete. The active `openspec/changes/<name>/` directory no longer exists — it has moved to `openspec/changes/archive/YYYY-MM-DD-<name>/`. To start new work, run `/comet` or `/comet-open`.
+```bash
+comet archive "<change-name>"
+```
 
-### Commit the archive changes
+The command writes a recoverable pending checkpoint, calls `openspec archive --yes`, validates main specs, annotates the Design Doc and Plan, and marks the Run complete. Annotation is idempotent and preserves a clean Markdown EOF.
 
-The archive script only moves files, merges the delta spec into the main spec, and annotates frontmatter — it **does not commit**. After it runs, the worktree holds these uncommitted changes:
-
-- The change directory move (`openspec/changes/<name>/` → `openspec/changes/archive/YYYY-MM-DD-<name>/`)
-- The delta → main spec merge
-- Archive metadata annotations on the Design Doc / plan
-
-You should commit them, otherwise the archived result stays in the worktree:
+Archive does not commit the result. Commit the dated change move, merged main specs, and artifact annotations after review:
 
 ```bash
 git add -A
 git commit -m "chore: archive <change-name>"
 ```
 
-If phase 4 branch handling chose to defer the merge into the main branch, finish that selected option (merge / PR / keep branch) together with this commit.
+If archive was interrupted after OpenSpec moved the directory, rerunning `comet archive` locates the dated archive, revalidates it, finishes missing annotations, and closes state without duplicating the merge.
 
-<Note>
-After the archive script runs successfully, do **not** run the phase guard (`comet-guard.sh archive`) against the old change name — the active directory no longer exists. Archive completeness is determined by the script's exit code and the presence of the dated archive directory.
-</Note>
+<Warning>
+  Do not hand-edit <code>archive_confirmation</code> or <code>archived</code>. After success, do not rerun <code>comet guard &lt;name&gt; archive</code> against the old active path; use the archive command exit status and dated directory as evidence.
+</Warning>
 
-<Tip>
-**Delta specs are living documents.** During Phase 3 (Build), you're encouraged to freely edit delta specs as the implementation evolves — add acceptance scenarios, adjust interfaces, capture edge cases as you discover them. None of those edits touch the main specs. Only at archive, when the change is fully verified, do delta specs get promoted to the canonical main specs. This keeps your canonical specs clean and change-complete.
-</Tip>
+## Next steps
+
+- [comet archive](/en/scripts/comet-archive)
+- [Open phase](/en/phases/open)
+- [Intermediate artifacts](/en/concepts/intermediate-artifacts)

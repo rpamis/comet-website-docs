@@ -1,6 +1,6 @@
 ---
 title: "archive 阶段"
-description: "archive 阶段不调用 skill，用 comet-archive 脚本完成 delta spec 合并到主 spec、标注产物、移动到 archive 目录——关闭整个 spec 生命周期。"
+description: "archive 阶段在最终确认后用 comet archive 完成 delta spec 合并、产物标注和目录归档，关闭整个 spec 生命周期。"
 ---
 
 archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产物，并移动到 archive 目录。它**关闭整个 spec 生命周期**。从你的角度看，这是一个**不可逆的收尾动作**——Comet 会先给你看清楚要做什么，等你确认才执行。
@@ -35,7 +35,8 @@ verify 阶段通过后（`verify_result: pass`），`/comet` 会先做归档前�
 ```mermaid
 flowchart TD
     Entry["入口状态验证<br/>phase=archive, verify_result=pass"] --> Stop1["停顿点 13：归档前最终确认<br/>三选一"]
-    Stop1 -->|确认归档| Run["comet-archive.mjs 执行"]
+    Stop1 -->|确认归档| Confirm["comet state transition<br/>archive-confirm"]
+    Confirm --> Run["comet archive 执行"]
     Stop1 -->|需要调整| Reopen["archive-reopen 回 verify"]
     Stop1 -->|暂不归档| Keep["保持 phase: archive"]
     Run --> S1["校验入口状态"]
@@ -57,7 +58,7 @@ flowchart TD
 ### Step 0：入口状态验证
 
 ```bash
-node "$COMET_STATE" check <name> archive
+comet state check <name> archive
 ```
 
 要求 `phase: archive`、`verify_result: pass`、`archived != true`。
@@ -76,24 +77,24 @@ Comet **暂停等你确认**——不会因为验证通过就自动归档。它�
 | 选项 | 含义 |
 | --- | --- |
 | **确认归档** | 立即执行归档脚本，完成 spec 合并和 change 移动 |
-| **需要调整或重新验证** | 不执行；`comet-state transition <name> archive-reopen` 回 `phase: verify`，再调 `/comet-verify` |
+| **需要调整或重新验证** | 不执行；`comet state transition <name> archive-reopen` 回 `phase: verify`，再调 `/comet-verify` |
 | **暂不归档** | 不执行，保留 `phase: archive`，等你稍后再调 `/comet-archive` |
 
-只有"确认归档"才执行脚本。"需要调整"必须用 `archive-reopen`（**不能手工编辑 `.comet.yaml`**），它会设 `verify_result: pending`、`phase: verify`、清 `verified_at`。
+只有“确认归档”才会先执行 `comet state transition <name> archive-confirm`，把 machine-owned `archive_confirmation` 写为 `confirmed`，再进入真实归档。“需要调整”必须用 `archive-reopen`（**不能手工编辑 `.comet.yaml`**），它会设 `verify_result: pending`、`phase: verify`，并清除 `verified_at` 和旧确认。
 
 ### Step 2：执行归档
 
 ```bash
-node "$COMET_ARCHIVE" "<change-name>"
+comet archive "<change-name>"
 ```
 
 脚本按顺序执行（每步打印 `[OK]`/`[FAIL]`）：
 
 | 步骤 | 内容 |
 | --- | --- |
-| 1 | 校验入口状态（`phase: archive`、`verify_result: pass`、`archived: false`） |
+| 1 | 校验共同入口状态（`phase: archive`、`verify_result: pass`、`archived: false`）；真实归档另要求 `archive_confirmation: confirmed` |
 | 2 | 检查归档目标可用（`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在） |
-| 3 | 写 pending checkpoint（支持中断恢复），调用 `openspec archive --yes` 按 ADDED/MODIFIED/REMOVED/RENAMED 合并 delta 到主 spec 并移动目录 |
+| 3 | 真实归档写 pending checkpoint（支持中断恢复），调用 `openspec archive --yes` 合并 delta 并移动目录；dry-run 不执行这些写入 |
 | 4 | 校验主 spec 无 delta-only 标题残留（有残留 **FATAL**） |
 | 5 | 标注 Design Doc frontmatter（`archived-with` + `status: final`） |
 | 6 | 标注 Plan frontmatter（`archived-with`） |
@@ -102,10 +103,12 @@ node "$COMET_ARCHIVE" "<change-name>"
 可以用 `--dry-run` 预览不执行：
 
 ```bash
-node "$COMET_ARCHIVE" "<change-name>" --dry-run
+comet archive "<change-name>" --dry-run
 ```
 
 dry-run 跑前两步，OpenSpec archive 和标注只打印 `[DRY-RUN]` 不执行，最后给 `Dry run complete. X/Y steps would succeed.`
+
+`--dry-run` 只要求 change 已进入 archive 且 verify 通过，不要求先写入 `archive_confirmation: confirmed`，也不会写 pending checkpoint。它适合在最终确认前检查归档目标和将要执行的动作。
 
 <Note>
   delta → 主 spec 的合并由 <strong>OpenSpec CLI</strong> 执行（<code>openspec archive &lt;change&gt; --yes</code>），Comet 只调用它然后校验结果。如果 OpenSpec CLI 找不到，会 <code>FATAL: OpenSpec CLI not found</code>——装 OpenSpec 或设 <code>COMET_OPENSPEC</code>。
@@ -142,7 +145,7 @@ git commit -m "chore: archive <change-name>"
 
 ## 调用的 skill
 
-**archive 阶段不通过 Skill 工具加载任何 skill。** 所有工作由脚本完成：`comet-state.mjs`、`comet-archive.mjs`、`comet-guard.mjs`。归档脚本内部调用 OpenSpec archive 能力做 delta→主 spec 语义合并。
+**archive 阶段不通过 Skill 工具加载其他 skill。** 状态检查和归档由稳定的 `comet state`、`comet archive`、`comet guard` 命令完成；`comet archive` 内部调用 OpenSpec archive 做 delta→主 spec 语义合并。
 
 ## 产物
 
@@ -160,7 +163,7 @@ git commit -m "chore: archive <change-name>"
 正常情况下由 `/comet` 在 verify 通过后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。前置条件：`verify_result: pass` 且分支已处理（`branch_status: handled`）。
 
 <Warning>
-  归档应由 <code>/comet-archive</code> 或归档脚本完成，<strong>不要手工 transition</strong>。OpenSpec 会把 change 移到带日期前缀的 archive 目录，手工 transition 容易造成状态和文件位置不一致。且归档成功后<strong>不要</strong>再跑 <code>comet-guard &lt;name&gt; archive</code>——活跃目录已不存在，guard 会报错。归档完整性以脚本退出码和归档目录状态判断。
+  归档应由 <code>/comet-archive</code> 或 <code>comet archive</code> 完成。不要手工写 <code>archive_confirmation</code> 或 <code>archived</code>；前者只能由确认 transition 写入，后者由真实归档完成。归档成功后不要再跑 <code>comet guard &lt;name&gt; archive</code>——活跃目录已不存在。归档完整性以命令退出码和归档目录状态判断。
 </Warning>
 
 ## 恢复（中断后可继续）

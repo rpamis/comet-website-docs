@@ -20,6 +20,21 @@ Comet 的恢复能力来自文件化状态。理解用户可读状态、机器�
   日常使用优先改 <code>.comet/config.yaml</code> 的项目默认值；<code>.comet.yaml</code> 是某个 change 的状态投影，Run state 是机器恢复细节。
 </Note>
 
+## 当前 change 选择
+
+`.comet/current-change.json` 保存当前 branch/worktree 明确选择的 Comet change。它只在多个 active change 并行时消除源码写入歧义，不替代每个 change 自己的 `.comet.yaml`。
+
+```bash
+comet state select <change-name>
+comet state current
+comet state clear-selection
+```
+
+- 只有一个 active change 时可以自动归属。
+- 多个 active change 时，进入目标 change 后必须显式 `select`。
+- 选择会记录 branch；切换 branch/worktree、目标归档或选择文件损坏后，守卫会失败闭合并要求重新选择。
+- 不要手工编辑 `current-change.json`。
+
 ## 三类状态 + 一层配置
 
 ```mermaid
@@ -101,9 +116,11 @@ auto_transition: true
 如果你在中英文混合会话里继续同一个 change，Comet 会读取该 change 的 `language`，保持产物语言稳定。要切换已有 change 的产物语言，用状态命令改 change 级字段：
 
 ```bash
-node "$COMET_STATE" set <change-name> language en
-node "$COMET_STATE" set <change-name> language zh-CN
+comet state set <change-name> language en
+comet state set <change-name> language zh-CN
 ```
+
+全局 `comet init` 和 `comet update` 会把选择的产物语言保存到 `~/.comet/config.yaml`。新 workflow 优先使用项目 `.comet/config.yaml`；项目没有配置语言时才回退到全局默认。因此个人可以设置跨项目默认值，团队项目仍能用仓库内配置覆盖。
 
 <Warning>
   项目级和 change 级语言值只接受 <code>en</code> 或 <code>zh-CN</code>。<code>zh</code> 只用于 <code>comet init --language zh</code> 的 CLI 选择，不是 <code>.comet/config.yaml</code> 的合法值。
@@ -116,7 +133,7 @@ Comet guard 会检查关键工作流产物的主语言。如果配置是 `zh-CN`
 每个配置项的运行时值按以下优先级解析：
 
 ```text
-change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > 默认值
+change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > 全局 language 默认 > 内置默认值
 ```
 
 | 层级 | 说明 | 设置方式 |
@@ -124,6 +141,7 @@ change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > �
 | change 级 `.comet.yaml` | 最高优先级。change 创建时从项目配置快照，之后由 `/comet` 流转 | 由 `/comet` 阶段 Skill 写入 |
 | 环境变量 | 仅在 change 级字段为空时生效，适合 CI/CD 临时覆盖 | `export COMET_AUTO_TRANSITION=true` / `export COMET_LANGUAGE=zh-CN` |
 | 项目级 `.comet/config.yaml` | change 级为空、环境变量也未设时的回退 | 手写或 init 生成 |
+| 全局 `~/.comet/config.yaml` | 只为 `language` 提供跨项目默认；项目配置优先 | 全局 init/update 生成 |
 | 默认值 | 最后回退 | 见上表 |
 
 ## auto_transition 详解
@@ -190,7 +208,7 @@ export COMET_AUTO_TRANSITION=true
 | `direct_override` | `true` \| `false` | full workflow 用 `build_mode: direct` 时必须为 `true` |
 
 <Warning>
-  <code>build_command</code> 和 <code>verify_command</code> 已移除，不再是合法字段。它们出现在 change 的 <code>.comet.yaml</code> 中时会被当作未知字段拒绝，而不是作为兼容配置读取。build guard 会自动探测项目构建命令（例如 <code>npm run build</code>、Maven 或 Cargo），没有探测到时会要求你补齐可验证的构建路径。
+  <code>build_command</code> 和 <code>verify_command</code> 已移除，不再是合法字段。build guard 会自动探测项目构建命令（例如 <code>npm run build</code>、Maven 或 Cargo）；没有探测到时，先真实运行项目命令，再用 <code>comet state record-check &lt;change&gt; &lt;build|verify&gt; --command "..." --exit-code 0</code> 记录可审计结果。该命令不能替代真实执行。
 </Warning>
 
 ### 时间与归档
@@ -199,6 +217,7 @@ export COMET_AUTO_TRANSITION=true
 | --- | --- | --- |
 | `created_at` | `YYYY-MM-DD` | change 创建日期，init 自动写入 |
 | `archived` | `true` \| `false` | 是否已归档 |
+| `archive_confirmation` | `null` \| `pending` \| `confirmed` | machine-owned 最终确认；verify 通过后为 `pending`，用户确认后才变为 `confirmed` |
 
 ### 机器管理字段（machine-managed）
 
@@ -216,7 +235,7 @@ export COMET_AUTO_TRANSITION=true
 
 ## 状态机硬约束
 
-这些约束同时存在于 `comet-guard.mjs` 和 `comet-state.mjs transition` 两个守卫层：
+这些约束同时存在于 `comet guard` 和 `comet state transition` 两个守卫层：
 
 | 约束 | 说明 |
 | --- | --- |
@@ -228,10 +247,11 @@ export COMET_AUTO_TRANSITION=true
 | `build_mode: direct` | hotfix/tweak 默认允许；full 需要 `direct_override: true` |
 | `verify → archive` 前 | `verify_result` 必须是 `pass` |
 | `verify-pass` 转换 | 需要 `verification_report` 指向已存在的文件，`branch_status` 为 `handled` |
+| 真实归档命令 | 需要 `archive_confirmation: confirmed`；重新打开归档会清除旧确认 |
 | `build_pause` | 不是执行方式，不能写进 `build_mode` |
 
 <Note>
-  直接 <code>comet-state set &lt;name&gt; phase &lt;value&gt;</code> 会被硬阻止，除非设了 <code>COMET_FORCE_PHASE=1</code>（仅修复用）。阶段推进只能通过 guard <code>--apply</code>。
+  直接 <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> 会被硬阻止，除非设了 <code>COMET_FORCE_PHASE=1</code>（仅修复用）。阶段推进只能通过 <code>comet guard --apply</code> 或合法 transition。
 </Note>
 
 ### 预设升级
@@ -243,7 +263,7 @@ hotfix/tweak 命中升级信号（跨模块、新 API、schema 变更等）时�
 
 ## 状态转换审计日志
 
-Classic 状态转换现在共用同一张 TypeScript transition table。成功的 `comet-state transition`、`comet-guard --apply` 和归档更新都会追加一行 JSON 到：
+Classic 状态转换共用同一套语义。成功的 `comet state transition`、`comet guard --apply` 和归档更新都会追加一行 JSON 到：
 
 ```text
 openspec/changes/<name>/.comet/state-events.jsonl
@@ -306,11 +326,11 @@ export COMET_AUTO_TRANSITION=false
 
 ### 修改单个 change 的字段
 
-通过 `comet-state` 命令（不要直接编辑文件）：
+通过 `comet state` 命令（不要直接编辑文件）：
 
 ```bash
-node "$COMET_STATE" set <change-name> verify_mode full
-node "$COMET_STATE" set <change-name> review_mode thorough
+comet state set <change-name> verify_mode full
+comet state set <change-name> review_mode thorough
 ```
 
 machine-owned 字段（`classic_profile`、`classic_migration`、`run_id`）不能用 `set` 修改。

@@ -1,0 +1,68 @@
+---
+title: "恢复探测（comet resume-probe）"
+description: "只读判断当前请求是否应恢复活跃 Comet workflow，并在歧义或决策点暂停确认。"
+---
+
+恢复探测是一个只读步骤，对应的 CLI 命令是 `comet resume-probe`。它读取活跃 change、`.comet.yaml`、当前阶段、工作树状态和用户请求，再给出是否适合恢复已有 Comet workflow 的判断。
+
+它不会修改 change、推进阶段、替你选择多个 change，也不会自动执行返回的下一条命令。
+
+## 基本用法
+
+```bash
+comet resume-probe . --utterance "继续刚才的登录重构"
+```
+
+如果请求来自标准输入：
+
+```bash
+echo "继续刚才的登录重构" | comet resume-probe . --stdin --json
+```
+
+常用选项：
+
+| 选项 | 作用 |
+| --- | --- |
+| `--utterance <text>` | 直接传入需要分类的用户请求 |
+| `--stdin` | 从标准输入读取用户请求 |
+| `--json` | 输出稳定的结构化结果，适合 Agent、hooks 和自动化 |
+| `--no-workflow-work` | 把当前请求标记为信息查询，而不是需要推进 workflow 的工作 |
+| `--already-in-comet-flow` | 当前已经在 Comet 流程内时返回 `out_of_scope`，避免重复路由 |
+
+## 如何理解结果
+
+| `action` | 含义 | 下一步 |
+| --- | --- | --- |
+| `auto_resume` | 只有一个明确相关的 active change，且不在决策点 | Agent 可以按 JSON 字段 `nextCommand` 路由到对应 `/comet-*` Skill |
+| `ask_user` | 存在多个 active change、未提交改动、状态异常或必须由用户决定的停顿点 | 先向用户确认，不要自行选择或推进 |
+| `out_of_scope` | 用户明确不想恢复、当前已在 Comet 内，或请求只是与 workflow 无关的信息查询 | 正常回答当前请求，不进入 Comet |
+| `none` | 没有 active Comet change | 不执行恢复；如需开始新工作，可显式运行 `/comet` |
+
+文本输出同时包含 `confidence`、`reason`，以及适用时的 `change`、`phase` 和 `next`。JSON 输出中的后续命令字段名为 `nextCommand`，同时还包含判断证据，便于调用方解释为什么恢复或暂停。
+
+## 哪些情况一定会暂停
+
+- 多个 active change，但用户请求没有点名目标。
+- 工作树有未提交改动，需要先判断归属。
+- active change 缺少有效 Comet 状态。
+- 当前处于 plan-ready、验证失败、归档确认等用户决策点。
+- 请求与唯一 active change 看起来无关。
+
+<Warning>
+  <code>ask_user</code> 不是错误。它表示证据不足或流程正在等待用户选择；调用方应展示原因并询问用户，而不是反复运行恢复探测。
+</Warning>
+
+## 与其他命令的区别
+
+| 命令 | 用途 |
+| --- | --- |
+| `/comet` | 显式开始或恢复 workflow，并路由到正确阶段 |
+| `comet resume-probe` | 在进入 workflow 前做一次只读恢复探测 |
+| `comet status` | 查看 active change、阶段、证据和推荐下一步 |
+| `comet doctor` | 诊断安装、环境或状态损坏 |
+
+## 下一步
+
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 自然语言恢复与显式 `/comet` 的使用方式
+- [状态损坏与恢复](/zh/guides/state-recovery) — 恢复探测提示状态异常时如何排查
+- [comet status](/zh/cli/status) — 查看全部 active change 的详细状态

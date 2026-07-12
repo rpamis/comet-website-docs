@@ -1,35 +1,44 @@
 ---
-title: "comet-state.mjs — workflow state interface"
-sidebarTitle: "comet-state.mjs"
-description: "The state runtime reads and updates .comet.yaml and keeps user-readable workflow state separate from machine-managed run state."
+title: "comet state"
+description: "Select the current change, read and transition Classic state, record custom command evidence, and resolve the next Skill."
 ---
 
-`comet-state.mjs` is the runtime interface for Comet workflow state. Agents should use Comet commands and installed Skill entrypoints instead of editing `.comet.yaml` directly.
+`comet state` is the stable public interface for Classic workflow state.
 
-## What it manages
+## Select the current change
 
-| Area | Purpose |
-| --- | --- |
-| current workflow | change id, phase, mode, and archive status |
-| transition events | allowed moves such as build complete or verify pass |
-| user-readable fields | paths, verification report, branch status, timestamps |
-| runtime boundary | keeps detailed checkpoints in `.comet/run-state.json` |
-
-## Typical operations
-
-State operations initialize a change, read fields, update approved metadata, validate entry conditions, and record transitions.
-
-Most users interact through:
+When multiple active changes exist, bind source work to the intended change:
 
 ```bash
-comet status
-comet dashboard .
+comet state select <change-name>
+comet state current
+comet state clear-selection
 ```
 
-## Why not edit phase manually
+The selection is tied to the current branch/worktree. Switching branches or worktrees, archiving the selected change, or damaging the selection makes it stale and requires a new `select`. A single active change may be attributed automatically; multiple changes are never guessed.
 
-Phase is part of a state machine. A transition should happen only after required artifacts and checks exist. Manual edits can make recovery ambiguous.
+## Common transitions
 
-## Recovery role
+```bash
+comet state transition <change-name> open-complete
+comet state transition <change-name> design-complete
+comet state transition <change-name> build-complete
+comet state transition <change-name> verify-pass
+comet state transition <change-name> verify-fail
+comet state next <change-name>
+```
 
-After context compression or a new session, `/comet` uses state files to decide whether to start, resume, verify, archive, or ask for a user decision.
+`next` returns `NEXT: auto`, `NEXT: manual`, or `NEXT: done` based on phase, workflow, and `auto_transition`.
+
+## Record custom project command evidence
+
+If Comet cannot infer a command from npm, Maven, or Cargo, run the project command and record the real result:
+
+```bash
+comet state record-check <change-name> build --command "make release" --exit-code 0
+comet state record-check <change-name> verify --command "./scripts/verify" --exit-code 0 --cwd packages/api
+```
+
+The record is bound to the current Run, command, working directory, and exit code. It is auditable evidence, not a way to skip build or verification, and must not describe a command that was not executed.
+
+State rejects illegal transitions and protects machine-owned Run fields from direct edits. The packaged `comet-state.mjs` launcher remains for compatibility, but normal use should prefer `comet state`.
