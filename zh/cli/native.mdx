@@ -1,0 +1,108 @@
+---
+title: 'Native CLI'
+description: '初始化 Native、管理 change、推进阶段、归档规格以及恢复中断事务。'
+---
+
+`comet native` 是 Native 工作流的统一命令入口。它只操作 `comet.config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取 Classic 或 OpenSpec change。
+
+## 初始化与根目录
+
+```bash
+comet native init [--root <artifact-root>] [--language en|zh-CN]
+comet native root show
+comet native root move <artifact-root>
+```
+
+示例：
+
+```bash
+# <project>/comet/
+comet native init
+
+# <project>/docs/comet/
+comet native init --root docs --language zh-CN
+
+# 事务化迁移到 <project>/artifacts/comet/
+comet native root move artifacts
+```
+
+已有配置会拒绝冲突的 `init --root`。根目录迁移依次经过 `copying`、`ready`、`switched`；存在 `pending_root_move` 时，普通 Native 写命令会失败关闭，避免猜测该使用哪棵树。
+
+## Change 管理
+
+```bash
+comet native new <change-name> [--language en|zh-CN]
+comet native list
+comet native show <change-name>
+comet native status [<change-name>]
+comet native select <change-name>
+```
+
+`change-name` 使用 lowercase kebab-case。`new` 在配置缺失时创建默认 `<project>/comet/`；`show` 返回 change 状态、brief 和拟议完整规格；`status` 返回当前阶段、验证结果、下一条命令和归档就绪度；`select` 只写 Native 自有 selection。
+
+## 推进与归档
+
+```bash
+comet native next <change-name> --summary <text> \
+  [--artifact <project-relative-path>]... \
+  [--no-code-reason <text>] \
+  [--result pass|fail] \
+  [--report <change-relative-path>]
+
+comet native archive <change-name>
+```
+
+各阶段所需证据：
+
+| 当前阶段 | 必要条件                                    | 结果                               |
+| -------- | ------------------------------------------- | ---------------------------------- |
+| Shape    | 完整 brief、合法的完整目标规格、无阻塞问题  | 进入 Build                         |
+| Build    | 至少一个真实项目产物，或 `--no-code-reason` | 进入 Verify                        |
+| Verify   | `--result` 与完整 `--report`                | pass 进入 Archive；fail 回到 Build |
+| Archive  | Verify 已 pass，canonical hash 仍匹配       | 更新 canonical spec 并归档         |
+
+`archive` 不能用 `next` 代替。若另一个 change 已改变相同 canonical spec，命令返回冲突，并保留 active change 供重新读取和决策。
+
+## 诊断与恢复
+
+```bash
+comet native doctor [<change-name>]
+comet native doctor [<change-name>] --repair --strategy continue
+comet native doctor [<change-name>] --repair --strategy rollback
+```
+
+默认 doctor 不改文件。显式 repair 可清理指向不存在 change 的 selection、可证明陈旧的本机锁，并按 journal 继续或回滚 Archive / root move 事务。
+
+Archive finalization 已开始后只能 continue。若事务两端或根目录树的 hash 无法对应，doctor 会停止自动修复并保留全部数据，供人工判断。
+
+## JSON 与退出码
+
+所有 Native 命令支持 `--json`，并只输出一个对象：
+
+```json
+{
+  "command": "status",
+  "exitCode": 0,
+  "data": {}
+}
+```
+
+失败时增加结构化 `error`。
+
+| 退出码 | 含义                             |
+| ------ | -------------------------------- |
+| `0`    | 成功                             |
+| `64`   | 参数或用法错误                   |
+| `65`   | 配置、状态或产物无效             |
+| `70`   | 未预期的内部失败                 |
+| `73`   | 锁、事务、并发 hash 或根目录冲突 |
+
+## 只提供 Skill 文件的环境
+
+若宿主没有安装 `comet` CLI，可直接使用 `/comet-native` 随包发布的 runtime：
+
+```bash
+node <comet-native-skill-root>/scripts/comet-native-runtime.mjs <command> [options]
+```
+
+它与 `comet native` 使用相同参数、输出和退出码，不依赖 OpenSpec、Superpowers 或其他外部 Skill。
