@@ -1,0 +1,87 @@
+---
+title: 'Native 工作流'
+description: '面向强编码模型的自包含需求工作流：详细约束、轻量执行、可恢复状态与安全归档。'
+---
+
+Comet Native 面向能够自主调查代码、选择实现方式并按风险安排验证的强编码模型。它保留 Spec 模式真正有价值的部分——需求管理、change 生命周期、状态检查、自动推进、验证证据、并发冲突和可恢复归档——但不再规定固定的设计、计划、TDD、调试或审查方法。
+
+它的原则是：**需求和验收条件要详细，执行协议要轻。** 模型需要知道目标、边界、决策、完整目标行为和验证期望；至于怎么实现，由模型结合仓库事实自主决定。
+
+## Native 与 Classic 是两套独立工作流
+
+|          | Native                                       | Classic Spec 模式                             |
+| -------- | -------------------------------------------- | --------------------------------------------- |
+| 适用模型 | 能自主规划和验证的强模型                     | 需要更明确步骤指导的模型                      |
+| 需求产物 | Comet 自有 brief、完整目标规格和 change 状态 | OpenSpec change/delta spec + Superpowers 文档 |
+| 执行约束 | 只约束结果、证据和安全边界                   | 五阶段 Skill、设计/计划/TDD/审查协议          |
+| 依赖     | 只依赖 Comet 自带 Native runtime             | 依赖 Classic、OpenSpec 和 Superpowers 组合    |
+| 入口     | `/comet-native`、`comet native ...`          | `/comet` 及 Classic 阶段 Skill                |
+
+Phase 1 不会自动判断或切换两种模式，也不提供 Native 到 Classic 的升级或转换。选择哪一条路径是用户或项目的明确决定；两边不会共享 change、状态或归档目录。
+
+## 目录与 artifact root
+
+Native 只使用 Comet 自有目录：
+
+```text
+<project>/comet.config.yaml
+<artifact-root>/comet/
+  specs/
+  changes/
+  archive/
+  runtime/
+```
+
+默认 artifact root 是项目根，因此产物位于 `<project>/comet/`。也可以初始化到 `docs`，得到 `<project>/docs/comet/`：
+
+```bash
+comet native init --root docs --language zh-CN
+```
+
+`artifact_root` 必须是项目内相对路径。需要调整位置时使用 `comet native root move`，不能直接编辑配置；迁移过程带事务状态，可在中断后继续或回滚。
+
+## 四个阶段
+
+```mermaid
+flowchart LR
+  A["Shape：理清需求"] --> B["Build：自主实现"]
+  B --> C["Verify：记录证据"]
+  C -->|pass| D["Archive：更新规格并归档"]
+  C -->|fail| B
+```
+
+### Shape：让信息足以完成任务
+
+Shape 将用户目标整理为 `brief.md`，固定记录 Outcome、Scope、Non-goals、Acceptance examples、Constraints and invariants、Decisions、Open questions 和 Verification expectations。
+
+模型先调查仓库中能获得的事实，只把真正会改变范围、用户可见行为、兼容性、风险或不可逆性的决定交给用户。存在这类决定时，一次只问最重要的一个问题，并给出推荐答案、理由与各选项的实际影响；没有高影响未知项时直接继续。
+
+若变更会改变长期行为，还要为每个 capability 写一份**完整目标规格**：它描述归档后该能力应有的全部行为，而不是只能叠加在旧文本上的增量 patch。
+
+### Build：强模型自主选择方法
+
+进入 Build 后，模型选择满足 brief 和目标规格的最简单可靠方案。是否写实现计划、采用何种测试粒度、如何调试和审查，都按任务风险决定。Native 不要求为了流程制造额外文档，也不强制 TDD。
+
+阶段推进需要引用真实项目产物；纯文档或无需代码的变更则记录明确的 no-code 原因。
+
+### Verify：事实而不是声明
+
+Verify 对照 Acceptance examples、完整目标规格和风险执行验证。`verification.md` 记录实际命令与结果、跳过项、规格一致性、已知限制和结论。失败会自动返回 Build，修复后重新验证；未运行的检查不能写成通过。
+
+### Archive：冲突安全地收敛
+
+只有 Verify 为 pass 时才能归档。Archive 在锁内重新检查 canonical spec 的 SHA-256：
+
+- `create` 要求 canonical spec 不存在；
+- `replace` 和 `remove` 要求当前 hash 与 change 保存的 `base_hash` 一致；
+- hash 已变化时停止并报告冲突，不覆盖另一个 change 的结果。
+
+成功后完整目标规格成为 canonical spec，active change 移到 `archive/YYYY-MM-DD-<change-name>/`，trajectory 保留 Shape、Build、Verify 和 Archive 的摘要证据，但不保存隐藏推理过程。
+
+## 状态检查、自动推进与恢复
+
+每次恢复从磁盘事实开始：先读配置，再运行 `comet native status` 和 `show`，然后读取目标 change、canonical spec、实现和测试。不要依赖聊天记录猜阶段，也不要手改 phase、Run state、锁或 transaction journal。
+
+`comet native next` 在阶段条件满足时自动推进；条件不足时返回结构化检查结果并停在当前阶段。`comet native doctor` 默认只读，`--repair` 只处理可证明安全的陈旧 selection、锁和确定性事务恢复，不会自动重写用户编写的 brief、规格或验证报告。
+
+完整命令见 [Native CLI](/zh/cli/native)。
