@@ -15,9 +15,29 @@ Comet Native 面向能够自主调查代码、选择实现方式并按风险安�
 | 需求产物 | Comet 自有 brief、完整目标规格和 change 状态 | OpenSpec change/delta spec + Superpowers 文档 |
 | 执行约束 | 只约束结果、证据和安全边界                   | 五阶段 Skill、设计/计划/TDD/审查协议          |
 | 依赖     | 只依赖 Comet 自带 Native runtime             | 依赖 Classic、OpenSpec 和 Superpowers 组合    |
-| 入口     | `/comet-native`、`comet native ...`          | `/comet` 及 Classic 阶段 Skill                |
+| 入口     | `/comet-native`、`comet native ...`          | `/comet-classic` 及 Classic 阶段 Skill        |
 
-Phase 1 不会自动判断或切换两种模式，也不提供 Native 到 Classic 的升级或转换。选择哪一条路径是用户或项目的明确决定；两边不会共享 change、状态或归档目录。
+`/comet` 是配置驱动的统一别名：它只读取项目根 `comet.config.yaml`，再转发到 `/comet-native` 或 `/comet-classic`。它不会根据任务大小、文件数量或模型判断切换模式，也不提供 Native 到 Classic 的升级或转换。两边不会共享 change、状态或归档目录。
+
+## 初始化与默认入口
+
+新的 Comet 项目运行项目级初始化时默认选择 Native：
+
+```bash
+comet init
+```
+
+这条路径只安装 Comet 自有 Skill/runtime，创建 `comet.config.yaml` 和默认的 `comet/` 目录，不安装 OpenSpec、Superpowers、CodeGraph，也不写入 Classic rules、hooks 或 `.comet/config.yaml`。已有明确 Classic 状态的项目继续保持 Classic；普通 `openspec/` 或 `docs/superpowers/` 目录本身不会被误判为 Classic。
+
+需要显式选择时使用：
+
+```bash
+comet init --workflow native
+comet init --workflow native --root docs
+comet init --workflow classic
+```
+
+显式改变 `default_workflow` 只改变 `/comet` 的入口，不迁移、删除或转换任何已有 change。`--root` 只适用于项目级 Native；global 安装仍表示安装全局能力，不写项目配置。
 
 ## 目录与 artifact root
 
@@ -35,7 +55,7 @@ Native 只使用 Comet 自有目录：
 默认 artifact root 是项目根，因此产物位于 `<project>/comet/`。也可以初始化到 `docs`，得到 `<project>/docs/comet/`：
 
 ```bash
-comet native init --root docs --language zh-CN
+comet init --workflow native --root docs
 ```
 
 `artifact_root` 必须是项目内相对路径。需要调整位置时使用 `comet native root move`，不能直接编辑配置；迁移过程带事务状态，可在中断后继续或回滚。
@@ -89,5 +109,7 @@ Verify 对照 Acceptance examples、完整目标规格和风险执行验证。`v
 `comet native next` 在阶段条件满足时自动推进；条件不足时返回结构化检查结果并停在当前阶段。普通推进通过 `runtime/transition.json` 先记录确定的前后状态，再依次写 Run state、`change.yaml`、trajectory 和 checkpoint；中断后下一次 `next` / `archive` 会自动继续，也可用 `doctor --repair --strategy continue` 显式恢复。
 
 `comet native doctor` 默认只读，`--repair` 只处理可证明安全的陈旧 selection、锁和确定性事务恢复，不会自动重写用户编写的 brief、规格或验证报告。普通推进不支持 rollback；Archive 和 root move 仍按各自 journal 的安全阶段决定能否回滚。
+
+`comet status` 会把 Native、Classic 和未托管 OpenSpec change 分区展示。自然语言恢复由 `comet resume-probe` 先解析项目默认工作流，再只检查对应一侧；Native 恢复永远进入 `/comet-native`，不会把 `comet native next` 误当作恢复命令，也不会扫描 Classic 目录。配置损坏时探针会停止并要求修复，而不是猜测回退。
 
 完整命令见 [Native CLI](/zh/cli/native)。
