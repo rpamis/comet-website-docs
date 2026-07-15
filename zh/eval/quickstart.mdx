@@ -1,25 +1,26 @@
 ---
 title: "快速上手：评估一个 Skill"
-description: "从环境准备到两步评估、看报告，跑通一次 Skill 评估的最短路径。新手从这里开始。"
+description: "从环境准备到一条命令在 Docker 隔离环境里跑通 Skill 评估、看报告，新手从这里开始。"
 ---
 
-本页是评估 Skill 的最短上手路径：先准备好环境，再用两条命令跑通一次评估。想了解完整机制、失败归因和报告解读，再看[进阶内容](#进阶内容)。
+本页是评估 Skill 的最短上手路径：准备好环境，用一条命令让你的 Skill 在 Docker 隔离环境里真实跑一次并产出报告。想了解完整机制、失败归因和报告解读，再看[进阶内容](#进阶内容)。
 
 ## 评估解决什么问题
 
-在发布一个 Skill 之前，你需要回答一个问题：**这个 Skill 作为产品能力，能不能通过真实任务的评估？** `comet eval` 就是回答这个问题的工具。它把底层细节（pytest、Docker、任务注册、profile、报告）封装起来，让你从项目根目录就能跑评估。
+在投入一个 Skill 之前，你想先确认一件事：**这个 Skill 作为产品能力，能不能在真实任务里跑通？** `comet eval` 就是回答这个问题的工具。它把底层细节（pytest、Docker、任务注册、profile、报告）封装起来，让你从命令行就能跑评估。
 
-评估结果是 `/comet-any` 发布前的**强制证据**——没有通过评估的 Skill 不能发布。
+你只需要一个本地 Skill 目录，`comet eval` 会用它内置的评估 harness（随 npm 包分发，不用 clone 仓库）在 Docker 隔离环境里跑一次真实任务。
 
 ## 你需要什么
 
-- 已经通过 [`/comet-any`](/zh/skill-creator/getting-started) 生成了一个 Skill（产物里有 `comet/eval.yaml`）
-- 或有一个本地 Skill 目录（用于早期冒烟）。
+- 已安装 `@rpamis/comet`（npm 包自带评估 harness，不用 clone Comet 仓库）
+- 一个本地 Skill 目录（你自己的 Skill，或任意一个含 `SKILL.md` 的目录）
+- 运行环境：`uv`、Docker、`claude` CLI、模型凭证（见下一节）
 
-如果你还没有 Skill，先看[组合任意 Skill 快速上手](/zh/skill-creator/getting-started)。
+想从零造一个 Skill 再评估？先看[组合任意 Skill 快速上手](/zh/skill-creator/getting-started)。
 
 <Note>
-  `/comet-any` 生成的 <code>comet/eval.yaml</code> 可以保留 <code>&lt;current-bundle-hash&gt;</code>。<code>comet eval</code> 会在运行前计算当前 Bundle draft hash，创建临时 manifest，再执行 collect/run；源 Bundle 不会被修改。
+  <code>comet eval</code> 传目录时默认用 <code>generic-skill-smoke</code> 任务做冒烟：它要求被测 Skill 在 Docker 容器里创建一个 <code>result.md</code>，用来验证"Skill 能被注入、被调用、能产出文件"。这是一个轻量但真实的 Docker 评估，不需要 <code>comet/eval.yaml</code>，也不需要先 <code>/comet-any</code>。
 </Note>
 
 ## 运行前你需要准备什么
@@ -91,49 +92,41 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ---
 
-## 最短路径：两步评估
+## 最短路径：一条命令跑通 Docker 评估
 
-环境准备好后，评估只需要两步。
-
-### 第一步：发现预检查（collect）
-
-先确认 eval 能发现你的 Skill 和任务。这一步**不消耗模型调用**，成本最低：
+环境准备好后，把你的 Skill 目录传给 `comet eval`：
 
 ```bash
-comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./my-skill --html
 ```
 
-如果输出没有报错，说明 manifest、路径和任务都能被正确发现。
-
-如果占位 hash 无法解析，错误会说明 manifest 是否已离开原 Bundle、是否缺少 `bundle.yaml`，或 draft 是否无法加载。先修复 Bundle 结构，不要手工把占位值替换成猜测的 hash。
-
-<Tip>
-  只有本地 Skill 目录、还没有 <code>comet/eval.yaml</code>？用早期冒烟路径：
-  ```bash
-  comet eval ./my-skill --skill-name my-skill --quick
-  ```
-  这会用 <code>generic-skill-smoke</code> 任务做冒烟，<strong>不等于发布前证据</strong>。
-</Tip>
-
-### 第二步：执行真实评估（run）
-
-确认发现没问题后，跑真实评估并生成可浏览的 HTML 报告：
-
-```bash
-comet eval ./generated-skill/comet/eval.yaml --html
-```
+这一条命令内部做了这些事：`comet eval` 用 npm 包内置的评估 harness，通过 `uv run pytest` 启动；为任务构建隔离的 Docker 环境；在容器里调用 `claude`，注入你的 Skill 执行任务；产出可浏览的 HTML 报告。
 
 运行后，CLI 会打印 `Report path`，指向生成的报告。打开它看结果是否通过。
 
+- 不需要 `comet/eval.yaml`，不需要 clone Comet 仓库，也不需要先 `/comet-any`。
+- target 传目录、`SKILL.md` 或 `comet/eval.yaml` 都可以；传目录时默认跑 `generic-skill-smoke`，所以 `--quick` 这个 flag 其实可省。
+- 不带 `--html` 时只输出 Markdown 报告（`summary.md`）。
+
 <Info>
-  不带 <code>--collect</code> 时会真正调用模型，会消耗 token 和时间。一次评估的耗时取决于任务数，以及 <code>auto_user</code> 模式下允许多少次"被测 Agent 到决策点、用户模拟器回复、被测 Agent 继续"的外层往返。<code>maxTurns</code> 限制的是这个往返上限，不是 Agent 内部工具调用数。先用 <code>--collect</code> 排错能避免浪费。
+  这一步会真正调用模型，消耗 token 和时间。一次评估的耗时取决于任务数，以及 <code>auto_user</code> 模式下允许多少次"被测 Agent 到决策点、用户模拟器回复、被测 Agent 继续"的外层往返。<code>maxTurns</code> 限制的是这个往返上限，不是 Agent 内部工具调用数。
 </Info>
 
 <p align="center">
   <img src="/assets/eval-quickstart-illustrations/01-collect-run.png" alt="小鱼先把 Skill 卡放进 --collect 低成本预检查托盘，再移动到 --html 真实评估报告托盘" width="800" />
 </p>
 
-<p align="center">先用 `--collect` 排路径、manifest 和任务发现问题，再用 `--html` 执行真实评估并生成可浏览报告</p>
+<p align="center">把你的 Skill 目录传给 comet eval，在 Docker 隔离环境里跑一次真实任务并生成可浏览报告</p>
+
+### 出问题时：先用 --collect 排错
+
+如果跑不起来，先用 `--collect` 做一次不消耗模型调用的发现预检查：
+
+```bash
+comet eval ./my-skill --collect
+```
+
+它确认 harness 能读到你的 Skill、任务能被发现。`--collect` 不调用模型、不启动 Docker 工作负载，成本最低。
 
 ## 看报告只需要关注三点
 
@@ -145,7 +138,7 @@ comet eval ./generated-skill/comet/eval.yaml --html
 
 ## 评估通过后做什么
 
-评估通过的结果会成为 `/comet-any` 发布前的证据。把结果交回 `/comet-any` 继续推进，或用 creator 命令检查 readiness：
+对于 `/comet-any` 生成的完整 Skill 包，通过的评估结果会成为发布前的证据。把结果交回 `/comet-any` 继续推进，或用 creator 命令检查 readiness：
 
 ```bash
 comet creator status my-skill --project . --json
@@ -156,13 +149,28 @@ comet creator next my-skill --project . --json
 
 ---
 
+## 进阶：评估 /comet-any 生成的完整 Skill 包
+
+如果你用 `/comet-any` 生成了一个完整 Skill 包，它的产物里会带 `comet/eval.yaml`——这是 `/comet-any` 自动生成的评估清单，**不是你要手写的文件**。这时可以跑完整的 profile 任务集，结果作为发布证据：
+
+```bash
+comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./generated-skill/comet/eval.yaml --html
+```
+
+- `comet/eval.yaml` 告诉 harness：Skill 在哪里、用哪个 profile、推荐跑哪些任务、期望哪些 evidence 和 artifacts。
+- 先 `--collect` 确认 manifest 和任务能被发现，再 `--html` 跑真实评估。
+- `/comet-any` 生成的 `comet/eval.yaml` 可以保留 `<current-bundle-hash>` 占位符；`comet eval` 会在运行前计算当前 Bundle draft hash、创建临时 manifest，不修改源 Bundle。
+
+完整包评估才是发布 readiness 的有效证据；直接传 Skill 目录的 `generic-skill-smoke` 冒烟只是早期验证，不作为发布证据。完整清单格式见[评估系统概览](/zh/eval/overview)。
+
 ## 一次评估内部发生了什么
 
 理解这一段能帮你判断评估结果是否可信。`comet eval ... --html` 内部做了这些事：
 
 ```mermaid
 flowchart TD
-    A["comet eval<br/>./comet/eval.yaml --html"] --> B["在 eval/ 下用 uv run pytest 启动 harness"]
+    A["comet eval<br/>./my-skill --html"] --> B["在 eval/ 下用 uv run pytest 启动 harness"]
     B --> C["加载 manifest / Skill<br/>解析 profile 和 task"]
     C --> D["为每个 task 构建隔离的 Docker 环境"]
     D --> E["在 Docker 内跑 claude<br/>stream-json 输出"]
@@ -181,8 +189,8 @@ flowchart TD
 ## 常见问题
 
 <AccordionGroup>
-  <Accordion title="collect 报错说找不到 manifest">
-    检查路径是否正确，确认 `comet/eval.yaml` 文件存在。如果你不在 Comet 仓库根目录，加上 `--project <dir>` 指向正确的根目录。
+  <Accordion title="--collect 或 run 报错说找不到目标">
+    确认传的路径正确：本地 Skill 目录要包含 <code>SKILL.md</code>（或直接传 <code>SKILL.md</code>）；<code>comet/eval.yaml</code> 要指向真实存在的文件。如果你不在 Comet 仓库根目录，加上 <code>--project &lt;dir&gt;</code> 指向正确的根目录。
   </Accordion>
 
   <Accordion title="run 报错说找不到报告">
