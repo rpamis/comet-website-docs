@@ -4,7 +4,7 @@ description: "深入理解 Comet 如何封装本地 eval harness，harness 目�
 ---
 
 <Tip>
-  这是进阶内容。日常评估只需要[快速上手](/zh/eval/quickstart)里的两条命令。这里讲的是 harness 内部机制，适合排查问题或理解 profile/task 选择。
+  这是进阶内容。日常评估只需要[快速上手](/zh/eval/quickstart)里的一条命令。这里讲的是 harness 内部机制，适合排查问题或理解 profile/task 选择。
 </Tip>
 
 Comet 的 eval harness 随 npm 包按版本分发。普通安装直接运行 `comet eval` 时，CLI 默认使用当前 `@rpamis/comet` 包中的 `eval/`；在 Comet 源码仓库开发或需要自定义 harness 时，可以用 `--project <repository-root>` 显式选择该仓库的 `eval/`。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke，让你不需要手工切目录或拼 pytest 参数。
@@ -78,13 +78,23 @@ uv run pytest local/tests/tasks/test_tasks.py [参数]
 
 两者共用同一套参数构建逻辑（`buildEvalArgs`），唯一区别是 collect 加 `--collect-only`，普通执行加 `-v`。`--report-config`、`--html`、`--quick` 用于真实评估路径。
 
-## manifest 模式
+## skill-path 模式（默认入口）
 
-### generated manifest 的 draft hash
+传一个本地 Skill 目录或 `SKILL.md` 时，`comet eval` 走 skill-path，不需要 `comet/eval.yaml`：
 
-manifest 的 `metadata.draftHash` 为 `<current-bundle-hash>` 时，CLI 会定位上层 `bundle.yaml`、计算当前 draft hash，并在系统临时目录写入一份运行时 manifest。Skill source 会解析为稳定绝对路径；评估结束后临时目录会被清理。
+```bash
+comet eval ./my-skill --html
+```
 
-原 manifest 和 Bundle 不会被修改。占位值只适用于仍位于 Bundle draft 内的 generated manifest；离开 Bundle 后应使用具体、可验证的 draft hash。
+这是评估任意本地 Skill 的默认入口。传目录时默认跑 `generic-skill-smoke`（验证"Skill 能被注入、被调用、产出文件"），所以 `--quick` 这个 flag 可省；`--skill-name` 会从目录名自动推断。你也可以用 `--task` 显式指定任务，或用 `--profile` 覆盖 profile。
+
+| 模式 | 默认 profile | 默认 task | 适合场景 |
+| --- | --- | --- | --- |
+| `--skill-path`（默认 quick） | `generic` | `generic-skill-smoke` | 评估自己的 Skill，跑通 Docker 评估 |
+| `--skill-path`（显式 `--task`） | `generic` | 你指定的 task | 手动指定任务时 |
+| `--manifest` | manifest 自带（通常 `authoring-skill`） | `recommended` | 评估 `/comet-any` 完整包，作发布证据 |
+
+## manifest 模式（评估 /comet-any 完整包）
 
 `--manifest` 适合 `/comet-any` 生成物，或任何带 `comet/eval.yaml` 的 Skill 包：
 
@@ -93,23 +103,13 @@ comet eval ./generated-skill/comet/eval.yaml --collect
 comet eval ./generated-skill/comet/eval.yaml --html
 ```
 
-manifest 通常由 `/comet-any` 生成，包含目标 Skill、profile、推荐任务、预期产物和交互配置。Engine-enabled 生成物默认使用 `authoring-skill` profile 和 `authoring-skill-smoke` quick eval。
+manifest 通常由 `/comet-any` 自动生成（不是手写），包含目标 Skill、profile、推荐任务、预期产物和交互配置。Engine-enabled 生成物默认使用 `authoring-skill` profile 和 `authoring-skill-smoke` quick eval。这条路径的结果才是发布 readiness 的有效证据；skill-path 的 `generic-skill-smoke` 只是早期验证，不作为发布证据。
 
-## skill-path 模式
+### generated manifest 的 draft hash
 
-`--skill-path` 适合还没有 `comet/eval.yaml` 的本地 Skill 目录：
+manifest 的 `metadata.draftHash` 为 `<current-bundle-hash>` 时，CLI 会定位上层 `bundle.yaml`、计算当前 draft hash，并在系统临时目录写入一份运行时 manifest。Skill source 会解析为稳定绝对路径；评估结束后临时目录会被清理。
 
-```bash
-comet eval ./my-skill --skill-name my-skill --quick
-```
-
-它适合早期冒烟。使用 `--skill-path` 时，`--quick` 默认选中 `generic-skill-smoke` task。你也可以用 `--task` 显式指定任务，或用 `--profile` 覆盖 profile。
-
-| 模式 | 默认 profile | 默认 task | 适合场景 |
-| --- | --- | --- | --- |
-| `--manifest` | manifest 自带（通常 `authoring-skill`） | `recommended` | 发布前评估 |
-| `--skill-path --quick` | `generic` | `generic-skill-smoke` | 早期冒烟 |
-| `--skill-path`（无 `--quick`） | `generic` | `recommended` | 手动指定任务时 |
+原 manifest 和 Bundle 不会被修改。占位值只适用于仍位于 Bundle draft 内的 generated manifest；离开 Bundle 后应使用具体、可验证的 draft hash。
 
 ## 执行信息
 

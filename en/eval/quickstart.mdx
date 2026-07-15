@@ -1,25 +1,26 @@
 ---
 title: "Quickstart: Evaluating a Skill"
-description: "The shortest path from environment preparation to a two-step evaluation and reading the report to run a Skill evaluation. New users start here."
+description: "From environment preparation to running a Skill evaluation in an isolated Docker environment with one command and reading the report. New users start here."
 ---
 
-This page is the shortest onboarding path for evaluating a Skill: prepare the environment first, then run a full evaluation in two commands. For the complete mechanism, failure attribution, and report interpretation, see the [advanced content](#advanced-content).
+This page is the shortest onboarding path for evaluating a Skill: prepare the environment, then run your Skill once in an isolated Docker environment with a single command and read the report. For the complete mechanism, failure attribution, and report interpretation, see the [advanced content](#advanced-content).
 
 ## What Problem Evaluation Solves
 
-Before publishing a Skill, you need to answer one question: **can this Skill, as a product capability, pass a real task evaluation?** `comet eval` is the tool that answers this. It wraps the underlying details (pytest, Docker, task registration, profiles, reports) so you can run evaluations from the project root directory.
+Before investing in a Skill, you want to confirm one thing: **can this Skill, as a product capability, pass a real task?** `comet eval` is the tool that answers this. It wraps the underlying details (pytest, Docker, task registration, profiles, reports) so you can run evaluations from the command line.
 
-The evaluation result is **mandatory evidence** for `/comet-any` before publishing — a Skill that hasn't passed evaluation cannot be published.
+All you need is a local Skill directory. `comet eval` uses its built-in eval harness (bundled with the npm package, no repo clone needed) to run a real task in an isolated Docker environment.
 
 ## What You Need
 
-- A Skill already generated via [`/comet-any`](/en/skill-creator/getting-started) (the artifact contains `comet/eval.yaml`)
-- Or a local Skill directory (for early smoke testing).
+- `@rpamis/comet` installed (the npm package bundles the eval harness, no need to clone the Comet repo)
+- A local Skill directory (your own Skill, or any directory containing `SKILL.md`)
+- Runtime environment: `uv`, Docker, the `claude` CLI, and model credentials (see the next section)
 
-If you don't have a Skill yet, first read [Composing Any Skill Quickstart](/en/skill-creator/getting-started).
+Want to build a Skill from scratch before evaluating it? Start with [Composing Any Skill Quickstart](/en/skill-creator/getting-started).
 
 <Note>
-  A generated <code>comet/eval.yaml</code> can keep <code>&lt;current-bundle-hash&gt;</code>. Before collect or run, <code>comet eval</code> calculates the current Bundle draft hash and creates a temporary manifest. It does not modify the source Bundle.
+  When you pass a directory, <code>comet eval</code> defaults to the <code>generic-skill-smoke</code> task: it asks the Skill under test to create a <code>result.md</code> inside the Docker container, verifying that "the Skill can be injected, invoked, and produce files." This is a lightweight but real Docker evaluation — it needs no <code>comet/eval.yaml</code> and no prior <code>/comet-any</code>.
 </Note>
 
 ## What You Need to Prepare Before Running
@@ -91,49 +92,41 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ---
 
-## Shortest Path: Two-Step Evaluation
+## Shortest Path: One Command to Run a Docker Evaluation
 
-Once the environment is ready, evaluation takes just two steps.
-
-### Step 1: Discovery pre-check (collect)
-
-First confirm that eval can discover your Skill and tasks. This step **consumes no model calls** and has the lowest cost:
+Once the environment is ready, pass your Skill directory to `comet eval`:
 
 ```bash
-comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./my-skill --html
 ```
 
-If the placeholder cannot be resolved, the error explains whether the manifest has left its original Bundle, `bundle.yaml` is missing, or the draft cannot be loaded. Repair the Bundle structure instead of replacing the placeholder with a guessed hash.
-
-If the output has no errors, the manifest, paths, and tasks can all be correctly discovered.
-
-<Tip>
-  Only have a local Skill directory, no <code>comet/eval.yaml</code> yet? Use the early smoke path:
-  ```bash
-  comet eval ./my-skill --skill-name my-skill --quick
-  ```
-  This uses the <code>generic-skill-smoke</code> task for a smoke test, which <strong>is not equivalent to pre-release evidence</strong>.
-</Tip>
-
-### Step 2: Execute the real evaluation (run)
-
-After confirming discovery is fine, run the real evaluation and generate a browsable HTML report:
-
-```bash
-comet eval ./generated-skill/comet/eval.yaml --html
-```
+This single command does the following internally: `comet eval` uses the eval harness bundled with the npm package and launches it via `uv run pytest`; it builds an isolated Docker environment for the task; it calls `claude` inside the container with your Skill injected to execute the task; and it produces a browsable HTML report.
 
 After running, the CLI prints `Report path` pointing to the generated report. Open it to see whether the result passed.
 
+- No `comet/eval.yaml` needed, no Comet repo clone needed, and no prior `/comet-any` needed.
+- The target can be a directory, a `SKILL.md`, or a `comet/eval.yaml`; when you pass a directory it defaults to the `generic-skill-smoke` task, so the `--quick` flag is in fact optional.
+- Without `--html`, only a Markdown report (`summary.md`) is produced.
+
 <Info>
-  Without <code>--collect</code>, the model is actually invoked, consuming tokens and time. The duration of one evaluation depends on the number of tasks and how many outer round-trips of "subject Agent reaches a decision point, user simulator replies, subject Agent continues" are allowed under <code>auto_user</code> mode. <code>maxTurns</code> limits this round-trip ceiling, not the Agent's internal tool call count. Using <code>--collect</code> to troubleshoot first avoids waste.
+  This step actually invokes the model, consuming tokens and time. The duration of one evaluation depends on the number of tasks and how many outer round-trips of "subject Agent reaches a decision point, user simulator replies, subject Agent continues" are allowed under <code>auto_user</code> mode. <code>maxTurns</code> limits this round-trip ceiling, not the Agent's internal tool call count.
 </Info>
 
 <p align="center">
   <img src="/assets/eval-quickstart-illustrations/01-collect-run.png" alt="Little fish first placing the Skill card into the --collect low-cost pre-check tray, then moving it to the --html real evaluation report tray" width="800" />
 </p>
 
-<p align="center">First use `--collect` to catch path, manifest, and task discovery issues, then use `--html` to execute the real evaluation and generate a browsable report</p>
+<p align="center">Pass your Skill directory to comet eval to run a real task in an isolated Docker environment and generate a browsable report</p>
+
+### When Something Goes Wrong: Troubleshoot with --collect First
+
+If it doesn't run, first do a discovery pre-check with `--collect` that consumes no model calls:
+
+```bash
+comet eval ./my-skill --collect
+```
+
+It confirms the harness can read your Skill and that the task can be discovered. `--collect` does not invoke the model or start Docker workloads, so it has the lowest cost.
 
 ## Only Three Things to Focus On in the Report
 
@@ -145,7 +138,7 @@ For the complete report structure, see [Reading Evaluation Reports](/en/eval/rep
 
 ## What to Do After the Evaluation Passes
 
-The passing evaluation result becomes `/comet-any`'s pre-release evidence. Hand the result back to `/comet-any` to continue, or use the creator command to check readiness:
+For a full Skill package generated by `/comet-any`, a passing evaluation result becomes pre-release evidence. Hand the result back to `/comet-any` to continue, or use the creator command to check readiness:
 
 ```bash
 comet creator status my-skill --project . --json
@@ -156,13 +149,28 @@ See [Publishing and Distributing a Skill](/en/skill-creator/publishing).
 
 ---
 
+## Advanced: Evaluating a Full /comet-any Skill Package
+
+If you generated a full Skill package with `/comet-any`, its artifact includes `comet/eval.yaml` — an eval manifest **auto-generated by `/comet-any`, not a file you write by hand**. You can then run the full profile task set, and the result serves as release evidence:
+
+```bash
+comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./generated-skill/comet/eval.yaml --html
+```
+
+- `comet/eval.yaml` tells the harness: where the Skill is, which profile to use, which tasks to run by default, and which evidence and artifacts are expected.
+- Run `--collect` first to confirm the manifest and tasks can be discovered, then `--html` for the real evaluation.
+- A `/comet-any`-generated `comet/eval.yaml` may keep the `<current-bundle-hash>` placeholder; `comet eval` computes the current Bundle draft hash before running and creates a temporary manifest without modifying the source Bundle.
+
+Full-package evaluation is the only valid evidence for publish readiness; passing a Skill directory through `generic-skill-smoke` is just early validation and does not count as release evidence. For the manifest format, see [Evaluation System Overview](/en/eval/overview).
+
 ## What Happens Inside a Single Evaluation
 
 Understanding this section helps you judge whether an evaluation result is trustworthy. `comet eval ... --html` does the following internally:
 
 ```mermaid
 flowchart TD
-    A["comet eval<br/>./comet/eval.yaml --html"] --> B["Launch the harness under eval/ using uv run pytest"]
+    A["comet eval<br/>./my-skill --html"] --> B["Launch the harness under eval/ using uv run pytest"]
     B --> C["Load manifest / Skill<br/>parse profile and task"]
     C --> D["Build an isolated Docker environment for each task"]
     D --> E["Run claude inside Docker<br/>stream-json output"]
@@ -181,8 +189,8 @@ Key points:
 ## FAQ
 
 <AccordionGroup>
-  <Accordion title="collect errors saying it can't find the manifest">
-    Check whether the path is correct and confirm the `comet/eval.yaml` file exists. If you're not in the Comet repo root directory, add `--project <dir>` to point to the correct root.
+  <Accordion title="--collect or run errors saying it can't find the target">
+    Confirm the path is correct: a local Skill directory must contain <code>SKILL.md</code> (or pass the <code>SKILL.md</code> directly); <code>comet/eval.yaml</code> must point to a file that actually exists. If you're not in the Comet repo root directory, add <code>--project &lt;dir&gt;</code> to point to the correct root.
   </Accordion>
 
   <Accordion title="run errors saying it can't find the report">

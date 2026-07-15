@@ -59,8 +59,8 @@ Comet 有两套评估系统，名字相近但完全不同：
 %%{init: {'flowchart': {'defaultRenderer': 'elk'}}}%%
 flowchart TB
   subgraph Input["你的 Skill"]
-    A["有 comet/eval.yaml<br/>发布前完整评估"]
-    B["只有本地 Skill 目录<br/>早期 quick smoke"]
+    A["任意本地 Skill 目录<br/>默认 quick smoke"]
+    B["有 comet/eval.yaml<br/>完整包评估（发布证据）"]
   end
 
   subgraph Discover["发现和准备"]
@@ -89,23 +89,17 @@ flowchart TB
 
 ## 入口怎么选
 
-| 场景 | 命令 | 适合阶段 |
+`comet eval [target]` 根据 target 自动判断入口：传目录或 `SKILL.md` 走 skill-path，传 `comet/eval.yaml` 走 manifest。两者也可以用 `--skill-path` / `--manifest` 显式指定，显式入口互斥。
+
+| 场景 | 命令 | 适合 |
 | --- | --- | --- |
-| 有 `comet/eval.yaml` 的 Skill | `comet eval ./skill/comet/eval.yaml --html` | 发布前完整评估 |
-| 本地早期冒烟 | `comet eval ./my-skill --skill-name my-skill --quick` | 早期验证 |
+| 任意本地 Skill 目录（默认） | `comet eval ./my-skill --html` | 评估自己的 Skill，一条命令跑通 Docker 评估 |
+| `/comet-any` 生成的完整包 | `comet eval ./generated-skill/comet/eval.yaml --html` | 跑完整 profile 任务集，作为发布证据 |
 
-`comet eval [target]` 会根据 target 判断是 manifest 还是本地 Skill。你也可以用 `--manifest` 或 `--skill-path` 显式指定入口；显式入口互斥。
-
-优先级很简单：
-
-| 场景 | 推荐入口 |
-| --- | --- |
-| 有 `comet/eval.yaml` | 直接传 eval.yaml 路径 |
-| 只有本地目录、还在早期调试 | 直接传目录并加 `--quick` |
-| 要进入发布 readiness | 直接传 `comet/eval.yaml` |
+传目录时默认跑 `generic-skill-smoke`，所以 `--quick` 这个 flag 可省；`--skill-name` 会从目录名自动推断。不需要 `comet/eval.yaml`，也不需要 clone Comet 仓库——npm 包自带 eval harness。
 
 <Warning>
-  不要把目录 quick smoke 当成最终发布评估。它只覆盖早期冒烟场景。
+  目录 quick smoke 不等于发布评估。它只验证"Skill 能被注入、被调用、产出文件"；发布 readiness 需要评估 <code>/comet-any</code> 生成的完整包（带 <code>comet/eval.yaml</code>）。
 </Warning>
 
 ## 为什么先 collect
@@ -209,21 +203,21 @@ eval harness 内置一组任务，每个任务是一个目录（含 `instruction
 
 **`recommended`** 不是任务名，而是 CLI 的默认解析路径：用 `--manifest` 时读 manifest 的 `recommendedTasks`；没有 manifest 时跑每个 task 的 `default_treatments`。
 
-## 只有本地 Skill 目录时怎么评估
+## skill-path 默认入口跑什么
 
-如果你还没有 `comet/eval.yaml`，只有一个本地 Skill 目录，可以先做 quick smoke：
+传一个本地 Skill 目录时，`comet eval` 默认用 `generic-skill-smoke` 任务做 quick smoke：
 
 ```bash
-comet eval ./my-skill --skill-name my-skill --quick
+comet eval ./my-skill --html
 ```
 
-这个路径适合早期验证：
+它验证：
 
 - Skill 目录是否可读取
 - eval harness 是否能把它当作动态 Skill 注入
-- 通用 smoke task 是否能跑起来
+- 通用 smoke task 是否能跑起来并产出 `result.md`
 
-当前 quick smoke 默认使用 `generic-skill-smoke`。这只是早期冒烟，**不等于**发布前完整证据。
+这是评估自己 Skill 的默认入口，轻量但真实。它**不等于**发布前完整证据——发布 readiness 需要评估 `/comet-any` 生成的完整包（带 `comet/eval.yaml`）。
 
 ## 第二块：/comet-any 如何连接 eval
 
@@ -320,7 +314,7 @@ comet creator next <name> --json
 ## 用户最少需要记什么
 
 1. `comet eval` 的核心问题是：这个 Skill 作为产品能力能不能通过真实任务评估。
-2. 有 `comet/eval.yaml` 就用它做完整评估；只有本地目录时，只能先做 quick smoke。
+2. 任意本地 Skill 目录都能用 `comet eval ./your-skill` 跑通 Docker 评估；要发布时再评估 `/comet-any` 生成的完整包（带 `comet/eval.yaml`）。
 3. 先 `collect`，再 `run --html`。
 4. `/comet-any` 生成物会把 eval 结果接入发布 readiness，但 eval 本身不是发布动作。
 5. `comet eval`（创建期）和 `comet skill check`（运行期）是两套系统，不要混用。
