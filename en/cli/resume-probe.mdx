@@ -1,9 +1,9 @@
 ---
-title: 'Resume probe (comet resume-probe)'
-description: 'Use project configuration to decide read-only whether the current request should resume Native or Classic, pausing on ambiguity or damage.'
+title: "Resume probe (comet resume-probe)"
+description: "Read-only detection of whether the current request should resume an active Comet workflow."
 ---
 
-The resume probe is a read-only step exposed as `comet resume-probe`. It first reads the project-root `comet.config.yaml` to select Native or Classic, then reads only that workflow's active changes, current phase, and the user request. Legacy projects without root configuration retain the Classic fallback. If configuration is malformed, the probe stops and requests repair instead of scanning the other workflow's directories.
+The resume probe is a read-only step exposed as `comet resume-probe`. It reads active changes, `.comet.yaml`, the current phase, worktree state, and the user request, then decides whether resuming an existing Comet workflow is appropriate.
 
 It does not modify a change, advance a phase, choose between multiple changes, or execute the returned next command.
 
@@ -19,54 +19,48 @@ Read the request from standard input:
 echo "continue the login refactor" | comet resume-probe . --stdin --json
 ```
 
-Common options:
-
-| Option                    | Purpose                                                                                 |
-| ------------------------- | --------------------------------------------------------------------------------------- |
-| `--utterance <text>`      | Pass the user request to classify directly                                              |
-| `--stdin`                 | Read the user request from standard input                                               |
-| `--json`                  | Return stable structured output for agents, hooks, and automation                       |
-| `--no-workflow-work`      | Mark the request as informational rather than workflow work                             |
-| `--already-in-comet-flow` | Return `out_of_scope` when the turn is already inside Comet, avoiding duplicate routing |
+| Option | Purpose |
+| --- | --- |
+| `--utterance <text>` | Pass the user request directly. |
+| `--stdin` | Read the request from standard input. |
+| `--json` | Return structured output for agents, hooks, and automation. |
+| `--no-workflow-work` | Treat the request as informational instead of workflow work. |
+| `--already-in-comet-flow` | Return `out_of_scope` when the turn is already inside Comet. |
 
 ## Understand the result
 
-| `action`       | Meaning                                                                                                              | Next step                                                                                                    |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `auto_resume`  | One clear target exists and its state allows recovery                                                                | Enter the permanent entry point in `nextCommand`: `/comet-native` for Native or `/comet-classic` for Classic |
-| `ask_user`     | The target is ambiguous, state is invalid, or a user decision is required                                            | Ask one question; do not choose a target or scan across workflows                                            |
-| `out_of_scope` | The user opted out, the turn is already inside Comet, or the request is informational and unrelated to workflow work | Handle the request normally without entering Comet                                                           |
-| `none`         | No active Comet change exists                                                                                        | Do not resume; invoke `/comet` explicitly to start new work                                                  |
+| `action` | Meaning | Next step |
+| --- | --- | --- |
+| `auto_resume` | One clearly related active change exists and it is not at a decision point. | The agent may route to the `/comet-*` command in JSON field `nextCommand`. |
+| `ask_user` | Multiple changes, dirty files, damaged state, or a user decision prevents automatic resume. | Show the reason and ask before continuing. |
+| `out_of_scope` | The user opted out, the turn is already in Comet, or the request is informational and unrelated. | Handle the request normally without entering Comet. |
+| `none` | No active change exists. | Do not resume; invoke `/comet` explicitly to start new work. |
 
-JSON uses `comet.resume_probe.v2` and includes `workflow`, `skill`, `entrySource`, `reasonCode`, `candidates`, `changeName`, `phase`, `nextCommand`, and decision evidence. Native resumes from every phase through `/comet-native`; `comet native next` advances state and is not a recovery entry point. The v1 probe bundled with the Classic runtime remains compatible internally, while the top-level CLI returns v2.
+Text output includes `confidence`, `reason`, and, when available, `change`, `phase`, and `next`. In JSON output, the command field is named `nextCommand`; JSON also includes evidence so the caller can explain the result.
 
-## Cases that pause recovery
+## Cases that require confirmation
 
-- Multiple active changes exist and the user request does not name a target.
-- Multiple active changes exist without a valid selection or user-named target.
-- An active change lacks valid state, or project configuration is malformed.
-- The workflow is at plan-ready, verification failure, archive confirmation, or another user decision point.
-- A request unrelated to existing changes, or an informational request, does not resume and returns `out_of_scope` instead.
-
-For Native, uncommitted changes are recovery evidence and a reminder; they do not by themselves block a strong model from entering `/comet-native` and inspecting the worktree. Classic retains its worktree-attribution confirmation rules.
+- More than one active change exists and the request does not name one.
+- The worktree contains uncommitted files that need attribution.
+- The active OpenSpec change has missing or invalid Comet state.
+- The workflow is at plan-ready, verification failure, final archive confirmation, or another decision point.
+- The request appears unrelated to the only active change.
 
 <Warning>
-  <code>ask_user</code> is not an error. It means the evidence is insufficient or the workflow is
-  waiting for a user decision. The caller should show the reason and ask the user instead of
-  repeatedly running the probe.
+  <code>ask_user</code> is not a command failure. It means the available evidence is insufficient or the workflow is waiting for a user decision.
 </Warning>
 
-## How it differs from other commands
+## Related commands
 
-| Command              | Purpose                                                                           |
-| -------------------- | --------------------------------------------------------------------------------- |
-| `/comet`             | Forward to `/comet-native` or `/comet-classic` according to project configuration |
-| `comet resume-probe` | Perform a read-only recovery probe before entering a workflow                     |
-| `comet status`       | View active changes, phases, evidence, and recommended next steps                 |
-| `comet doctor`       | Diagnose installation, environment, or damaged state                              |
+| Command | Purpose |
+| --- | --- |
+| `/comet` | Explicitly start or resume a workflow and route to the correct phase. |
+| `comet resume-probe` | Probe for a safe resume before entering the workflow. |
+| `comet status` | Inspect active changes, evidence, and recommended next actions. |
+| `comet doctor` | Diagnose installation, environment, or damaged state. |
 
 ## Next steps
 
-- [Resume interrupted work](/en/guides/resuming-workflow) — Natural-language recovery and explicit `/comet` usage
-- [Broken state and recovery](/en/guides/state-recovery) — Troubleshoot invalid state reported by the probe
-- [comet status](/en/cli/status) — Inspect detailed status for every active change
+- [Resume interrupted work](/en/guides/resuming-workflow)
+- [Broken state and recovery](/en/guides/state-recovery)
+- [comet status](/en/cli/status)
