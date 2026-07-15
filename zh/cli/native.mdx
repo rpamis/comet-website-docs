@@ -36,14 +36,19 @@ comet native list
 comet native show <change-name>
 comet native status [<change-name>]
 comet native select <change-name>
+comet native spec remove <change-name> <capability>
+comet native spec rebase <change-name> --summary <text>
 ```
 
 `change-name` 使用 lowercase kebab-case。`new` 在配置缺失时创建默认 `<project>/comet/`；`show` 返回 change 状态、brief 和拟议完整规格；`status` 返回当前阶段、验证结果、下一条命令和归档就绪度；`select` 只写 Native 自有 selection。
+
+新增或替换长期行为时，把完整目标规格写到 `changes/<change-name>/specs/<capability>/spec.md`。runtime 会根据 canonical spec 是否存在推导 `create` 或 `replace`，并冻结用于并发检查的 `base_hash`；删除能力时使用 `spec remove`。不要手改 `change.yaml` 里的 `spec_changes`。并发变化导致冲突时，重读并改写完整目标规格后使用 `spec rebase` 刷新基线、回到 Build 并清除旧验证结论。
 
 ## 推进与归档
 
 ```bash
 comet native next <change-name> --summary <text> \
+  [--confirmed] \
   [--artifact <project-relative-path>]... \
   [--no-code-reason <text>] \
   [--result pass|fail] \
@@ -54,14 +59,16 @@ comet native archive <change-name>
 
 各阶段所需证据：
 
-| 当前阶段 | 必要条件                                    | 结果                               |
-| -------- | ------------------------------------------- | ---------------------------------- |
-| Shape    | 完整 brief、合法的完整目标规格、无阻塞问题  | 进入 Build                         |
-| Build    | 至少一个真实项目产物，或 `--no-code-reason` | 进入 Verify                        |
-| Verify   | `--result` 与完整 `--report`                | pass 进入 Archive；fail 回到 Build |
-| Archive  | Verify 已 pass，canonical hash 仍匹配       | 更新 canonical spec 并归档         |
+| 当前阶段 | 必要条件                                   | 结果                               |
+| -------- | ------------------------------------------ | ---------------------------------- |
+| Shape    | 完整 brief、合法的完整目标规格、无阻塞问题 | 进入 Build，并由 runtime 记录确认  |
+| Build    | brief/spec 无阻塞，且有产物或 no-code 原因 | 进入 Verify                        |
+| Verify   | `--result` 与完整 `--report`               | pass 进入 Archive；fail 回到 Build |
+| Archive  | Verify 已 pass，canonical hash 仍匹配      | 更新 canonical spec 并归档         |
 
-`archive` 不能用 `next` 代替。若另一个 change 已改变相同 canonical spec，命令返回冲突，并保留 active change 供重新读取和决策。
+只有用户刚确认了会影响范围、用户可见行为、兼容性、风险或不可逆性的决定时，才在 Shape 或 Build 推进时传入 `--confirmed`；没有这类决定时由 runtime 记录隐式确认。任何确认都不能绕过 `brief.md` 中的 `[blocking]` 问题。
+
+`archive` 不能用 `next` 代替。若另一个 change 已改变相同 canonical spec，命令返回冲突，并保留 active change。重新读取 canonical spec、更新完整目标规格后运行 `spec rebase`；runtime 会受控重开到 Build，必须重新实现、确认和验证。
 
 ## 诊断与恢复
 
@@ -71,7 +78,9 @@ comet native doctor [<change-name>] --repair --strategy continue
 comet native doctor [<change-name>] --repair --strategy rollback
 ```
 
-默认 doctor 不改文件。显式 repair 可清理指向不存在 change 的 selection、可证明陈旧的本机锁，并按 journal 继续或回滚 Archive / root move 事务。
+默认 doctor 不改文件。每次普通阶段推进先写 `runtime/transition.json`；若进程在写 Run state、`change.yaml`、trajectory 或 checkpoint 之间中断，下一次 `next` 或 `archive` 会先幂等地继续未完成推进。也可以用 `doctor --repair --strategy continue` 显式恢复。
+
+显式 repair 还可清理指向不存在 change 的 selection、可证明陈旧的本机锁，并按 journal 继续或回滚 Archive / root move 事务。普通阶段推进只支持 `continue`，因为它的 journal 已保存确定的前后状态；`rollback` 只适用于仍允许回滚的 Archive / root move 事务。
 
 Archive finalization 已开始后只能 continue。若事务两端或根目录树的 hash 无法对应，doctor 会停止自动修复并保留全部数据，供人工判断。
 
