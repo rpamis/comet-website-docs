@@ -1,59 +1,121 @@
 ---
-title: 'comet status'
-description: 'View active changes, current phases, next commands, and recovery guidance.'
+title: "comet status — View Active Changes and Next Command"
+sidebarTitle: "comet status"
+description: "comet status displays active OpenSpec changes, task progress, and the recommended next workflow command. Use --json for machine-readable output."
 ---
 
-`comet status` is the first command to use for everyday recovery and troubleshooting.
+`comet status` gives you a read-only snapshot of active Comet-managed and plain OpenSpec changes, task progress, runtime evidence, and the appropriate next command.
 
-## Basic usage
+## Usage
 
 ```bash
 comet status
 ```
 
-| Option   | Description              |
-| -------- | ------------------------ |
-| `--json` | Output structured status |
+`path` defaults to `.` (the current directory) when omitted. The command reads change state from `openspec/changes/` inside the target directory.
 
-## What it tells you
+## Example Output
 
-- Whether project configuration sets Native or Classic as the default entry point; projects without root configuration show the Classic legacy fallback.
-- Separate sections for Native changes, Classic changes, and plain OpenSpec changes.
-- Native phase, approval, verification, selection, and next step.
-- Classic workflow, phase, runtime mode, current step, and file-evidence status.
-- Recovery guidance for missing evidence or malformed `.comet.yaml`.
+```
+Active Changes:
 
-## Reading mixed changes
+  1. my-feature [Comet] [phase: build [3/7 tasks]]
+     workflow: full | build_mode: subagent-driven-development
+     plan:   docs/superpowers/plans/2024-06-01-my-feature.md
+     next: /comet-build
 
-A project can contain Native, Classic, and plain OpenSpec changes at the same time—even changes with the same name. `comet status` displays them in separate sections. It does not convert fields, merge state, or force a plain OpenSpec change into either Comet state machine.
+  2. quick-fix [Comet] [phase: verify [5/5 tasks]]
+     workflow: full | build_mode: direct
+     verify_result: pending
+     next: /comet-verify
 
-| Change type           | State source                                        | Archive command when ready           |
-| --------------------- | --------------------------------------------------- | ------------------------------------ |
-| Native change         | `<artifact-root>/comet/changes/` and Native runtime | `comet native archive <change-name>` |
-| Classic change        | `.comet.yaml` and Classic runtime evidence          | `comet archive <change-name>`        |
-| Plain OpenSpec change | OpenSpec artifacts and task state                   | `openspec archive <change-name> -y`  |
+  3. docs-only [OpenSpec] [plain change [2/2 tasks]]
+     recommended archive: openspec archive docs-only -y
+```
 
-Changes that have not passed verification, have invalid state, or still have incomplete tasks do not show a direct archive recommendation. Follow `next:` or the recovery guidance to restore the required evidence first.
+Each entry shows:
+
+| Field | Description |
+|---|---|
+| `phase` | Current workflow phase (`open`, `design`, `build`, `verify`, `archive`). |
+| `tasks` | Completed / total task count from `tasks.md`, e.g. `[3/7 tasks]`. |
+| `workflow` | Workflow preset (`full`, `hotfix`, `tweak`). |
+| `build_mode` | Build execution mode (e.g. `subagent-driven-development`, `direct`). |
+| `design` | Path to the Superpowers Design Doc, if generated. |
+| `plan` | Path to the implementation plan, if generated. |
+| `verify_result` | Verification outcome (`pending`, `pass`, `fail`) — shown only in the `verify` phase. |
+| `next` | The Comet skill command to run next. |
+
+## Mixed Comet and OpenSpec changes
+
+One project may contain both Comet-managed changes and plain OpenSpec changes. Status labels them separately instead of forcing plain OpenSpec work into the Classic five-phase lifecycle.
+
+| Change type | State source | Archive command when ready |
+| --- | --- | --- |
+| Comet-managed | `.comet.yaml` and Classic runtime evidence | `comet archive <change-name>` |
+| Plain OpenSpec | OpenSpec artifacts and task completion | `openspec archive <change-name> -y` |
+
+Only archive-ready entries show a recommendation. Invalid state, incomplete tasks, or failed verification continue to show recovery guidance.
 
 ## Multiple active Comet changes
 
-With only one active Comet change, source writes can be attributed automatically. When multiple changes are active, select the current work target explicitly:
+With one active Comet change, source work can be attributed automatically. With multiple active changes, select the intended target first:
 
 ```bash
 comet state select <change-name>
 comet state current
 ```
 
-Selection is bound to the current branch or worktree. After switching branches or worktrees, or after the target is archived, select again. Use `comet status` to review candidates; guards do not guess when the target is ambiguous.
+Selection is tied to the current branch/worktree. Switches and stale selections require a new `select`; the source-write guard does not guess.
 
-## Recommended use
+Only non-archived changes appear. A directory without `.comet.yaml` appears as a plain OpenSpec change rather than being silently excluded.
+
+## Flags
+
+<ParamField query="--json" type="boolean">
+  Output active changes as structured JSON, including a `nextCommand` field for each change. Useful for scripting and automation.
+</ParamField>
+
+## JSON Output
 
 ```bash
-comet status
+comet status --json
 ```
 
-If the output looks abnormal, then run:
-
-```bash
-comet doctor
+```json
+{
+  "changes": [
+    {
+      "name": "my-feature",
+      "workflow": "full",
+      "phase": "build",
+      "buildMode": "subagent-driven-development",
+      "isolation": "branch",
+      "verifyMode": null,
+      "verifyResult": "pending",
+      "designDoc": null,
+      "plan": "docs/superpowers/plans/2024-06-01-my-feature.md",
+      "tasksCompleted": 3,
+      "tasksTotal": 7,
+      "nextCommand": "/comet-build"
+    }
+  ]
+}
 ```
+
+The `nextCommand` field maps each phase to its corresponding Comet entry point:
+
+| Phase | Next command |
+|---|---|
+| `open` | `/comet-open` |
+| `design` | `/comet-design` |
+| `build` | `/comet-build` |
+| `verify` | `/comet-verify` |
+| `archive` | `/comet-archive` |
+
+## Use Cases
+
+- **Quick workflow check** — Glance at all in-flight changes and where each one stands.
+- **Know what to run next** — The `next` field tells you exactly which Comet command to invoke to continue.
+- **Scripting and automation** — Pipe `--json` output into CI scripts or shell tooling to conditionally trigger workflow commands based on phase or task completion.
+- **Resume after interruption** — After closing an AI coding session, run `comet status` to orient yourself before typing `/comet` in your AI platform.

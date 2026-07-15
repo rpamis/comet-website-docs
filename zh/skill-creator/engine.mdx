@@ -4,7 +4,7 @@ description: "理解 Comet Skill 的三类来源、Skill 包结构、Engine 运�
 ---
 
 <Tip>
-  创建、优化或组合 Skill 时，通常只需要在 Agent 里调用 <code>/comet-any</code> 并按提示确认。除非你要调试 Engine Run、runtime checks 或生成物结构，不需要先理解本页的底层机制。经典 Spec 模式的 <code>/comet-classic</code> 用户也不需要理解 Engine 就能使用五阶段工作流。
+  创建、优化或组合 Skill 时，通常只需要在 Agent 里调用 <code>/comet-any</code> 并按提示确认。除非你要调试 Engine Run、runtime checks 或生成物结构，不需要先理解本页的底层机制。经典 Spec 模式的 <code>/comet</code> 用户也不需要理解 Engine 就能使用五阶段工作流。
 </Tip>
 
 Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置了 **Skill Engine**——一个确定性运行时，负责执行、约束、持久化、恢复和评估 Comet Skill。它为多步骤 Skill 提供稳定内容 hash、不可变快照、pending action 恢复、guardrails 和 runtime check。
@@ -13,7 +13,7 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 
 | 你的目标 | 建议 |
 | --- | --- |
-| 使用 `/comet-classic` 跑经典五阶段工作流 | 不需要读本页，先看[快速开始](/zh/quickstart) |
+| 使用 `/comet` 跑经典五阶段工作流 | 不需要读本页，先看[快速开始](/zh/quickstart) |
 | 用 `/comet-any` 创建或组合 Skill | 先看[快速上手：组合任意 Skill](/zh/skill-creator/getting-started) |
 | 发布 Skill | 先看[发布和分发 Skill](/zh/skill-creator/publishing) |
 | 调试 `comet skill run/continue/check` | 读本页 |
@@ -29,7 +29,7 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 
 | 类型 | 来源 | 常见入口 | 说明 |
 | --- | --- | --- | --- |
-| 内置工作流 Skill | 随包分发在 `assets/skills/` | `/comet-classic`、`/comet-open`、`/comet-any` | 驱动五阶段流程和 Skill Creator |
+| 内置工作流 Skill | 随包分发在 `assets/skills/` | `/comet`、`/comet-open`、`/comet-any` | 驱动五阶段流程和 Skill Creator |
 | 项目 Skill | 安装到 `.comet/skills/<name>` | `comet skill add` | 按名称覆盖内置 Skill，无效覆盖 fail closed |
 | Factory 生成 Skill | `/comet-any` 创建或组合 | `/comet-any`、`comet publish` | 生成后就是普通 Skill 包，可评估、可发布、可分发 |
 
@@ -376,7 +376,7 @@ Run state 是 machine-owned 的，不要手工编辑。
 
 | runnerMode | 存储位置 | 特点 |
 | --- | --- | --- |
-| `change` | `<changeDir>/.comet/` | 绑定 OpenSpec change 目录，一个目录一个 Run。经典 `/comet-classic` 工作流用这种。 |
+| `change` | `<changeDir>/.comet/` | 绑定 OpenSpec change 目录，一个目录一个 Run。经典 `/comet` 工作流用这种。 |
 | `standalone` | `<projectRoot>/.comet/runs/<runId>/` | 独立 Run，用 runId 寻址，多个 Run 并存 |
 
 ### run-state.json 字段
@@ -410,11 +410,11 @@ Run state 是 machine-owned 的，不要手工编辑。
 
 ## 经典工作流和 Engine 的关系
 
-经典 `/comet-classic` 五阶段工作流在底层由 Engine 驱动，但用户不需要直接操作 Engine。
+经典 `/comet` 五阶段工作流在底层由 Engine 驱动，但用户不需要直接操作 Engine。
 
 ```mermaid
 flowchart LR
-  A["/comet-classic"] --> B[".comet.yaml 用户可见状态"]
+  A["/comet"] --> B[".comet.yaml 用户可见状态"]
   B --> C["run_id 链接"]
   C --> D[".comet/run-state.json<br/>machine-owned Run state"]
   B --> E["workflow / phase / verify_result"]
@@ -430,7 +430,7 @@ flowchart LR
 - 首次进入一个 change 时，`ensureClassicRun` 从 `.comet.yaml` 的 classic 字段推导当前 step，创建快照和 Run state，建立 `run_id` 链接。
 
 <Note>
-  Engine 内部的 <code>comet-classic</code> 定义是一个 deterministic Skill，有 30 个步骤覆盖 full/hotfix/tweak 三种 profile。用户通过永久入口 <code>/comet-classic</code>（或由项目配置驱动的 <code>/comet</code> 别名转发）进入，不直接操作这些内部 YAML；Engine 在底层加载并运行它们。
+  <code>comet-classic</code> 本身是一个 deterministic Skill，有 30 个步骤覆盖 full/hotfix/tweak 三种 profile。它是内部 Skill——用户从不直接调用它，而是用 <code>/comet</code>、<code>/comet-open</code> 等，Engine 在底层运行。
 </Note>
 
 #### Classic 控制包的打包方式
@@ -443,7 +443,7 @@ flowchart LR
 | `comet/runtime/classic/guardrails.yaml` | 允许的 7 个公开 Skill、`maxIterations: 500`、`maxRetriesPerAction: 3` |
 | `comet/runtime/classic/checks.yaml` | runtime check（`classic-completed`：completion 时 `status == completed`） |
 
-这里的 Engine 定义**不是**用户调用的顶层 `comet-classic/` 入口目录。内部安装产物是这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册并由 Engine 加载；顶层 `/comet-classic` 只负责稳定入口与工作流编排。
+它**不是**一个顶层、像用户 Skill 一样的 `comet-classic/` 目录——安装产物只暴露这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册，运行时由 Engine 加载。所有 `/comet*` 命令的用户面行为完全不变。
 
 ## 什么时候用 /comet-any
 
@@ -478,7 +478,7 @@ comet skill continue --run-id demo-run --upgrade my-skill --project .
 
 ## 下一步
 
-- [工作流概念](/zh/concepts/workflow) — `/comet-classic` 如何在底层使用 Engine
+- [工作流概念](/zh/concepts/workflow) — `/comet` 如何在底层使用 Engine
 - [comet skill](/zh/cli/skill) — 完整命令参考
 - [Runtime check](/zh/eval/runtime) — `comet skill check` 和 `comet eval` 的区别
 - [Skill Creator 概览](/zh/skill-creator/overview) — 用 `/comet-any` 创建 Engine-enabled Skill
