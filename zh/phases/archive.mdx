@@ -28,13 +28,13 @@ verify 阶段通过后（`verify_result: pass`），`/comet` 会先做归档前�
 
 ## 前置条件
 
-进入 archive 需要：验证已通过（`verify_result: pass`）、分支已处理（`branch_status: handled`）。
+进入 archive 需要：验证已通过（`verify_result: pass`）、归档提交和分支处理仍未完成（`branch_status: pending`）。
 
 ## 你会经历什么
 
 ```mermaid
 flowchart TD
-    Entry["入口状态验证<br/>phase=archive, verify_result=pass"] --> Stop1["停顿点 13：归档前最终确认<br/>三选一"]
+    Entry["入口状态验证<br/>phase=archive, verify_result=pass"] --> Stop1["停顿点 8：归档前最终确认<br/>三选一"]
     Stop1 -->|确认归档| Confirm["comet state transition<br/>archive-confirm"]
     Confirm --> Run["comet archive 执行"]
     Stop1 -->|需要调整| Reopen["archive-reopen 回 verify"]
@@ -46,7 +46,9 @@ flowchart TD
     S4 --> S5["标注 Design Doc + Plan frontmatter"]
     S5 --> S6["移动目录 + archived: true"]
     S6 --> Done["生命周期闭合"]
-    Done --> Commit["停顿点 14：提示提交归档变更<br/>git add -A && git commit"]
+    Done --> Commit["Step 4：用显式 pathspec 提交归档变更"]
+    Commit --> Branch["停顿点 9：分支处理<br/>合并 / PR / 保留"]
+    Branch --> Final["写 branch_status: handled<br/>comet guard archive"]
 ```
 
 <p align="center">
@@ -63,13 +65,13 @@ comet state check <name> archive
 
 要求 `phase: archive`、`verify_result: pass`、`archived != true`。
 
-### 停顿点 13：归档前最终确认
+### 停顿点 8：归档前最终确认
 
 Comet **暂停等你确认**——不会因为验证通过就自动归档。它给你看清楚：
 
 - change 名称
 - 验证报告路径和结论
-- 分支处理状态
+- 当前分支/工作区和已有未提交改动的归属摘要
 - 本次将执行的**不可逆动作**：按 delta 语义合并主 spec、标注 design doc/plan、移动 change 到 archive 目录
 
 然后让你**三选一**：
@@ -122,7 +124,7 @@ brainstorming → delta spec → 实施 → 验证 → 主 spec 合并 → desig
 
 流程全部完成。活跃 change 列表不再包含它，后续改动需要创建新 change。
 
-### Step 4：提交归档变更（停顿点 14）
+### Step 4：用显式 pathspec 提交归档变更
 
 归档脚本只移动文件、合并 spec，**不会自动提交**。执行完后，工作树里会留下这些未提交的变更：
 
@@ -130,15 +132,40 @@ brainstorming → delta spec → 实施 → 验证 → 主 spec 合并 → desig
 - delta spec 已按 ADDED/MODIFIED/REMOVED/RENAMED 语义合并进主 spec
 - Design Doc / Plan 的 frontmatter 加上了归档标注
 
-Comet 会**提示你提交这些变更**，否则归档结果就一直悬在工作树里。展示待提交文件后，建议：
+归档后读 `git status --short`，与归档前的脏工作区归属基线对比，**只 stage 可归属到本次 change 的路径**：原始活跃路径、命令打印的实际归档路径、本次 delta 改动的主 spec、本 Design Doc/Plan 的归档元数据。有路径无法归属时停止。用显式 pathspec 后检查 staged diff，不要 stage 整个仓库，也不要把用户已有的未提交改动混进归档提交：
 
 ```bash
-git add -A
+git add -- <逐个核实的归档路径...>
+git diff --cached --stat
 git commit -m "chore: archive <change-name>"
 ```
 
+提交失败或 staged diff 含无关路径时停止。
+
+### Step 5：归档提交后处理分支（停顿点 9）
+
+归档提交成功后，**立即加载** Superpowers `finishing-a-development-branch`。这个顺序确保最终分支或 PR 包含主 spec 合并和归档元数据。skill 不可用时停止并提示安装/启用，不写 `branch_status: handled`。
+
+加载后按 `comet/reference/decision-point.md` 暂停让你选：
+
+| 选项 | 行为 |
+| --- | --- |
+| 1 | 本地合并到主分支 |
+| 2 | 推送并创建 PR |
+| 3 | 保持当前分支稍后处理 |
+
+归档已完成，所以**不提供"丢弃工作"选项"。只有选定操作成功（或你明确选择保留分支）后才写：
+
+```bash
+comet state set <change-name> branch_status handled
+comet guard <change-name> archive
+comet state clear-selection
+```
+
+archive guard 会校验归档完整性和 `branch_status: handled`；失败说明工作流仍未完成。
+
 <Note>
-  如果 phase 4 的分支处理选择了"暂不合并到主分支"，把选定的收尾方式（合并 / PR / 保留分支）和这次提交一起完成。归档脚本本身不接管分支操作。
+  分支处理在 verify 和 archive 之间曾经属于 verify 阶段。0.4.0-beta.5 起移到 archive，<strong>在归档提交之后</strong>进行，使最终分支或 PR 包含合并后的 spec 和归档元数据。
 </Note>
 
 ---
@@ -160,10 +187,10 @@ git commit -m "chore: archive <change-name>"
 
 ## 何时进入
 
-正常情况下由 `/comet` 在 verify 通过后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。前置条件：`verify_result: pass` 且分支已处理（`branch_status: handled`）。
+正常情况下由 `/comet` 在 verify 通过后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。前置条件：`verify_result: pass` 且 `branch_status: pending`（分支处理在 archive 内完成）。
 
 <Warning>
-  归档应由 <code>/comet-archive</code> 或 <code>comet archive</code> 完成。不要手工写 <code>archive_confirmation</code> 或 <code>archived</code>；前者只能由确认 transition 写入，后者由真实归档完成。归档成功后不要再跑 <code>comet guard &lt;name&gt; archive</code>——活跃目录已不存在。归档完整性以命令退出码和归档目录状态判断。
+  归档应由 <code>/comet-archive</code> 或 <code>comet archive</code> 完成。不要手工写 <code>archive_confirmation</code> 或 <code>archived</code>；前者只能由确认 transition 写入，后者由真实归档完成。归档后 <code>comet guard &lt;name&gt; archive</code> 会从原始 change 名解析实际归档目录，不要手工构造带日期的归档路径。
 </Warning>
 
 ## 恢复（中断后可继续）

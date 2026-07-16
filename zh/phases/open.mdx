@@ -41,17 +41,16 @@ open 阶段不是一次性生成文档，而是一段**多轮对话 + 多个停�
 
 ```mermaid
 flowchart TD
-    Start["你说出想法"] --> S1["加载 openspec-explore<br/>反复提问澄清"]
+    Start["你说出想法"] --> Chk["OpenSpec 兼容性检查<br/>需要 >= 1.5.0"]
+    Chk --> S1["加载 openspec-explore<br/>反复提问澄清"]
     S1 --> S1a{"大型 PRD /<br/>多个独立能力?"}
-    S1a -->|是| Stop1["停顿点 1：PRD 拆分预检<br/>三选一"]
+    S1a -->|是| Stop1["停顿点 2：PRD 拆分预检<br/>三选一"]
     S1a -->|否| S1sum["生成澄清摘要<br/>5 个必备部分"]
     Stop1 --> S1sum
-    S1sum --> Stop2["停顿点 2：确认需求澄清完成"]
-    Stop2 --> Stop3["停顿点 3：确认 change 名称"]
-    Stop3 --> S2["加载 openspec-new-change<br/>逐个生成 proposal → design → tasks"]
+    S1sum --> S2["加载 openspec-new-change<br/>按 schema 生成 proposal → design → tasks"]
     S2 --> S3["入口状态验证 + 内容完整性检查"]
-    S3 --> Stop4["停顿点 4：审视三个文档并确认"]
-    Stop5 --> Exit["comet-guard open --apply<br/>推进到下一阶段"]
+    S3 --> Stop3["停顿点 3：审视名称、范围和三个文档"]
+    Stop3 --> Exit["comet guard open --apply<br/>推进到下一阶段"]
 ```
 
 <p align="center">
@@ -59,6 +58,10 @@ flowchart TD
 </p>
 
 <p align="center">open 阶段把模糊想法过滤成三份可执行的 OpenSpec 产物</p>
+
+### 第 0b 步：OpenSpec 兼容性检查
+
+在任何 OpenSpec 状态或指令命令之前，Comet 会运行 `openspec --version`。本流程**要求 OpenSpec >= 1.5.0**。版本更旧、无法解析、命令不可用或退出码非零时立即停止，提示你运行 `npm install -g @fission-ai/openspec@latest` 后重试——不会继续使用缺少 `applyRequires`、`artifactPaths`、`changeRoot` 或 `resolvedOutputPath` 契约的旧 CLI。
 
 ### 第一步：探索想法与澄清需求
 
@@ -72,56 +75,71 @@ Comet 加载 `openspec-explore`，**围绕你的想法持续提问**，直到能
 | **关键未知项** | 假设、风险、依赖 |
 | **验收场景草案** | 核心成功场景 + 关键边界场景 |
 
-### 停顿点 1：PRD 拆分预检（条件触发）
+### 停顿点 2：PRD 拆分预检（条件触发）
 
 如果你的输入是一个**大型 PRD、路线图或完整产品计划**，或者澄清摘要里出现了**多个独立能力**，Comet 会在这里暂停，给你一份**候选拆分清单**（每个拆分项含建议名称、目标范围、非目标、依赖顺序、核心验收场景），然后让你三选一：
 
 | 选项 | 含义 |
 | --- | --- |
-| **创建多个 OpenSpec changes** | 按拆分清单创建多个独立 change（每个都要用自己的 `/comet-open`） |
+| **创建多个 OpenSpec changes** | 按拆分清单创建多个独立 change，并把清单持久化到 `.comet/batches/<batch-id>.json` |
 | **保持为一个 change** | 不拆，继续单 change 流程，把不拆的原因记进文档 |
 | **调整拆分方案后继续** | 你描述调整，Comet 重新出清单再问一次 |
 
+确认拆分后，Comet 把接受的拆分项写入 `.comet/batches/<batch-id>.json`（记录版本、原始目标摘要、创建时间、有序 change 名，以及每项的目标/范围/非目标/验收场景和 `pending|open-complete|selected` 状态）。每创建或完成一项后原子更新该文件。这是批次编排清单，不替代每个 change 自己的 `.comet.yaml`。
+
+每个拆分项完成各自 open 阶段后，Comet 对清单里每个 change 跑 `openspec status --change "<name>" --json` 和 `comet state check <name> design` 双重校验（`changeRoot` 必须是仓库本地、`applyRequires` 的产物必须全部 `done`、具体输出必须存在且非空）。全部通过才宣布拆分完成。
+
 <Tip>
-  拆分后 Comet <strong>不会</strong>自动推进任何单个 change 到 design。它会暂停问你想先做哪一个，只推进你选的那个，其余保持活跃等以后 <code>/comet</code> 恢复。
+  拆分后 Comet <strong>不会</strong>自动推进任何单个 change 到 design。它会暂停问你想先做哪一个（停顿点 1），只推进你选的那个，其余保持活跃等以后 <code>/comet</code> 恢复。恢复时先读批次清单，对已通过校验的项不重建，从第一个未完成项继续。
 </Tip>
 
-### 停顿点 2：确认需求澄清完成
+### 澄清与命名（默认非阻塞）
 
-在创建任何文档之前，Comet 把完整的澄清摘要（五个部分）摆给你看，**等你明确确认**。确认前不会创建 proposal/design/tasks，也不会用 `openspec-propose` 一次性生成。
+0.4.0-beta.5 起，需求澄清和 change 命名**默认非阻塞**。Comet 把第一步澄清整理成一份已解决的 brief（目标、非目标、范围边界、关键未知项、验收场景草案），并推导一个准确代表范围的 kebab-case 英文名：
 
-### 停顿点 3：确认 change 名称
+- 范围和命名都明确时**直接继续**，不单独暂停让你确认摘要或名称——最终审视（停顿点 3）会一次性确认名称、范围和三个文档
+- 你提供名称时归一化为 kebab-case 并在进度更新中回显，归一化保留含义时不重复确认
+- 复用已确认批次项的持久化摘要和名称；只在检测到范围漂移或清单数据缺失时重新澄清
+- 只在仍有会改变范围或目标 change 身份的互斥选择时，才用决策点协议提一次联合问题
 
-在 `openspec new change` 之前，Comet 让你定名字。**名字必须是 kebab-case 英文**（小写字母、数字、连字符，例如 `refine-requirements-doc`）。它会：
-
-- 推荐 2-3 个 kebab-case 英文名，每个带一行范围说明
-- 让你**自行输入名称**——如果你输入的是中文或非合规文本，它会转换成合规 kebab-case 并**回显让你确认**
-- 如果名字和已有 change 冲突，报告冲突让你换一个
+OpenSpec 名必须是用小写字母、数字和单个连字符的 kebab-case 英文。存在冲突但目标明确时，推导一个稳定的非冲突名继续；只有 Comet 无法判断是复用已有 change 还是新建时才问你。
 
 ### 第二步：创建 change 结构
 
-加载 `openspec-new-change`。完整工作流**默认不加载** `openspec-propose`（一次性生成全部），只有你明确要求时才允许。Comet 用**标准产物循环**逐个生成 proposal → design → tasks：
+加载 `openspec-new-change`。完整工作流**默认不加载** `openspec-propose`（一次性生成全部），只有你明确要求时才允许。创建 change 骨架后立即初始化可恢复状态：
 
-1. 刷新状态：`openspec status --change "<name>" --json`
-2. 获取指令：`openspec instructions proposal|design|tasks --change "<name>" --json`
-3. 读取 `dependencies`、遵循 `template` 和 `instruction`、应用 `context`/`rules` 约束（**不复制到文档内容里**）、写入 `resolvedOutputPath`
-4. 每个 artifact 后再刷新状态确认
+```bash
+comet state init <name> full
+comet state select <name>
+comet state check <name> open
+```
+
+任一命令失败即停止。然后运行一次 `openspec status --change "<name>" --json` 做兼容性预检：`changeRoot` 必须等于仓库本地 `openspec/changes/<name>`，`artifacts` 必须包含核心 id `proposal`/`design`/`tasks`，`applyRequires` 必须是可解析的产物 id 列表且每个都在 `artifacts` 中。
+
+预检通过后，按 OpenSpec schema 和依赖图生成实现所需产物：
+
+1. 运行 `openspec status --change "<name>" --json` 解析完整 JSON
+2. `applyRequires` 全部 `done` 时退出；`isComplete` 仅作诊断，不作为阶段阻塞
+3. 从未完成的 `ready` 产物中优先推进 `applyRequires` 依赖闭包，按 CLI 返回顺序处理，不硬编码生成顺序
+4. 为每个 ready `<artifact-id>` 获取当前指令：`openspec instructions <artifact-id> --change "<name>" --json`
+5. 读取 `dependencies`、遵循 `template` 和 `instruction`、应用 `context`/`rules` 约束（**不复制到文档内容里**）、写入 `resolvedOutputPath`
+6. 每个 artifact 后再刷新状态确认
 
 <Warning>
-  如果 <code>openspec instructions</code> 失败、返回无效 JSON、或没提供可用的 <code>resolvedOutputPath</code>，Comet 会<strong>立即停止</strong>并报告 OpenSpec 错误，<strong>不会</strong>回退成硬编码文档结构——那会绕过项目规则。change 名必须是你确认过的 kebab-case 名，Comet 不会自作主张扩大或缩小范围。
+  如果 <code>openspec instructions</code> 失败、返回无效 JSON、或没提供可用的 <code>resolvedOutputPath</code>，Comet 会<strong>立即停止</strong>并报告 OpenSpec 错误，<strong>不会</strong>回退成硬编码文档结构——那会绕过项目规则。
 </Warning>
 
 ### 第三步：入口状态验证 + 内容完整性检查
 
 ```bash
-node "$COMET_STATE" check <name> open
+comet state check <name> open
 ```
 
 然后逐个确认三个文件存在且非空：proposal（背景/目标/范围）、design（架构决策/选型/数据流）、tasks（任务描述）。任何一个缺失或为空，Comet 都不会继续，而是回到创建步骤。
 
-### 停顿点 4：审视三个文档并确认
+### 停顿点 3：审视名称、范围和三个文档
 
-Comet 把三个文档的摘要摆给你看（proposal 的背景目标范围、design 的架构决策选型、tasks 的任务数和关键任务），然后让你**二选一**：
+Comet 把三个文档的摘要摆给你看（proposal 的背景目标范围、design 的架构决策选型、tasks 的任务数和关键任务），以及推导的 change 名，然后让你**二选一**：
 
 | 选项 | 含义 |
 | --- | --- |
@@ -131,7 +149,7 @@ Comet 把三个文档的摘要摆给你看（proposal 的背景目标范围、de
 ### 退出：推进到下一阶段
 
 ```bash
-node "$COMET_GUARD" <change-name> open --apply
+comet guard <change-name> open --apply
 ```
 
 `--apply` 是必须的——没有它 `.comet.yaml` 会停在 `phase: open`，下一阶段的入口检查会失败。full workflow 推进到 `phase: design`；hotfix/tweak 直接跳到 `phase: build`（跳过 design）。
@@ -167,23 +185,23 @@ node "$COMET_GUARD" <change-name> open --apply
 初始化 Comet 状态：
 
 ```bash
-node "$COMET_STATE" init <name> full
+comet state init <name> full
 ```
 
 ## 幂等性：可以安全重复
 
 open 阶段所有操作都可以安全重复执行。如果 `.comet.yaml` 已经在 `phase: open` 且三个产物都已存在，Comet 会**跳过已完成步骤**，从第一个缺失的步骤继续。这让你在中断后重新 `/comet` 也不会搞乱状态。
 
-## 四个停顿点一览
+## open 的停顿点
 
-open 阶段有 4 个停顿点（全局编号 1-4，整个五阶段工作流共 13 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
+open 阶段的停顿点（全局编号见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
 
 | 停顿点 | 何时出现 | 你要做什么 |
 | --- | --- | --- |
-| 1 PRD 拆分 | 输入是大 PRD 或多个独立能力 | 拆分 / 不拆 / 调整方案 |
-| 2 需求澄清完成 | 澄清摘要生成后 | 确认理解对了 |
-| 3 change 名称 | 创建 change 前 | 选名 / 自定义名 |
-| 4 文档审视 | 三文档生成后 | 确认 / 要调整 |
+| 2 PRD 拆分 | 输入是大 PRD 或多个独立能力 | 拆分 / 不拆 / 调整方案 |
+| 3 文档审视 | 三文档生成后 | 确认名称、范围和文档 / 要调整 |
+
+需求澄清和命名默认非阻塞，不再单独占用停顿点——只在最终审视一次性确认。
 
 所有停顿点都遵循[决策点协议](/zh/concepts/decision-points)——Comet 不能用推荐规则、默认值或"用户应该会同意"来代替你的明确选择。
 
@@ -210,6 +228,6 @@ open 阶段有 4 个停顿点（全局编号 1-4，整个五阶段工作流共 1
 ## 下一步
 
 - [design 阶段](/zh/phases/design) — open 完成后进入深度设计
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的 4 个停顿点详解
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的停顿点详解
 - [大型 PRD 拆分](/zh/guides/prd-splitting) — Step 1a 的完整机制
 - [自动推进机制](/zh/concepts/auto-transition) — open 完成后如何自动衔接 design

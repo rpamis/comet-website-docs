@@ -61,9 +61,9 @@ hotfix 通常**不是你手敲的命令**。`/comet` 的 Step 0 会**优先做�
 ```mermaid
 flowchart TD
     Start["bug 描述"] --> S1["Step 1 快速开启<br/>openspec-new-change 创建精简产物"]
-    S1 --> S2["Step 2 直接构建<br/>build_mode: direct, review_mode: off"]
+    S1 --> S2["Step 2 直接构建<br/>build_mode: direct, review_mode: off<br/>先复现 bug 留 RED 证据"]
     S2 --> Esc{"命中升级信号?"}
-    Esc -->|是| EscStop["停顿点：升级判定<br/>继续 hotfix / 升级 full"]
+    Esc -->|是| EscStop["停顿点 10：升级判定<br/>继续 hotfix / 升级 full"]
     Esc -->|否| S3["Step 3 根因消除检查<br/>（hotfix 专属）"]
     EscStop -->|继续 hotfix| S3
     EscStop -->|升级 full| EscUp["preset-escalate → design"]
@@ -71,9 +71,11 @@ flowchart TD
     Root -->|否| S2
     Root -->|是| S4["Step 4 验证<br/>comet-verify"]
     S4 --> Vf{"验证通过?"}
-    Vf -->|否| VfStop["停顿点：验证失败决策"]
-    VfStop -->|修复| S2
-    Vf -->|是| S5["Step 5 归档<br/>comet-archive（归档前确认）"]
+    Vf -->|否，可修复| Auto["自动 verify-fail 回 build<br/>（前 3 次，verify_failures 计数）"]
+    Vf -->|否，需权衡/第 4 次| VfStop["停顿点 7：验证例外决策"]
+    Auto --> S2
+    VfStop -->|修复/继续| S2
+    Vf -->|是| S5["Step 5 归档<br/>comet-archive（归档确认 + 分支处理）"]
     S5 --> Done["完成"]
 ```
 
@@ -91,9 +93,10 @@ flowchart TD
 初始化 hotfix 状态（`init` 写入的默认值见下表）：
 
 ```bash
-node "$COMET_STATE" init <name> hotfix
-node "$COMET_STATE" check <name> open
-node "$COMET_GUARD" <change-name> open --apply
+comet state init <name> hotfix
+comet state select <name>
+comet state check <name> open
+comet guard <change-name> open --apply
 ```
 
 open guard 对 hotfix **不要求** `design.md`（只对 full 要求），所以 open 完成后直接跳到 build，**跳过 design 阶段**。
@@ -107,17 +110,25 @@ open guard 对 hotfix **不要求** `design.md`（只对 full 要求），所以
 | `build_mode` | `direct` | `null`（build 时选） |
 | `tdd_mode` | `direct` | `null`（build 时选） |
 | `review_mode` | `off` | 来自项目配置/env（可能 null） |
-| `isolation` | `branch` | `null`（build 时选） |
+| `isolation` | `current` | `null`（build 时选） |
 | `verify_mode` | `light` | `null`（verify 时 scale 定） |
 
-所以 hotfix 不需要你在 build 阶段选这四项——guard 对预设工作流**豁免** `review_mode`/`tdd_mode` 选择检查。`build_mode: direct` 默认只允许 hotfix/tweak，full 必须显式设 `direct_override: true`。
+所以 hotfix 不需要你在 build 阶段选这四项——guard 对预设工作流**豁免** `review_mode`/`tdd_mode` 选择检查。`build_mode: direct` 默认只允许 hotfix/tweak，full 必须显式设 `direct_override: true`。`isolation: current` 如实记录在当前工作区执行；创建分支/工作区后才改为 `branch`/`worktree`。`tdd_mode: direct` 不做 Red-Green-Refactor，但仍要求相关测试和 bug 回归证据。
 
 ### Step 2：直接构建（预设 build）
 
-使用默认值 `build_mode: direct`、`review_mode: off`，跳过 `brainstorming` 和 `writing-plans`。逐任务执行：
+使用默认值 `build_mode: direct`、`tdd_mode: direct`、`review_mode: off`、`isolation: current`。`direct` 跳过完整 plan/TDD 编排，**绝不跳过复现、回归覆盖和验证**。跳过 `brainstorming` 和 `writing-plans`；**任务数量本身不路由到 `/comet-build`**。
+
+实现前**先复现 bug 并记录失败证据**：
+
+1. 用最小可重复步骤确认报的旧行为，记录命令、输入和实际结果
+2. 可自动化时，加一个能为此 bug 失败的回归测试，确认失败由 bug 而非环境或测试本身导致
+3. 暂时无法自动化时，把原因加上可重复的手动失败证据记进 proposal/验证报告；没有证据不得改代码
+
+有了 RED 证据后，逐任务执行：
 
 1. 读 tasks.md 未完成任务
-2. 每个任务：改代码 → 格式化 → 跑测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
+2. 每个任务：改代码 → 格式化 → 先重跑新增的失败回归测试确认转绿，再跑相关测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
 3. 全部完成后显式运行项目测试和构建命令
 
 <Warning>
@@ -137,7 +148,7 @@ open guard 对 hotfix **不要求** `design.md`（只对 full 要求），所以
 这一步本身也是升级信号来源：根因消除检查发现**深层架构问题**，或修复需要**额外接口变更**，命中质变信号，暂停交你决定。
 
 ```bash
-node "$COMET_GUARD" <change-name> build --apply
+comet guard <change-name> build --apply
 ```
 
 ### Step 4：验证（预设 verify）
@@ -152,7 +163,7 @@ node "$COMET_GUARD" <change-name> build --apply
 想增加审查可在验证前手动设置：
 
 ```bash
-node "$COMET_STATE" set <name> review_mode standard
+comet state set <name> review_mode standard
 ```
 
 ### Step 5：归档（预设 archive）
@@ -181,7 +192,7 @@ hotfix 的范围判定采用三层分工，避免"用纯文件数当硬性升级
 
 ### 3. 验证级别（scale 脚本判定）
 
-`comet-state scale` 只决定 `verify_mode`，不卡流程、不触发升级。
+`comet state scale` 只决定 `verify_mode`，不卡流程、不触发升级。
 
 ### 升级决策（停顿点）
 
@@ -195,21 +206,20 @@ hotfix 的范围判定采用三层分工，避免"用纯文件数当硬性升级
 选 B 后用合法升级通道（**不能手工编辑 `.comet.yaml`**）：
 
 ```bash
-node "$COMET_STATE" transition <name> preset-escalate
+comet state transition <name> preset-escalate
 ```
 
-它**原子地**设 `workflow: full`、`classic_profile: full`、`phase` 回退到 `design`、清空 `design_doc`，然后加载 `/comet-design` 补 Design Doc。已完成的代码、tasks 和 OpenSpec artifacts 都保留——你只补一个 Design Doc，不是从头来。`preset-escalate` 只能从 `phase: build` 的 hotfix/tweak 触发，其他情况会报错。
+它**原子地**设 `workflow: full`、`classic_profile: full`、`phase` 回退到 `design`、清空 `design_doc`，并清除预设专属的轻量执行设置，然后加载 `/comet-design` 补 Design Doc。已完成的代码、tasks 和 OpenSpec artifacts 都保留——你只补一个 Design Doc，不是从头来。升级到 full 后会在 Design Doc 之后的联合决策里重新选择完整工作流配置。`preset-escalate` 只能从 `phase: build` 的 hotfix/tweak 触发，其他情况会报错。
 
 ## 连续执行和必停点
 
-hotfix 默认**一次性连续执行**——调用后自动推进，不主动停顿。但无论 `auto_transition` 取何值，以下情况**必须暂停**等你确认：
+hotfix 默认**一次性连续执行**——调用后自动推进，不主动停顿。但无论 `auto_transition` 取何值，以下真正的用户决策**必须暂停**等你确认：
 
-1. 命中升级判定信号
-2. 任务超过 3 个转入 `/comet-build` 时的工作区和执行方式选择
-3. 验证阶段的验证失败决策和分支处理
-4. 归档前最终确认
+1. 命中升级判定信号（停顿点 10）
+2. 验证阶段接受 WARNING/SUGGESTION 偏差、spec 漂移处理，或第 4 次失败后的策略选择（停顿点 7）——前 3 次可修复失败自动回 build
+3. 归档前最终确认（停顿点 8）和归档提交后的分支处理（停顿点 9）
 
-`auto_transition: false` 时降级为逐阶段手动推进（每个 phase 边界停下，由你手动运行下一阶段命令）。
+`auto_transition: false` 时，每个阶段边界结束当前调用并交还控制权（打印 HINT），由你稍后运行下一阶段——这是手动交接，不是新的确认点，不会问"是否继续"。
 
 <Tip>
   升级后绝不会自动归档——无论自动衔接还是手动，<code>/comet-archive</code> 都会先做归档前最终确认。
@@ -220,11 +230,11 @@ hotfix 默认**一次性连续执行**——调用后自动推进，不主动停
 - Bug 已修复，测试通过
 - change 已归档
 - 如有 spec 变更，已同步到 main spec
-- 阶段守卫：build→verify 前 `comet-guard <name> build --apply`，verify→archive 前 `comet-guard <name> verify --apply`
+- 阶段守卫：build→verify 前 `comet guard <name> build --apply`，verify→archive 前 `comet guard <name> verify --apply`（分支处理在 archive 内完成）
 
 ## 恢复
 
-hotfix 幂等。中断后用 `/comet` 恢复——它读 `.comet.yaml` 的 `workflow` 字段，在 `phase: build` 时自动路由回 `/comet-hotfix`。`comet-state check <name> build --recover` 给出恢复上下文，从 tasks.md 第一个未完成任务继续。
+hotfix 幂等。中断后用 `/comet` 恢复——它读 `.comet.yaml` 的 `workflow` 字段，在 `phase: build` 时自动路由回 `/comet-hotfix`。`comet state check <name> build --recover` 给出恢复上下文，从 tasks.md 第一个未完成任务继续。
 
 ## 下一步
 
