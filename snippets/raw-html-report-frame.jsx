@@ -1,22 +1,23 @@
 export const RawHtmlReportFrame = ({ src, title, height = 720 }) => {
-  const [html, setHtml] = useState("");
-  const [error, setError] = useState("");
+  const [html, setHtml] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    setHtml("");
-    setError("");
+    setHtml('');
+    setError('');
 
     fetch(src)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Failed to load report: ${response.status}`);
         }
-        return response.json();
+        return response.text();
       })
-      .then((payload) => {
+      .then((body) => {
         if (!cancelled) {
-          setHtml(payload.html || "");
+          const payload = src.endsWith('.json') ? JSON.parse(body) : null;
+          setHtml(payload?.html || body);
         }
       })
       .catch((loadError) => {
@@ -43,7 +44,7 @@ export const RawHtmlReportFrame = ({ src, title, height = 720 }) => {
         />
       ) : (
         <div className="flex min-h-48 items-center justify-center px-6 py-12 text-sm text-zinc-600 dark:text-zinc-300">
-          {error || "Loading report..."}
+          {error || 'Loading report...'}
         </div>
       )}
     </div>
