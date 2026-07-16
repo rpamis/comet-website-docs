@@ -1,10 +1,12 @@
 ---
-title: "Phase 4: Verify and Finish — Test and Close the Branch"
+title: "Phase 4: Verify — Record Evidence and Manage Repair Loops"
 sidebarTitle: "Verify"
-description: "The Verify phase runs tests, saves a verification report, and handles the branch — the guard blocks archive until both conditions are met and confirmed."
+description: "The Verify phase runs tests, records a verification report, and returns repairable failures to build automatically — pausing only for real tradeoffs or the retry limit."
 ---
 
-The Verify phase is the quality gate before archiving. `/comet-verify` runs your tests and build commands, checks that implementation matches design, produces a verification report saved to disk, and then asks you to decide what to do with the feature branch. Nothing advances to archive until both the report exists and the branch is handled — the guard enforces both as hard prerequisites.
+The Verify phase is the quality gate before archiving. `/comet-verify` runs your tests and build commands, checks that implementation matches design, and records a verification report saved to disk. The first 3 repairable failures return to build automatically; it pauses only when you accept a deviation, handle spec drift, or hit the retry limit.
+
+Verify **no longer handles the branch**. Branch closeout moved to the archive phase: after the archive commit, archive handles the branch and writes `branch_status: handled`, so the final branch or PR includes merged specs and archive metadata.
 
 ## Trigger
 
@@ -12,7 +14,7 @@ Run `/comet-verify` directly, or let `/comet` auto-dispatch when all tasks in `t
 
 ## Owner
 
-**Both OpenSpec and Superpowers** — OpenSpec's `openspec-verify-change` skill handles full spec-coverage verification for larger changes; Superpowers' `finishing-a-development-branch` skill handles the branch lifecycle. Lightweight verification (small changes) runs inline without loading an external skill.
+**Both OpenSpec and Superpowers** — OpenSpec's `openspec-verify-change` skill handles full spec-coverage verification for larger changes. Lightweight verification (small changes) runs inline without loading an external skill. Branch handling no longer fires here; it fires in archive.
 
 ## What Happens
 
@@ -29,22 +31,11 @@ Run `/comet-verify` directly, or let `/comet` auto-dispatch when all tasks in `t
   <Step title="Verification report is produced and saved">
     Verification conclusions are written to a report file at `docs/superpowers/reports/YYYY-MM-DD-<change-name>-verify.md`. The path is recorded in `.comet.yaml` as `verification_report`. This file must exist on disk — the guard checks the path, not just the field value.
   </Step>
-  <Step title="You choose how to handle the branch (blocking pause)">
-    The AI loads the Superpowers `finishing-a-development-branch` skill and presents your branch-handling options. **You must choose explicitly** — the AI will not select based on recommendations or current branch state:
-
-    1. Merge to main branch locally
-    2. Push and create a PR
-    3. Keep the branch (handle later)
-    4. Discard work
-
-    Only after you select and the corresponding operation completes is `branch_status: handled` written to `.comet.yaml`.
-  </Step>
   <Step title="Guard validates evidence and advances state">
-    The phase guard checks two hard prerequisites before allowing the transition to archive:
+    The phase guard checks the prerequisite before allowing the transition to archive:
     - `verification_report` points to an existing file
-    - `branch_status: handled`
 
-    When both are satisfied, the guard auto-transitions `.comet.yaml` to `phase: archive`, sets `verify_result: pass`, and records `verified_at`.
+    When satisfied, the guard auto-transitions `.comet.yaml` to `phase: archive`, sets `verify_result: pass`, and records `verified_at`. `branch_status` stays `pending` — branch handling happens inside archive after the archive commit.
   </Step>
 </Steps>
 
@@ -56,29 +47,32 @@ The `verify_result` field in `.comet.yaml` reflects the current verification sta
 |-------|---------|
 | `pending` | Verification has not yet completed (initial state after build) |
 | `pass` | All verification checks passed and the guard has confirmed evidence |
-| `fail` | Verification failed; the workflow has rolled back to `phase: build` for fixes |
+| `fail` | Verification failed; repairable failures return to `phase: build` automatically (within the retry limit), while real tradeoffs pause for your decision |
 
 ## Verification Failure Handling
 
-<Warning>
-**Verify failure blocks the workflow.** If any check fails, the AI pauses and presents a structured list of failed items — classified as CRITICAL, WARNING, or SUGGESTION — and waits for your explicit decision. You must choose to fix the issues or accept the deviation. The workflow cannot advance until you choose.
+Since 0.4.0-beta.5, failures are classified before pausing. The AI first reads `comet state get <change-name> verify_failures` for the persisted consecutive failure count:
 
-- **Fix all**: The state rolls back to `phase: build` via `comet-state transition verify-fail`, then `/comet-build` is invoked to make corrections.
-- **Handle item by item**: CRITICAL failures (build failures, test failures, security issues, core acceptance scenario failures) **must** be fixed. Non-CRITICAL failures may be accepted with a recorded rationale in the verification report. You cannot skip all fixes when any CRITICAL failure exists.
-</Warning>
+| Situation | Handling |
+| --- | --- |
+| CRITICAL/IMPORTANT or objectively repairable in-scope issues | Automatically `comet state transition <change-name> verify-fail` back to build (within the retry limit), without asking you |
+| WARNING/SUGGESTION whose fix introduces a behavior/scope/risk tradeoff | Pauses for you to choose fix or accept; records reason and impact scope when accepted |
+| WARNING/SUGGESTION with a safe, local, tradeoff-free fix | Repaired automatically within the retry limit; no pause |
+| 4th failure after 3 consecutive (`verify_failures >= 3`) | Pauses with only "Continue fixing" or "Stop and seek an external decision" |
+
+**CRITICAL and IMPORTANT findings are never waivable.** Only accepting a WARNING/SUGGESTION deviation, spec drift, or the retry-limit strategy is a user pause. The consecutive failure count is persisted by the machine-owned `verify_failures` field across resumes; `verify-pass` or `archive-reopen` resets it to `0`.
 
 ## Required Evidence
 
-The guard enforces two conditions as hard prerequisites before `verify-pass` can be recorded:
+The guard enforces this condition as a hard prerequisite before `verify-pass` can be recorded:
 
 1. **`verification_report`** must point to a file that actually exists on disk at the recorded path
-2. **`branch_status: handled`** must be set in `.comet.yaml`
 
-Both must be true simultaneously. Completing verification without saving the report file, or handling the branch without completing verification, will cause the guard to block the transition with a specific error message.
+`branch_status` stays `pending` through verify; it is written `handled` only by archive after the branch decision. Do not handle, merge, or discard branches in verify.
 
 ## Spec Drift Handling
 
-If full verification finds that the delta spec was modified during Phase 3 but the Design Doc doesn't reflect those changes, the AI pauses and asks you to choose one of three options:
+If full verification finds that the delta spec was modified during Phase 3 but the Design Doc doesn't reflect those changes, the AI pauses and asks you to choose one of three options. This is one of the few genuine verify pauses:
 
 | Option | Action |
 |--------|--------|
@@ -93,7 +87,7 @@ The AI will not choose for you — the spec drift decision is always a user choi
 The verify phase may trigger context compaction, especially during full verification of large changes. To recover, run:
 
 ```bash
-"$COMET_BASH" "$COMET_STATE" check <change-name> verify --recover
+comet state check <change-name> verify --recover
 ```
 
-The script outputs the current phase, verification status, branch status, and a recommended recovery action. Follow the recovery action to resume from the correct step — for example, if `verify_result` is already `pass` and `branch_status` is `handled`, the recovery action will direct you straight to the guard for transition.
+The script outputs the current phase, verification status, and a recommended recovery action. Follow the recovery action to resume from the correct step — for example, if `verify_result` is already `pass`, the recovery action will direct you straight to the guard for transition.

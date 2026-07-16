@@ -46,7 +46,7 @@ flowchart TD
     Start["Bug description"] --> S1["Fast open\nminimal OpenSpec artifacts"]
     S1 --> S2["Direct build\nbuild_mode: direct"]
     S2 --> Esc{"Upgrade signal?"}
-    Esc -->|yes| Stop["Pause: continue hotfix or upgrade full"]
+    Esc -->|yes| Stop["Pause point 10:\ncontinue hotfix or upgrade full"]
     Esc -->|no| S3["Root-cause elimination check"]
     Stop -->|continue| S3
     Stop -->|upgrade| Up["preset-escalate -> design"]
@@ -54,22 +54,45 @@ flowchart TD
     Root -->|no| S2
     Root -->|yes| S4["Verify"]
     S4 --> V{"Pass?"}
-    V -->|no| Fix["Verification failure decision"]
-    Fix --> S2
-    V -->|yes| S5["Archive after confirmation"]
+    V -->|no, fixable| Auto["Auto verify-fail back to build\n(first 3, verify_failures counter)"]
+    V -->|no, needs judgment / 4th| VfStop["Pause point 7:\nverify exception decision"]
+    Auto --> S2
+    VfStop -->|fix / continue| S2
+    V -->|yes| S5["Archive after confirmation\n(archive confirmation + branch handling)"]
 ```
 
 ## Default state
 
-`comet-state init <name> hotfix` defaults to:
+```bash
+comet state init <name> hotfix
+comet state select <name>
+```
+
+`init <name> hotfix` writes these defaults to `.comet.yaml`:
 
 | Field | Default |
 | --- | --- |
 | `build_mode` | `direct` |
 | `tdd_mode` | `direct` |
 | `review_mode` | `off` |
-| `isolation` | `branch` |
+| `isolation` | `current` |
 | `verify_mode` | `light` |
+
+`isolation: current` truthfully records execution in the current workspace; it switches to `branch`/`worktree` only after a branch or workspace is created. `tdd_mode: direct` skips Red-Green-Refactor but still requires relevant tests and regression evidence.
+
+## Build requires RED evidence
+
+Before implementation, **reproduce the bug and record failing evidence first**: confirm the reported old behavior with minimal repeatable steps; when automatable, add a regression test that fails for this bug and confirm the failure is caused by the bug. Only after RED evidence exists does Comet proceed task by task — and each task re-runs the new failing regression test to confirm it turns green before running related tests.
+
+## Must-stop points
+
+Hotfix runs as one continuous execution, but these genuine user decisions always pause:
+
+1. An upgrade-assessment signal is hit (pause point 10)
+2. Verify-phase acceptance of a WARNING/SUGGESTION deviation, spec drift handling, or the strategy after the 4th failure (pause point 7) — the first 3 repairable failures return to build automatically
+3. Final archive confirmation (pause point 8) and branch handling after the archive commit (pause point 9)
+
+With `auto_transition: false`, each phase boundary ends the current invocation and returns control with `HINT` — this is a manual handoff, not a new confirmation point.
 
 ## Root-cause check
 
@@ -82,10 +105,10 @@ Comet pauses when it sees qualitative signals such as cross-module coordination,
 Upgrade through the legal transition:
 
 ```bash
-node "$COMET_STATE" transition <name> preset-escalate
+comet state transition <name> preset-escalate
 ```
 
-This switches the workflow to full and returns to design without discarding existing artifacts.
+This atomically sets `workflow: full` and clears the preset-only lightweight build settings, then returns to design without discarding existing artifacts. After upgrading to full, the full workflow configuration is re-selected in the joint decision after the Design Doc. `preset-escalate` can only be triggered from hotfix/tweak at `phase: build`.
 
 ## Recovery
 
