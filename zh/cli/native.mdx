@@ -1,9 +1,9 @@
 ---
 title: 'Native CLI'
-description: '初始化 Native、管理 change、推进阶段、归档规格以及恢复中断事务。'
+description: '初始化 Native、管理 change、保存阶段内进度、推进状态、验证证据以及安全恢复和归档。'
 ---
 
-`comet native` 是 Native 工作流的统一命令入口。它只操作 `comet.config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取 Classic 或 OpenSpec change。
+`comet native` 是 Native 工作流的确定性 Runtime 入口。它只操作项目根的 `comet.config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取或转换 Classic/OpenSpec change，也不会调用外部 Skill、Git、shell 或项目命令。
 
 ## 初始化与根目录
 
@@ -17,7 +17,7 @@ comet native root move <artifact-root>
 
 ```bash
 # <project>/comet/
-comet native init
+comet native init --language zh-CN
 
 # <project>/docs/comet/
 comet native init --root docs --language zh-CN
@@ -26,92 +26,182 @@ comet native init --root docs --language zh-CN
 comet native root move artifacts
 ```
 
-已有配置会拒绝冲突的 `init --root`。根目录迁移依次经过 `copying`、`ready`、`switched`；存在 `pending_root_move` 时，普通 Native 写命令会失败关闭，避免猜测该使用哪棵树。
+`artifact-root` 必须是项目内相对路径。`.` 表示 `<project>/comet/`，`docs` 表示 `<project>/docs/comet/`。
+
+`init --language` 会把以后新建 Native change 的默认语言写入 `comet.config.yaml`。`new --language` 可以覆盖单个 change；再次运行 `init --language` 只改变以后新建 change 的默认值，不改写已有 change。
+
+已有配置会拒绝冲突的 `init --root`。改变目录必须使用 `root move`，不能直接编辑配置。迁移具有 `copying`、`ready`、`switched` 状态；存在 `pending_root_move` 时，普通写命令会失败关闭，避免两棵目录同时可写。
 
 ## Change 管理
 
 ```bash
 comet native new <change-name> [--language en|zh-CN]
-comet native list
-comet native show <change-name>
-comet native status [<change-name>]
-comet native select <change-name>
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
+comet native list [--cursor <token>]
+comet native show <change-name>
+comet native status [--cursor <token>]
+comet native status <change-name> [--details [--acceptance-cursor <token>]]
+comet native select <change-name>
 ```
 
-`change-name` 使用 lowercase kebab-case。`new` 在配置缺失时创建默认 `<project>/comet/`；`show` 返回 change 状态、brief 和拟议完整规格；`status` 返回当前阶段、验证结果、下一条命令和归档就绪度；`select` 只写 Native 自有 selection。
+`change-name` 和 capability 使用字母开头的 lowercase kebab-case。`new` 在配置缺失时创建默认配置和 `<project>/comet/`。
 
-新增或替换长期行为时，把完整目标规格写到 `changes/<change-name>/specs/<capability>/spec.md`。runtime 会根据 canonical spec 是否存在推导 `create` 或 `replace`，并冻结用于并发检查的 `base_hash`；删除能力时使用 `spec remove`。不要手改 `change.yaml` 里的 `spec_changes`。并发变化导致冲突时，重读并改写完整目标规格后使用 `spec rebase` 刷新基线、回到 Build 并清除旧验证结论。
+新增或替换长期行为时，把完整目标规格写入：
 
-## 推进与归档
+```text
+changes/<change-name>/specs/<capability>/spec.md
+```
+
+Runtime 根据 canonical spec 是否存在推导 `create` 或 `replace`，并冻结 `base_hash`。删除 capability 使用 `spec remove`，不要手工维护 `change.yaml` 的 `spec_changes`。若并行 change 已改变同一 canonical spec，先重读并改写完整目标规格，再使用 `spec rebase` 刷新基线、重开 Build 并清除旧验证结论。
+
+### 有界状态视图
+
+`list` 与不带 change 的 `status` 返回同一种只读分页投影：
+
+- 每页最多 24 个 active change；
+- 最多接受 4096 个可见 change；
+- `nextCursor` 非空时原样传入下一次 `--cursor`；
+- cursor 绑定完整 change 名称集合，增删 change 后旧 cursor 会明确失效。
+
+`status <change-name>` 返回阶段、证据新鲜度、finding 摘要、checkpoint、repair 状态和结构化 continuation。使用 `--details` 可以取得最多 50 条详细 findings、恢复信息以及首个 `acceptancePage`。若 `findingsTruncated` 为 `true`，不能把未展示项当作不存在。
+
+当 `acceptancePage.nextCursor` 非空时，用 `--acceptance-cursor` 逐页读取；每页最多 16 条，cursor 同时绑定 change 与当前 acceptance hash。`show` 对规格数量、单文件、累计读取和最终输出都有硬预算；超限时拒绝，不会通过截断需求正文伪装成功。
+
+## 阶段内 checkpoint
+
+```bash
+comet native checkpoint <change-name> \
+  --summary <text> \
+  --next-action <text> \
+  [--artifact <project-relative-path>]... \
+  [--expect-revision <n>]
+```
+
+Checkpoint 保存同阶段摘要、下一动作和内容寻址的产物 manifest，不改变 phase。`--expect-revision` 使用 CAS 防止旧会话覆盖更新后的状态。恢复会话应从 `status` 返回的 checkpoint 继续，而不是依赖聊天记忆。
+
+## 内置只读检查
+
+```bash
+comet native check <change-name>
+```
+
+`check` 只允许在 Verify 且已有 implementation scope 时运行。它执行 Comet 内置的有界只读文本策略，并把结果写入独立、内容寻址的 receipt。
+
+它不会：
+
+- 调用 Git、shell、项目脚本、测试命令或外部 Skill；
+- 接受任意命令、环境变量、路径或超时参数；
+- 修改项目源码、change phase、Run state 或 trajectory。
+
+检查发现问题或 scope 已 stale 时返回退出码 `1`，但 receipt 仍会保存。模型仍应按任务风险自行运行真实项目测试；内置 check 是可复核的补充证据，不是通用测试执行器。
+
+## 阶段推进
 
 ```bash
 comet native next <change-name> --summary <text> \
   [--confirmed] \
   [--artifact <project-relative-path>]... \
   [--no-code-reason <text>] \
+  [--allow-partial-scope <sha256> --partial-reason <text> --confirmed] \
   [--result pass|fail] \
-  [--report <change-relative-path>]
-
-comet native archive <change-name>
+  [--report <change-relative-path>] \
+  [--receipt <runtime/evidence/check-receipts/...json>] \
+  [--failure-category <token>]... \
+  [--failed-check <token>]... \
+  [--override-repair <sha256> --override-summary <text>]
 ```
 
-各阶段所需证据：
+| 当前阶段 | Runtime 要求                                                          | 推进结果                           |
+| -------- | --------------------------------------------------------------------- | ---------------------------------- |
+| Shape    | 完整 brief、合法目标规格、无 `[blocking]` 问题                        | 进入 Build                         |
+| Build    | brief/spec 仍有效；真实产物或 no-code 原因；完整 implementation scope | 进入 Verify                        |
+| Verify   | 结构完整且绑定当前 acceptance/contract/scope 的报告                   | pass 进入 Archive；fail 返回 Build |
+| Archive  | 使用独立两步归档命令                                                  | 更新 canonical spec 并归档         |
 
-| 当前阶段 | 必要条件                                   | 结果                               |
-| -------- | ------------------------------------------ | ---------------------------------- |
-| Shape    | 完整 brief、合法的完整目标规格、无阻塞问题 | 进入 Build，并由 runtime 记录确认  |
-| Build    | brief/spec 无阻塞，且有产物或 no-code 原因 | 进入 Verify                        |
-| Verify   | `--result` 与完整 `--report`               | pass 进入 Archive；fail 回到 Build |
-| Archive  | Verify 已 pass，canonical hash 仍匹配      | 更新 canonical spec 并归档         |
+只有用户刚确认了会影响范围、用户可见行为、兼容性、风险或不可逆性的决定时，Shape/Build 才传 `--confirmed`。没有高影响决定时由 Runtime 记录隐式确认；任何确认都不能绕过 `[blocking]` 问题。
 
-只有用户刚确认了会影响范围、用户可见行为、兼容性、风险或不可逆性的决定时，才在 Shape 或 Build 推进时传入 `--confirmed`；没有这类决定时由 runtime 记录隐式确认。任何确认都不能绕过 `brief.md` 中的 `[blocking]` 问题。
+Build 无法证明完整 scope 时，第一次调用只返回 scope hash 和未归属项，不推进。用户明确接受该组风险后，使用完全匹配的 `--allow-partial-scope`、非空理由和 `--confirmed` 重试。Allowance 与 scope hash 绑定；实现变化后不能沿用旧授权。
 
-`archive` 不能用 `next` 代替。若另一个 change 已改变相同 canonical spec，命令返回冲突，并保留 active change。重新读取 canonical spec、更新完整目标规格后运行 `spec rebase`；runtime 会受控重开到 Build，必须重新实现、确认和验证。
+Verify 报告必须包含 Runtime 可解析的验收机器块，并逐项绑定当前 Acceptance ID。旧报告、旧 receipt、变化后的 brief/spec、变化后的 implementation scope 或不同 revision 的证据都会被判定 stale。
+
+## 自主修复与停止语义
+
+Verify fail 会自动返回 Build。模型可以自主修复，但 Runtime 会按失败分类、失败检查 ID、contract 和 implementation scope 形成语义签名：
+
+- 相同 scope 下第三次出现相同失败签名时，continuation 变为 manual stop；
+- scope 真正变化后，新的 Build 推进会结束旧 repair episode；
+- scope 未变化时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
+- 单个 repair episode 最多记录 12 次 failure，达到上限后 hard stop。
+
+这些限制按“有没有真实证据进展”计算，不按机械 phase 切换次数计算，因此长期 change 不会因为固定 Run iteration 上限永久锁死。
+
+## 两步 Archive
+
+```bash
+comet native archive <change-name> --dry-run
+comet native archive <change-name> --expect-preflight <sha256>
+```
+
+Archive 不能用 `next` 代替，也不能单步提交：
+
+1. 先运行 `--dry-run`，检查证据、canonical hash、目标路径和冲突，取得 `preflightHash`。
+2. 把该 hash 原样传入 `--expect-preflight`。
+3. Runtime 在锁内重算全部事实；只有完全一致时才提交。
+
+Archive 对源树、canonical 文件和事务日志使用有界、身份绑定的读取。目录移动先进入事务绑定的 quarantine，再完成不可逆提交。若在最终 marker 前中断，可以按 journal 继续或回滚；marker 写入后只能 exactly-once continue，避免已经公开为归档的结果被反向撤销。
 
 ## 诊断与恢复
 
 ```bash
 comet native doctor [<change-name>]
-comet native doctor [<change-name>] --repair --strategy continue
-comet native doctor [<change-name>] --repair --strategy rollback
+comet native doctor [<change-name>] --repair
+comet native doctor [<change-name>] --repair [--strategy continue|rollback]
 ```
 
-默认 doctor 不改文件。每次普通阶段推进先写 `runtime/transition.json`；若进程在写 Run state、`change.yaml`、trajectory 或 checkpoint 之间中断，下一次 `next` 或 `archive` 会先幂等地继续未完成推进。也可以用 `doctor --repair --strategy continue` 显式恢复。
+只读 doctor 不改文件。`--repair` 只处理 Runtime 能证明安全的事项：
 
-显式 repair 还可清理指向不存在 change 的 selection、可证明陈旧的本机锁，并按 journal 继续或回滚 Archive / root move 事务。普通阶段推进只支持 `continue`，因为它的 journal 已保存确定的前后状态；`rollback` 只适用于仍允许回滚的 Archive / root move 事务。
+- 陈旧 selection 和锁；
+- schema / workspace identity 迁移；
+- 阶段 transition、Archive 和 root move 事务恢复；
+- 未引用且超过保留窗口的派生 evidence/receipt；
+- 中断的 retention quarantine。
 
-Archive finalization 已开始后只能 continue。若事务两端或根目录树的 hash 无法对应，doctor 会停止自动修复并保留全部数据，供人工判断。
+Doctor 不会自动重写用户的 brief、规格、验证报告或项目源码。普通阶段 transition 只支持 `continue`；`rollback` 只适用于 journal 仍允许回滚的 Archive/root move。
 
-## JSON 与退出码
+普通写命令不会自动接管陈旧锁。只有显式 `doctor --repair` 能在证明本机 owner 已不存在、锁身份未变化且没有冲突事务时接管；活动锁和无法证明陈旧的锁始终保留。
 
-所有 Native 命令支持 `--json`，并只输出一个对象：
+Evidence retention 只清理 active change 中至少 30 天、每种 evidence kind 最新 32 份之外、且依赖闭包证明未引用的派生证据。当前状态引用、归档证据、依赖项、较新文件和每类最新 32 份始终保留。
 
-```json
-{
-  "command": "status",
-  "exitCode": 0,
-  "data": {}
-}
-```
+## Continuation 与退出码
 
-失败时增加结构化 `error`。
+`status` 和写命令会返回结构化 continuation，常见 disposition 包括：
 
-| 退出码 | 含义                             |
-| ------ | -------------------------------- |
-| `0`    | 成功                             |
-| `64`   | 参数或用法错误                   |
-| `65`   | 配置、状态或产物无效             |
-| `70`   | 未预期的内部失败                 |
-| `73`   | 锁、事务、并发 hash 或根目录冲突 |
+- `continue-same-skill`：当前 Skill 可以按下一动作继续；
+- `await-user`：需要真实用户决定或 partial scope 授权；
+- `repair-runtime`：先执行 doctor/recovery；
+- `stop`：已完成、手动停止或达到 hard stop。
+
+`next: auto` 表示调用方可以继续同一个 Native Skill，不表示后台 daemon 会自行调用模型。
+
+所有命令支持 `--json`。JSON 模式只输出一个对象，包含 `command`、`exitCode`、`data`，失败时增加结构化 `error`。
+
+| 退出码 | 含义                                      |
+| ------ | ----------------------------------------- |
+| `0`    | 成功                                      |
+| `1`    | 内置 `check` 完成，但发现问题或结果 stale |
+| `64`   | 参数或用法错误                            |
+| `65`   | 配置、状态或产物无效                      |
+| `70`   | 未预期的内部失败                          |
+| `73`   | 锁、事务、并发 hash 或根目录冲突          |
+| `75`   | repair stagnation 或 hard stop 阻塞继续   |
 
 ## 只提供 Skill 文件的环境
 
-若宿主没有安装 `comet` CLI，可直接使用 `/comet-native` 随包发布的 runtime：
+若宿主没有安装 `comet` CLI，可直接使用 `/comet-native` 随包发布的 Runtime：
 
 ```bash
 node <comet-native-skill-root>/scripts/comet-native-runtime.mjs <command> [options]
 ```
 
-它与 `comet native` 使用相同参数、输出和退出码，不依赖 OpenSpec、Superpowers 或其他外部 Skill。
+它与 `comet native` 使用相同参数、输出和退出码。Runtime 与 Skill 一起发布，不依赖 OpenSpec、Superpowers、grill-me 或其他外部 Skill。

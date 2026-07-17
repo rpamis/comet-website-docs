@@ -58,7 +58,7 @@ Native 只使用 Comet 自有目录：
 comet init --workflow native --root docs
 ```
 
-`artifact_root` 必须是项目内相对路径。需要调整位置时使用 `comet native root move`，不能直接编辑配置；迁移过程带事务状态，可在中断后继续或回滚。
+`artifact_root` 必须是项目内相对路径。`comet native init --language zh-CN` 还会持久化以后新建 change 的默认语言，单个 `new --language` 可以覆盖它。需要调整位置时使用 `comet native root move`，不能直接编辑配置；迁移过程带事务状态，可在中断后继续或回滚。
 
 ## 四个阶段
 
@@ -88,11 +88,15 @@ Shape 将用户目标整理为 `brief.md`，固定记录 Outcome、Scope、Non-g
 
 ### Verify：事实而不是声明
 
-Verify 对照 Acceptance examples、完整目标规格和风险执行验证。`verification.md` 记录实际命令与结果、跳过项、规格一致性、已知限制和结论。失败会自动返回 Build，修复后重新验证；未运行的检查不能写成通过。
+Verify 对照 Acceptance examples、完整目标规格和风险执行验证。`verification.md` 记录实际命令与结果、跳过项、规格一致性、已知限制和结论，并包含 Runtime 可解析的验收机器块。每个 Acceptance ID 都要绑定证据或明确的跳过理由。
+
+Runtime 会把报告绑定到当时的 contract、implementation scope 和 change revision。brief、目标规格或实现文件变化后，旧 pass 和旧 check receipt 会变成 stale，不能继续归档。失败会自动返回 Build；未运行的检查不能写成通过。
+
+模型可以自主修复，但 Runtime 不允许无进展地无限循环：相同 scope 下第三次出现相同失败签名时转为 manual stop，单个 repair episode 最多记录 12 次 failure。真实 scope 进展会开启新的 episode；无进展 override 只有一次。
 
 ### Archive：冲突安全地收敛
 
-只有 Verify 为 pass 时才能归档。Archive 在锁内重新检查 canonical spec 的 SHA-256：
+只有 Verify 为 pass 时才能归档。归档必须先 `archive --dry-run` 取得内容绑定的 `preflightHash`，再通过 `archive --expect-preflight <sha256>` 提交。Runtime 在锁内重算证据、路径和 canonical spec 的 SHA-256：
 
 - `create` 要求 canonical spec 不存在；
 - `replace` 和 `remove` 要求当前 hash 与 runtime 冻结的 `base_hash` 一致；
@@ -100,16 +104,26 @@ Verify 对照 Acceptance examples、完整目标规格和风险执行验证。`v
 
 冲突不是死路：重读最新 canonical spec、改写完整目标规格后运行 `comet native spec rebase`。runtime 刷新 operation/hash，把 change 受控重开到 Build 并清除旧验证结论，随后重新实现、确认和验证。
 
-成功后完整目标规格成为 canonical spec，active change 移到 `archive/YYYY-MM-DD-<change-name>/`，trajectory 保留 Shape、Build、Verify 和 Archive 的摘要证据，但不保存隐藏推理过程。
+成功后完整目标规格成为 canonical spec，active change 移到 `archive/YYYY-MM-DD-<change-name>/`，trajectory 保留 Shape、Build、Verify 和 Archive 的摘要证据，但不保存隐藏推理过程。源树和目标文件使用有界、对象身份绑定的读取；目录删除先进入事务 quarantine。最终归档 marker 之前可以安全回滚，写入 marker 后只能 exactly-once continue。
 
 ## 状态检查、自动推进与恢复
 
 每次恢复从磁盘事实开始：先读配置，再运行 `comet native status` 和 `show`，然后读取目标 change、canonical spec、实现和测试。不要依赖聊天记录猜阶段，也不要手改 phase、Run state、锁或 transaction journal。
 
+阶段内可以用 `checkpoint` 保存摘要、下一动作和内容寻址的产物 manifest。`status` 返回最新 checkpoint 和结构化 continuation：`continue-same-skill` 表示继续当前 Skill，`await-user` 表示等待真实决定，`repair-runtime` 表示先恢复 Runtime，`stop` 表示完成或停止。它让新的会话能恢复工作，但不代表后台 daemon 会自行调用模型。
+
+`list`、项目级 `status`、详细 findings 和 Acceptance ID 都使用有界分页。Cursor 绑定当前名称集合或 acceptance hash；输入变化后旧 cursor 会明确失效，不会静默错页。输入和输出超限时 Runtime 失败关闭，不通过截断需求正文掩盖遗漏。
+
 `comet native next` 在阶段条件满足时自动推进；条件不足时返回结构化检查结果并停在当前阶段。普通推进通过 `runtime/transition.json` 先记录确定的前后状态，再依次写 Run state、`change.yaml`、trajectory 和 checkpoint；中断后下一次 `next` / `archive` 会自动继续，也可用 `doctor --repair --strategy continue` 显式恢复。
 
 `comet native doctor` 默认只读，`--repair` 只处理可证明安全的陈旧 selection、锁和确定性事务恢复，不会自动重写用户编写的 brief、规格或验证报告。普通推进不支持 rollback；Archive 和 root move 仍按各自 journal 的安全阶段决定能否回滚。
 
+Native 还提供一个窄范围的 `comet native check`：它只在 Verify 对当前 implementation scope 做内置、有界的只读文本检查，并产生内容寻址 receipt。它不执行 Git、shell、项目脚本或外部 Skill。真实项目测试仍由强模型按任务风险选择和运行。
+
 `comet status` 会把 Native、Classic 和未托管 OpenSpec change 分区展示。自然语言恢复由 `comet resume-probe` 先解析项目默认工作流，再只检查对应一侧；Native 恢复永远进入 `/comet-native`，不会把 `comet native next` 误当作恢复命令，也不会扫描 Classic 目录。配置损坏时探针会停止并要求修复，而不是猜测回退。
 
 完整命令见 [Native CLI](/zh/cli/native)。
+
+## Dashboard 只是观察面
+
+Dashboard 可以展示 Native change 的阶段、证据新鲜度、continuation、checkpoint、归档就绪和冲突摘要，但它只消费 Runtime 的只读 projection。它不重新推导状态、不缓存一份新的事实，也不提供推进或修复按钮。CLI/Runtime 始终是唯一写入方。

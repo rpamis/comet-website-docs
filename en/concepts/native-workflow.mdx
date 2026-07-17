@@ -58,7 +58,7 @@ The default artifact root is the project root, producing `<project>/comet/`. Ini
 comet init --workflow native --root docs
 ```
 
-`artifact_root` must be a project-relative path. Use `comet native root move` to change it instead of editing configuration. The move records transaction state and can continue or roll back after interruption.
+`artifact_root` must be a project-relative path. `comet native init --language en` also persists the default language for future changes, while an individual `new --language` can override it. Use `comet native root move` to change location instead of editing configuration. The move records transaction state and can continue or roll back after interruption.
 
 ## Four phases
 
@@ -88,11 +88,15 @@ Progression cites real project artifacts. Documentation-only or no-code work rec
 
 ### Verify: facts instead of assertions
 
-Verify checks the Acceptance examples, complete target specs, and relevant risks. `verification.md` records actual commands and results, skipped checks, specification consistency, known limitations, and the conclusion. Failure automatically returns to Build for repair and re-verification. An unrun check cannot be reported as passing.
+Verify checks the Acceptance examples, complete target specs, and relevant risks. `verification.md` records actual commands and results, skipped checks, specification consistency, known limitations, and the conclusion, plus a Runtime-readable acceptance block. Every Acceptance ID binds either to evidence or to an explicit skip reason.
+
+The Runtime binds the report to the current contract, implementation scope, and change revision. Changing the brief, target specifications, or implementation files makes the old pass and old check receipt stale, so they cannot be archived. Failure automatically returns to Build; an unrun check cannot be reported as passing.
+
+The model may repair autonomously, but the Runtime prevents endless loops without evidence progress. Under the same scope, the third identical failure signature becomes a manual stop, and one repair episode records at most 12 failures. Real scope progress opens a new episode, while a no-progress override is available only once.
 
 ### Archive: converge without overwriting conflicts
 
-Archive is allowed only after Verify passes. While holding a lock, it recalculates canonical-spec SHA-256 values:
+Archive is allowed only after Verify passes. First run `archive --dry-run` to obtain a content-bound `preflightHash`, then submit it with `archive --expect-preflight <sha256>`. While holding a lock, the Runtime recomputes evidence, paths, and canonical-spec SHA-256 values:
 
 - `create` requires the canonical spec not to exist;
 - `replace` and `remove` require the current hash to equal the runtime-frozen `base_hash`;
@@ -100,16 +104,26 @@ Archive is allowed only after Verify passes. While holding a lock, it recalculat
 
 A conflict is recoverable: re-read the latest canonical specification, rewrite the complete target specification, and run `comet native spec rebase`. The runtime refreshes operation/hash, reopens the change in Build, and clears the old verification conclusion before implementation, confirmation, and verification run again.
 
-On success, complete target specs become canonical, the active change moves to `archive/YYYY-MM-DD-<change-name>/`, and the trajectory retains Shape, Build, Verify, and Archive summary evidence without hidden reasoning.
+On success, complete target specs become canonical, the active change moves to `archive/YYYY-MM-DD-<change-name>/`, and the trajectory retains Shape, Build, Verify, and Archive summary evidence without hidden reasoning. Source trees and destination files use bounded, object-identity-bound reads, and directory deletion first enters transaction quarantine. Rollback remains safe before the final archive marker; after that marker, only exactly-once continue is allowed.
 
 ## Phase checks, automatic progression, and recovery
 
 Resume from disk facts: read configuration, run `comet native status` and `show`, then inspect the target change, canonical specs, implementation, and tests. Do not guess the phase from chat history or edit phase, Run state, locks, or transaction journals manually.
 
+Within a phase, `checkpoint` can preserve a summary, next action, and content-addressed artifact manifest. `status` returns the latest checkpoint and structured continuation: `continue-same-skill` continues the current Skill, `await-user` waits for a real decision, `repair-runtime` runs recovery first, and `stop` means done or stopped. This lets a new session recover work; it does not mean a background daemon invokes the model.
+
+Change lists, project status, detailed findings, and Acceptance IDs all use bounded pagination. Cursors bind the current name set or acceptance hash and fail explicitly after input changes instead of silently shifting pages. The Runtime fails closed on input or output budget overflow rather than hiding omitted requirement text.
+
 `comet native next` advances automatically when phase conditions pass. Otherwise it returns structured findings and stays in the current phase. An ordinary transition records deterministic before-and-after state in `runtime/transition.json` before writing Run state, `change.yaml`, trajectory, and checkpoint. After interruption, the next `next` or `archive` continues automatically; `doctor --repair --strategy continue` performs the same recovery explicitly.
 
 `comet native doctor` is read-only by default. `--repair` is limited to provably safe stale selections, locks, and deterministic transaction recovery; it does not rewrite user-authored briefs, specs, or verification reports. Ordinary transitions do not support rollback. Archive and root-move journals still decide whether rollback remains safe for their own transactions.
 
+Native also provides a narrow `comet native check`. In Verify it runs only a built-in bounded read-only text policy over the current implementation scope and produces a content-addressed receipt. It does not execute Git, a shell, project scripts, or external Skills. The strong model still selects and runs real project tests according to risk.
+
 `comet status` presents Native, Classic, and unmanaged OpenSpec changes in separate sections. For natural-language recovery, `comet resume-probe` resolves the project's default workflow first and then inspects only that side. Native always resumes through `/comet-native`; it never treats `comet native next` as a resume command or scans Classic directories. If configuration is malformed, the probe stops and requests a repair instead of guessing a fallback.
 
 See [Native CLI](/en/cli/native) for every command.
+
+## Dashboard is an observation surface
+
+Dashboard can show a Native change's phase, evidence freshness, continuation, checkpoint, archive readiness, and conflict summary, but it consumes only the Runtime's read-only projection. It neither re-derives state nor caches a second source of truth, and it provides no advance or repair controls. CLI/Runtime remains the only writer.

@@ -1,9 +1,9 @@
 ---
 title: 'Native CLI'
-description: 'Initialize Native, manage changes, advance phases, archive specifications, and recover interrupted transactions.'
+description: 'Initialize Native, manage changes, preserve in-phase progress, advance state, bind verification evidence, and recover or archive safely.'
 ---
 
-`comet native` is the single CLI facade for the Native workflow. It operates only on `comet.config.yaml` and the configured `<artifact-root>/comet/`; it does not read Classic or OpenSpec changes.
+`comet native` is the deterministic Runtime entry for the Native workflow. It operates only on the project-root `comet.config.yaml` and the configured `<artifact-root>/comet/`. It neither reads nor converts Classic/OpenSpec changes and never invokes external Skills, Git, a shell, or project commands.
 
 ## Initialize and manage the artifact root
 
@@ -17,7 +17,7 @@ Examples:
 
 ```bash
 # <project>/comet/
-comet native init
+comet native init --language en
 
 # <project>/docs/comet/
 comet native init --root docs --language en
@@ -26,92 +26,182 @@ comet native init --root docs --language en
 comet native root move artifacts
 ```
 
-Existing configuration rejects a conflicting `init --root`. A root move progresses through `copying`, `ready`, and `switched`. While `pending_root_move` exists, ordinary Native write commands fail closed instead of guessing which tree to use.
+`artifact-root` must be a project-relative path. `.` means `<project>/comet/`, while `docs` means `<project>/docs/comet/`.
+
+`init --language` persists the default language for future Native changes in `comet.config.yaml`. `new --language` can override it for one change. Running `init --language` again changes only the default for future changes and never rewrites existing ones.
+
+Existing configuration rejects a conflicting `init --root`. Change directories through `root move`, never by editing configuration. Migration progresses through `copying`, `ready`, and `switched`. While `pending_root_move` exists, ordinary write commands fail closed so two trees cannot become writable at once.
 
 ## Change management
 
 ```bash
 comet native new <change-name> [--language en|zh-CN]
-comet native list
-comet native show <change-name>
-comet native status [<change-name>]
-comet native select <change-name>
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
+comet native list [--cursor <token>]
+comet native show <change-name>
+comet native status [--cursor <token>]
+comet native status <change-name> [--details [--acceptance-cursor <token>]]
+comet native select <change-name>
 ```
 
-`change-name` uses lowercase kebab-case. `new` creates default `<project>/comet/` configuration when absent. `show` returns change state, the brief, and proposed complete specifications. `status` returns the current phase, verification result, next command, and archive readiness. `select` writes only Native-owned selection state.
+`change-name` and capability IDs start with a letter and use lowercase kebab-case. `new` creates default configuration and `<project>/comet/` when configuration is absent.
 
-For added or replaced durable behavior, write the complete target specification to `changes/<change-name>/specs/<capability>/spec.md`. The runtime derives `create` or `replace` from canonical-spec existence and freezes the `base_hash` used for conflict checks. Use `spec remove` to delete a capability. Do not edit `spec_changes` in `change.yaml` manually. After a concurrent change causes a conflict, re-read and rewrite the complete target specification, then use `spec rebase` to refresh the baseline, return to Build, and clear the old verification conclusion.
+For new or replaced durable behavior, write the complete target specification at:
 
-## Progress and archive
+```text
+changes/<change-name>/specs/<capability>/spec.md
+```
+
+The Runtime derives `create` or `replace` from canonical-spec existence and freezes `base_hash`. Use `spec remove` to remove a capability; never maintain `change.yaml`'s `spec_changes` by hand. If a parallel change has modified the same canonical specification, re-read and rewrite the complete target, then use `spec rebase` to refresh the baseline, reopen Build, and clear the old verification conclusion.
+
+### Bounded status views
+
+`list` and `status` without a change name return the same read-only paginated projection:
+
+- At most 24 active changes per page.
+- At most 4096 visible changes are accepted.
+- Pass a non-null `nextCursor` unchanged to the next `--cursor` call.
+- The cursor binds the complete change-name set and fails explicitly after a change is added or removed.
+
+`status <change-name>` returns the phase, evidence freshness, finding summary, checkpoint, repair state, and structured continuation. Add `--details` for up to 50 detailed findings, recovery information, and the first `acceptancePage`. If `findingsTruncated` is `true`, never assume undisplayed items do not exist.
+
+When `acceptancePage.nextCursor` is non-null, retrieve pages with `--acceptance-cursor`. Each page contains at most 16 items, and the cursor binds both the change and current acceptance hash. `show` enforces hard budgets on specification count, per-file and cumulative reads, and final output. On overflow it rejects the request instead of pretending success by truncating requirements.
+
+## In-phase checkpoints
+
+```bash
+comet native checkpoint <change-name> \
+  --summary <text> \
+  --next-action <text> \
+  [--artifact <project-relative-path>]... \
+  [--expect-revision <n>]
+```
+
+A checkpoint stores an in-phase summary, next action, and content-addressed artifact manifest without changing phase. `--expect-revision` uses CAS so an old session cannot overwrite newer state. Resume from the checkpoint returned by `status`, not from chat memory.
+
+## Built-in read-only checks
+
+```bash
+comet native check <change-name>
+```
+
+`check` is available only in Verify after an implementation scope exists. It runs Comet's built-in bounded read-only text policy and writes an independent content-addressed receipt.
+
+It does not:
+
+- Invoke Git, a shell, project scripts, test commands, or external Skills.
+- Accept arbitrary commands, environment variables, paths, or timeout arguments.
+- Modify source code, change phase, Run state, or trajectory.
+
+A check that finds issues or a stale scope exits with `1`, but still saves its receipt. The model should continue to run real project tests according to task risk. The built-in check is reviewable supplemental evidence, not a general test runner.
+
+## Phase progression
 
 ```bash
 comet native next <change-name> --summary <text> \
   [--confirmed] \
   [--artifact <project-relative-path>]... \
   [--no-code-reason <text>] \
+  [--allow-partial-scope <sha256> --partial-reason <text> --confirmed] \
   [--result pass|fail] \
-  [--report <change-relative-path>]
-
-comet native archive <change-name>
+  [--report <change-relative-path>] \
+  [--receipt <runtime/evidence/check-receipts/...json>] \
+  [--failure-category <token>]... \
+  [--failed-check <token>]... \
+  [--override-repair <sha256> --override-summary <text>]
 ```
 
-Evidence by phase:
+| Current phase | Runtime requirement                                                               | Result                                             |
+| ------------- | --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Shape         | Complete brief, valid target specifications, no `[blocking]` question             | Enter Build                                        |
+| Build         | Valid brief/specs; real artifact or no-code reason; complete implementation scope | Enter Verify                                       |
+| Verify        | Structurally complete report bound to current acceptance, contract, and scope     | pass enters Archive; fail returns to Build         |
+| Archive       | Use the separate two-step archive command                                         | Update canonical specifications and archive change |
 
-| Current phase | Required condition                                                | Result                                          |
-| ------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
-| Shape         | Complete brief, valid complete target specs, no blocking question | Enter Build and let the runtime record approval |
-| Build         | Unblocked brief/specs plus an artifact or no-code reason          | Enter Verify                                    |
-| Verify        | `--result` and a complete `--report`                              | pass enters Archive; fail returns to Build      |
-| Archive       | Verify passed and canonical hashes still match                    | Update canonical specs and archive              |
+Pass `--confirmed` in Shape or Build only when the user has just confirmed a decision that changes scope, user-visible behavior, compatibility, risk, or an irreversible result. Without a high-impact decision, the Runtime records implicit approval. No confirmation can bypass a `[blocking]` question.
 
-Pass `--confirmed` during Shape or Build progression only when the user has just confirmed a decision that materially affects scope, user-visible behavior, compatibility, risk, or irreversibility. With no such decision, the runtime records implicit approval. No approval form can bypass a `[blocking]` question in `brief.md`.
+When Build cannot prove complete scope, the first call returns a scope hash and unattributed items without advancing. Only after the user explicitly accepts that group of risks should you retry with the exact `--allow-partial-scope`, a non-empty reason, and `--confirmed`. The allowance binds to the scope hash and cannot authorize a changed implementation.
 
-`next` cannot replace `archive`. If another change already modified the same canonical spec, the command reports a conflict and preserves the active change. After re-reading the canonical specification and updating the complete target specification, run `spec rebase`. The runtime reopens Build under state control, and implementation, confirmation, and verification must run again.
+The Verify report must contain the Runtime-readable acceptance block and bind every current Acceptance ID. An old report or receipt, changed brief/specification, changed implementation scope, or evidence from another revision is stale.
+
+## Autonomous repair and stop semantics
+
+A Verify failure automatically returns to Build. The model may repair autonomously, while the Runtime forms a semantic signature from failure categories, failed check IDs, contract, and implementation scope:
+
+- The third identical failure signature under the same scope changes continuation to manual stop.
+- A genuine scope change makes the next Build progression close the old repair episode.
+- With unchanged scope, the exact signature returned by `status` may be overridden once with a non-empty summary.
+- A repair episode records at most 12 failures; reaching the budget creates a hard stop.
+
+These limits measure real evidence progress rather than mechanical phase switches, so a long-lived change is not permanently locked by a fixed Run-iteration cap.
+
+## Two-step Archive
+
+```bash
+comet native archive <change-name> --dry-run
+comet native archive <change-name> --expect-preflight <sha256>
+```
+
+Archive cannot be replaced by `next` or committed in one step:
+
+1. Run `--dry-run`, inspect evidence, canonical hashes, target paths, and conflicts, and obtain `preflightHash`.
+2. Pass that hash unchanged to `--expect-preflight`.
+3. The Runtime recomputes every fact under lock and commits only on an exact match.
+
+Archive uses bounded identity-bound reads for source trees, canonical files, and transaction journals. Directory moves enter a transaction-bound quarantine before the irreversible commit. An interruption before the final marker can continue or roll back according to the journal. After the marker, only exactly-once continue is allowed, preventing a published archive result from being reversed.
 
 ## Diagnose and recover
 
 ```bash
 comet native doctor [<change-name>]
-comet native doctor [<change-name>] --repair --strategy continue
-comet native doctor [<change-name>] --repair --strategy rollback
+comet native doctor [<change-name>] --repair
+comet native doctor [<change-name>] --repair [--strategy continue|rollback]
 ```
 
-Doctor is non-mutating by default. Every ordinary phase transition first writes `runtime/transition.json`. If the process stops between Run state, `change.yaml`, trajectory, or checkpoint writes, the next `next` or `archive` idempotently continues that transition first. Use `doctor --repair --strategy continue` to recover it explicitly.
+Doctor is non-mutating by default. `--repair` handles only facts the Runtime can prove safe:
 
-Explicit repair can also clear a selection that points to a missing change, remove a provably stale local lock, and continue or roll back an Archive or root-move transaction according to its journal. Ordinary phase transitions support only `continue` because their journal contains a deterministic before-and-after state. `rollback` remains available only for Archive or root-move transactions that still permit it.
+- Stale selections and locks.
+- Schema and workspace-identity migrations.
+- Phase-transition, Archive, and root-move transaction recovery.
+- Derived evidence/receipts that are unreferenced and beyond the retention window.
+- Interrupted retention quarantines.
 
-Once Archive finalization starts, only continue is safe. When hashes cannot match either side of a transaction or root tree, doctor stops automatic recovery and preserves all data for manual judgment.
+Doctor never rewrites user briefs, specifications, verification reports, or project source. Ordinary phase transitions support only `continue`; `rollback` applies only to Archive/root-move journals that have not crossed their irreversible boundary.
 
-## JSON and exit codes
+Ordinary write commands never take over a stale lock automatically. Only explicit `doctor --repair` may do so after proving the local owner is gone, lock identity is unchanged, and no conflicting transaction exists. Active locks and locks that cannot be proven stale are preserved.
 
-Every Native command supports `--json` and emits exactly one object:
+Evidence retention cleans only active-change derived evidence that is at least 30 days old, outside the latest 32 files of each evidence kind, and proven unreferenced through the dependency closure. Current-state references, archived evidence, dependencies, newer files, and the latest 32 of every kind are always retained.
 
-```json
-{
-  "command": "status",
-  "exitCode": 0,
-  "data": {}
-}
-```
+## Continuation and exit codes
 
-Failures add a structured `error`.
+`status` and write commands return structured continuation. Common dispositions include:
 
-| Exit code | Meaning                                              |
-| --------- | ---------------------------------------------------- |
-| `0`       | Success                                              |
-| `64`      | Invalid arguments or usage                           |
-| `65`      | Invalid configuration, state, or artifacts           |
-| `70`      | Unexpected internal failure                          |
-| `73`      | Lock, transaction, concurrent hash, or root conflict |
+- `continue-same-skill`: the current Skill can perform the next action.
+- `await-user`: a real user decision or partial-scope authorization is required.
+- `repair-runtime`: run doctor/recovery first.
+- `stop`: completed, manually stopped, or at hard stop.
+
+`next: auto` means the caller can continue in the same Native Skill. It does not mean a background daemon will invoke the model.
+
+Every command supports `--json`. JSON mode emits exactly one object containing `command`, `exitCode`, and `data`, plus a structured `error` on failure.
+
+| Exit code | Meaning                                                       |
+| --------- | ------------------------------------------------------------- |
+| `0`       | Success                                                       |
+| `1`       | Built-in `check` completed but found issues or became stale   |
+| `64`      | Invalid arguments or usage                                    |
+| `65`      | Invalid configuration, state, or artifacts                    |
+| `70`      | Unexpected internal failure                                   |
+| `73`      | Lock, transaction, concurrent hash, or artifact-root conflict |
+| `75`      | Repair stagnation or a hard stop blocks continuation          |
 
 ## Hosts that expose only Skill files
 
-If the host does not have the `comet` CLI, use the runtime shipped with `/comet-native` directly:
+If the host does not have the `comet` CLI, use the Runtime shipped with `/comet-native` directly:
 
 ```bash
 node <comet-native-skill-root>/scripts/comet-native-runtime.mjs <command> [options]
 ```
 
-It uses the same arguments, output, and exit codes as `comet native`, without depending on OpenSpec, Superpowers, or any external Skill.
+It uses the same arguments, output, and exit codes as `comet native`. Runtime and Skill ship together and depend on neither OpenSpec, Superpowers, grill-me, nor any other external Skill.
