@@ -1,0 +1,130 @@
+---
+title: 'Native configuration'
+description: 'Configure the /comet default route, enabled workflows, automatic recovery, and Native artifact root and document language.'
+---
+
+Native and Classic share the project-level `.comet/config.yaml`. After Native is enabled, this file no longer contains only four Classic defaults. It also owns `/comet` entry routing, enabled workflows, and automatic recovery, while Native-specific settings live under the `native` namespace.
+
+## Complete example
+
+A project with both Native and Classic enabled can use:
+
+```yaml
+schema: comet.project.v1
+default_workflow: native
+workflows:
+  - native
+  - classic
+ambient_resume: true
+
+# Classic defaults
+language: en
+context_compression: off
+review_mode: standard
+auto_transition: true
+
+native:
+  artifact_root: .
+  language: en
+```
+
+Shared fields control entry and recovery. Top-level Classic fields affect only new Classic changes, and `native.*` affects only Native. Sharing one configuration file does not merge their state machines, change directories, or Guards.
+
+## Shared entry fields
+
+| Field | Values / default | Purpose |
+| --- | --- | --- |
+| `schema` | `comet.project.v1` | Current structured project configuration version; managed by Comet |
+| `default_workflow` | `native` \| `classic` | Permanent Skill entered when the user invokes `/comet` |
+| `workflows` | `native`, `classic`, or both | Workflows enabled and installed for this project; must include the default |
+| `ambient_resume` | `true` (default) \| `false` | Whether the agent automatically runs the read-only resume probe for ordinary natural-language continuation requests |
+
+`default_workflow` controls entry only; it does not migrate existing changes. `workflows` is not an installer. Do not enable a workflow only by editing YAML. Use `comet init . --workflow native|classic|both` so its Skills, Rule, and Hook Router are installed.
+
+## Native fields
+
+| Field | Values / default | Purpose |
+| --- | --- | --- |
+| `native.artifact_root` | Project-relative path; default `.` | Locates specs, changes, archive, and runtime under `<artifact-root>/comet/` |
+| `native.language` | `en` \| `zh-CN`; default `en` | Language for briefs, specs, and reports of newly created Native changes |
+
+`artifact_root: .` maps to `<project>/comet/`; `artifact_root: docs` maps to `<project>/docs/comet/`. For an existing Native project, do not edit the field and move files manually. Use the transactional command:
+
+```bash
+comet native root show
+comet native root move docs
+```
+
+Change the default language for future changes with:
+
+```bash
+comet native init --language en
+```
+
+Existing changes keep the language written when they were created.
+
+<Warning>
+  <code>native.pending_root_move</code> is a machine-managed recovery field for an interrupted root move, not a user setting. Run <code>comet native doctor</code> instead of editing or deleting it.
+</Warning>
+
+## Why Classic fields remain top-level
+
+Classic Runtime still reads these top-level defaults and snapshots them into a new change's `.comet.yaml`:
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `language` | `en` \| `zh-CN` | `en` |
+| `context_compression` | `off` \| `beta` | `off` |
+| `review_mode` | `off` \| `standard` \| `thorough` | `standard` |
+| `auto_transition` | `true` \| `false` | `true` |
+
+They were not moved under `classic:` so existing Classic projects and Runtime remain compatible. These fields do not change Native methodology. Native has no context compression, review mode, or cross-Skill phase-transition setting.
+
+## Common configurations
+
+### Native only
+
+```yaml
+schema: comet.project.v1
+default_workflow: native
+workflows:
+  - native
+ambient_resume: true
+native:
+  artifact_root: .
+  language: en
+```
+
+### Both workflows, with Classic as the default
+
+```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+language: en
+context_compression: off
+review_mode: standard
+auto_transition: true
+native:
+  artifact_root: .
+  language: en
+```
+
+### Disable automatic recovery for ordinary requests
+
+```yaml
+ambient_resume: false
+```
+
+This disables ambient probing for natural-language continuation requests only. Explicit `/comet` still follows `default_workflow`.
+
+## Legacy Classic configuration
+
+An older file containing only `language`, `context_compression`, `review_mode`, and `auto_transition` remains valid. Without structured fields, `/comet` uses `legacy-fallback` and enters Classic. It does not guess Native or scan Native directories.
+
+When formally enabling Native, run `comet init . --workflow native` or `--workflow both` to create structured configuration. Comet preserves existing Classic defaults and adds shared fields plus the `native` namespace.
+
+Continue with [Single Skill and entry routing](/en/native/skills-and-routing), [Artifacts and state](/en/native/artifacts-and-state), and [Classic state and configuration](/en/concepts/state-management).

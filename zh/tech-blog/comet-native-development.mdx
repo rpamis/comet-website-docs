@@ -41,7 +41,7 @@ Classic Spec 模式解决过真实问题。能力较弱的模型面对复杂任�
 
 最终的完成标准也更严格：另一个没有原对话的强模型，只读 brief、完整目标规格和仓库事实，就应该能够实现并验收，不必猜测用户可见行为。
 
-## 2026-07-14：先切断概念混合
+## 先切断概念混合
 
 第一轮设计先确定了几条产品边界：
 
@@ -56,9 +56,9 @@ Classic Spec 模式解决过真实问题。能力较弱的模型面对复杂任�
 
 第一版 Runtime 优先交付机械事实：项目配置、change 状态、四阶段守卫、完整目标规格、trajectory、选择、归档和自带 Runtime。它不替模型思考，但保证模型读到的阶段和目录是可复现的。
 
-## 2026-07-15：从“有状态”到“一致状态”
+## 从“有状态”到“一致状态”
 
-第一版很快暴露一个问题：状态分散在 `change.yaml`、Run state、trajectory 和 checkpoint 中，只保证每个文件格式正确还不够。如果进程恰好在两次写入之间退出，不同文件可能各自合法、彼此矛盾。
+第一版很快暴露一个问题：状态分散在当时的 change state（现名 `comet-state.yaml`）、Run state、trajectory 和 checkpoint 中，只保证每个文件格式正确还不够。如果进程恰好在两次写入之间退出，不同文件可能各自合法、彼此矛盾。
 
 Phase 1.5 引入 transition journal，把一次阶段推进拆成可以幂等恢复的写入序列。Runtime 先记录确定的前后状态，再依次更新 Run、change、trajectory 和 checkpoint；下一次 `next` 或 doctor 可以从 journal 继续，而不是猜测哪一份文件才是真的。
 
@@ -71,7 +71,7 @@ Phase 1.5 引入 transition journal，把一次阶段推进拆成可以幂等恢
 | 哪个阶段、哪些输入、是否可恢复 | Runtime                  |
 | 模型是否真的更好               | Eval，而不是 Prompt 自述 |
 
-## 2026-07-16：先修正评估口径，再谈性能
+## 先修正评估口径，再谈性能
 
 早期 Native 和 0.4.0 Classic 的样本数量、运行窗口与耗时计算方式不同，不能直接比较。尤其是旧报告只使用每个样本最后一个 `result.duration_ms`，会漏掉多轮模型调用的前序耗时。
 
@@ -80,6 +80,16 @@ Phase 1.5 引入 transition journal，把一次阶段推进拆成可以幂等恢
 对齐结果显示，两组 `pass@3` 都达到 16/16；Native 在 strict pass@1、`pass³` 和修正耗时上给出较好的方向性结果。可是两边不在同一运行窗口，机器负载和服务时段没有完全受控，因此这些数字不能证明“删掉某个阶段直接带来多少加速”。
 
 这个修正影响了后续所有 Wave：先明确业务验证与 workflow 验证各自的契约；先保证样本身份和时间口径可信；没有真实模型 artifact 时，只把 fixture 和 validator 通过写成机械覆盖，不把它包装成模型行为结论。
+
+## 把独立工作流接入统一项目边界
+
+临近发版时，工作重点从单个 Native Runtime 转向 Native 与既有 Classic 项目如何安全共存。最终配置统一回到 `.comet/config.yaml`：`workflows` 表示启用 Native、Classic 或两者，`default_workflow` 只决定 `/comet` 入口，`native.artifact_root` 仍只控制 Native 的 `comet/` 目录。Native change 状态文件定名为 `comet-state.yaml`，与 Classic 的 `.comet.yaml` 保持清楚区分。
+
+安装边界也随之收敛。每个平台只有一份 Comet 工作流 Rule；支持 Hook 的平台只有一个 Router。Router 读取共享 selection，把一次写入最多交给当前 workflow 的一个 Guard。这样既避免 Native 与 Classic 同时阻塞，也避免仅靠默认 workflow 猜测当前需求归属。
+
+同一轮还强化了 Shape 的产品决策归属：相邻代码、库默认值和“常见做法”只能帮助形成推荐，不能代替用户决定。初始化、更新和迁移失败则必须返回 incomplete 或非零退出码，不能在缺少入口、Runtime、Rule、Hook 或清理失败时继续显示成功。
+
+环境感知恢复最终成为 Native 与 Classic 共用的可配置能力。`.comet/config.yaml` 中的 `ambient_resume: false` 可以关闭普通请求触发的只读探针，同时保留显式 `/comet` 入口和用户自有规则。
 
 ## 从 58 个想法收敛为 14 + 1 个能力
 

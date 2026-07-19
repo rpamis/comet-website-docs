@@ -9,6 +9,8 @@ Comet's recovery model comes from file-based state. Understanding user-readable 
 
 | Goal | Look at | Recommendation |
 | --- | --- | --- |
+| Set the workflow entered by `/comet` | `default_workflow` in `.comet/config.yaml` | Must also appear in `workflows` |
+| Control automatic probing for natural-language continuation | `ambient_resume` in `.comet/config.yaml` | Defaults to `true`; explicit `/comet` is unaffected |
 | Set workflow artifact language | `language` in `.comet/config.yaml` | Only `en` or `zh-CN`; affects new changes |
 | Set default context compression | `context_compression` in `.comet/config.yaml` | Project default; affects new changes |
 | Set default review strength | `review_mode` in `.comet/config.yaml` | Full workflow defaults to `standard` |
@@ -30,24 +32,41 @@ A single active change may be attributed automatically. Multiple active changes 
 
 ## Project defaults: `.comet/config.yaml`
 
-For a project-level English install, Comet generates a config like this:
+Native and Classic now share this project-level file. With both workflows enabled, an English installation can generate:
 
 <Warning>
   Comet no longer reads a repository-root <code>.comet.yaml</code> or <code>comet.yaml</code>. Project defaults live only in <code>.comet/config.yaml</code>; workflow state lives only in <code>openspec/changes/&lt;name&gt;/.comet.yaml</code>.
 </Warning>
 
 ```yaml
-# language: en | zh-CN
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+
+# Classic defaults
 language: en
-# context_compression: off | beta
 context_compression: off
-# review_mode: off | standard | thorough
 review_mode: standard
-# auto_transition: true | false
 auto_transition: true
+
+native:
+  artifact_root: .
+  language: en
 ```
 
-### Four configuration fields
+### Shared and Classic fields
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `schema` | `comet.project.v1` | Structured project configuration version managed by Comet |
+| `default_workflow` | `native` \| `classic` | Permanent Skill entered by `/comet` |
+| `workflows` | `native`, `classic`, or both | Enabled workflows; must include the default |
+| `ambient_resume` | `true` \| `false` | Whether the agent automatically probes ordinary natural-language continuation requests |
+
+The following top-level fields remain Classic-only defaults and are snapshotted into new Classic changes:
 
 | Field | Allowed values | Default | Meaning |
 | --- | --- | --- | --- |
@@ -57,17 +76,23 @@ auto_transition: true
 | `auto_transition` | `true` \| `false` | `true` | Controls whether Comet invokes the next phase Skill automatically after phase advancement |
 
 <Note>
-  Project config values are <strong>snapshotted</strong> into each new change's <code>.comet.yaml</code>. Changing project config later does not change existing changes. This keeps each change deterministic.
+  Changing <code>default_workflow</code> changes only the <code>/comet</code> entry and never migrates a change. Classic defaults are snapshotted into new changes; later edits do not rewrite existing changes.
 </Note>
+
+See [Native configuration](/en/native/configuration) for `native.artifact_root`, `native.language`, migration commands, and complete examples. Native does not read Classic `context_compression`, `review_mode`, or `auto_transition`.
+
+<Info>
+  Legacy flat Classic configuration remains valid. Without <code>schema</code>, <code>default_workflow</code>, and <code>native</code>, <code>/comet</code> uses the Classic legacy fallback. Enable Native with <code>comet init . --workflow native</code> or <code>--workflow both</code>; do not add only a YAML list entry.
+</Info>
 
 ### Artifact language versus Skill language
 
-The "Skill language" selected in `comet init` decides whether Comet installs English or Chinese Comet Skills. It also writes the project-level artifact language:
+The Skill language selected by `comet init` determines which localized Skills are installed. Classic artifact language is stored in top-level `language`; Native artifact language is stored in `native.language`:
 
-| init selection | Installed Skill | `.comet/config.yaml` |
-| --- | --- | --- |
-| `English` / `--language en` | English Skills | `language: en` |
-| `中文` / `--language zh` | Chinese Skills | `language: zh-CN` |
+| Init selection | Installed Skill | Classic | Native |
+| --- | --- | --- | --- |
+| `English` / `--language en` | English Skills | `language: en` | `native.language: en` |
+| `中文` / `--language zh` | Chinese Skills | `language: zh-CN` | `native.language: zh-CN` |
 
 When a new change is created, Comet snapshots project-level `language` into `openspec/changes/<name>/.comet.yaml`. OpenSpec proposal, design, tasks, Superpowers design/plan artifacts, verification reports, and archive notes follow this configured language instead of guessing from whichever request triggered the workflow.
 
@@ -78,7 +103,7 @@ comet state set <change-name> language en
 comet state set <change-name> language zh-CN
 ```
 
-Global `comet init` and `comet update` persist the selected artifact language in `~/.comet/config.yaml`. New workflows prefer project `.comet/config.yaml`; only projects without a language setting fall back to the global default. A repository can therefore override the user's cross-project preference.
+Global `comet init` and `comet update` persist the selected artifact language in `~/.comet/config.yaml`. New Classic changes prefer top-level project `language` and fall back to the global default only when it is absent. Native uses its separate `native.language` and does not read this Classic global fallback.
 
 <Warning>
   Project-level and change-level language values only accept <code>en</code> or <code>zh-CN</code>. <code>zh</code> is only a <code>comet init --language zh</code> CLI selection value; it is not valid inside <code>.comet/config.yaml</code>.
@@ -88,7 +113,7 @@ Comet guard checks the dominant language of key workflow artifacts. If the confi
 
 ## Configuration precedence
 
-Each supported project default is resolved in this order:
+The following precedence applies only to Classic `language`, `context_compression`, `review_mode`, and `auto_transition`. Shared entry fields and `native.*` do not use Classic change-level overrides:
 
 ```text
 change-level .comet.yaml field > environment variable > project-level .comet/config.yaml > global language default > built-in default
@@ -146,10 +171,19 @@ Comet does not treat phase as a free-form note. Transitions must follow allowed 
 Edit `.comet/config.yaml`:
 
 ```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
 language: en
 context_compression: beta
 review_mode: thorough
 auto_transition: true
+native:
+  artifact_root: .
+  language: en
 ```
 
 For a temporary override:

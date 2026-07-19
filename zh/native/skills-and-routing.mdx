@@ -1,0 +1,49 @@
+---
+title: '单 Skill 与入口路由'
+description: '理解 /comet 如何按项目配置进入 Native，以及 /comet-native 如何在一个自包含 Skill 中持续推进。'
+---
+
+Native 不把 Shape、Build、Verify、Archive 拆成四个 Skill，也不加载 OpenSpec、Superpowers 或其他外部方法 Skill。它由一个 `/comet-native` Skill 读取磁盘状态，在同一入口内完成调查、澄清、实现、验证和归档。
+
+## 用户入口
+
+正常情况下使用 `/comet`。入口只读取 `.comet/config.yaml`，按 `default_workflow` 确定性转发：
+
+```yaml
+schema: comet.project.v1
+default_workflow: native
+workflows:
+  - native
+  - classic
+```
+
+`/comet-native` 是显式目标，适合诊断路由或明确要求进入 Native。它是宿主 Skill 调用，不是 shell 命令。Runtime 命令统一使用 `comet native ...`。
+
+<Note>
+  Comet 不根据任务大小、提示词或模型名称猜测模式。修改默认模式要改项目配置；切换入口不会迁移现有 change。
+</Note>
+
+## 一个 Skill 如何覆盖四个阶段
+
+每次进入后，Skill 会重新读取配置、selection、`comet-state.yaml`、brief、目标规格和当前仓库事实，然后根据 phase 继续：
+
+| phase | Skill 的职责 |
+| --- | --- |
+| Shape | 调查事实，清空用户决定，固定 brief 与完整目标规格 |
+| Build | 让模型自主选择实现方法，提交真实项目产物形成 implementation scope |
+| Verify | 按验收与风险运行检查，写入逐项证据 |
+| Archive | 两步预检，更新 canonical spec 并归档 change |
+
+阶段 transition 返回结构化 `continuation`。只有 `continue` 才会在当前调用中接着工作；`await-user`、`blocked`、`manual` 或 `done` 会分别等待用户、处理阻塞、停止自动修复或结束。
+
+## 写入归属
+
+`.comet/current-change.json` 记录当前写入属于哪个 workflow 和 change。项目只有一个共享 Hook Router，一次原子写入最多交给一个 Guard。多个 active change 时，先显式选择：
+
+```bash
+comet native select <change-name>
+```
+
+只读 `status` 和 `show` 不会暗中改变 selection。这样，读取状态不会意外把后续写入绑定到另一个需求。
+
+继续阅读：[用户决定协议](/zh/native/decision-ownership) 和 [连续推进与 Checkpoint](/zh/native/continuation-and-checkpoints)。

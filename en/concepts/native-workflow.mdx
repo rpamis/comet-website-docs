@@ -1,129 +1,99 @@
 ---
 title: 'Native workflow'
-description: 'A self-contained requirements workflow for strong coding models: detailed constraints, lightweight execution, recoverable state, and safe archive.'
+description: 'A self-contained requirements workflow for strong models such as Fable 5 and GPT-5.6: detailed constraints, lightweight execution, and recoverable evidence.'
 ---
 
-Comet Native is designed for strong coding models that can investigate code, choose an implementation approach, and scale verification to risk. It preserves what matters from Spec workflows—requirements management, a change lifecycle, phase checks, automatic progression, verification evidence, concurrent conflicts, and recoverable archive—without prescribing a fixed design, planning, TDD, debugging, or review method.
+Comet Native is a Skill designed specifically for strong coding models in the Fable 5 and GPT-5.6 capability tier. It assumes the model can investigate code, form an implementation approach, and choose verification according to risk. It therefore does not mandate fixed design, planning, TDD, debugging, or review methods, while a Comet-owned Runtime still manages requirements, complete target specifications, phases, evidence, conflicts, and archiving.
 
-Its principle is: **make requirements and acceptance conditions detailed, and keep the execution protocol light.** The model needs the outcome, boundaries, decisions, complete target behavior, and verification expectations. It decides how to implement from repository facts.
+Its core principle is: **make requirements and acceptance precise while keeping execution methods lightweight.** Lightweight means removing unnecessary process orchestration for capable models, not reducing requirement quality or skipping verification.
 
-## Native and Classic are independent workflows
+## Choosing Native or Classic
 
-|                        | Native                                                     | Classic Spec mode                                              |
-| ---------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
-| Intended model         | Strong models that can plan and verify autonomously        | Models that benefit from explicit step-by-step guidance        |
-| Requirements artifacts | Comet-owned brief, complete target specs, and change state | OpenSpec change/delta specs plus Superpowers documents         |
-| Execution constraints  | Constrains outcomes, evidence, and safety boundaries       | Five-phase Skills plus design, plan, TDD, and review protocols |
-| Dependencies           | Only Comet's bundled Native runtime                        | The Classic, OpenSpec, and Superpowers composition             |
-| Entry point            | `/comet-native`, `comet native ...`                        | `/comet-classic` and Classic phase Skills                      |
+| Dimension              | Native                                                          | Classic Spec mode                                                                    |
+| ---------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Primary model tier     | Fable 5, GPT-5.6, and similarly capable models                  | Models below the Fable 5 or GPT-5.6 capability tier that benefit from finer guidance |
+| Workflow               | Shape → Build → Verify → Archive                                | open → design → build → verify → archive                                             |
+| Requirements and state | Comet brief, complete target specifications, `comet-state.yaml` | OpenSpec change/delta specs and `.comet.yaml`                                        |
+| Implementation process | Model chooses from repository facts and risk                    | Explicit design, planning, TDD, debugging, and review protocols                      |
+| Dependencies           | Comet Native Skill and Runtime                                  | Comet Classic, OpenSpec, and Superpowers                                             |
+| Constraint profile     | Strong outcome constraints with fewer method constraints        | Finer phase guidance and stronger process constraints                                |
 
-`/comet` is a configuration-driven shared alias: it reads only the project-root `comet.config.yaml`, then forwards to `/comet-native` or `/comet-classic`. It never switches modes based on task size, file count, or model judgment, and it provides no Native-to-Classic upgrade or conversion. The two workflows share no changes, state, or archive directories.
+Classic is neither an obsolete Native version nor a fallback after Native fails. For models below the Fable 5 or GPT-5.6 capability tier, finer Spec and execution phases can reduce omissions and process drift. Comet's existing real-model baseline has shown that Classic's stronger constraints can deliver good task coverage and completion on this type of work. Native targets models that already have stronger autonomous reasoning and removes repeated phases and dependency-Skill overhead.
 
-## Initialization and default entry point
+The current aligned Native versus 0.4.0 Classic experiment used Mimo 2.5 Pro on 16 tasks with three repetitions each. Both workflows reached task-level `pass@3 = 100%`. That supports the narrower conclusions that both workflows covered the tasks and Native ran lighter in this experiment; it does not establish a universal causal advantage across every model, repository, or task. See [Native versus Classic real-model evaluation](/en/eval/comet-native-vs-040-experiment).
 
-A project-scope initialization defaults to Native for a new Comet project:
+<Info>
+  Model names are capability-tier guidance, not a Runtime detection rule. Comet does not inspect the
+  model name and switch automatically; project configuration controls the workflow.
+</Info>
 
-```bash
-comet init
+## One entry, independent lifecycles
+
+`/comet` reads `.comet/config.yaml`, then deterministically forwards to `/comet-native` or `/comet-classic`. A project can enable one workflow or both:
+
+```yaml
+schema: comet.project.v1
+default_workflow: native
+workflows:
+  - native
+  - classic
+ambient_resume: true
+native:
+  artifact_root: .
+  language: en
 ```
 
-This path installs only Comet-owned Skills and runtime, creates `comet.config.yaml` and the default `comet/` directory, and does not install OpenSpec, Superpowers, or CodeGraph or write Classic rules, hooks, or `.comet/config.yaml`. Projects with clear existing Classic state remain Classic; an ordinary `openspec/` or `docs/superpowers/` directory alone is not misclassified as Classic.
+`default_workflow` controls only where `/comet` enters. It does not migrate, delete, or merge changes. Native and Classic retain independent phases, schemas, changes, specifications, and archive directories even when both are enabled.
 
-Choose explicitly when needed:
-
-```bash
-comet init --workflow native
-comet init --workflow native --root docs
-comet init --workflow classic
-```
-
-Changing `default_workflow` explicitly changes only where `/comet` enters. It does not migrate, delete, or convert existing changes. `--root` applies only to project-scope Native initialization; a global installation still means installing global capabilities without writing project configuration.
-
-## Layout and artifact root
-
-Native uses only Comet-owned directories:
-
-```text
-<project>/comet.config.yaml
-<artifact-root>/comet/
-  specs/
-  changes/
-  archive/
-  runtime/
-```
-
-The default artifact root is the project root, producing `<project>/comet/`. Initialize with `docs` to use `<project>/docs/comet/` instead:
-
-```bash
-comet init --workflow native --root docs
-```
-
-`artifact_root` must be a project-relative path. `comet native init --language en` also persists the default language for future changes, while an individual `new --language` can override it. Use `comet native root move` to change location instead of editing configuration. The move records transaction state and can continue or roll back after interruption.
-
-## Four phases
+## Four-phase workflow
 
 ```mermaid
 flowchart LR
-  A["Shape: clarify requirements"] --> B["Build: implement autonomously"]
-  B --> C["Verify: record evidence"]
-  C -->|pass| D["Archive: update specs and archive"]
-  C -->|fail| B
+  S["Shape"] --> B["Build"]
+  B --> V["Verify"]
+  V -->|pass| A["Archive"]
+  V -->|fail| B
 ```
 
-### Shape: make the information sufficient
+### Shape: fix the target and user decisions
 
-Shape captures the user goal in `brief.md` under Outcome, Scope, Non-goals, Acceptance examples, Constraints and invariants, Decisions, Open questions, and Verification expectations.
+Shape investigates repository facts, then records Outcome, Scope, Non-goals, Acceptance examples, Constraints and invariants, Decisions, Open questions, and Verification expectations in `brief.md`.
 
-The model first investigates facts available from the repository. It asks the user only about decisions that materially affect scope, user-visible behavior, compatibility, risk, or irreversibility. When one exists, it asks the single most important question and includes a recommendation, rationale, and practical impact of each option. After the answer, it records the decision and advances with `next --confirmed`. With no high-impact unknown, it keeps going and the runtime records implicit approval. A `[blocking]` question must be resolved under either approval form.
+The model distinguishes two kinds of choices:
 
-When durable behavior changes, each capability also receives a **complete target specification** at `changes/<change>/specs/<capability>/spec.md`: the full behavior that should exist after archive, rather than an incremental patch meaningful only against old text. The runtime derives `create` / `replace` and freezes `base_hash` from canonical specs; deletion uses `comet native spec remove`. The model does not maintain this state metadata directly.
+- a choice that changes user-visible results, defaults, compatibility, scope, risk, or irreversible outcomes belongs to the user;
+- a choice that changes implementation without changing observable results belongs to the model.
 
-### Build: let the strong model choose the method
+When a user decision remains, Native asks one upstream question at a time with a recommendation, rationale, and option impact. A `[blocking]` question prevents Build. Changes to durable behavior also receive a complete target specification for each capability rather than an incremental patch alone.
 
-In Build, the model chooses the simplest reliable approach that satisfies the brief and target specs. Whether to write an implementation plan, which test granularity to use, and how deeply to debug or review all depend on task risk. Native neither requires process-only documents nor mandates TDD.
+### Build: autonomous implementation
 
-When implementation reveals a new high-impact decision, the model marks it `[blocking]` and asks only one question. After the answer, it updates Decisions, removes the blocker, and records the decision with `--confirmed` while leaving Build. Build rechecks the brief and target specifications, so artifact references cannot bypass a newly discovered question.
+Build is bounded by the brief, complete target specifications, and repository rules. The model decides whether to persist a plan, what test depth to use, and how to debug and review. Native does not create process documents for their own sake or mandate TDD.
 
-Progression cites real project artifacts. Documentation-only or no-code work records an explicit no-code reason instead.
+New product decisions return the workflow to clarification. Before Verify, the Runtime captures real project artifacts as the implementation scope. If it cannot prove the scope complete, progression stops; a partial scope requires explicit user acceptance bound to the exact scope hash.
 
-### Verify: facts instead of assertions
+### Verify: bind conclusions to current facts
 
-Verify checks the Acceptance examples, complete target specs, and relevant risks. `verification.md` records actual commands and results, skipped checks, specification consistency, known limitations, and the conclusion, plus a Runtime-readable acceptance block. Every Acceptance ID binds either to evidence or to an explicit skip reason.
+Verify runs appropriate checks against Acceptance examples, complete target specifications, and implementation risk. `verification.md` records commands, results, skipped checks, known limitations, and evidence for each Acceptance ID.
 
-The Runtime binds the report to the current contract, implementation scope, and change revision. Changing the brief, target specifications, or implementation files makes the old pass and old check receipt stale, so they cannot be archived. Failure automatically returns to Build; an unrun check cannot be reported as passing.
+The Runtime binds the conclusion to the current brief, target specifications, implementation scope, and revision. Any input change makes old reports, receipts, and pass results stale. A failure returns to Build. Repeated identical failures on the same scope without real progress eventually stop autonomous repair instead of looping indefinitely.
 
-The model may repair autonomously, but the Runtime prevents endless loops without evidence progress. Under the same scope, the third identical failure signature becomes a manual stop, and one repair episode records at most 12 failures. Real scope progress opens a new episode, while a no-progress override is available only once.
+### Archive: commit after a two-step preflight
 
-### Archive: converge without overwriting conflicts
+Archive first produces a content-bound `preflightHash`, then rechecks evidence, paths, and canonical-spec hashes at commit time. If a parallel change has altered the same capability, archiving stops instead of overwriting it. The model must read the latest canonical specification, run `spec rebase`, then implement and verify again.
 
-Archive is allowed only after Verify passes. First run `archive --dry-run` to obtain a content-bound `preflightHash`, then submit it with `archive --expect-preflight <sha256>`. While holding a lock, the Runtime recomputes evidence, paths, and canonical-spec SHA-256 values:
+After success, complete target specifications become canonical specs and the active change moves to a dated archive directory. The trajectory stores phase summaries and evidence references, not hidden reasoning.
 
-- `create` requires the canonical spec not to exist;
-- `replace` and `remove` require the current hash to equal the runtime-frozen `base_hash`;
-- when a hash changed, archive stops and reports a conflict instead of overwriting another change.
+## Boundaries of automatic progression
 
-A conflict is recoverable: re-read the latest canonical specification, rewrite the complete target specification, and run `comet native spec rebase`. The runtime refreshes operation/hash, reopens the change in Build, and clears the old verification conclusion before implementation, confirmation, and verification run again.
+When phase conditions pass, the Runtime returns a structured continuation so the same `/comet-native` Skill can continue. It stops when:
 
-On success, complete target specs become canonical, the active change moves to `archive/YYYY-MM-DD-<change-name>/`, and the trajectory retains Shape, Build, Verify, and Archive summary evidence without hidden reasoning. Source trees and destination files use bounded, object-identity-bound reads, and directory deletion first enters transaction quarantine. Rollback remains safe before the final archive marker; after that marker, only exactly-once continue is allowed.
+- a user decision is unresolved;
+- configuration, state, locks, or transactions cannot be interpreted safely;
+- verification evidence is stale or implementation scope is incomplete;
+- a canonical specification has a concurrent conflict; or
+- the same failure repeats without progress.
 
-## Phase checks, automatic progression, and recovery
+Native automation is therefore stateful continuation, not a background daemon and not permission to skip user decisions or safety checks.
 
-Resume from disk facts: read configuration, run `comet native status` and `show`, then inspect the target change, canonical specs, implementation, and tests. Do not guess the phase from chat history or edit phase, Run state, locks, or transaction journals manually.
-
-Within a phase, `checkpoint` can preserve a summary, next action, and content-addressed artifact manifest. `status` returns the latest checkpoint and structured continuation: `continue-same-skill` continues the current Skill, `await-user` waits for a real decision, `repair-runtime` runs recovery first, and `stop` means done or stopped. This lets a new session recover work; it does not mean a background daemon invokes the model.
-
-Change lists, project status, detailed findings, and Acceptance IDs all use bounded pagination. Cursors bind the current name set or acceptance hash and fail explicitly after input changes instead of silently shifting pages. The Runtime fails closed on input or output budget overflow rather than hiding omitted requirement text.
-
-`comet native next` advances automatically when phase conditions pass. Otherwise it returns structured findings and stays in the current phase. An ordinary transition records deterministic before-and-after state in `runtime/transition.json` before writing Run state, `change.yaml`, trajectory, and checkpoint. After interruption, the next `next` or `archive` continues automatically; `doctor --repair --strategy continue` performs the same recovery explicitly.
-
-`comet native doctor` is read-only by default. `--repair` is limited to provably safe stale selections, locks, and deterministic transaction recovery; it does not rewrite user-authored briefs, specs, or verification reports. Ordinary transitions do not support rollback. Archive and root-move journals still decide whether rollback remains safe for their own transactions.
-
-Native also provides a narrow `comet native check`. In Verify it runs only a built-in bounded read-only text policy over the current implementation scope and produces a content-addressed receipt. It does not execute Git, a shell, project scripts, or external Skills. The strong model still selects and runs real project tests according to risk.
-
-`comet status` presents Native, Classic, and unmanaged OpenSpec changes in separate sections. For natural-language recovery, `comet resume-probe` resolves the project's default workflow first and then inspects only that side. Native always resumes through `/comet-native`; it never treats `comet native next` as a resume command or scans Classic directories. If configuration is malformed, the probe stops and requests a repair instead of guessing a fallback.
-
-See [Native CLI](/en/cli/native) for every command.
-
-## Dashboard is an observation surface
-
-Dashboard can show a Native change's phase, evidence freshness, continuation, checkpoint, archive readiness, and conflict summary, but it consumes only the Runtime's read-only projection. It neither re-derives state nor caches a second source of truth, and it provides no advance or repair controls. CLI/Runtime remains the only writer.
+Continue with [Native quickstart](/en/native/quickstart), [Native configuration](/en/native/configuration), [Artifacts and state](/en/native/artifacts-and-state), and [Safety and recovery](/en/native/safety-and-recovery).

@@ -1,28 +1,32 @@
 ---
-title: "状态损坏与恢复"
-description: "当 /comet-classic 路由不对、.comet.yaml 缺失或格式异常、证据缺失时，如何用 comet status / comet doctor 诊断和恢复。"
+title: '状态损坏与恢复'
+description: '当 Classic 路由不对、.comet.yaml 缺失或格式异常、证据缺失时，如何用 comet status / comet doctor 诊断和恢复。'
 ---
 
-Classic 正常恢复只需要 `/comet-classic`（见[恢复中断的工作](/zh/guides/resuming-workflow)）。**本页是当 `/comet-classic` 路由不对、或状态看起来坏了时**的诊断和恢复指南。
+Classic 正常恢复只需要统一入口 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)）。配置进入 Classic 后，内部 `/comet-classic` 会读取文件状态并选择阶段；本页只处理该内部路由异常或状态损坏。
 
 状态损坏时，目标是**恢复真实事实**，而不是强行改字段让流程继续。
 
 <p align="center">
-  <img src="/assets/state-recovery-illustrations/01-state-recovery-first-aid.png" alt="小鱼在状态急救台上用 status 和 doctor 诊断坏状态，并按文件事实恢复证据" width="800" />
+  <img
+    src="/assets/state-recovery-illustrations/01-state-recovery-first-aid.png"
+    alt="小鱼在状态急救台上用 status 和 doctor 诊断坏状态，并按文件事实恢复证据"
+    width="800"
+  />
 </p>
 
 <p align="center">状态恢复先诊断真实文件证据，再按提示修复；不要为了推进流程手工伪造状态</p>
 
 ## 先判断：是状态坏了，还是只是中断
 
-| 情况 | 这算什么 | 怎么办 |
-| --- | --- | --- |
-| 会话断了、上下文压缩了、换了设备 | 正常中断 | 直接 `/comet-classic`（见[恢复中断的工作](/zh/guides/resuming-workflow)） |
-| 自然语言请求命中多个 active change | 需要确认目标，不是状态损坏 | 查看恢复探测结果中的 `reason`，点名要恢复的 change |
-| 工作树有未提交改动 | 需要先归因，不是状态损坏 | 确认改动属于哪个 change，再继续 |
-| `/comet-classic` 路由到的阶段不对 | 可能元数据和文件冲突 | `/comet-classic` 会以文件为准自愈；若仍不对，跑诊断 |
-| `.comet.yaml` 缺失或格式异常 | 状态损坏 | `comet doctor` 诊断 |
-| 声明的产物/证据在磁盘上找不到 | 证据缺失 | `comet status` 看 `runtime_eval` |
+| 情况                               | 这算什么                   | 怎么办                                                            |
+| ---------------------------------- | -------------------------- | ----------------------------------------------------------------- |
+| 会话断了、上下文压缩了、换了设备   | 正常中断                   | 直接 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)） |
+| 自然语言请求命中多个 active change | 需要确认目标，不是状态损坏 | 查看恢复探测结果中的 `reason`，点名要恢复的 change                |
+| 工作树有未提交改动                 | 需要先归因，不是状态损坏   | 确认改动属于哪个 change，再继续                                   |
+| `/comet-classic` 路由到的阶段不对  | 可能元数据和文件冲突       | `/comet-classic` 会以文件为准自愈；若仍不对，跑诊断               |
+| `.comet.yaml` 缺失或格式异常       | 状态损坏                   | `comet doctor` 诊断                                               |
+| 声明的产物/证据在磁盘上找不到      | 证据缺失                   | `comet status` 看 `runtime_eval`                                  |
 
 ## 诊断命令
 
@@ -48,13 +52,13 @@ comet doctor        # 诊断安装、环境、Skill 完整性、.comet.yaml 有�
 
 ## 常见症状和处理
 
-| 症状 | 可能原因 | 先做什么 |
-| --- | --- | --- |
-| `comet status` 没有下一步 | `.comet.yaml` 缺失或格式异常 | `comet doctor` |
-| build 无法进入 verify | 缺 `build_mode`/`isolation`/`tdd_mode` | 回 build 阶段补选（`/comet-classic` 会路由过去让你选） |
-| verify 通过但不能 archive | 缺验证报告或分支状态未处理 | 补验证报告、设 `branch_status: handled` |
-| archive 后仍显示 active | 手工移动目录或状态没同步 | 用 `openspec status` 核对，用归档脚本重跑（可恢复） |
-| `/comet-classic` 报 `.comet.yaml` 格式异常 | 文件被手工改坏 | `comet doctor`；严重时从 git 恢复 `.comet.yaml` |
+| 症状                                       | 可能原因                               | 先做什么                                            |
+| ------------------------------------------ | -------------------------------------- | --------------------------------------------------- |
+| `comet status` 没有下一步                  | `.comet.yaml` 缺失或格式异常           | `comet doctor`                                      |
+| build 无法进入 verify                      | 缺 `build_mode`/`isolation`/`tdd_mode` | 重新调用 `/comet`，让 Classic 路由回 build 补选     |
+| verify 通过但不能 archive                  | 缺验证报告或分支状态未处理             | 补验证报告、设 `branch_status: handled`             |
+| archive 后仍显示 active                    | 手工移动目录或状态没同步               | 用 `openspec status` 核对，用归档脚本重跑（可恢复） |
+| `/comet-classic` 报 `.comet.yaml` 格式异常 | 文件被手工改坏                         | `comet doctor`；严重时从 git 恢复 `.comet.yaml`     |
 
 ## 恢复原则
 
@@ -87,12 +91,12 @@ flowchart TD
   F --> G["核对 Superpowers design/plan"]
   G --> H["核对工作树和验证证据"]
   H --> I["用 Comet 命令恢复<br/>不手工改 machine-owned 字段"]
-  I --> J["重新 /comet-classic"]
+  I --> J["重新调用 /comet"]
 ```
 
 ## 下一步
 
 - [恢复探测命令](/zh/cli/resume-probe) — 区分可自动恢复、需要确认和不应进入 workflow 的请求
-- [恢复中断的工作](/zh/guides/resuming-workflow) — Classic 正常中断只需 `/comet-classic`
+- [恢复中断的工作](/zh/guides/resuming-workflow) — Classic 正常中断只需 `/comet`
 - [项目文件结构](/zh/guides/project-structure) — 状态都存在哪些文件里
 - [状态与配置](/zh/concepts/state-management) — `.comet.yaml` 字段和状态守卫

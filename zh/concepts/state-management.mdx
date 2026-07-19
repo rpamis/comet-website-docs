@@ -9,6 +9,8 @@ Comet 的恢复能力来自文件化状态。理解用户可读状态、机器�
 
 | 目标 | 看哪里 | 建议 |
 | --- | --- | --- |
+| 设置 `/comet` 默认进入哪套工作流 | `.comet/config.yaml` 的 `default_workflow` | 必须同时出现在 `workflows` 中 |
+| 控制自然语言续接是否自动探测 | `.comet/config.yaml` 的 `ambient_resume` | 默认 `true`；不影响显式 `/comet` |
 | 设置工作流产物语言 | `.comet/config.yaml` 的 `language` | 只支持 `en` 或 `zh-CN`，影响新 change |
 | 设置默认上下文压缩 | `.comet/config.yaml` 的 `context_compression` | 项目级默认，影响新 change |
 | 设置默认审查强度 | `.comet/config.yaml` 的 `review_mode` | full workflow 默认走 `standard` |
@@ -42,7 +44,7 @@ flowchart LR
   A[".comet.yaml<br/>每个 change 一个"] --> B["用户可见工作流投影<br/>phase / build_mode / verify_result"]
   C[".comet/run-state.json<br/>每个 change 或 run 一个"] --> D["machine-owned Run state<br/>currentStep / pending / artifacts"]
   E[".comet/state-events.jsonl<br/>每个 change 一个"] --> F["追加式转换审计<br/>event / source / effects"]
-  H[".comet/config.yaml<br/>项目级，全局一份"] --> I["项目默认值<br/>language / context_compression / review_mode / auto_transition"]
+  H[".comet/config.yaml<br/>项目级，全局一份"] --> I["共享入口 + Classic 默认值<br/>default_workflow / workflows / language / review_mode"]
   B --> G["status / doctor / guard"]
   D --> G
   F --> G
@@ -60,7 +62,7 @@ flowchart LR
 | `.comet.yaml` | `openspec/changes/<name>/.comet.yaml` | 用户可见，通过 `/comet-classic` 和 guard 流转 | 工作流投影：阶段、执行方式、验证结果 |
 | `.comet/run-state.json` | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | machine-owned，不需要手动编写，运行时自动写入 | Engine Run 细节：currentStep、pending、trajectory |
 | `.comet/state-events.jsonl` | `openspec/changes/<name>/.comet/` | Comet 追加写入，用户可读 | 成功 state transition 的审计日志 |
-| `.comet/config.yaml` | 项目根 `.comet/config.yaml` | 用户可手写或由 init 生成 | 项目级默认值，init 时快照到新 change |
+| `.comet/config.yaml` | 项目根 `.comet/config.yaml` | 用户可手写或由 init 生成 | `/comet` 共享入口配置，以及 Classic 和 Native 各自的项目默认值 |
 
 <Warning>
   不要手工编辑 `.comet/run-state.json` 的 machine-owned 字段，也不要手工把已归档 change 标成完成。归档应通过 `/comet-archive` 完成。
@@ -68,28 +70,45 @@ flowchart LR
 
 ## 项目配置：.comet/config.yaml
 
-`.comet/config.yaml` 是项目级配置，全局一份。`comet init` 会在项目级安装时自动生成（不存在才写），你也可以手写或提交到仓库。
+`.comet/config.yaml` 是 Native 与 Classic 共用的项目级配置，全局一份。引入 Native 后，它新增共享入口字段和 `native` 命名空间；Classic 原有的四个默认值继续保留在顶层。
 
 <Warning>
   Comet 不再读取仓库根目录的 <code>.comet.yaml</code> 或 <code>comet.yaml</code>。根目录只使用 <code>.comet/config.yaml</code> 作为项目默认配置；每个 change 的状态只在 <code>openspec/changes/&lt;name&gt;/.comet.yaml</code>。
 </Warning>
 
-### 生成的内容
+### 当前结构
 
-选择中文 Skill 时，项目级安装会生成类似配置：
+同时启用两套工作流并选择中文时，项目级安装会生成类似配置：
 
 ```yaml
-# language: en | zh-CN
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+
+# Classic defaults
 language: zh-CN
-# context_compression: off | beta
 context_compression: off
-# review_mode: off | standard | thorough
 review_mode: standard
-# auto_transition: true | false
 auto_transition: true
+
+native:
+  artifact_root: .
+  language: zh-CN
 ```
 
-### 四个配置项
+### 共享字段与 Classic 字段
+
+| 配置项 | 允许值 | 含义 |
+| --- | --- | --- |
+| `schema` | `comet.project.v1` | 当前结构化项目配置版本，由 Comet 管理 |
+| `default_workflow` | `native` \| `classic` | `/comet` 默认进入哪套永久 Skill |
+| `workflows` | `native`、`classic` 或两者 | 项目已启用的工作流；必须包含默认工作流 |
+| `ambient_resume` | `true` \| `false` | 是否允许 Agent 对普通自然语言续接请求自动运行恢复探测 |
+
+下面四个顶层字段仍然只属于 Classic，创建新 Classic change 时会快照到该 change 的 `.comet.yaml`：
 
 | 配置项 | 允许值 | 默认值 | 含义 |
 | --- | --- | --- | --- |
@@ -99,17 +118,23 @@ auto_transition: true
 | `auto_transition` | `true` \| `false` | `true` | 阶段推进后是否自动调用下一个阶段 Skill。详见[自动推进机制](/zh/concepts/auto-transition) |
 
 <Note>
-  项目配置的值在创建新 change 时<strong>快照</strong>到该 change 的 <code>.comet.yaml</code>。之后修改项目配置不影响已有 change——这保证每个 change 的行为是确定的。
+  修改 <code>default_workflow</code> 只改变 <code>/comet</code> 的入口，不迁移任何 change。Classic 项目默认值在创建新 change 时快照到 <code>.comet.yaml</code>；之后修改不会追溯改变已有 change。
 </Note>
+
+`native.artifact_root` 和 `native.language` 的含义、迁移方式及完整示例见 [Native 配置](/zh/native/configuration)。Native 不读取 Classic 的 `context_compression`、`review_mode` 或 `auto_transition`。
+
+<Info>
+  旧的纯 Classic 扁平配置仍然有效。没有 <code>schema</code>、<code>default_workflow</code> 和 <code>native</code> 时，<code>/comet</code> 通过 legacy fallback 进入 Classic。启用 Native 时应运行 <code>comet init . --workflow native</code> 或 <code>--workflow both</code>，不要只手工增加 <code>workflows</code>。
+</Info>
 
 ### 产物语言和 Skill 语言的区别
 
-`comet init` 里的"Skill 语言"会决定安装中文还是英文版 Comet Skill，同时也会写入项目级 `language`：
+`comet init` 里的“Skill 语言”会决定安装中文还是英文版 Comet Skill。Classic 的产物语言写入顶层 `language`；Native 的产物语言写入 `native.language`：
 
-| init 选择 | 安装的 Skill | `.comet/config.yaml` |
-| --- | --- | --- |
-| `English` / `--language en` | 英文 Skill | `language: en` |
-| `中文` / `--language zh` | 中文 Skill | `language: zh-CN` |
+| init 选择 | 安装的 Skill | Classic | Native |
+| --- | --- | --- | --- |
+| `English` / `--language en` | 英文 Skill | `language: en` | `native.language: en` |
+| `中文` / `--language zh` | 中文 Skill | `language: zh-CN` | `native.language: zh-CN` |
 
 之后新建 change 时，Comet 会把项目级 `language` 快照到 `openspec/changes/<name>/.comet.yaml`。OpenSpec proposal、design、tasks、Superpowers 设计/计划、验证报告和 archive 说明都会按这个配置输出，而不是按某次触发请求的语言临时判断。
 
@@ -120,7 +145,7 @@ comet state set <change-name> language en
 comet state set <change-name> language zh-CN
 ```
 
-全局 `comet init` 和 `comet update` 会把选择的产物语言保存到 `~/.comet/config.yaml`。新 workflow 优先使用项目 `.comet/config.yaml`；项目没有配置语言时才回退到全局默认。因此个人可以设置跨项目默认值，团队项目仍能用仓库内配置覆盖。
+全局 `comet init` 和 `comet update` 会把选择的产物语言保存到 `~/.comet/config.yaml`。新建 Classic change 优先使用项目 `.comet/config.yaml` 的顶层 `language`；未配置时才回退到全局默认。Native 使用独立的 `native.language`，不读取这个 Classic 全局回退。
 
 <Warning>
   项目级和 change 级语言值只接受 <code>en</code> 或 <code>zh-CN</code>。<code>zh</code> 只用于 <code>comet init --language zh</code> 的 CLI 选择，不是 <code>.comet/config.yaml</code> 的合法值。
@@ -130,7 +155,7 @@ Comet guard 会检查关键工作流产物的主语言。如果配置是 `zh-CN`
 
 ## 配置优先级
 
-每个配置项的运行时值按以下优先级解析：
+以下优先级只描述 Classic 的 `language`、`context_compression`、`review_mode` 和 `auto_transition`。共享入口字段与 `native.*` 不使用 Classic change 级覆盖：
 
 ```text
 change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > 全局 language 默认 > 内置默认值
@@ -307,10 +332,19 @@ openspec/changes/<name>/.comet/state-events.jsonl
 编辑 `.comet/config.yaml`：
 
 ```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
 language: zh-CN
 context_compression: beta
 review_mode: thorough
 auto_transition: true
+native:
+  artifact_root: .
+  language: zh-CN
 ```
 
 提交到仓库，团队成员的新 change 会用这些默认值。

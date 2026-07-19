@@ -13,7 +13,7 @@ description: '会话中断、上下文压缩或换设备后，用 /comet 按项�
 /comet 继续
 ```
 
-就这样。Comet 不依赖对话历史：Native 重读 `comet.config.yaml`、`<artifact-root>/comet/`、实现和验证证据；Classic 重读 OpenSpec、`.comet.yaml` 与运行证据。
+就这样。Comet 不依赖对话历史：Native 重读 `.comet/config.yaml`、`<artifact-root>/comet/`、实现和验证证据；Classic 重读同一项目配置、OpenSpec、`.comet.yaml` 与运行证据。
 
 <Tip>
   <strong>
@@ -25,7 +25,7 @@ description: '会话中断、上下文压缩或换设备后，用 /comet 按项�
 
 ## 也可以直接说“继续”
 
-0.4.0-beta.4 起，`comet init` 和 `comet update` 会把一段 Comet 恢复说明合并进项目的 `AGENTS.md` 和 `CLAUDE.md`。Agent 收到“继续刚才的登录重构”这类自然语言请求时，可以先做一次只读恢复探测（CLI 命令为 `comet resume-probe`），再决定是否进入现有 workflow。
+0.4.0-beta.4 起，`comet init` 和 `comet update` 会把一段 Comet 恢复说明合并进项目的 `AGENTS.md` 和 `CLAUDE.md`。长程任务经过上下文压缩、跨会话或跨设备继续时，Agent 可能已经忘记当前请求原本属于 Comet，而用户也未再次输入 `/comet`。此时 Agent 可以先运行只读的 `comet resume-probe`，判断“继续刚才的登录重构”是否对应现有 change，再决定是否重新进入工作流。
 
 | 场景                                                | 探测结果                                 |
 | --------------------------------------------------- | ---------------------------------------- |
@@ -34,7 +34,7 @@ description: '会话中断、上下文压缩或换设备后，用 /comet 按项�
 | 只是问问题、明确不走 Comet，或当前已在 Comet 流程内 | 返回 `out_of_scope`，不重复进入 workflow |
 | 没有 active Comet change                            | 返回 `none`，不执行恢复                  |
 
-这段说明只约束 Comet 的恢复探测，并会保留文件中已有的用户规则。探针先解析配置，再只检查一套工作流；配置损坏时不会回退。它不会把所有后续请求强行路由到 Comet，也不会绕过已有决策点。你仍然可以随时显式输入 `/comet`；这是最直接、最确定的恢复方式。
+这段说明只约束 Comet 的恢复探测，并会保留文件中已有的用户规则。探针先解析配置，再只检查一套工作流；配置损坏时不会回退。`.comet/config.yaml` 中的 `ambient_resume: false` 可以关闭普通请求触发的探针。它不会影响显式 `/comet`，也不会绕过已有决策点。
 
 详见[恢复探测命令](/zh/cli/resume-probe)。
 
@@ -73,7 +73,7 @@ Native 的所有阶段都从永久入口 `/comet-native` 恢复。入口先运�
 
 ## 换设备/换平台也能恢复
 
-状态完全保存在仓库文件里：Native 使用 `comet.config.yaml` 与 `<artifact-root>/comet/`，Classic 使用 `.comet.yaml`、OpenSpec 和 `docs/superpowers/`。所以在另一台设备或另一个 Agent 平台打开同一个仓库，`/comet` 能从对应文件恢复。
+状态完全保存在仓库文件里：两边共享 `.comet/config.yaml`；Native change 使用 `<artifact-root>/comet/` 与 `comet-state.yaml`，Classic change 使用 `.comet.yaml`、OpenSpec 和 `docs/superpowers/`。所以在另一台设备或另一个 Agent 平台打开同一个仓库，`/comet` 能从对应文件恢复。
 
 <Note>
   唯一的注意点：未提交的工作区改动不会跟着 <code>git push</code> 走。跨设备前先把改动 commit
@@ -88,11 +88,11 @@ Native 的所有阶段都从永久入口 `/comet-native` 恢复。入口先运�
 
 ## 上下文压缩后怎么办
 
-如果 Classic change 所在的 Agent 平台自动压缩了上下文（之前的对话被摘要了），输入 `/comet-classic`。Agent 内部会按上下文压缩恢复协议重载状态——必要时它会读 `brainstorm-summary.md`、handoff 交接包、`.comet/subagent-progress.md` 等检查点文件继续。你不需要手动操作这些文件。
+如果 Classic change 所在的 Agent 平台自动压缩了上下文，重新输入 `/comet`。项目配置会再次进入 Classic，内部 `/comet-classic` 按恢复协议重载状态；必要时读取 `brainstorm-summary.md`、handoff 交接包和 `.comet/subagent-progress.md`。你不需要手动操作这些文件。
 
 ## 从任意阶段入口恢复
 
-Classic 正常恢复可用 `/comet-classic`；也可以直接从任意阶段或预设入口恢复——`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。Native 始终使用 `/comet-native`。
+Classic 正常恢复使用 `/comet`。阶段和预设入口只用于手动控制或调试：`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
 
 这是 0.4.0-beta.1 渐进式加载带来的确定性保证：每个子 Skill 进入时都会先通过 `comet/reference/scripts.md` 定位脚本，然后跑自己那个阶段的**入口检查或恢复检查**，而不是从对话历史推断阶段。
 
@@ -114,7 +114,7 @@ flowchart TD
 ```
 
 <Tip>
-  这条规则让你在 <strong>已知自己在哪个阶段</strong> 时跳过 <code>/comet-classic</code>{' '}
+  这条规则让你在 <strong>已知自己在哪个阶段</strong> 时跳过统一入口和 Classic 内部路由，
   的路由开销直接干活，同时保证即使记错了阶段也不会把状态写坏——入口检查会拦住不匹配的进入。
 </Tip>
 

@@ -1,19 +1,25 @@
 ---
 title: '工作流概念'
-description: '理解 /comet-classic 为什么把 OpenSpec 的 Spec 管理能力和 Superpowers 的执行能力串成五阶段。'
+description: '理解 /comet 如何按项目配置进入经典 Spec 模式，以及 Classic 如何把 OpenSpec 和 Superpowers 串成五阶段。'
 ---
 
-`/comet-classic` 是 Comet 的经典 Spec 模式永久入口。它把一次变更拆成五个阶段：open、design、build、verify、archive，把 OpenSpec 和 Superpowers 连成一条可恢复的工作流。项目配置为 Classic 时，统一别名 `/comet` 会确定性转发到这里；它不会与 Native change 混用。组合 OpenSpec + Superpowers 不是 Comet 的最终目的，我们希望持续追踪这类长程任务 Skill，找到能让长链路 Skill 稳定执行的 Harness 能力；如果你也感兴趣，欢迎参与项目贡献，或通过源码进行学习。
+用户正常只需要调用 `/comet`。它读取 `.comet/config.yaml`，按项目配置确定性地进入 Native 或 Classic；配置选择 Classic 时，内部转发到永久入口 `/comet-classic`，再由 Classic 把一次变更拆成 open、design、build、verify、archive 五个阶段。两套工作流的 change、状态和产物彼此独立。
+
+Classic 把 OpenSpec 和 Superpowers 连成一条可恢复的工作流。`/comet-classic` 自带意图识别，会读取活跃 change、`.comet.yaml` 和实际文件状态，判断应该新建、恢复、进入轻量预设，还是调用当前阶段 Skill。用户无需先判断自己是否处于 open、design、build、verify 或 archive。
+
+**Classic 主要适配 Fable 5、GPT-5.6 以下的模型能力档。对这类模型，明确的 Spec、设计、计划、TDD、调试和审查阶段能够减少遗漏与流程漂移**；Comet 的现有真实基线评估已验证，这种约束在较低能力档模型上能保持良好的任务覆盖和完成效果。Fable 5、GPT-5.6 及同档强模型通常更适合使用执行方法更轻的 [Native 工作流](/zh/concepts/native-workflow)。模型名称用于帮助选择能力档，Comet 不会自动检测模型并切换模式。
 
 ## 哪些值得注意
 
-| 什么是需要关心的 | 结论                                                                  |
-| ---------------- | --------------------------------------------------------------------- |
-| 入口             | 直接使用 `/comet-classic`；项目默认配置为 Classic 时也可输入 `/comet` |
-| 流程             | `open` → `design` → `build` → `verify` → `archive`                    |
-| 你什么时候参与   | 需求、设计、执行模式、验证失败、归档前确认                            |
-| 恢复靠什么       | OpenSpec 产物、`.comet.yaml` 和运行证据                               |
-| 哪些是高级细节   | handoff hash、归档目录、路由判断，排障时再读                          |
+| 什么是需要关心的 | 结论                                                   |
+| ---------------- | ------------------------------------------------------ |
+| 用户入口         | 使用 `/comet`；项目配置决定进入 Classic 还是 Native    |
+| Classic 内部入口 | `/comet-classic`，负责意图识别、文件状态读取和阶段路由 |
+| 适用模型         | Fable 5、GPT-5.6 以下、需要更细步骤与过程约束的模型    |
+| 流程             | `open` → `design` → `build` → `verify` → `archive`     |
+| 你什么时候参与   | 需求、设计、执行模式、验证失败、归档前确认             |
+| 恢复靠什么       | OpenSpec 产物、`.comet.yaml` 和运行证据                |
+| 哪些是高级细节   | handoff hash、归档目录、路由判断，排障时再读           |
 
 ## 为什么把 OpenSpec 和 Superpowers 连接起来
 
@@ -282,9 +288,9 @@ openspec/changes/archive/YYYY-MM-DD-<change-name>/
 
 `comet-archive.mjs ... --dry-run` 可以预览归档流程而不真正执行 OpenSpec，用 `[DRY-RUN]` 标记标注，报告多少步会成功。
 
-## `/comet-classic` 如何判断入口
+## Classic 如何判断当前入口
 
-每次调用 `/comet-classic`，Comet 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。入口判断不再只靠提示词里的经验规则；Comet 会把用户原话、active change 列表和风险信号整理成结构化路由上下文（实现类型名为 `CometIntentFrame`），再交给运行时评分得到最终 route。
+每次用户调用 `/comet` 并由项目配置进入 Classic 后，`/comet-classic` 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。入口判断不再只靠提示词里的经验规则；Comet 会把用户原话、active change 列表和风险信号整理成结构化路由上下文（实现类型名为 `CometIntentFrame`），再交给运行时评分得到最终 route。
 
 从用户视角，你只需要知道这些结果：
 
@@ -299,15 +305,16 @@ openspec/changes/archive/YYYY-MM-DD-<change-name>/
 
 ```mermaid
 flowchart TD
-  A["调用 /comet-classic"] --> B["openspec list --json"]
-  B --> C["整理路由上下文"]
-  C --> D["运行时评分 route"]
-  D --> E{"route?"}
-  E -->|full| F["/comet-open"]
-  E -->|hotfix| G["/comet-hotfix"]
-  E -->|tweak| H["/comet-tweak"]
-  E -->|resume| I["读取 .comet.yaml 并恢复"]
-  E -->|ask_user| J["停顿点：让用户选择"]
+  A["用户调用 /comet"] --> B["配置路由到 /comet-classic"]
+  B --> C["openspec list --json"]
+  C --> D["整理路由上下文"]
+  D --> E["运行时评分 route"]
+  E --> F{"route?"}
+  F -->|full| G["/comet-open"]
+  F -->|hotfix| H["/comet-hotfix"]
+  F -->|tweak| I["/comet-tweak"]
+  F -->|resume| J["读取 .comet.yaml 并恢复"]
+  F -->|ask_user| K["停顿点：让用户选择"]
 ```
 
 路由上下文让路由可解释：如果 Comet 没有足够证据证明某条路径安全，它会问你，而不是把 `hotfix`、`tweak` 或 `full` 猜到底。

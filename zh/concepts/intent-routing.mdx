@@ -1,33 +1,40 @@
 ---
-title: "意图识别与路由"
-description: "意图识别和槽位提取是 /comet-classic 路由的核心：了解 Comet 如何识别你的意图、提取路由槽位，再用固定优先级的评分顺序得出可解释的路由结果。"
+title: '意图识别与路由'
+description: '用户调用 /comet 并进入 Classic 后，内部路由如何识别意图、读取状态并选择 full、hotfix、tweak 或恢复路径。'
 ---
 
-每次你输入 `/comet-classic` 加一句话，Comet 都要做一个关键判断：这次到底该走哪条 Classic profile？这个判断由两件事驱动——**意图识别**和**槽位提取**。
+用户只需要输入 `/comet` 加一句话。项目配置选择 Classic 后，内部 `/comet-classic` 要判断这次该走哪条 Classic profile；这个判断由**意图识别**、**槽位提取**和实际文件状态共同驱动。
 
 **意图识别**回答"你想干什么"：启动新变更、修已有 bug、做轻量调整、恢复进行中的变更，还是只是在提问？**槽位提取**把你的原话和仓库状态拆解成结构化的路由信号——动作、候选流程、风险标记——每条信号都带来源标注，供运行时按固定优先级评分。
 
 0.4.0 起，这套机制（实现为 `CometIntentFrame`）取代了 Skill 正文里的自然语言经验规则，让路由结果变得**可解释、可复核、可恢复**，在我们的基准测试上这使得Comet的可恢复能力大幅提高。
 
 <p align="center">
-  <img src="/assets/intent-routing-illustrations/01-routing-context-triage.png" alt="小鱼在路由上下文分诊台核对用户原话、仓库状态和风险信号，再把请求拨到最终 route" width="800" />
+  <img
+    src="/assets/intent-routing-illustrations/01-routing-context-triage.png"
+    alt="小鱼在路由上下文分诊台核对用户原话、仓库状态和风险信号，再把请求拨到最终 route"
+    width="800"
+  />
 </p>
 
-<p align="center">路由上下文把原话、仓库状态和风险信号整理成可复核证据，再交给运行时决定最终 route</p>
+<p align="center">
+  路由上下文把原话、仓库状态和风险信号整理成可复核证据，再交给运行时决定最终 route
+</p>
 
 ## 为什么需要路由上下文
 
 <Note>
-  一句话概括：路由上下文让 <code>/comet-classic</code> 的路由<strong>可解释、可复核、可恢复</strong>，而不是一个黑盒猜测。
+  一句话概括：路由上下文让 <code>/comet-classic</code> 的路由<strong>可解释、可复核、可恢复</strong>
+  ，而不是一个黑盒猜测。
 </Note>
 
 在路由上下文之前，`/comet-classic` 入口靠的是 Skill 正文里的一段自然语言规则——"如果是 bug 就走 hotfix，如果是文案改动就走 tweak……"。这种做法有三个问题：
 
-| 问题 | 表现 |
-| --- | --- |
-| **不可解释** | 路由结果是怎么得出来的？用户和 Agent 都说不清，只能信任提示词 |
+| 问题         | 表现                                                           |
+| ------------ | -------------------------------------------------------------- |
+| **不可解释** | 路由结果是怎么得出来的？用户和 Agent 都说不清，只能信任提示词  |
 | **不可复核** | 没有结构化的判断依据，无法在路由错的时候定位是哪个信号出了问题 |
-| **不可恢复** | 中断后重新进来，Agent 只能重新读一遍提示词，重新"猜"一次 |
+| **不可恢复** | 中断后重新进来，Agent 只能重新读一遍提示词，重新"猜"一次       |
 
 路由上下文把"用户想干什么"变成一份**有字段、有证据、有置信度**的结构化数据。运行时不再信任 Agent 自己提的路由建议，而是**重新评分**后给出最终路由，并把分歧写进诊断日志。
 
@@ -35,14 +42,14 @@ description: "意图识别和槽位提取是 /comet-classic 路由的核心：�
 
 运行时评分后，会把你的请求路由到下面六种结果之一：
 
-| 路由（route） | 含义 | 下一步 Skill | 需要确认 |
-| --- | --- | --- | --- |
-| `full` | 走完整五阶段（open→design→build→verify→archive） | `comet-open` | 否 |
-| `hotfix` | 快速修复已有行为，跳过头脑风暴 | `comet-hotfix` | 否 |
-| `tweak` | OpenSpec 链路的中等改动，delta spec 是一等公民 | `comet-tweak` | 否 |
-| `resume` | 恢复一个进行中的变更 | 由该变更的当前阶段决定 | 否 |
-| `ask_user` | 证据不足或有冲突，停下来问你 | 无 | **是** |
-| `out_of_scope` | 你只是在提问，没要求执行工作流 | 无 | **是** |
+| 路由（route）  | 含义                                             | 下一步 Skill           | 需要确认 |
+| -------------- | ------------------------------------------------ | ---------------------- | -------- |
+| `full`         | 走完整五阶段（open→design→build→verify→archive） | `comet-open`           | 否       |
+| `hotfix`       | 快速修复已有行为，跳过头脑风暴                   | `comet-hotfix`         | 否       |
+| `tweak`        | OpenSpec 链路的中等改动，delta spec 是一等公民   | `comet-tweak`          | 否       |
+| `resume`       | 恢复一个进行中的变更                             | 由该变更的当前阶段决定 | 否       |
+| `ask_user`     | 证据不足或有冲突，停下来问你                     | 无                     | **是**   |
+| `out_of_scope` | 你只是在提问，没要求执行工作流                   | 无                     | **是**   |
 
 注意两点：
 
@@ -69,14 +76,14 @@ flowchart LR
     RT --> O["最终 route<br/>full/hotfix/tweak/resume/ask_user/out_of_scope"]
 ```
 
-| 部分 | 作用 |
-| --- | --- |
-| `utterance` | 触发 `/comet-classic` 的用户原话，便于事后追溯 |
-| `intent` | 高层意图（启动/恢复/修 bug/小改/提问/未知）+ 置信度 |
-| `slots` | 从原话归一化出来的路由槽位：动作、候选流程、风险信号等 |
-| `context` | 从**仓库状态**读取的上下文，不是从你的话里抽的 |
-| `evidence` | 支撑关键判断的证据片段，每条标注来源（`user`/`repo`/`state`） |
-| `proposed_route` | Agent 提交的候选路由——**只是建议，运行时会复核** |
+| 部分             | 作用                                                          |
+| ---------------- | ------------------------------------------------------------- |
+| `utterance`      | 触发 `/comet-classic` 的用户原话，便于事后追溯                |
+| `intent`         | 高层意图（启动/恢复/修 bug/小改/提问/未知）+ 置信度           |
+| `slots`          | 从原话归一化出来的路由槽位：动作、候选流程、风险信号等        |
+| `context`        | 从**仓库状态**读取的上下文，不是从你的话里抽的                |
+| `evidence`       | 支撑关键判断的证据片段，每条标注来源（`user`/`repo`/`state`） |
+| `proposed_route` | Agent 提交的候选路由——**只是建议，运行时会复核**              |
 
 ### 意图识别（`intent`）
 
@@ -89,18 +96,20 @@ flowchart LR
 
 槽位里最影响路由的是几个**风险信号**布尔值。它们决定了"这事是不是该走完整流程"：
 
-| 槽位 | 命中时倾向 |
-| --- | --- |
-| `existing_behavior: true` | 修复已有行为 → 倾向 `hotfix` |
-| `new_capability: true` | 新增能力 → 倾向 `full` |
-| `public_api_change: true` | 改了对外接口/契约 → 倾向 `full` |
-| `schema_change: true` | 改了结构化数据格式（如 `.comet.yaml`） → 倾向 `full` |
-| `cross_module_change: true` | 跨模块/跨工作流边界 → 倾向 `full` |
+| 槽位                        | 命中时倾向                                           |
+| --------------------------- | ---------------------------------------------------- |
+| `existing_behavior: true`   | 修复已有行为 → 倾向 `hotfix`                         |
+| `new_capability: true`      | 新增能力 → 倾向 `full`                               |
+| `public_api_change: true`   | 改了对外接口/契约 → 倾向 `full`                      |
+| `schema_change: true`       | 改了结构化数据格式（如 `.comet.yaml`） → 倾向 `full` |
+| `cross_module_change: true` | 跨模块/跨工作流边界 → 倾向 `full`                    |
 
 只要命中**任何一个**风险信号（`new_capability`/`public_api_change`/`schema_change`/`cross_module_change`），运行时就倾向于走 `full`，哪怕用户说的是"小改一下"。
 
 <Warning>
-  这是 Comet 的安全设计：<strong>风险信号优先于口头说的流程</strong>。如果你明确要求走 <code>hotfix</code> 但同时命中了风险信号，运行时会停下来问你（<code>ask_user</code>），而不是默默放行一个高风险的轻量流程。
+  这是 Comet 的安全设计：<strong>风险信号优先于口头说的流程</strong>。如果你明确要求走{' '}
+  <code>hotfix</code> 但同时命中了风险信号，运行时会停下来问你（<code>ask_user</code>
+  ），而不是默默放行一个高风险的轻量流程。
 </Warning>
 
 ## 运行时怎么评分
@@ -108,7 +117,8 @@ flowchart LR
 Agent 整理好路由上下文后，运行时（`comet-intent.mjs`）会按一套**固定优先级**重新评分，给出最终 `route`。
 
 <Note>
-  **这套固定优先级顺序，就是可解释路由的核心。** 每一步都有明确的判断条件，分歧写入诊断日志，方便事后追溯。
+  **这套固定优先级顺序，就是可解释路由的核心。**
+  每一步都有明确的判断条件，分歧写入诊断日志，方便事后追溯。
 </Note>
 
 ```mermaid
@@ -137,7 +147,9 @@ flowchart TD
 5. **证据不足 → `ask_user`。** 比起猜一条路，Comet 宁可问你。
 
 <Info>
-  运行时评分和 Agent 的 <code>proposed_route</code> 可能不一致。这种时候运行时输出最终 <code>route</code>，并把分歧写进 <code>diagnostics</code>（例如"agent proposed_route 'hotfix' normalized to 'full'"）。这让路由<strong>可复核</strong>：出问题时你能看到是哪一步改写了建议。
+  运行时评分和 Agent 的 <code>proposed_route</code> 可能不一致。这种时候运行时输出最终{' '}
+  <code>route</code>，并把分歧写进 <code>diagnostics</code>（例如"agent proposed_route 'hotfix'
+  normalized to 'full'"）。这让路由<strong>可复核</strong>：出问题时你能看到是哪一步改写了建议。
 </Info>
 
 ## 几个典型场景
@@ -147,7 +159,7 @@ flowchart TD
 ### 场景一：修一个已知 bug
 
 ```text
-/comet-classic 登录接口偶发 500，帮我看一下
+/comet 登录接口偶发 500，帮我看一下
 ```
 
 - `intent.name`: `fix_bug`，置信度高
@@ -160,7 +172,7 @@ flowchart TD
 ### 场景二：嘴上说小改，实则动了对外接口
 
 ```text
-/comet-classic 小改一下，把 CLI 的 --force 参数去掉
+/comet 小改一下，把 CLI 的 --force 参数去掉
 ```
 
 - `intent.name`: `make_tweak`
@@ -172,7 +184,7 @@ flowchart TD
 ### 场景三：恢复一个进行中的变更
 
 ```text
-/comet-classic 继续上次的 note-board
+/comet 继续上次的 note-board
 ```
 
 - `requested_action: continue`
@@ -183,7 +195,7 @@ flowchart TD
 ### 场景四：只是问个问题
 
 ```text
-/comet-classic Comet 的 verify 阶段大概做什么？
+/comet Comet 的 verify 阶段大概做什么？
 ```
 
 - `intent.name: ask_question`
@@ -193,7 +205,7 @@ flowchart TD
 
 ## 这套机制对用户意味着什么
 
-对普通用户，你**不需要手写路由上下文**——上下文整理和评分都是 `/comet-classic` 内部自动完成的。你只需要知道：
+对普通用户，你**不需要手写路由上下文**。调用 `/comet` 后，配置选择 Classic，再由 `/comet-classic` 在内部自动完成上下文整理和评分。你只需要知道：
 
 1. **说清楚你要干什么。** 越具体，路由越准。"修这个 bug"比"帮我看看"更容易命中 `hotfix`。
 2. **Comet 会问，而不是猜。** 如果证据不足或冲突，它会停下来确认，而不是把一条不确定的路走到底。
@@ -216,7 +228,8 @@ node "$COMET_INTENT" route --stdin < frame.json
 
 有用，但定位不同：
 
-- **`/comet-classic`**：Classic 永久入口，由路由上下文决定走 `full`/`hotfix`/`tweak`/`resume`。适合已经选择 Classic、但不确定走哪条 profile 时。
+- **`/comet`**：正常用户入口，按项目配置选择 Native 或 Classic。
+- **`/comet-classic`**：Classic 内部永久入口，由路由上下文决定走 `full`/`hotfix`/`tweak`/`resume`；通常由 `/comet` 转发进入。
 - **`/comet-tweak`**：**tweak 专用**的 OpenSpec action 路径。你已经明确知道要做一次 OpenSpec 链路的中等改动，直接走它更快。
 
 换句话说，`/comet-classic` 是"在 Classic 内帮我判断该走哪条"，`/comet-tweak` 是"我已经知道要走 tweak"。完整的五阶段 `full` 仍然走 Superpowers 的 design/plan/build 路径。

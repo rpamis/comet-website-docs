@@ -1,25 +1,61 @@
 ---
 title: 'Resume probe (comet resume-probe)'
-description: 'Use project configuration to decide read-only whether the current request should resume Native or Classic, pausing on ambiguity or damage.'
+description: 'During long-running, cross-session, or cross-device work, decide read-only whether a natural-language request belongs to an existing Comet change and help the agent re-enter the correct workflow.'
 ---
 
-The resume probe is a read-only step exposed as `comet resume-probe`. It first reads the project-root `comet.config.yaml` to select Native or Classic, then reads only that workflow's active changes, current phase, and the user request. Legacy projects without root configuration retain the Classic fallback. If configuration is malformed, the probe stops and requests repair instead of scanning the other workflow's directories.
+`comet resume-probe` primarily addresses lost workflow context during long-running work. The user still intends to continue a Comet change, but an agent in a new context window, session, or device no longer knows that the request belongs to Comet, and the user has not invoked `/comet` again. The probe compares the request with active changes read-only and decides whether the agent should re-enter the corresponding Native or Classic workflow instead of treating “continue the login refactor” as an unrelated new task.
 
-It does not modify a change, advance a phase, choose between multiple changes, or execute the returned next command.
+It first reads the project's `.comet/config.yaml` to select Native or Classic, then reads only that workflow's active changes, current phase, and the user request. Legacy Classic projects without valid workflow configuration retain the fallback. If configuration is malformed, the probe stops and requests repair instead of scanning the other workflow's directories.
 
-## Basic usage
+The probe only identifies and routes. It does not modify a change, advance a phase, choose between multiple changes, or execute the returned next command. Actual recovery happens when the agent follows `nextCommand` into `/comet-native` or `/comet-classic`.
+
+## Why the resume probe exists
+
+Long-running work does not always remain in one complete context. An agent may lose the original Comet association when:
+
+- the conversation is compacted, moved to another window, or continued in a new session;
+- the user continues the same repository and change from another device;
+- a new agent sees only disk state and a request such as “continue the previous work”;
+- the user naturally asks to continue without invoking `/comet` again.
+
+Recovery instructions installed in the project can ask the agent to run the probe before handling such a request. The probe uses configuration, active changes, phase, selection, and request text to return an explainable result: a unique target receives the permanent Skill entry, ambiguity produces one question, and unrelated work remains outside Comet.
+
+<Note>
+  The resume probe is not another command users must remember. It is primarily called by agents and project recovery instructions to bridge natural-language continuation with the explicit <code>/comet</code> entry point.
+</Note>
+
+## How automatic probing works
+
+Users do not need to run `comet resume-probe`. Normal interaction remains a direct request to the agent:
+
+> Continue the login refactor.
+
+`comet init` and `comet update` install recovery instructions in the project's agent instruction files. With `ambient_resume` enabled, the agent automatically runs the read-only probe before handling a natural-language request that may belong to long-running work:
+
+1. read project configuration to choose Native or Classic;
+2. compare the request with active changes, phase, and selection;
+3. when one target matches, follow `nextCommand` into `/comet-native` or `/comet-classic`;
+4. ask one question on ambiguity, or handle unrelated work normally outside Comet.
+
+An explicit `/comet` invocation enters the configured workflow directly and does not depend on ambient probing. Setting `ambient_resume: false` disables probing for ordinary natural-language requests while leaving `/comet` available.
+
+<Note>
+  For users, recovery probing is automatic. The CLI options below are integration details for agents, hooks, project instructions, and automation—not a manual prerequisite for resuming work.
+</Note>
+
+## Agent and automation integration reference
+
+An agent or integration can pass the request directly:
 
 ```bash
-comet resume-probe . --utterance "continue the login refactor"
+comet resume-probe . --utterance "continue the login refactor" --json
 ```
 
-Read the request from standard input:
+Or read it from standard input:
 
 ```bash
 echo "continue the login refactor" | comet resume-probe . --stdin --json
 ```
-
-Common options:
 
 | Option                    | Purpose                                                                                 |
 | ------------------------- | --------------------------------------------------------------------------------------- |

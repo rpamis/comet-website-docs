@@ -19,7 +19,7 @@ Common options:
 | `--yes`             | Run non-interactively, installing missing components and skipping existing ones |
 | `--scope <scope>`   | Installation scope: `project` or `global`                                       |
 | `--language <lang>` | Skill language: `en` or `zh`                                                    |
-| `--workflow <mode>` | Project default workflow: `native` or `classic`                                 |
+| `--workflow <mode>` | Enable `native`, `classic`, or `both`                                           |
 | `--root <path>`     | Native artifact root, such as `docs`                                            |
 | `--skip-existing`   | Skip existing components                                                        |
 | `--overwrite`       | Overwrite manifest-managed files                                                |
@@ -27,27 +27,28 @@ Common options:
 
 ## Native and Classic initialization
 
-Project-scope initialization selects the workflow using these rules:
+Interactive project initialization explains and offers Native, Classic, or both. Non-interactive initialization selects the default using these rules:
 
-1. A valid project-root `comet.config.yaml` is the source of truth.
-2. `--workflow native|classic` is an explicit choice. It changes only the default entry point and does not migrate changes.
-3. Without root configuration, the project remains Classic if it has `.comet/config.yaml`, any Classic `.comet.yaml`, or an existing Ambient Resume managed block.
+1. A valid `.comet/config.yaml` is the source of truth.
+2. `--workflow native|classic|both` is an explicit choice and does not migrate existing changes. `both` keeps `/comet` on Native by default.
+3. Without valid workflow configuration, Classic `.comet.yaml` state or legacy Ambient Resume evidence preserves Classic.
 4. Every other project defaults to Native. Existing code, an ordinary `openspec/` directory, or `docs/superpowers/` does not change that default.
 
-Native initialization installs only Comet-owned Skills and runtime, and creates:
+Native initialization installs Comet-owned Skills and runtime, one shared workflow Rule, and one Hook Router where the platform supports Hooks. It creates:
 
 ```text
-comet.config.yaml
+.comet/config.yaml
 <artifact-root>/comet/
 ```
 
-It does not install OpenSpec, Superpowers, or CodeGraph, and does not write Classic rules, hooks, `.comet/config.yaml`, or `docs/superpowers/`. Classic initialization preserves the original complete dependency set and phase governance.
+It does not install OpenSpec, Superpowers, or CodeGraph and does not create Classic/OpenSpec changes or `docs/superpowers/`. The shared Rule and Router use `.comet/current-change.json` to send each write to one workflow Guard, never both Native and Classic. Classic initialization preserves its complete dependency set and phase governance.
 
-Native writes and activates `comet.config.yaml` only after Comet assets succeed on **every selected platform** and any existing `/comet` entry is compatible with the bundled routing contract. If an incompatible custom `/comet` entry exists, initialization preserves it and does not activate Native. Re-run `comet init --workflow native --overwrite` only when you intend to replace that custom entry.
+Comet writes and activates `.comet/config.yaml` only after required assets succeed on **every selected platform** and any existing `/comet` entry is compatible with the bundled routing contract. If an incompatible custom `/comet` entry exists, initialization preserves it and reports the run as incomplete. Re-run `comet init --workflow native --overwrite` only when you intend to replace that custom entry.
 
 ```bash
 comet init --workflow native --root docs
 comet init --workflow classic
+comet init --workflow both
 ```
 
 `--root` is valid only for project-scope Native initialization. Global initialization installs global capabilities without writing configuration into the target project, so it cannot be combined with `--workflow` or `--root`.
@@ -60,7 +61,7 @@ After registration, interactive `comet update` and `comet uninstall` can offer t
 
 ## Installation mode: copy or symlink
 
-Classic or global initialization asks for an **installation mode** after platform selection. Project-scope Native always uses Copy, avoiding `.comet/skills/` so Native project state remains limited to `comet.config.yaml` and `<artifact-root>/comet/`. Symlink mode was added in 0.4.0-beta.1:
+Classic or global initialization asks for an **installation mode** after platform selection. Project-scope Native always uses Copy and avoids `.comet/skills/`. Native change state stays under `<artifact-root>/comet/`, while shared project configuration and selection live under `.comet/`. Symlink mode was added in 0.4.0-beta.1:
 
 - **Copy**: copy an independent set of Skill files to each platform.
 - **Symlink**: create links in each platform directory that point to the shared `.comet/skills/` store, saving space and making one update apply everywhere.
@@ -69,15 +70,16 @@ If a platform already has its own `skills/` directory, Comet preserves it and ad
 
 See [Supported platforms · Copy or symlink](/en/platforms#copy-or-symlink) for details and guidance.
 
-## Classic project configuration merge
+## Shared project configuration merge
 
-Classic initialization writes its project configuration to `.comet/config.yaml`. Starting in 0.4.0-beta.1, an existing file is no longer skipped; Comet performs a **field-level merge**:
+Native and Classic now share `.comet/config.yaml`. Initialization merges managed fields for the enabled workflows:
 
 - preserves existing values such as `review_mode` and `tdd_mode`;
 - adds defaults for missing managed fields;
 - refreshes comments to match the current version;
 - preserves extra custom fields;
-- falls back gracefully to all defaults when the YAML is malformed instead of failing.
+- keeps Native's `default_workflow`, `workflows`, `ambient_resume`, and `native.*` semantics separate from Classic settings;
+- fails closed when workflow configuration cannot be parsed safely instead of guessing defaults and overwriting it.
 
 The terminal reports `Project config merged (.comet/config.yaml)`.
 

@@ -1,31 +1,67 @@
 ---
-title: '恢复探测（comet resume-probe）'
-description: '按项目配置只读判断当前请求是否应恢复 Native 或 Classic，并在歧义或损坏时暂停确认。'
+title: 'comet resume-probe（恢复探测）'
+description: '在长程任务、跨会话或跨设备恢复时，只读判断当前自然语言请求是否对应现有 Comet change，并帮助 Agent 重新进入正确工作流。'
 ---
 
-恢复探测是一个只读步骤，对应的 CLI 命令是 `comet resume-probe`。它先读取项目根 `comet.config.yaml` 确定 Native 或 Classic，再只读取该工作流的 active changes、当前阶段和用户请求。没有根配置的旧项目保持 Classic legacy fallback；配置损坏时停止并要求修复，不扫描另一套目录。
+`comet resume-probe` 主要解决长程任务中的工作流上下文丢失：用户仍想继续某个 Comet change，但 Agent 在新的上下文窗口、会话或设备上已经不知道当前请求属于 Comet，用户也没有再次显式调用 `/comet`。恢复探测会只读比较用户请求与现有 active changes，判断是否应重新进入对应的 Native 或 Classic 工作流，避免 Agent 脱离 Comet 后把“继续刚才的登录重构”当成一项普通的新任务。
 
-它不会修改 change、推进阶段、替你选择多个 change，也不会自动执行返回的下一条命令。
+它先读取项目的 `.comet/config.yaml` 确定 Native 或 Classic，再只读取该工作流的 active changes、当前阶段和用户请求。没有有效 workflow 配置的旧 Classic 项目保持 legacy fallback；配置损坏时停止并要求修复，不扫描另一套目录。
 
-## 基本用法
+恢复探测只负责识别和路由。它不会修改 change、推进阶段、替用户选择多个 change，也不会自动执行返回的下一条命令；真正的恢复仍由 Agent 按 `nextCommand` 调用 `/comet-native` 或 `/comet-classic` 完成。
+
+## 为什么需要恢复探测
+
+长程任务不一定始终处于同一个完整上下文中。以下情况都可能让 Agent 忘记当前工作原本由 Comet 管理：
+
+- 对话经过上下文压缩、切换窗口或开启新会话；
+- 用户换设备继续同一个仓库和 change；
+- 新 Agent 只能看到磁盘状态和一句“继续之前的工作”；
+- 用户自然地要求继续任务，但没有再次输入 `/comet`。
+
+项目初始化写入的 Comet 恢复说明可以让 Agent 在处理这类请求前调用恢复探测。探针根据配置、active change、阶段、selection 和请求文本返回可解释结果：目标唯一时给出正确的永久 Skill 入口，目标不明确时只询问一次，确实无关时保持在普通对话中。
+
+<Note>
+  恢复探测不是要求用户记住一个额外命令。它主要供 Agent 和项目恢复说明调用，用来弥补自然语言续接与显式 <code>/comet</code> 入口之间的断层。
+</Note>
+
+## 自动探测如何发生
+
+用户不需要输入 `comet resume-probe`。正常交互仍然是直接告诉 Agent：
+
+> 继续刚才的登录重构。
+
+`comet init` 和 `comet update` 会把恢复说明写入项目的 Agent 指令文件。当 `ambient_resume` 开启时，Agent 在处理可能属于长程任务的自然语言请求前，会自动运行只读恢复探测：
+
+1. 读取项目配置，确定应检查 Native 还是 Classic；
+2. 比较用户请求、active changes、当前阶段和 selection；
+3. 目标唯一时按 `nextCommand` 重新进入对应的 `/comet-native` 或 `/comet-classic`；
+4. 目标有歧义时只问用户一个问题；请求无关时正常处理，不进入 Comet。
+
+显式调用 `/comet` 时会直接按项目配置进入工作流，不依赖自动探测。项目若设置 `ambient_resume: false`，普通自然语言请求不会触发环境感知探测，但 `/comet` 仍然可用。
+
+<Note>
+  对用户而言，恢复探测是自动的。下面的 CLI 参数用于 Agent、Hook、项目指令和自动化集成，不是恢复任务前必须手工执行的步骤。
+</Note>
+
+## Agent 与自动化集成参考
+
+Agent 或集成可以直接传入请求：
 
 ```bash
-comet resume-probe . --utterance "继续刚才的登录重构"
+comet resume-probe . --utterance "继续刚才的登录重构" --json
 ```
 
-如果请求来自标准输入：
+也可以从标准输入读取：
 
 ```bash
 echo "继续刚才的登录重构" | comet resume-probe . --stdin --json
 ```
 
-常用选项：
-
 | 选项                      | 作用                                                       |
 | ------------------------- | ---------------------------------------------------------- |
 | `--utterance <text>`      | 直接传入需要分类的用户请求                                 |
 | `--stdin`                 | 从标准输入读取用户请求                                     |
-| `--json`                  | 输出稳定的结构化结果，适合 Agent、hooks 和自动化           |
+| `--json`                  | 输出稳定的结构化结果，适合 Agent、Hook 和自动化            |
 | `--no-workflow-work`      | 把当前请求标记为信息查询，而不是需要推进 workflow 的工作   |
 | `--already-in-comet-flow` | 当前已经在 Comet 流程内时返回 `out_of_scope`，避免重复路由 |
 

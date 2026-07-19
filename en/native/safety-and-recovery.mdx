@@ -1,0 +1,91 @@
+---
+title: 'Native safety and recovery'
+description: 'Understand shared Guard routing, stale evidence, concurrent conflicts, transaction recovery, repair stops, and Ambient Resume.'
+---
+
+Native uses two complementary safety layers. The Skill guides the model through requirement and phase protocols; the Runtime enforces deterministic state, evidence, and transaction invariants. A prose Rule alone is not an unbypassable state machine.
+
+## One write belongs to one change
+
+Project initialization installs one Comet workflow Rule per platform and only one `comet-hook-router.mjs` on platforms with Hook support. The Router reads `.comet/config.yaml` and `.comet/current-change.json`, then sends one atomic multi-file write to at most one workflow Guard.
+
+Native and Classic Guards remain independent:
+
+- Native checks only Shape, Build, Verify, Archive, and Native paths;
+- Classic checks its five phases and OpenSpec/Superpowers paths;
+- invalid, stale, or ambiguous selection causes potential writes to fail closed;
+- explicitly recognized read-only tools do not trigger a write Guard.
+
+This boundary reduces accidental writes and double blocking. For shell commands, external processes, or writes a platform does not expose to Hooks, the Native Runtime's state and evidence checks remain the final authority.
+
+## Why verification evidence becomes stale
+
+The Runtime binds verification conclusions to:
+
+- the brief and complete target specifications;
+- project artifacts in the implementation scope;
+- Acceptance IDs and an immutable report snapshot;
+- the current change revision; and
+- an optional built-in check receipt.
+
+Changing any input marks old evidence stale and blocks Archive. `comet native check` performs only a built-in, bounded, read-only text-hygiene scan. It invokes no Git, shell, test command, or external Skill and does not replace project tests.
+
+## Autonomous repair does not loop forever
+
+A Verify failure returns to Build. The Runtime builds a failure signature from categories, check IDs, the contract, and implementation scope:
+
+- the third identical signature on the same scope becomes a manual stop;
+- a real implementation-scope change opens a new repair episode;
+- one no-progress override is available and is bound to the current signature;
+- one episode records at most 12 failures.
+
+The stop condition measures evidence of progress rather than simply counting phase transitions.
+
+## Concurrent specification conflicts
+
+Several Native changes may exist in parallel, but safety for the same canonical specification has a precise boundary. Archive compares the `base_hash` frozen by the Runtime in Shape with the current canonical hash. A mismatch stops instead of applying last-write-wins.
+
+Recovery is:
+
+1. read the latest canonical specification;
+2. rewrite the change's complete target specification;
+3. run `comet native spec rebase <change> --summary <text>`;
+4. repeat Build and Verify; and
+5. run the two-step Archive again.
+
+The conflict radar reports capability overlap and scope signals provable inside the current Native root. It does not claim knowledge of arbitrary external branches or untracked parallel work.
+
+## Transaction and lock recovery
+
+Phase transitions, checkpoints, Archive, and root moves have explicit journals or recovery protocols. Ordinary writes never take over a stale lock on their own. Only `doctor --repair` can do so after proving the local owner no longer exists, lock identity is unchanged, and no conflicting transaction exists.
+
+```bash
+comet native doctor [<change-name>]
+comet native doctor [<change-name>] --repair
+comet native doctor [<change-name>] --repair --strategy continue
+comet native doctor [<change-name>] --repair --strategy rollback
+```
+
+- ordinary phase transitions can only continue;
+- Archive and root moves can roll back only while the journal is still reversible;
+- after Archive's final marker, only exactly-once continuation is allowed;
+- Doctor never rewrites a user's brief, specifications, verification report, or project source.
+
+## Ambient Resume
+
+`comet resume-probe` is read-only. It resolves the default workflow from `.comet/config.yaml`, then inspects only that side:
+
+| Result         | Meaning                                                                |
+| -------------- | ---------------------------------------------------------------------- |
+| `auto_resume`  | One target matches a request to continue; resume through `nextCommand` |
+| `ask_user`     | Several candidates or unclear ownership require one short choice       |
+| `out_of_scope` | The request should not enter a resumable workflow                      |
+| `none`         | No change can be resumed                                               |
+
+Damaged configuration or workflow state makes the probe stop with a reason instead of scanning another directory and guessing. `ambient_resume: false` disables automatic probing for ordinary requests; an explicit `/comet` call still works.
+
+## Dashboard responsibility
+
+Dashboard reads the Runtime projection to display phase, evidence freshness, continuation, structured findings, conflict summaries, and archive readiness. It neither re-derives facts nor offers write actions for progression, repair, or Archive. CLI and Runtime remain the only writers.
+
+For individual commands and exit semantics, see [Native CLI](/en/cli/native).
