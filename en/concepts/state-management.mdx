@@ -26,7 +26,7 @@ comet state current
 comet state clear-selection
 ```
 
-A single active change may be attributed automatically. Multiple active changes require explicit selection. Branch/worktree switches, an archived target, or an invalid selection fail closed and require a new `select`. Do not hand-edit the selection file.
+A single active change may be attributed automatically. Multiple active changes require explicit selection. Branch/worktree switches, an archived target, or an invalid selection fail closed. Once `isolation` is `current`, `branch`, or `worktree`, the change is also pinned to the branch recorded in `bound_branch`. On drift, switch back to the original branch; run `comet state rebind <change-name>` only after explicitly confirming that the current branch should take over. Do not hand-edit the selection file.
 
 ## Project defaults: `.comet/config.yaml`
 
@@ -118,6 +118,13 @@ Important user-visible fields include:
 | `language` | `en` \| `zh-CN` | Primary artifact language, snapshotted from `.comet/config.yaml` when the change is created |
 | `phase` | `open` \| `design` \| `build` \| `verify` \| `archive` | Current phase |
 | `auto_transition` | `true` \| `false` | Whether the next Skill is called automatically |
+| `isolation` | `current` \| `branch` \| `worktree` | Workspace isolation. All three modes require an explicit user choice and bind the current Git branch of the directory where the setting command runs |
+| `bound_branch` | Git branch name or `null` (machine-owned) | Branch bound to the workspace mode. Entry checks and the source-write guard block accidental drift; do not modify it with `set` |
+| `tdd_mode` | `tdd` \| `direct` | `tdd` enforces a failing test first per task; `direct` skips Red-Green-Refactor but still requires relevant tests and regression evidence |
+| `verify_mode` | `light` \| `full` | Verification depth |
+| `verify_result` | `pending` \| `pass` \| `fail` | Verification result |
+| `verify_failures` | integer (machine-owned) | Consecutive verification failure count. `verify-fail` increments it; `verify-pass` or `archive-reopen` resets it to `0`. At 3, the next failure requires the retry-limit strategy decision |
+| `branch_status` | `pending` \| `handled` | Stays `pending` through verify and archive; written `handled` only after the archive commit and branch handling complete |
 | `archive_confirmation` | `null` \| `pending` \| `confirmed` | Machine-owned final approval; a mutating archive requires `confirmed` |
 
 <Warning>
@@ -127,6 +134,14 @@ Important user-visible fields include:
 ## State-machine constraints
 
 Comet does not treat phase as a free-form note. Transitions must follow allowed events such as proposal approval, design approval, build completion, verify failure, or archive completion.
+
+Before build can advance, `isolation` must be `current`, `branch`, or `worktree`, and the current Git branch must match `bound_branch`. If an entry check reports drift, prefer switching back. Only after explicitly deciding that the current branch should take over should you run:
+
+```bash
+comet state rebind <change-name>
+```
+
+Rebinding appends an audit event and is rejected before the first binding or on a detached HEAD.
 
 ## Boundary between workflow state and run state
 

@@ -49,7 +49,7 @@ flowchart TD
     Delta -->|no| S2["OpenSpec apply build"]
     D --> S2
     S2 --> Esc{"Upgrade signal?"}
-    Esc -->|yes| Stop["Pause: continue tweak or upgrade full"]
+    Esc -->|yes| Stop["Pause point 10:\ncontinue tweak or upgrade full"]
     Esc -->|no| Guard["Build guard"]
     Stop -->|continue| Guard
     Stop -->|upgrade| Up["preset-escalate -> design"]
@@ -59,13 +59,18 @@ flowchart TD
     HasDelta -->|no| Light["light verify"]
     Full --> Done{"Pass?"}
     Light --> Done
-    Done -->|yes| Archive["Archive after confirmation"]
-    Done -->|no| Fix["Verification failure decision"]
+    Done -->|yes| Archive["Archive after confirmation\n(archive confirmation + branch handling)"]
+    Done -->|no, fixable| Auto["Auto verify-fail back to build\n(first 3, verify_failures counter)"]
+    Done -->|no, needs judgment / 4th| VfStop["Pause point 7:\nverify exception decision"]
+    Auto --> S2
+    VfStop -->|fix / continue| S2
 ```
 
 ## OpenSpec apply build
 
 The apply path belongs to tweak. The agent must read `openspec instructions apply --change <name> --json`, consume listed context files, complete tasks, run relevant tests, and commit focused changes. Full workflow must not reuse this path.
+
+`init <name> tweak` writes the same lightweight execution defaults as hotfix (`build_mode: direct`, `tdd_mode: direct`, `review_mode: off`, `verify_mode: light`) but leaves `isolation` as `null`. At entry, tweak asks you to explicitly keep the current branch, create a branch, or create a worktree. The confirmed `isolation` and `bound_branch` describe the real execution workspace, and later accidental branch switches are blocked. `tdd_mode: direct` skips Red-Green-Refactor but still requires relevant tests and regression evidence.
 
 ## Verification
 
@@ -78,8 +83,20 @@ Tweak pauses for qualitative signals such as cross-module coordination, need to 
 Upgrade through:
 
 ```bash
-node "$COMET_STATE" transition <name> preset-escalate
+comet state transition <name> preset-escalate
 ```
+
+This atomically sets `workflow: full` and clears the preset-only lightweight build settings, then returns to design without discarding existing artifacts. After upgrading to full, the full workflow configuration is re-selected in the joint decision after the Design Doc. `preset-escalate` can only be triggered from hotfix/tweak at `phase: build`.
+
+## Must-stop points
+
+Tweak runs as one continuous execution, but these genuine user decisions always pause:
+
+1. An upgrade-assessment signal is hit (pause point 10)
+2. Verify-phase acceptance of a WARNING/SUGGESTION deviation, spec drift handling, or the strategy after the 4th failure (pause point 7) — the first 3 repairable failures return to build automatically
+3. Final archive confirmation (pause point 8) and branch handling after the archive commit (pause point 9)
+
+With `auto_transition: false`, each phase boundary ends the current invocation and returns control with `HINT` — this is a manual handoff, not a new confirmation point.
 
 ## Recovery
 
