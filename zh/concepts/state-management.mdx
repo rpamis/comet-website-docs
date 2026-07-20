@@ -32,7 +32,8 @@ comet state clear-selection
 
 - 只有一个 active change 时可以自动归属。
 - 多个 active change 时，进入目标 change 后必须显式 `select`。
-- 选择会记录 branch；切换 branch/worktree、目标归档或选择文件损坏后，守卫会失败闭合并要求重新选择。
+- 选择会记录 branch；切换 branch/worktree、目标归档或选择文件损坏后，守卫会失败闭合。
+- `isolation` 已设为 `current`、`branch` 或 `worktree` 时，change 还会通过 `bound_branch` 固定到建立隔离的分支。发生漂移时，切回原分支；只有你明确确认当前分支应接管 change 后，才运行 `comet state rebind <change-name>`。
 - 不要手工编辑 `current-change.json`。
 
 ## 三类状态 + 一层配置
@@ -183,9 +184,10 @@ export COMET_AUTO_TRANSITION=true
 | `build_mode` | `subagent-driven-development` \| `executing-plans` \| `direct` | 执行方式 |
 | `build_pause` | `null` \| `plan-ready` | build 内部暂停点。`plan-ready` = 计划已生成，暂停等用户选择 |
 | `subagent_dispatch` | `null` \| `confirmed` | 只有 `confirmed` 才允许 `build_mode: subagent-driven-development` |
-| `tdd_mode` | `tdd` \| `direct` | `tdd` 强制每个任务先写失败测试；`direct` 不强制 |
+| `tdd_mode` | `tdd` \| `direct` | `tdd` 强制每个任务先写失败测试；`direct` 不做 Red-Green-Refactor，但仍要求相关测试和 bug 回归证据。hotfix/tweak 默认 `direct` |
 | `review_mode` | `off` \| `standard` \| `thorough` | 代码审查强度。详见[代码审查机制](/zh/concepts/review-mode) |
-| `isolation` | `branch` \| `worktree` | 工作区隔离方式 |
+| `isolation` | `current` \| `branch` \| `worktree` | 工作区隔离方式。三种模式都需要用户显式选择，并绑定设置命令实际运行所在目录的当前 Git 分支 |
+| `bound_branch` | Git 分支名或 `null`（machine-owned） | 当前工作区模式绑定的分支。入口检查与源码写入守卫会阻止意外分支漂移；不要直接 `set` 修改 |
 | `context_compression` | `off` \| `beta` | 从项目配置快照。详见[上下文压缩机制](/zh/concepts/context-compression) |
 
 ### 验证与分支
@@ -194,8 +196,9 @@ export COMET_AUTO_TRANSITION=true
 | --- | --- | --- |
 | `verify_mode` | `light` \| `full` | 验证深度 |
 | `verify_result` | `pending` \| `pass` \| `fail` | 验证结果 |
+| `verify_failures` | 整数（machine-owned） | 连续验证失败计数。`verify-fail` 自增，`verify-pass` 或 `archive-reopen` 重置为 `0`。达到 3 时下一次失败需重试上限策略决策 |
 | `verification_report` | 相对路径 | 验证报告路径，verify pass 前必须指向已存在的文件 |
-| `branch_status` | `pending` \| `handled` | 分支处理状态，verify pass 前必须为 `handled` |
+| `branch_status` | `pending` \| `handled` | 分支处理状态。verify 和 archive 期间保持 `pending`；归档提交和分支处理完成后才写 `handled` |
 | `verified_at` | `YYYY-MM-DD` 或 `null` | 验证通过时间 |
 
 ### 路径引用
@@ -239,15 +242,16 @@ export COMET_AUTO_TRANSITION=true
 
 | 约束 | 说明 |
 | --- | --- |
-| `build → verify` 前 | `isolation` 必须是 `branch` 或 `worktree` |
+| `build → verify` 前 | `isolation` 必须是 `current`、`branch` 或 `worktree`；三种模式都会校验绑定分支 |
 | `build → verify` 前 | `build_mode` 必须已选择 |
 | `build_mode: subagent-driven-development` | 需要 `subagent_dispatch: confirmed` |
 | full workflow 离开 build | `tdd_mode` 必须是 `tdd` 或 `direct` |
 | full workflow 离开 build | `review_mode` 必须是 `off`/`standard`/`thorough` |
 | `build_mode: direct` | hotfix/tweak 默认允许；full 需要 `direct_override: true` |
 | `verify → archive` 前 | `verify_result` 必须是 `pass` |
-| `verify-pass` 转换 | 需要 `verification_report` 指向已存在的文件，`branch_status` 为 `handled` |
+| `verify-pass` 转换 | 需要 `verification_report` 指向已存在的文件；`branch_status` 保持 `pending`（分支处理在 archive 内完成） |
 | 真实归档命令 | 需要 `archive_confirmation: confirmed`；重新打开归档会清除旧确认 |
+| archive 完成 | 归档提交 + 分支处理后写 `branch_status: handled`，`comet guard archive` 通过 |
 | `build_pause` | 不是执行方式，不能写进 `build_mode` |
 
 <Note>
@@ -277,7 +281,7 @@ openspec/changes/<name>/.comet/state-events.jsonl
 | `timestamp` | 写入时间 |
 | `change` | change 名称 |
 | `event` | `open-complete`、`build-complete`、`verify-pass` 等转换事件 |
-| `source` | `comet-state`、`comet-guard` 或 `comet-archive` |
+| `source` | `comet state`、`comet guard` 或 `comet archive` |
 | `from` / `to` | 转换前后的 Classic 状态投影 |
 | `effects` | 实际变更的字段列表，例如 `phase: build -> verify` |
 
@@ -333,7 +337,13 @@ comet state set <change-name> verify_mode full
 comet state set <change-name> review_mode thorough
 ```
 
-machine-owned 字段（`classic_profile`、`classic_migration`、`run_id`）不能用 `set` 修改。
+`bound_branch` 由设置 `isolation` 时自动记录。若入口检查报告当前分支与绑定分支不一致，优先切回原分支；只有你确认当前分支应接管该 change 后才运行：
+
+```bash
+comet state rebind <change-name>
+```
+
+换绑会写入状态审计日志；未建立首次绑定或 detached HEAD 下会被拒绝。machine-owned 字段（包括 `bound_branch`、`classic_profile`、`classic_migration`、`run_id`）不能用 `set` 修改。
 
 ## 状态和 Run state 的边界
 

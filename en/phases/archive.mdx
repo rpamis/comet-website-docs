@@ -4,7 +4,7 @@ sidebarTitle: "Archive"
 description: "Confirm final approval, merge the OpenSpec delta, annotate workflow artifacts, and close the change."
 ---
 
-Archive closes the spec lifecycle. After verification passes and branch handling is complete, Comet shows the irreversible actions and waits for final user approval before mutating specs or moving the change.
+Archive closes the spec lifecycle. After verification passes, Comet shows the irreversible actions and waits for final user approval before mutating specs or moving the change. Branch handling happens inside archive, after the archive commit, so the final branch or PR includes merged specs and archive metadata.
 
 <Tip>
   Normally, invoke <code>/comet</code>. It routes a verified change to <code>/comet-archive</code>. Call the phase Skill directly only when automatic transition is disabled or you are resuming an archive-phase change.
@@ -14,7 +14,7 @@ Archive closes the spec lifecycle. After verification passes and branch handling
 
 - `phase: archive`
 - `verify_result: pass`
-- `branch_status: handled`
+- `branch_status: pending` (branch handling happens inside archive)
 
 ## Final confirmation
 
@@ -44,17 +44,42 @@ comet archive "<change-name>"
 
 The command writes a recoverable pending checkpoint, calls `openspec archive --yes`, validates main specs, annotates the Design Doc and Plan, and marks the Run complete. Annotation is idempotent and preserves a clean Markdown EOF.
 
-Archive does not commit the result. Commit the dated change move, merged main specs, and artifact annotations after review:
+## Commit archive changes with exact paths
+
+Archive does not commit the result. After archiving, read `git status --short`, compare it against the pre-archive dirty-worktree baseline, and stage only paths attributable to this change: the original active path, the actual archive path printed by the command, main specs changed by this delta, and archive metadata on this Design Doc/Plan. Stop if any path cannot be attributed. Use explicit pathspecs and inspect the staged diff — never stage the whole repository or mix the user's pre-existing changes:
 
 ```bash
-git add -A
+git add -- <individually verified archive paths...>
+git diff --cached --stat
 git commit -m "chore: archive <change-name>"
 ```
+
+## Handle the branch after the archive commit
+
+After the archive commit succeeds, the AI loads Superpowers `finishing-a-development-branch`. This ordering ensures the final branch or PR contains the main-spec merge and archive metadata. If the skill is unavailable, stop and prompt to enable it; do not write `branch_status: handled`.
+
+For `isolation: current`, the change is already on its intended branch, so the user chooses only whether to push the current branch or keep it local. Comet does not offer feature-branch merge or PR actions. For `isolation: branch|worktree`, the user chooses:
+
+| Option | Action |
+| --- | --- |
+| 1 | Merge into the main branch locally |
+| 2 | Push and create a PR |
+| 3 | Keep the current branch for later |
+
+Archive is already complete, so "discard work" is not offered. Only after the selected operation succeeds (or the user explicitly keeps the branch) does the workflow write:
+
+```bash
+comet state set <change-name> branch_status handled
+comet guard <change-name> archive
+comet state clear-selection
+```
+
+The archive guard verifies both archive completeness and `branch_status: handled`; a failure means the workflow is still incomplete.
 
 If archive was interrupted after OpenSpec moved the directory, rerunning `comet archive` locates the dated archive, revalidates it, finishes missing annotations, and closes state without duplicating the merge.
 
 <Warning>
-  Do not hand-edit <code>archive_confirmation</code> or <code>archived</code>. After success, do not rerun <code>comet guard &lt;name&gt; archive</code> against the old active path; use the archive command exit status and dated directory as evidence.
+  Do not hand-edit <code>archive_confirmation</code> or <code>archived</code>. <code>comet guard &lt;name&gt; archive</code> resolves the actual archive directory from the original change name; do not construct a dated archive path manually.
 </Warning>
 
 ## Next steps
