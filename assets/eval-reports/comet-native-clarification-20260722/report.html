@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Comet Native Batch 与 Sequential 澄清模式评估</title>
+    <style>
+      :root { color-scheme: light; --paper:#fff; --canvas:#f3f1ec; --ink:#191817; --muted:#69645d; --line:#cbc6bc; --grid:#e8e4dc; --batch:#176b87; --seq:#595b60; --pass:#28745c; --fail:#a33a32; --warn:#a5642b; --font:"Times New Roman",SimSun,"Songti SC","Noto Serif CJK SC","Source Han Serif SC",serif; }
+      * { box-sizing:border-box; }
+      html,body { background:var(--canvas); }
+      body { margin:0; color:var(--ink); font:15px/1.58 var(--font); }
+      main { width:min(1040px,calc(100vw - 40px)); margin:20px auto 52px; padding:52px 62px 64px; background:var(--paper); border:1px solid #ddd8cf; border-top:2px solid var(--ink); }
+      .language-toggle { position:fixed; z-index:10; top:12px; right:14px; display:flex; overflow:hidden; border:1px solid var(--line); background:rgba(255,255,255,.94); font:12px/1.2 var(--font); }
+      .language-toggle a { padding:7px 10px; color:var(--muted); text-decoration:none; }
+      .language-toggle .is-active { color:#fff; background:var(--ink); }
+      .report-header { max-width:860px; margin:0 auto 34px; text-align:center; }
+      .kicker { margin:0 0 12px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
+      h1 { margin:0; font-size:clamp(30px,4.8vw,48px); line-height:1.12; letter-spacing:-.025em; }
+      .dek { max-width:760px; margin:20px auto 0; color:var(--muted); font-size:16px; }
+      .meta { display:flex; flex-wrap:wrap; justify-content:center; gap:6px 18px; margin-top:18px; color:var(--muted); font-size:12px; }
+      section { margin-top:40px; }
+      h2 { margin:0 0 16px; padding-bottom:8px; border-bottom:1.5px solid var(--ink); font-size:21px; }
+      h3 { margin:24px 0 10px; font-size:16px; }
+      p { margin:10px 0; }
+      .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-top:1.5px solid var(--ink); border-bottom:1px solid var(--line); }
+      .metric { min-height:126px; padding:18px 16px; border-right:1px solid var(--grid); }
+      .metric:last-child { border-right:0; }
+      .metric-label { min-height:34px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+      .metric-value { display:block; margin:7px 0 2px; font-size:31px; line-height:1; font-weight:700; }
+      .metric-context { color:var(--muted); font-size:12px; }
+      .callout { margin:18px 0; padding:14px 18px; border-left:3px solid var(--warn); background:#faf7f0; }
+      .bars { display:grid; gap:13px; margin-top:18px; }
+      .bar-row { display:grid; grid-template-columns:128px minmax(0,1fr) 72px; align-items:center; gap:12px; }
+      .track { height:16px; background:#efede8; }
+      .fill { height:100%; min-width:2px; }
+      .batch { background:var(--batch); }
+      .seq { background:var(--seq); }
+      .value { text-align:right; font-variant-numeric:tabular-nums; }
+      .legend { display:flex; gap:18px; margin:10px 0 0; color:var(--muted); font-size:12px; }
+      .legend i { display:inline-block; width:11px; height:11px; margin-right:5px; vertical-align:-1px; }
+      .table-wrap { overflow-x:auto; }
+      table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+      th,td { padding:9px 10px; border-bottom:1px solid var(--grid); text-align:right; white-space:nowrap; }
+      th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+      th:first-child,td:first-child { text-align:left; }
+      .good { color:var(--pass); font-weight:700; }
+      .bad { color:var(--fail); font-weight:700; }
+      .matrix td { text-align:center; }
+      .matrix td:first-child { text-align:left; }
+      .dot { display:inline-grid; place-items:center; width:24px; height:24px; border-radius:50%; color:#fff; font-size:11px; }
+      .dot.pass { background:var(--pass); }
+      .dot.fail { background:var(--fail); }
+      .failure-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+      .failure-card { padding:18px; border:1px solid var(--line); }
+      .failure-card h3 { margin-top:0; }
+      .failure-card ul { margin:8px 0 0; padding-left:20px; }
+      .fineprint { color:var(--muted); font-size:12px; }
+      @media (max-width:760px) { main{width:100%;margin:0;padding:60px 20px 42px;border-left:0;border-right:0}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric:nth-child(2){border-right:0}.metric:nth-child(-n+2){border-bottom:1px solid var(--grid)}.failure-grid{grid-template-columns:1fr}.bar-row{grid-template-columns:92px minmax(0,1fr) 62px} }
+    </style>
+  </head>
+  <body>
+    <nav class="language-toggle" aria-label="报告语言">
+      <a class="is-active" href="/assets/eval-reports/comet-native-clarification-20260722/report.html" target="_self" aria-current="page">中文</a>
+      <a href="/assets/eval-reports/comet-native-clarification-20260722/report-en.html" target="_self" lang="en">English</a>
+    </nav>
+    <main>
+      <header class="report-header">
+        <p class="kicker">Comet Eval · Native Clarification Study</p>
+        <h1>Batch 与 Sequential 澄清模式评估</h1>
+        <p class="dek">同一个包含 3 个独立产品决策的任务，每种模式重复 10 次。比较严格成功率、用户交互、执行成本与失败归因。</p>
+        <div class="meta"><span>2026-07-22</span><span>experiment_20260722_002221</span><span>20 runs · 10 strict pairs</span><span>mimo-v2.5-pro</span></div>
+      </header>
+
+      <section>
+        <h2>核心数据</h2>
+        <div class="metric-grid">
+          <article class="metric"><div class="metric-label">Batch strict pass@1</div><span class="metric-value">60%</span><span class="metric-context">Sequential 70%，-10 pp</span></article>
+          <article class="metric"><div class="metric-label">Batch pass@3</div><span class="metric-value">96.7%</span><span class="metric-context">Sequential 99.2%</span></article>
+          <article class="metric"><div class="metric-label">平均外层交互</div><span class="metric-value">-40%</span><span class="metric-context">2.7 vs 4.5 轮</span></article>
+          <article class="metric"><div class="metric-label">成功配对总 Token</div><span class="metric-value">-22.8%</span><span class="metric-context">5 组双方严格通过</span></article>
+        </div>
+        <div class="callout"><strong>结论：</strong>Batch 确实更省交互和执行资源，但本次 strict pass@1 低 10 个百分点。主要风险不是“批量提问”本身，而是模型把首次回答与共同理解确认合并，少走了必须独立完成的确认轮。</div>
+      </section>
+
+      <section>
+        <h2>成功概率与一致性</h2>
+        <div class="bars">
+          <div class="bar-row"><span>Batch pass@1</span><div class="track"><div class="fill batch" style="width:60%"></div></div><span class="value">60.0%</span></div>
+          <div class="bar-row"><span>Sequential pass@1</span><div class="track"><div class="fill seq" style="width:70%"></div></div><span class="value">70.0%</span></div>
+          <div class="bar-row"><span>Batch pass@3</span><div class="track"><div class="fill batch" style="width:96.7%"></div></div><span class="value">96.7%</span></div>
+          <div class="bar-row"><span>Sequential pass@3</span><div class="track"><div class="fill seq" style="width:99.2%"></div></div><span class="value">99.2%</span></div>
+        </div>
+        <div class="legend"><span><i class="batch"></i>Batch</span><span><i class="seq"></i>Sequential</span></div>
+        <p class="fineprint">pass@3 为 HumanEval 至少一次成功估计。Batch 观测 6/10 通过，Sequential 7/10。两者 pass³ 均为 0，因为都没有做到 10 次全部通过。</p>
+      </section>
+
+      <section>
+        <h2>双方严格通过时的执行效率</h2>
+        <p>只比较同一 repetition 上双方都严格通过的 5 组，避免把提前失败造成的低成本误判为效率提升。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>指标</th><th>Batch</th><th>Sequential</th><th>Batch 差异</th></tr></thead>
+          <tbody>
+            <tr><td>模型启动/恢复</td><td>3.20</td><td>4.60</td><td class="good">-30.4%</td></tr>
+            <tr><td>Agent 轮次</td><td>69.00</td><td>79.40</td><td class="good">-13.1%</td></tr>
+            <tr><td>工具调用</td><td>64.60</td><td>73.80</td><td class="good">-12.5%</td></tr>
+            <tr><td>累计模型耗时</td><td>616 秒</td><td>738 秒</td><td class="good">-16.6%</td></tr>
+            <tr><td>总 Token（含缓存读取）</td><td>2,881,945</td><td>3,731,929</td><td class="good">-22.8%</td></tr>
+            <tr><td>模型成本</td><td>$2.230</td><td>$2.837</td><td class="good">-21.4%</td></tr>
+            <tr><td>峰值上下文输入</td><td>72,858</td><td>74,756</td><td class="good">-2.5%</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section>
+        <h2>所有样本的分布</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>指标</th><th>Batch 平均</th><th>Batch 中位数</th><th>Batch P90</th><th>Sequential 平均</th><th>Sequential 中位数</th><th>Sequential P90</th></tr></thead>
+          <tbody>
+            <tr><td>外层交互轮次</td><td>2.7</td><td>3.0</td><td>3.0</td><td>4.5</td><td>4.0</td><td>6.0</td></tr>
+            <tr><td>Agent 轮次</td><td>73.8</td><td>72.0</td><td>91.0</td><td>77.6</td><td>75.5</td><td>90.0</td></tr>
+            <tr><td>工具调用</td><td>70.0</td><td>67.5</td><td>88.0</td><td>75.9</td><td>74.5</td><td>103.0</td></tr>
+            <tr><td>累计模型耗时</td><td>617 秒</td><td>652 秒</td><td>784 秒</td><td>712 秒</td><td>621 秒</td><td>972 秒</td></tr>
+            <tr><td>总 Token</td><td>2.95M</td><td>2.71M</td><td>4.02M</td><td>3.52M</td><td>3.25M</td><td>4.47M</td></tr>
+            <tr><td>模型成本</td><td>$2.266</td><td>$2.120</td><td>$3.107</td><td>$2.671</td><td>$2.282</td><td>$3.387</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section>
+        <h2>10 组严格配对结果</h2>
+        <div class="table-wrap"><table class="matrix">
+          <thead><tr><th>模式</th><th>r1</th><th>r2</th><th>r3</th><th>r4</th><th>r5</th><th>r6</th><th>r7</th><th>r8</th><th>r9</th><th>r10</th></tr></thead>
+          <tbody>
+            <tr><td>Batch</td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot fail">×</span></td><td><span class="dot pass">✓</span></td><td><span class="dot fail">×</span></td><td><span class="dot fail">×</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot fail">×</span></td></tr>
+            <tr><td>Sequential</td><td><span class="dot fail">×</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot fail">×</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot pass">✓</span></td><td><span class="dot fail">×</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section>
+        <h2>任务完成度与失败归因</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>硬检查层</th><th>Batch</th><th>Sequential</th></tr></thead>
+          <tbody><tr><td>业务行为通过</td><td>9/10</td><td>8/10</td></tr><tr><td>澄清协议通过</td><td>6/10</td><td>9/10</td></tr><tr><td>归档决策完整</td><td>9/10</td><td>8/10</td></tr><tr><td>strict pass</td><td>6/10</td><td>7/10</td></tr></tbody>
+        </table></div>
+        <div class="failure-grid">
+          <article class="failure-card"><h3>Batch：4 次失败</h3><ul><li>r3、r6、r10：只有 1 个决策轮，缺少独立确认。</li><li>r5：同时出现句子计数错误、缺少确认和 brief 漏决策。</li></ul></article>
+          <article class="failure-card"><h3>Sequential：3 次失败</h3><ul><li>r1：出现 4 个决策轮，超过预期的 3 轮。</li><li>r6、r10：决策点数量正确，但业务行为或归档证据失败。</li></ul></article>
+        </div>
+      </section>
+
+      <section>
+        <h2>实验边界</h2>
+        <p>20/20 样本均为 included、high confidence，无缺失 report、超时或剔除项。模型、任务、验证器、执行身份和运行窗口一致。</p>
+        <p>但实验只有一个任务。结果适合回答这个三决策任务上的成本与失败面，不足以推断所有需求类型。下一步应增加不同数量、相关性和歧义程度的澄清任务，并继续观察确认轮缺失是否稳定复现。</p>
+      </section>
+    </main>
+  </body>
+</html>
