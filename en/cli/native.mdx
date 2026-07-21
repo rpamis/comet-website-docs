@@ -3,7 +3,7 @@ title: 'Native CLI'
 description: 'Initialize Native, manage changes, preserve in-phase progress, advance state, bind verification evidence, and recover or archive safely.'
 ---
 
-`comet native` is the deterministic Runtime entry for the Native workflow. It reads the shared `.comet/config.yaml` project configuration and operates on the configured `<artifact-root>/comet/`. It neither reads nor converts Classic/OpenSpec changes and never invokes external Skills, Git, a shell, or project commands.
+`comet native` is the deterministic Runtime entry for the Native workflow. Its state and workflow artifacts belong only to the shared `.comet/config.yaml` project configuration and configured `<artifact-root>/comet/`; it neither reads nor converts Classic/OpenSpec changes. To build baselines and implementation scopes, the Runtime reads project-owned file content within fixed budgets. When Git metadata exists, it invokes Git only as part of building the Git-aware snapshot. It never invokes external Skills, a shell, or project commands. The built-in `comet native check` still invokes neither Git nor any external process.
 
 ## Initialize and manage the artifact root
 
@@ -54,6 +54,24 @@ changes/<change-name>/specs/<capability>/spec.md
 ```
 
 The Runtime derives `create` or `replace` from canonical-spec existence and freezes `base_hash`. Use `spec remove` to remove a capability; never maintain `comet-state.yaml`'s `spec_changes` by hand. If a parallel change has modified the same canonical specification, re-read and rewrite the complete target, then use `spec rebase` to refresh the baseline, reopen Build, and clear the old verification conclusion.
+
+### Baseline and Git-aware snapshots
+
+`new` captures a complete baseline before committing change state. A Git project includes only tracked and non-ignored untracked files. Ignored caches and contents of unregistered nested repositories are outside the project-owned set, while each submodule/gitlink is one atomic entry. Non-Git projects use the bounded physical-tree provider. Any omitted project-owned item returns structured `baseline-incomplete` and removes the unfinished change instead of deferring an unusable baseline until Build.
+
+Git selection requires one stable, bounded enumeration:
+
+- `git-selection-changed` means the Git index changed during enumeration. Wait for `git add` and other Git writes to finish, then rerun the command. Never authorize past it as partial scope.
+- `git-enumeration-limit` means the tracked plus non-ignored untracked project-owned set exceeds the Git enumeration safety budget. This is structural incompleteness. First reduce or clean the project-owned set, or use a later Comet version that adjusts the product budget; never bypass it directly or by default. If recovery is genuinely impossible, use the ordinary partial protocol only when the Runtime returns an authorizable scope bound to a count and content hash and the user understands the unknown-tail risk, with the exact hash, a reason, and `--confirmed`. Never edit snapshot/evidence or guess unenumerated paths.
+
+For non-Git projects, physical selection uses bounded, order-independent before/after enumeration fences:
+
+- `physical-selection-changed` means the project tree changed during capture. Wait for concurrent filesystem activity to finish, then retry.
+- `physical-enumeration-limit` means the node, path, byte, or cooperative execution budget was exhausted. Reduce the project tree or move non-project content outside the project-owned set, then retry.
+
+Neither physical integrity failure can bind an unknown tail to a stable scope, so neither is authorizable as partial scope, including for a current snapshot.
+
+Ordinary omissions include a reason, counts, and bounded sample paths. Baseline creation and a migration cutover require completeness; neither Git selection omission is authorizable there. For a later current snapshot, only a partial scope that the Runtime explicitly makes authorizable may proceed with its exact hash. `git-selection-changed` must still be eliminated first; `git-enumeration-limit` is available only as the last-resort path described above.
 
 ### Bounded status views
 
@@ -119,11 +137,13 @@ comet native next <change-name> --summary <text> \
 | Verify        | Structurally complete report bound to current acceptance, contract, and scope     | pass enters Archive; fail returns to Build         |
 | Archive       | Use the separate two-step archive command                                         | Update canonical specifications and archive change |
 
-Pass `--confirmed` in Shape or Build only when the user has just confirmed a decision that changes scope, user-visible behavior, compatibility, risk, or an irreversible result. Without a high-impact decision, the Runtime records implicit approval. No confirmation can bypass a `[blocking]` question.
+Pass `--confirmed` in Shape or Build only when the user has just confirmed a decision that changes scope, user-visible behavior, compatibility, risk, or an irreversible result. Without a high-impact decision, the Runtime records implicit approval. No confirmation can bypass a `[blocking]` question. On entry to Build, the Runtime binds approval to that moment's `approved_contract_hash`. If the brief or complete target specifications later change, Build remains blocked and returns `re-confirm-contract`. Pass `--confirmed` again only after the user reconfirms the current contract; never reuse an old confirmation or edit the hash.
 
-When Build cannot prove complete scope, the first call returns a scope hash and unattributed items without advancing. Only after the user explicitly accepts that group of risks should you retry with the exact `--allow-partial-scope`, a non-empty reason, and `--confirmed`. The allowance binds to the scope hash and cannot authorize a changed implementation.
+When Build cannot prove complete scope, the first call returns a scope hash and unattributed items without advancing. An incomplete current snapshot never turns an unobserved path into a deletion. When change details exceed the budget, bounded details remain and `scope-detail-overflow` represents the rest with a count and content hash. Only after the user explicitly accepts a concrete risk that the Runtime permits for authorization should you retry with the exact `--allow-partial-scope`, a non-empty reason, and `--confirmed`. The allowance binds to the scope hash and cannot authorize a changed implementation. `git-selection-changed`, `physical-selection-changed`, and `physical-enumeration-limit` are never authorizable. `git-enumeration-limit` may use the same ordinary partial protocol only after recovery attempts fail, the Runtime returns an authorizable scope, and the user understands the unknown-tail risk.
 
 The Verify report must contain the Runtime-readable acceptance block and bind every current Acceptance ID. An old report or receipt, changed brief/specification, changed implementation scope, or evidence from another revision is stale.
+
+If the contract or project snapshot changes after entering Verify, status returns a controlled summary-only `next`. Run it to retreat to Build and generate a new scope. Reconfirm with the user only when the brief/spec contract hash also changed. If only the project snapshot or implementation changed, preserve the existing `approved_contract_hash` instead of creating a meaningless confirmation. Do not submit pass/fail against a stale scope. Drift in any bound Archive fact uses the same retreat protocol; never reuse the old pass.
 
 ## Autonomous repair and stop semantics
 
@@ -168,6 +188,10 @@ Doctor is non-mutating by default. `--repair` handles only facts the Runtime can
 - Interrupted retention quarantines.
 
 Doctor never rewrites user briefs, specifications, verification reports, or project source. Ordinary phase transitions support only `continue`; `rollback` applies only to Archive/root-move journals that have not crossed their irreversible boundary.
+
+New changes and current-schema v3 changes must retain the complete baseline captured at creation. If a v3 baseline is missing or incomplete, doctor does not rebuild it from current files because that would erase differences accumulated since creation. Restore it from a trusted backup, or preserve the user-authored artifacts and implementation facts while creating a new change.
+
+Explicit v1/v2 schema migration is the sole cutover exception. Before any state write, `doctor --repair` captures a complete baseline at the migration timepoint. An incomplete capture leaves the old state unchanged and stops. Post-migration implementation evidence proves only changes after that cutover; pre-migration chat, an old scope, or an old pass is not current evidence. A v2 change in Verify/Archive retreats to Build to establish fresh evidence.
 
 Ordinary write commands never take over a stale lock automatically. Only explicit `doctor --repair` may do so after proving the local owner is gone, lock identity is unchanged, and no conflicting transaction exists. Active locks and locks that cannot be proven stale are preserved.
 

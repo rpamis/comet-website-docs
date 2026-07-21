@@ -1,9 +1,9 @@
 ---
 title: 'comet update'
-description: '更新 Comet npm 包和已安装的 Comet Skill 文件。'
+description: '安全刷新 Comet 资产，并在显式请求时更新 npm 包。'
 ---
 
-`comet update` 用于刷新已安装的 Comet Skill、规则和脚本。它适合版本升级后同步项目或全局安装。
+`comet update` 用于刷新已安装的 Comet Skill、Rule、Hook、Runtime 和托管说明。current-project 模式默认只刷新资产，不修改任何 npm 安装；需要更新 CLI 包时必须显式使用 `--self-update`。
 
 ## 基本用法
 
@@ -11,13 +11,15 @@ description: '更新 Comet npm 包和已安装的 Comet Skill 文件。'
 comet update
 ```
 
-| 选项                | 说明                                      |
-| ------------------- | ----------------------------------------- |
-| `--json`            | 输出 JSON                                 |
-| `--language <lang>` | 覆盖自动检测到的 Skill 语言，`zh` 或 `en` |
-| `--scope <scope>`   | 仅更新 `project` 或 `global`              |
-| `--current-project` | 只更新当前项目级安装                      |
-| `--all-projects`    | 更新项目索引中的所有项目级安装            |
+| 选项                 | 说明                                      |
+| -------------------- | ----------------------------------------- |
+| `--json`             | 输出单个结构化 JSON 结果                  |
+| `--language <lang>`  | 覆盖自动检测到的 Skill 语言，`zh` 或 `en` |
+| `--scope <scope>`    | 仅刷新 `project` 或 `global` 资产目标     |
+| `--current-project`  | 只刷新当前项目解析出的安装                |
+| `--all-projects`     | 刷新项目索引中的所有项目级安装            |
+| `--self-update`      | 刷新资产前显式更新 Comet npm 包           |
+| `--skip-self-update` | 显式跳过 npm 包自更新                     |
 
 ## 选择更新范围
 
@@ -28,14 +30,15 @@ comet update
 
 自动化调用采用更保守的默认值：
 
-| 调用方式                       | 默认范围                     |
-| ------------------------------ | ---------------------------- |
-| 普通交互式调用，且索引中有项目 | 询问当前项目或所有已登记项目 |
-| `--json`                       | 当前项目                     |
-| 显式 `--current-project`       | 当前项目                     |
-| 显式 `--all-projects`          | 所有已登记项目               |
+| 调用方式                       | 默认范围                             |
+| ------------------------------ | ------------------------------------ |
+| 普通交互式调用，且索引中有项目 | 询问当前项目或所有已登记项目         |
+| `--json`                       | 当前项目                             |
+| 显式 `--current-project`       | 当前项目                             |
+| 显式 `--all-projects`          | 所有已登记项目                       |
+| 显式 `--scope global`          | current-project 模式下的全局资产目标 |
 
-`--all-projects` 不能与 `--scope global` 或 `--current-project` 同时使用。项目索引非空时，更新全局安装应同时传入 `--current-project`，避免进入项目范围选择：
+`--all-projects` 不能与 `--scope global` 或 `--current-project` 同时使用。显式 `--scope global` 会确定性走 current-project 模式，不会打开 all-projects 选择；它只选择全局资产目标，并不会隐式更新全局 npm 包。
 
 ```bash
 # 只更新当前项目
@@ -44,13 +47,24 @@ comet update --current-project
 # 批量更新所有已登记的项目级安装
 comet update --all-projects
 
-# 更新全局安装，不进入项目范围选择
-comet update --scope global --current-project
+# 只刷新全局资产目标，不修改 npm 安装
+comet update --scope global
+
+# 同时显式更新对应的 Comet npm 包
+comet update --scope global --self-update
 ```
 
 批量模式会分别记录每个项目的结果。npm 包更新、安装目标检查或配置读取失败都会计入对应项目的失败汇总，不会被报告为全部成功。已不存在、且能安全确认不再有项目级安装的索引条目会被清理。
 
 自动化脚本应显式使用 `--json`、`--current-project` 或 `--all-projects`。Comet 不会根据“是否由脚本启动”自动推断范围；没有这些选项且索引非空时，命令仍会进入交互式范围选择。
+
+## npm 自更新边界
+
+current-project 模式包括显式 `--current-project`、`--json`、没有可选择索引时的默认调用，以及显式 `--scope global`。这些调用默认不修改任何 npm 安装，包括全局包和项目级包。只有 `--self-update` 会在刷新资产前更新对应的 Comet 包。
+
+all-projects 属于较宽的更新模式，默认允许更新每个项目对应的适用包；同一全局包最多尝试一次。若只想刷新已登记项目的资产，传入 `--skip-self-update`。`--self-update` 与 `--skip-self-update` 互斥。
+
+自更新会比较目标安装的完整 semver，包括预发布版本。候选版本低于已安装版本时拒绝降级。安装前，Comet 会把精确候选版本安装到隔离临时目录，并在有界时间和输出预算内验证版本、`workflow resolve` 与 Native 命令；候选验证失败不会修改目标安装。实际安装失败时，Comet 会尝试恢复原来的精确版本，并把整个更新报告为 incomplete，而不是继续显示成功。
 
 ## 什么时候运行
 
@@ -63,16 +77,18 @@ comet update --scope global --current-project
 
 和 `comet init` 一样，`comet update` 会：
 
-- Native 项目刷新 Comet 自有 Skill/runtime、统一工作流 Rule、Hook Router 与 Ambient Resume 说明，并固定使用 Copy；不会创建 `.comet/skills/`，也不会安装 OpenSpec、Superpowers、CodeGraph 或 Classic 专属 Skill。遇到旧 symlink 安装时，会安全解除 Comet 管理的链接并物化为本地 copy，不会沿链接写回 `.comet/skills/`；共享目录含非托管 Skill 时会保留现场并拒绝替换。
+- Native 项目刷新 Comet 自有 Skill/runtime、统一工作流 Rule、Hook Router 与 Ambient Resume 说明，并固定使用 Copy；不会创建 `.comet/skills/`，还会跳过 CodeGraph 与 Classic 专属 Skill。遇到旧 symlink 安装时，会安全解除 Comet 管理的链接并物化为本地 copy，不会沿链接写回 `.comet/skills/`；共享目录含非托管 Skill 时会保留现场并拒绝替换。
 - Classic 与 global 目标保留原来的安装模式选择（Copy / Symlink）和依赖能力。选择 Symlink 时会重建到 `.comet/skills/` 的链接。
 - `.comet/config.yaml` 作为共享项目配置按字段合并，保留另一工作流与用户字段；Native 更新不会删除已有 Classic 文件，改变默认入口也不等于迁移工作流。
 - `ambient_resume` 控制 Native 与 Classic 的同一套只读环境感知恢复说明；设置为 `false` 时，更新会移除托管恢复块但保留其他用户规则。
 
-已有平台 `skills/` 目录会被保留。Symlink 模式只刷新 Comet 管理的链接，不删除本地或第三方 Skill。
+`comet update` 不管理 OpenSpec、Superpowers 或其他第三方 Skill；Native 项目还会跳过 CodeGraph 与 Classic 专属 Skill，Classic 保持原有行为。已有平台 `skills/` 目录会被保留；Symlink 模式只刷新 Comet 管理的链接，不删除本地或第三方 Skill。
 
 ## 推荐流程
 
 ```bash
-comet update
+# 以下两条更新命令任选其一
+comet update --current-project
+comet update --current-project --self-update
 comet doctor
 ```

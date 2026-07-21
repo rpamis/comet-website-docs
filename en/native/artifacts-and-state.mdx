@@ -23,9 +23,16 @@ The default layout is:
         specs/<capability>/spec.md
         verification.md
         runtime/
+          baseline-manifest.json
           run-state.json
           trajectory.jsonl
           checkpoints/
+          evidence/
+            snapshots/
+            scopes/
+            allowances/
+            verifications/
+            check-receipts/
     archive/
       YYYY-MM-DD-<change-name>/
     runtime/
@@ -74,7 +81,7 @@ The report records actual commands, results, skip reasons, known limitations, th
 
 ### `comet-state.yaml`
 
-Every active or archived Native change has its own `comet-state.yaml`. It records machine-owned phase, revision, approval, verification, and specification-operation state. Do not edit these fields manually or confuse this file with Classic's `.comet.yaml`.
+Every active or archived Native change has its own `comet-state.yaml`. It records machine-owned phase, revision, approval, `approved_contract_hash`, verification, and specification-operation state. On entry to Build, `approved_contract_hash` binds approval to the brief/spec contract from that moment. Later contract drift requires fresh user confirmation. Do not edit these fields manually or confuse this file with Classic's `.comet.yaml`.
 
 ### Run state, trajectory, and checkpoint
 
@@ -92,6 +99,12 @@ A checkpoint does not replace the brief, specifications, or verification report 
 
 Native budgets change counts, specification size, findings, Acceptance IDs, output, and archive trees. Lists and details use cursors bound to the current content set; a changed input invalidates an old cursor explicitly.
 
-Implementation scopes, specification baselines, verification reports, check receipts, checkpoint manifests, and archive preflights are hash-bound. This lets the Runtime determine whether evidence still matches current facts instead of trusting a statement that verification happened earlier.
+`baseline-manifest.json` is the bounded project snapshot captured when a change is created. The Git provider includes only tracked and non-ignored untracked files and represents each submodule/gitlink atomically; non-Git projects use a bounded physical-tree provider with before/after enumeration fences. Creation and a v1/v2 migration cutover require a complete baseline. A current v3 baseline cannot be rebuilt automatically from current files.
+
+Implementation scopes, specification baselines, current snapshots, verification reports, check receipts, checkpoint manifests, and archive preflights are hash-bound. An incomplete current snapshot never infers a deletion. When change details exceed the budget, `scope-detail-overflow` preserves a count and content hash for the remaining changes. These bindings let the Runtime determine whether evidence still matches current facts instead of trusting a statement that verification happened earlier.
+
+Git enumeration also reports `git-selection-changed` and `git-enumeration-limit` explicitly. The first requires a retry after the index settles and is never authorizable. For the second, first reduce or clean the project-owned set, or use a later product version that adjusts the budget. Baseline creation and a migration cutover require completeness and have no partial authorization. For a later current snapshot, `git-enumeration-limit` may use the ordinary partial protocol with the exact hash, a reason, and `--confirmed` only when recovery is impossible, the Runtime returns an authorizable scope bound to a count and content hash, and the user understands the unknown-tail risk. Neither condition may be bypassed through edited evidence.
+
+Physical-tree enumeration reports `physical-selection-changed` and `physical-enumeration-limit` explicitly. The first requires waiting for concurrent filesystem activity to settle; the second requires reducing the project tree or moving non-project content outside it. Neither can bind an unknown tail stably, so neither is authorizable as partial scope, including for a current snapshot.
 
 Continue with [Safety and recovery](/en/native/safety-and-recovery), or see the matching commands in [Native CLI](/en/cli/native).

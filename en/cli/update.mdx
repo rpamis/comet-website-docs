@@ -1,59 +1,86 @@
 ---
-title: 'comet update — Update Comet Package and Skills'
+title: 'comet update'
 sidebarTitle: 'comet update'
-description: 'Update the Comet package and installed Skill files for the current project, all indexed projects, or global scope.'
+description: 'Safely refresh Comet assets and update the npm package only when explicitly requested.'
 ---
 
-`comet update` keeps your Comet installation current by updating both the npm package and the skill files deployed to your AI coding platforms.
+`comet update` refreshes installed Comet Skills, Rules, Hooks, Runtime files, and managed instructions. Current-project mode refreshes assets without changing any npm installation by default. Updating the CLI package requires explicit `--self-update`.
 
-## Usage
+## Basic usage
 
 ```bash
 comet update
 ```
 
-You can also update the package directly without refreshing skills:
+To update the applicable package with Comet's candidate validation, downgrade refusal, and rollback protection, prefer:
 
 ```bash
-npm install -g @rpamis/comet@latest
+comet update --self-update
 ```
 
-## What `update` Does
+If you deliberately need to change only the global package, select an exact version yourself, for example `npm install -g @rpamis/comet@0.4.0-beta.7`. Direct npm installation bypasses Comet's candidate validation and downgrade protection; do not use a moving tag such as `latest` when preserving the installed version matters.
 
-1. **Updates the npm package** — Runs `npm install -g @rpamis/comet@latest` (global install) or `npm install @rpamis/comet@latest` (project install), depending on how Comet was originally installed. If the npm update fails, the command continues with the bundled skill files from the currently installed package.
-2. **Detects installed targets** — Scans both the project directory and the home directory for platforms that already have Comet skills installed (files starting with `comet` inside the platform's `skills/` directory).
-3. **Detects installed language** — Reads each target's existing skill files to determine whether `en` or `zh` skills are installed, and preserves that language unless overridden with `--language`.
-4. **Refreshes Comet skill files** — Copies the latest skill files from the updated package's assets to each detected target, always overwriting.
+## Choose the update scope
 
-If no installed targets are found, `comet update` exits with a prompt to run `comet init` first.
+When the project registry contains project-scope installations, interactive `comet update` asks you to choose:
+
+- **All indexed projects**: update every registered project in sequence.
+- **Current project only**: update only the project for the current working directory.
+
+Automated calls use more conservative defaults:
+
+| Invocation                             | Default scope                                      |
+| -------------------------------------- | -------------------------------------------------- |
+| Interactive call with indexed projects | Ask for current project or all registered projects |
+| `--json`                               | Current project                                    |
+| Explicit `--current-project`           | Current project                                    |
+| Explicit `--all-projects`              | All registered projects                            |
+| Explicit `--scope global`              | Global asset targets in current-project mode       |
+
+`--all-projects` cannot be combined with `--scope global` or `--current-project`. Explicit `--scope global` deterministically uses current-project mode and never opens the all-projects selector. It selects global asset targets without implicitly updating the global npm package.
+
+```bash
+# Refresh only the current project
+comet update --current-project
+
+# Refresh every registered project-scope installation
+comet update --all-projects
+
+# Refresh only global asset targets without changing npm
+comet update --scope global
+
+# Explicitly update the corresponding Comet npm package too
+comet update --scope global --self-update
+```
+
+Batch mode records a result for every project. Package update, target inspection, or configuration-read failures remain failed or unattempted results rather than being reported as success. Registry entries that no longer exist and can be proven to have no project installation are removed safely.
+
+Automation should explicitly pass `--json`, `--current-project`, or `--all-projects`. Comet does not infer scope merely because a script launched the command. Without one of these options, an indexed interactive invocation still opens the scope selector.
+
+## npm self-update boundary
+
+Current-project mode includes explicit `--current-project`, `--json`, a default call with no indexed choice, and explicit `--scope global`. These calls do not change any npm installation by default, whether global or project-local. Only `--self-update` updates the corresponding Comet package before assets are refreshed.
+
+All-projects is a broader update mode and permits an applicable package update for each project by default; the same global package is attempted at most once. Pass `--skip-self-update` when you want to refresh only registered project assets. `--self-update` and `--skip-self-update` are mutually exclusive.
+
+Self-update compares the target installation's full semver, including prereleases, and refuses a downgrade. Before target mutation, Comet installs the exact candidate into an isolated temporary directory and validates its version, `workflow resolve`, and Native commands under bounded time and output budgets. Candidate validation failure leaves the target untouched. If the real install fails, Comet attempts to restore the exact previous version and reports the update as incomplete instead of displaying success.
+
+## What `update` does
+
+1. **Resolves the asset scope** — Chooses current project, all indexed projects, or explicit global/project targets before changing anything.
+2. **Optionally self-updates npm** — Skips package mutation in current-project mode unless `--self-update` is present. Broader updates can disable it with `--skip-self-update`.
+3. **Detects installed targets** — Scans the selected project and/or home-directory platform locations for existing Comet assets.
+4. **Preserves installed language** — Keeps each target's current `en` or `zh` Skill language unless `--language` overrides it.
+5. **Refreshes managed assets** — Updates Comet Skills, Rules, Hooks, Runtime files, and managed instructions while preserving unmanaged files.
+
+If no installed targets are found, `comet update` exits without claiming that assets were refreshed and recommends running `comet init` first.
 
 ## When to run it
 
 - After upgrading `@rpamis/comet`.
-- When `comet doctor` reports Skill or script version drift.
+- When `comet doctor` reports Skill or Runtime version drift.
 - When switching between English and Chinese Skills.
 - When the team updates project-level Comet configuration.
-
-## Choose the project update scope
-
-When indexed project installs exist, interactive `comet update` asks whether to update all indexed projects or only the current project.
-
-| Invocation                             | Scope                                                |
-| -------------------------------------- | ---------------------------------------------------- |
-| Interactive call with indexed projects | Prompts for all indexed projects or current project. |
-| `--json`                               | Current project.                                     |
-| `--current-project`                    | Current project.                                     |
-| `--all-projects`                       | All indexed project installs.                        |
-
-`--all-projects` cannot be combined with `--scope global` or `--current-project`. When indexed projects exist, pair the global scope with `--current-project` so Comet does not open the project-scope selector:
-
-```bash
-comet update --current-project
-comet update --all-projects
-comet update --scope global --current-project
-```
-
-Batch mode reports results per project. npm update, target inspection, or registry-read failures remain failed results instead of being reported as success. Automation should pass `--json`, `--current-project`, or `--all-projects`; Comet does not infer scope merely because a command was launched by a script.
 
 ## Native and Classic update boundaries
 
@@ -69,119 +96,107 @@ An existing platform `skills/` directory is preserved. Symlink mode refreshes on
 ## Recommended flow
 
 ```bash
-comet update
+# Choose either an asset-only refresh or an explicit package update.
+comet update --current-project
+comet update --current-project --self-update
 comet doctor
 ```
 
 ## Flags
 
 <ParamField query="--json" type="boolean">
-  Suppress progress output and print a single structured JSON result when the command finishes. See
-  [JSON output](#json-output) below.
+  Suppress progress output and print one structured JSON result. JSON mode always uses
+  current-project scope unless `--all-projects` is explicit, and it does not update npm without
+  `--self-update`.
 </ParamField>
 
 <ParamField query="--language" type="string">
-  Override the auto-detected skill language for all targets. Accepted values: `en` (English) or `zh`
-  (Chinese). Without this flag, each target's existing language is preserved individually.
+  Override the auto-detected Skill language for every selected target. Accepted values are `en` and
+  `zh`. Without this flag, each target keeps its installed language.
 </ParamField>
 
 <ParamField query="--scope" type="string">
-  Limit the update to a single scope. Accepted values: `project` or `global`. Without this flag,
-  both scopes are scanned and updated.
+  Limit asset refresh to `project` or `global`. Explicit `--scope global` deterministically uses
+  current-project mode and does not imply npm self-update.
 </ParamField>
 
 <ParamField query="--current-project" type="boolean">
-  Update only the current project-scope installation.
+  Refresh only installations resolved from the current project. Package self-update remains disabled
+  unless `--self-update` is also present.
 </ParamField>
 
 <ParamField query="--all-projects" type="boolean">
-  Update every project-scope installation in the project registry.
+  Refresh every project-scope installation in the project registry. This cannot be combined with
+  `--current-project` or `--scope global`.
 </ParamField>
 
-## Example Output
+<ParamField query="--self-update" type="boolean">
+  Explicitly update the applicable Comet npm package before refreshing assets. Candidate validation,
+  downgrade refusal, and rollback safeguards apply.
+</ParamField>
 
+<ParamField query="--skip-self-update" type="boolean">
+  Explicitly disable npm package self-update, including in all-projects mode. It cannot be combined
+  with `--self-update`.
+</ParamField>
+
+## Example output
+
+An asset-only current-project refresh reports the npm step as skipped and still refreshes managed targets:
+
+```text
+Comet Update
+
+Updating Comet assets on 1 installed target:
+  Claude Code (project, en): assets refreshed
+
+Summary:
+  npm: skipped
+  assets: complete
+  scope: project
+
+Update complete.
 ```
-  Comet Update v1.3.0
 
-  Updating npm package (global scope)...
-    $ npm install -g @rpamis/comet@latest
-  npm package: updated to latest @rpamis/comet
+Pass `--self-update` to add the isolated candidate validation and package installation before this asset refresh.
 
-  Updating comet skills on 2 installed target(s):
-    - Claude Code (project (/your/project), en)
-      $ copy assets/skills -> .claude/skills/ (project)
-    - Cursor (global, en)
-      $ copy assets/skills -> ~/.cursor/skills/ (global)
-
-  Copying 8 skill files...
-
-  Claude Code (project, skills): 8 copied, 0 skipped
-  Cursor (global, skills): 8 copied, 0 skipped
-
-  Summary:
-    npm: updated (global)
-    skills: 2 target(s), 16 files updated
-    scope: project, global
-    language: en
-
-  Update complete.
-```
-
-## JSON Output
+## JSON output
 
 ```bash
 comet update --json
 ```
 
+The current-project result includes component details. The relevant package-status excerpt for the default asset-only path is:
+
 ```json
 {
+  "status": "complete",
+  "failures": [],
   "npm": {
-    "scope": "global",
-    "status": "updated",
-    "command": "npm install -g @rpamis/comet@latest"
-  },
-  "skills": {
-    "totalCopied": 16,
-    "targets": [
-      {
-        "scope": "project",
-        "platform": "claude",
-        "platformName": "Claude Code",
-        "language": "en",
-        "source": "skills",
-        "copied": 8,
-        "skipped": 0,
-        "command": "copy assets/skills -> .claude/skills/ (project)"
-      },
-      {
-        "scope": "global",
-        "platform": "cursor",
-        "platformName": "Cursor",
-        "language": "en",
-        "source": "skills",
-        "copied": 8,
-        "skipped": 0,
-        "command": "copy assets/skills -> ~/.cursor/skills/ (global)"
-      }
-    ]
+    "scope": "skipped",
+    "status": "skipped",
+    "command": null,
+    "exitCode": null,
+    "reason": "self-update disabled for current-project updates; pass --self-update to opt in"
   }
 }
 ```
 
 The `npm.status` field is one of:
 
-| Value     | Meaning                                                                                                     |
-| --------- | ----------------------------------------------------------------------------------------------------------- |
-| `updated` | The npm package was updated successfully.                                                                   |
-| `failed`  | The npm update command exited with a non-zero code; skill files from the current package were used instead. |
-| `skipped` | The npm update step was skipped.                                                                            |
+| Value     | Meaning                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------ |
+| `updated` | The exact validated candidate was installed successfully.                                        |
+| `failed`  | Candidate inspection, validation, installation, or rollback failed; the run is incomplete.       |
+| `skipped` | Package mutation was disabled or no newer allowed version needed installation; inspect `reason`. |
 
 <Tip>
-  Run `comet update` regularly to get the latest skill improvements, new phase commands, and bug
-  fixes. Skill files are always overwritten — there is no conflict prompt.
+  Use `comet update --current-project` for a safe asset-only refresh. Add `--self-update` only when
+  you also intend to change the installed CLI package.
 </Tip>
 
 <Note>
-  `comet update` only refreshes **Comet** skill files. OpenSpec and Superpowers skills are managed
-  by their own separate packages and are not touched by this command.
+  `comet update` does not manage OpenSpec, Superpowers, or other third-party Skills. Native targets
+  additionally skip CodeGraph and Classic-only Skills; Classic targets retain their existing
+  behavior. Unmanaged local or third-party Skills are preserved.
 </Note>

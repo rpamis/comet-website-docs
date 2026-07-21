@@ -3,7 +3,7 @@ title: 'Native CLI'
 description: '初始化 Native、管理 change、保存阶段内进度、推进状态、验证证据以及安全恢复和归档。'
 ---
 
-`comet native` 是 Native 工作流的确定性 Runtime 入口。它只读取共享项目配置 `.comet/config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取或转换 Classic/OpenSpec change，也不会调用外部 Skill、Git、shell 或项目命令。
+`comet native` 是 Native 工作流的确定性 Runtime 入口。它的状态与工作流产物只归属共享项目配置 `.comet/config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取或转换 Classic/OpenSpec change。为生成 baseline 与 implementation scope，Runtime 会有界读取项目所有范围内的文件内容；项目存在 Git metadata 时，仅在构建 Git-aware snapshot 时调用 Git。它不会调用外部 Skill、shell 或项目命令；内置 `comet native check` 仍不调用 Git 或任何外部进程。
 
 ## 初始化与根目录
 
@@ -54,6 +54,24 @@ changes/<change-name>/specs/<capability>/spec.md
 ```
 
 Runtime 根据 canonical spec 是否存在推导 `create` 或 `replace`，并冻结 `base_hash`。删除 capability 使用 `spec remove`，不要手工维护 `comet-state.yaml` 的 `spec_changes`。若并行 change 已改变同一 canonical spec，先重读并改写完整目标规格，再使用 `spec rebase` 刷新基线、重开 Build 并清除旧验证结论。
+
+### Baseline 与 Git-aware snapshot
+
+`new` 在提交 change 状态前捕获完整 baseline。Git 项目只纳入 tracked 和未被 ignore 的 untracked 文件；ignored cache 与未登记的嵌套仓库内容不属于项目所有范围，submodule/gitlink 作为一个原子条目。非 Git 项目使用有界物理树 provider。任何项目所有项被省略都会返回结构化 `baseline-incomplete`，并清理未完成的 change，而不是把问题拖到 Build。
+
+Git selection 需要一次稳定且有界的枚举：
+
+- `git-selection-changed` 表示枚举期间 Git index 变化。等待 `git add` 等 Git 写入结束后重新运行命令；不能用 partial-scope 授权越过。
+- `git-enumeration-limit` 表示 tracked 与未忽略 untracked 的项目所有范围超过 Git 枚举安全预算。这是结构化不完整；应优先缩小或清理项目所有范围，或使用后续调整该产品预算的 Comet 版本，不能直接或默认越过。若确实无法恢复，只有 Runtime 返回带计数和内容 hash 的可授权 scope、且用户理解未知尾部风险时，才可按普通 partial 协议提交精确 hash、理由与 `--confirmed`。不能手改 snapshot/evidence 或猜测未枚举路径。
+
+非 Git 项目的 physical selection 使用有界、顺序无关的前后枚举围栏：
+
+- `physical-selection-changed` 表示项目树在捕获期间发生变化。等待并发文件操作结束后重试。
+- `physical-enumeration-limit` 表示节点、路径、字节或协作式执行预算耗尽。缩小项目树或把非项目内容移出项目所有范围后重试。
+
+这两种 physical 完整性失败都无法为未知尾部建立稳定 scope，因此在 current snapshot 中也不能通过 partial-scope 授权。
+
+普通 omission 会带 reason、计数和有界样本路径。baseline 创建与 migration cutover 必须完整，两种 Git selection omission 都不能在这里授权。之后的 current snapshot 只有在 Runtime 明确返回可授权 partial scope 时才可按精确 hash 进入确认：`git-selection-changed` 仍必须先消除，`git-enumeration-limit` 仅能使用上一段所述的最终兜底。
 
 ### 有界状态视图
 
@@ -119,11 +137,13 @@ comet native next <change-name> --summary <text> \
 | Verify   | 结构完整且绑定当前 acceptance/contract/scope 的报告                   | pass 进入 Archive；fail 返回 Build |
 | Archive  | 使用独立两步归档命令                                                  | 更新 canonical spec 并归档         |
 
-只有用户刚确认了会影响范围、用户可见行为、兼容性、风险或不可逆性的决定时，Shape/Build 才传 `--confirmed`。没有高影响决定时由 Runtime 记录隐式确认；任何确认都不能绕过 `[blocking]` 问题。
+只有用户刚确认了会影响范围、用户可见行为、兼容性、风险或不可逆性的决定时，Shape/Build 才传 `--confirmed`。没有高影响决定时由 Runtime 记录隐式确认；任何确认都不能绕过 `[blocking]` 问题。进入 Build 时，Runtime 把 approval 绑定到当时的 `approved_contract_hash`。之后若 brief 或完整目标规格变化，Build 会保持阻塞并返回 `re-confirm-contract`；只有用户重新确认当前 contract 后才能再次传 `--confirmed`，不能复用旧确认或手改 hash。
 
-Build 无法证明完整 scope 时，第一次调用只返回 scope hash 和未归属项，不推进。用户明确接受该组风险后，使用完全匹配的 `--allow-partial-scope`、非空理由和 `--confirmed` 重试。Allowance 与 scope hash 绑定；实现变化后不能沿用旧授权。
+Build 无法证明完整 scope 时，第一次调用只返回 scope hash 和未归属项，不推进。当前 snapshot 不完整时，Runtime 不会把未观察到的路径推断成删除；变化明细超过预算时，保留有界明细，并用带计数和内容 hash 的 `scope-detail-overflow` 表示其余变化。用户明确接受一组 Runtime 允许授权的具体风险后，使用完全匹配的 `--allow-partial-scope`、非空理由和 `--confirmed` 重试。Allowance 与 scope hash 绑定；实现变化后不能沿用旧授权。`git-selection-changed`、`physical-selection-changed` 与 `physical-enumeration-limit` 绝不可授权；`git-enumeration-limit` 只有在优先恢复无效、Runtime 返回可授权 scope 且用户理解未知尾部风险后，才能使用同一普通 partial 协议。
 
 Verify 报告必须包含 Runtime 可解析的验收机器块，并逐项绑定当前 Acceptance ID。旧报告、旧 receipt、变化后的 brief/spec、变化后的 implementation scope 或不同 revision 的证据都会被判定 stale。
+
+进入 Verify 后，若 contract 或项目 snapshot 变化，status 会返回只含摘要的受控 `next`。先运行该命令退回 Build 并生成新 scope；只有 brief/spec contract hash 也变化时才让用户重新确认。若只是项目 snapshot 或 implementation 变化，保留原 `approved_contract_hash`，不要制造无意义确认。不要在 stale scope 上提交 pass/fail；Archive 中任一绑定事实变化时使用同一回退协议，不能沿用旧 pass。
 
 ## 自主修复与停止语义
 
@@ -168,6 +188,10 @@ comet native doctor [<change-name>] --repair [--strategy continue|rollback]
 - 中断的 retention quarantine。
 
 Doctor 不会自动重写用户的 brief、规格、验证报告或项目源码。普通阶段 transition 只支持 `continue`；`rollback` 只适用于 journal 仍允许回滚的 Archive/root move。
+
+新 change 和当前 schema 的 v3 change 都必须保留创建时的完整 baseline。v3 baseline 缺失或不完整时，doctor 不会用当前文件重新生成，因为那会抹掉 change 创建以来的差异；应从可信备份恢复，或保留用户产物和实现事实后新建 change。
+
+显式 v1/v2 schema migration 是唯一 cutover 例外。`doctor --repair` 会在任何状态写入前捕获完整的迁移时点 baseline；捕获不完整时保持旧状态并停止。迁移后的 implementation evidence 只证明 cutover 之后的变化，不能把迁移前聊天、旧 scope 或旧 pass 当作当前证据。v2 位于 Verify/Archive 时会受控退回 Build 重新建立证据。
 
 普通写命令不会自动接管陈旧锁。只有显式 `doctor --repair` 能在证明本机 owner 已不存在、锁身份未变化且没有冲突事务时接管；活动锁和无法证明陈旧的锁始终保留。
 

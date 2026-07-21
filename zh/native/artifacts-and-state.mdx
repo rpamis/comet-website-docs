@@ -23,9 +23,16 @@ Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些�
         specs/<capability>/spec.md
         verification.md
         runtime/
+          baseline-manifest.json
           run-state.json
           trajectory.jsonl
           checkpoints/
+          evidence/
+            snapshots/
+            scopes/
+            allowances/
+            verifications/
+            check-receipts/
     archive/
       YYYY-MM-DD-<change-name>/
     runtime/
@@ -74,7 +81,7 @@ Runtime 根据 canonical spec 是否存在推导操作：
 
 ### `comet-state.yaml`
 
-每个 active 或 archived Native change 都有独立的 `comet-state.yaml`。它记录 phase、revision、approval、verification 与规格操作等机器状态。不要手改这些字段，也不要把它与 Classic change 的 `.comet.yaml` 混为一谈。
+每个 active 或 archived Native change 都有独立的 `comet-state.yaml`。它记录 phase、revision、approval、`approved_contract_hash`、verification 与规格操作等机器状态。进入 Build 时，`approved_contract_hash` 把 approval 绑定到当时的 brief/spec contract；后续 contract 漂移必须取得用户重新确认。不要手改这些字段，也不要把它与 Classic change 的 `.comet.yaml` 混为一谈。
 
 ### Run、trajectory 与 checkpoint
 
@@ -92,6 +99,12 @@ Checkpoint 不替代 brief、规格或验证报告，也不推进 phase。
 
 Native 对 change 数量、规格大小、finding、Acceptance ID、输出和归档树设置预算。列表与详情使用绑定当前内容集合的 cursor；输入变化后旧 cursor 会明确失效。
 
-实现范围、规格基线、验证报告、check receipt、checkpoint manifest 与归档预检都使用 hash 绑定。这样可以判断证据是否仍对应当前事实，而不是只相信“已经验证过”的文字声明。
+`baseline-manifest.json` 是创建 change 时捕获的有界项目快照。Git provider 只纳入 tracked 与未被 ignore 的 untracked 文件并原子表示 submodule/gitlink；非 Git 项目使用带前后枚举围栏的有界物理树 provider。创建或 v1/v2 migration cutover 时 baseline 必须完整；当前 v3 baseline 不能用当前文件自动重建。
+
+实现范围、规格基线、当前 snapshot、验证报告、check receipt、checkpoint manifest 与归档预检都使用 hash 绑定。当前 snapshot 不完整时不会推断删除；变化明细超预算时，`scope-detail-overflow` 用计数与内容 hash 保留其余变化的结构化事实。这样可以判断证据是否仍对应当前事实，而不是只相信“已经验证过”的文字声明。
+
+Git 枚举还会显式报告 `git-selection-changed` 与 `git-enumeration-limit`。前者必须等 index 稳定后重试，绝不可授权；后者应优先通过缩小或清理项目所有范围、或后续产品预算调整来恢复。baseline 创建与 migration cutover 必须完整，没有 partial 授权；仅在之后的 current snapshot 中恢复不可行、Runtime 返回带计数与内容 hash 的可授权 scope，且用户理解未知尾部风险时，`git-enumeration-limit` 才可使用精确 hash、理由与 `--confirmed` 走普通 partial 协议。两者都不能通过手改 evidence 绕过。
+
+物理树枚举会显式报告 `physical-selection-changed` 与 `physical-enumeration-limit`。前者要求等待并发文件操作结束，后者要求缩小项目树或移出非项目内容；两者都无法稳定绑定未知尾部，在 current snapshot 中也不能通过 partial scope 授权。
 
 下一步阅读 [安全与恢复](/zh/native/safety-and-recovery)，或在 [Native CLI](/zh/cli/native) 查看对应命令。
