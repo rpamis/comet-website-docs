@@ -1,9 +1,41 @@
 ---
-title: "Changelog"
-description: "Comet 发布记录。"
+title: 'Changelog'
+description: 'Comet 发布记录。'
 ---
 
 本页默认展开当前版本，历史版本按版本逐个折叠。日常升级时先看最新版本的重点变化、破坏性调整和修复项；只有排查旧版本行为时才需要展开对应版本。
+
+<Update label="0.4.0-beta.7" description="2026-07-20" rss={{ title: "Comet 0.4.0-beta.7", description: "2026-07-20 发布记录" }}>
+### Added（新增）
+
+- **Comet Native 工作流**：新增面向强模型的自包含工作流。需求澄清支持默认的 `sequential` 模式和可配置的 `batch` 模式：前者每轮询问一个最上游问题，后者一次提出本轮所有可回答问题，并在 Build 前要求最终共享理解确认。Claude Code 在整轮可由一次调用完整表达时优先使用 `AskUserQuestion`；否则整轮降级为编号文本，不拆分问题轮次。单 Skill 持续推进、可配置产物根、默认语言、完整目标规格、checkpoint 和有界状态都不依赖 OpenSpec、Superpowers 或其他外部 Skill。
+- **证据绑定的自主执行**：新增 Git-owned 项目 snapshot，只纳入 tracked 与未被 ignore 的 untracked 文件并把 submodule/gitlink 作为原子条目；非 Git 项目使用带前后枚举围栏的有界物理树 snapshot。同时加入有界 overflow evidence、contract-hash-bound approval、Acceptance ID、不可变验证报告快照、可选内置只读 check receipt、证据失效回退、partial scope 授权和 repair episode。新建 change 或旧 schema migration 在提交状态前必须取得完整 baseline；不完整的当前 snapshot 不会伪造删除。没有真实 scope 进展时会停止重复失败。
+- **可恢复的 Native 安全边界**：新增 schema 迁移、revision/CAS 与 live mutation 串行化、受保护 Run/文件 I/O、workspace identity、当前 root 冲突检查、两步 Archive、exactly-once 事务恢复、安全 root move、显式陈旧锁接管、有界 evidence retention 和只读 Dashboard projection。
+- **稳定工作流入口**：新增永久 `/comet-native`、`/comet-classic` 与 `comet workflow resolve`。`/comet` 是配置驱动别名，只选择一套工作流，不转换或混合两边的 change、状态与产物；Skill-only 安装在 CLI 不可用时仍可使用随包 resolver。
+- **Native 基线评估**：对齐 0.4.0 基线的 16 个任务与重复运行，按 `task_id + repetition` 配对并修正多轮调用耗时；Wave A–F fixture/validator 单独验证机械契约，不把静态覆盖包装成真实模型性能。
+- **可选 Eval suite**：新增 `comet eval --suite local|langsmith`。Local 保持默认；LangSmith 模式复用同一任务语料和评分逻辑，由 CLI 启动 tracing-aware runner、报告目录与 Claude Code tracing plugin。
+- **统一工作流保护**：每个平台只安装一个跨工作流 Rule，支持 Hook 的平台只安装一个 Router；共享 current-change selection 把一次原子多文件写入最多路由给一个 Guard，避免 Native 与 Classic 双重阻塞，并迁移已有 Classic selection 与旧托管 Hook/Rule。
+
+### Changed（变更）
+
+- **Node.js 运行时要求**：Comet 现在要求 Node.js 22 或更高版本。
+- **对齐的 Eval 效率指标**：Native 对比报告现在从 raw trace 重新计算配对的模型启动/恢复、turn、tool call、累计耗时、token、成本与上下文压力，并使用严格成功交集，避免缺失 telemetry 或未完成任务夸大效率。
+- **可选项目工作流**：项目级 `comet init` 会说明并提供 Native、Classic 或同时启用两者；新项目默认 `/comet` 进入 Native，Native 产物默认位于 `docs/comet/`。`--workflow both` 安装两套独立能力，共享 `.comet/config.yaml` 但不合并状态；完成摘要只展示实际初始化的工作目录。
+- **明确的 Native 状态文件**：Active 与 archived Native change 统一使用 `comet-state.yaml`，同时保持与 Classic `.comet.yaml` 的 schema 和生命周期独立。
+- **分区状态与恢复**：`comet status` 展示配置入口，并分别报告 Native、Classic 与未托管 OpenSpec change；`comet resume-probe` 返回 workflow-aware v2 结果，只从 `/comet-native` 或 `/comet-classic` 恢复，并在配置或状态损坏时失败关闭。
+- **可配置环境感知恢复**：`.comet/config.yaml` 新增 Native 与 Classic 共用的 `ambient_resume` 开关；生成的配置注释跟随 init/update 语言，旧配置默认保持启用。
+- **Classic 配置命名空间**：Classic 的 `language`、`context_compression`、`review_mode` 和 `auto_transition` 默认值迁入 `.comet/config.yaml` 的 `classic:` 块。`comet init` 与 `comet update` 会迁移旧顶层值，优先保留明确的新格式配置。
+- **显式 npm 自更新**：current-project `comet update` 默认只刷新托管资产，不修改任何 npm 安装；需要更新 CLI 时必须传入 `--self-update`。显式 `--scope global` 也确定性使用 current-project 资产范围且不会隐式更新包；较宽更新可用 `--skip-self-update` 跳过包更新。自更新比较包含预发布版本的完整 semver、拒绝降级、隔离验证精确候选 CLI，并在安装失败时尝试恢复原精确版本。
+
+### Fixed（修复）
+
+- **初始化与更新错误报告**：`comet init` 与 `comet update` 对 incomplete 工作返回非零退出码，在 JSON 中保留 npm 诊断，标出批量更新中的失败与未尝试项目，并在组件失败后不再显示成功横幅或隐藏清理错误。
+- **OpenSpec 安装诊断**：已安装的 OpenSpec CLI 版本过旧且未选择升级时，初始化会明确说明版本不满足要求，不再误报为 CLI 不可用。
+- **Windows 交互式 Eval**：Docker 交互评估优先使用 Git Bash，保留容器 prompt 路径，按真实 driver turn 计数，并正确区分用户决定、完成状态和环境失败。
+- **并行 Eval 协调**：Windows xdist worker 会等待共享 Docker build lock，不再把正常并发报告为资源死锁。
+- **npm 发布缓存清理**：发布预检会在文件系统检查前排除嵌套和平台特有的 pytest cache，避免不可读的本地 Eval 派生目录阻塞发布或进入 npm 包。
+
+</Update>
 
 <Update label="0.4.0-beta.6" description="2026-07-20" rss={{ title: "Comet 0.4.0-beta.6", description: "2026-07-20 发布记录" }}>
 ### Added（新增）
@@ -20,25 +52,27 @@ description: "Comet 发布记录。"
 
 - **Skill 发现容错**：无关本地 Skill 的 YAML frontmatter 格式错误不再中断 Bundle Factory 指引或候选发现，Comet 会跳过损坏的描述并继续扫描。
 </Update>
-<Update label="0.4.0-beta.5" description="2026-07-16" rss={{ title: "Comet 0.4.0-beta.5", description: "2026-07-16 发布记录" }}>
+
+<Update label="0.4.0-beta.5" description="2026-07-14" rss={{ title: "Comet 0.4.0-beta.5", description: "2026-07-14 发布记录" }}>
 ### Changed（变更）
 
-- **Skill 触发与决策编写**：内置阶段 Skill 和 Creator 生成的内部 Node Skill 现在显式声明入口/运行时边界；Creator 模板在产生用户暂停之前，会先对自动处理、停止条件和手动交接做分类。普通任务、守卫失败、能力缺口和单选项恢复路径不再触发内部阶段或多余提问。
-- **工作流检查点**：Clear 请求现在跳过冗余的产物前命名确认；Build 预检可执行能力并把相邻的配置选择合并为一个决策；手动交接直接交还控制权，不再重复询问。完整工作流在产物生成前初始化可恢复状态，持久化大型 PRD 批次清单，并让可恢复性独立于未落盘的对话状态。
-- **验证修复循环与归档归属**：验证现在自动把前三个可执行失败返回给 Build，并在恢复之间持久化连续失败计数；只在真正的权衡或重试上限决策时才暂停，CRITICAL 和 IMPORTANT 发现不可豁免。验证记录证据但不再完成分支；归档只在分支处理前提交有归属的路径，使最终分支或 PR 包含合并后的 spec 和归档元数据。
-- **预设执行语义**：Hotfix 和 tweak 工作流现在如实记录当前工作区隔离状态、在 direct 模式下保留回归测试、不再仅凭任务数量升级，并在升级到完整工作流时丢弃轻量执行设置。
-- **Dashboard 产物预览**：产物抽屉现在用完整 Markdown 渲染（表格、引用、任务列表）替代原来的子集渲染器，支持语法高亮和 Mermaid 图。侧边面板预览保持无干扰、不显示目录；全屏模式新增展开/折叠控件，存在标题时显示目录，重复标题有唯一锚点，标题内联格式正确渲染。抽屉标题中的长路径会换行，并提供一键复制控件。`.comet.yaml` / YAML 和 handoff / checkpoint JSON 产物以结构化表格渲染（标量为键值行，`files` 等同构对象数组渲染为独立数据表），不再是原始文本。
+- **Skill 触发与决策创作**：内置阶段 Skill 和 Creator 生成的内部 Node Skill 明确入口与 Runtime 边界；Creator 在生成暂停点前区分自动处理、停止条件和人工交接，减少不必要的内部 Skill 调用与用户提问。
+- **工作流 checkpoint**：清晰请求跳过多余命名确认；Build 预检可执行能力并合并相邻配置决定；大型 PRD 使用可恢复批次 manifest，恢复不再依赖未写入磁盘的对话状态。
+- **验证修复与归档归属**：前三次可执行验证失败自动返回 Build，并跨恢复保存连续失败次数；Verify 只记录证据，Archive 在分支处理前只提交归属路径，确保最终分支包含规格和归档元数据。
+- **Preset 执行语义**：Hotfix/Tweak 会如实记录当前工作区隔离，直接模式仍保留回归测试，升级完整工作流后清除轻量执行设置。
+- **Dashboard 产物预览**：Markdown 预览支持表格、引用、任务列表、语法高亮和 Mermaid；全屏目录、重复标题锚点、长路径复制以及 YAML/JSON 结构化表格也得到统一处理。
 
 ### Fixed（修复）
 
-- **OpenSpec 工作流兼容性**：Comet 现在要求 OpenSpec 1.5 或更高版本，会在安装和 Doctor 中报告不兼容的安装；从 `applyRequires` 和实时 schema 驱动 `/comet-open`，校验仓库本地路径和具体产物，并在恢复持久化的拆分批次时不重建已完成改动。
-- **Codex hook 配置**：Codex 的项目和全局安装现在把阶段守卫 hook 写到受支持的 `.codex/hooks.json` 位置，并安全地把 Comet 管理的条目从之前生成的 `settings.local.json` 迁移过来，不改变用户自定义的 hook 和设置（[#199](https://github.com/rpamis/comet/issues/199)）。
-- **标准 Superpowers 产物**：Classic 写入 hook 现在接受首次写入到标准工作流目录的 design、plan 和 verification 产物，不再要求 Comet 专属文件名后缀；同时仍然通过选中 change、阶段和占用槽位检查防止歧义或重复写入。
-- **Skill 生命周期完整性**：Comet 现在保留格式错误的用户 Hook 配置，在 init、update、Doctor 和 uninstall 之间一致地报告 Skill、Rule 和 Hook 失败，并避免把部分安装登记为完成。
+- **OpenSpec 兼容性**：要求 OpenSpec 1.5+，并从 live schema 驱动 `/comet-open`，校验项目相对路径与具体输出，恢复 split batch 时不重建已完成 change。
+- **Codex Hook 配置**：项目级和全局 Codex 安装写入受支持的 `.codex/hooks.json`，并安全迁移旧的 Comet 管理配置（[#199](https://github.com/rpamis/comet/issues/199)）。
+- **标准 Superpowers 产物**：Classic 写入守卫接受标准目录中的首次设计、计划和验证产物，同时保留阶段、选择和重复占位检查。
+- **Skill 生命周期完整性**：初始化、更新、Doctor 和卸载会一致报告 Skill、Rule、Hook 失败，保留损坏的用户 Hook 配置，并避免把部分安装登记成成功。
 
 ### Security（安全）
 
-- **Dashboard 预览 XSS 加固**：Markdown / YAML / JSON 产物的 HTML 在注入 DOM 前用 DOMPurify 清洗，危险 URL scheme 被阻断，Mermaid 以 `securityLevel: 'strict'` 运行，结构化预览的 key/属性转义覆盖引号，不可信产物内容无法通过原始 HTML、事件处理器、属性突破或松散的图渲染执行脚本。
+- **Dashboard 预览 XSS 防护**：Markdown/YAML/JSON 预览使用 DOMPurify，阻止危险 URL 与属性注入；Mermaid 使用严格安全模式，避免不可信产物执行脚本。
+
 </Update>
 
 <Update label="0.4.0-beta.4" description="2026-07-11" rss={{ title: "Comet 0.4.0-beta.4", description: "2026-07-11 发布记录" }}>
@@ -68,6 +102,7 @@ description: "Comet 发布记录。"
 - **归档最终确认**：`/comet-archive` 会把用户最终批准记录到机器管理的 Classic 状态；在确认 transition 成功前，真实归档命令拒绝修改，避免直接调用脚本绕过确认。
 - **归档注释格式**：Classic 归档注释会保留正常的 Markdown 文件结尾，并可安全重复执行，避免产生 `git diff --check` 格式错误（[#185](https://github.com/rpamis/comet/issues/185)）。
 - **全局产物语言**：全局 `comet init` 和 `comet update` 会把所选产物语言保存到 `~/.comet/config.yaml`。Classic workflow 优先读取项目配置，再回退到全局默认；项目仍可覆盖该设置（[#174](https://github.com/rpamis/comet/issues/174)）。
+
 </Update>
 
 <Update label="0.4.0-beta.3" description="2026-07-08" rss={{ title: "Comet 0.4.0-beta.3", description: "2026-07-08 发布记录" }}>
@@ -82,6 +117,7 @@ description: "Comet 发布记录。"
 ### Removed（移除）
 
 - **自定义 guard 命令字段**：Classic 工作流状态不再接受 `build_command` 和 `verify_command`。guard 改为使用内置项目构建探测路径，旧字段会作为未知字段被拒绝。
+
 </Update>
 
 <Update label="0.4.0-beta.2" description="2026-07-07" rss={{ title: "Comet 0.4.0-beta.2", description: "2026-07-07 发布记录" }}>
@@ -90,6 +126,7 @@ description: "Comet 发布记录。"
 - **单语言规则安装**：`comet init` 和 `comet update` 现在只安装与所选/检测到的 Skill 语言匹配的 Comet 阶段守卫规则文件（例如 `.claude/rules/comet-phase-guard.md`），不再无论语言选择都同时安装中英文两个规则变体。
 - **符号链接安装安全性**：`comet init` 和 `comet update` 在符号链接安装模式下，如果目标平台的 `skills/` 目录包含 Comet 管理清单之外的文件，现在会拒绝把该目录替换成符号链接，避免删除本地或第三方 Skill（[#159](https://github.com/rpamis/comet/issues/159)）。
 - **并行 change 的产物写入**：Classic 阶段守卫现在会把 `docs/superpowers/` 写入路由到匹配的 design/build/verify change，不再因为另一个更早创建的活跃 change 阻塞共享的 Design Doc 和计划产物（[#160](https://github.com/rpamis/comet/issues/160)）。
+
 </Update>
 
 <Update label="0.4.0-beta.1" description="2026-07-06" rss={{ title: "Comet 0.4.0-beta.1", description: "2026-07-06 发布记录" }}>
@@ -155,6 +192,7 @@ description: "Comet 发布记录。"
 ### Security（安全）
 
 - **Dependabot 依赖告警**：把测试工具钉到打过补丁的 Vite 和 esbuild 版本（覆盖 npm 和 pnpm lockfile），清除了待处理的 Vite 路径穿越、launch-editor 和 esbuild dev-server 告警，且不改变 Comet 运行时依赖。
+
 </Update>
 
 <Update label="0.3.9" description="2026-06-17" rss={{ title: "Comet 0.3.9", description: "2026-06-17 发布记录" }}>
@@ -469,11 +507,11 @@ description: "Comet 发布记录。"
 
 ### New Contributors
 
-* @felanny 在 #38 中首次贡献
-* @Joechan11 在 #44 中首次贡献
-* @bevishe 在 #47 中首次贡献
-* @kathy32 在 #39 中首次贡献
-* @gleami 在 #46 中首次贡献
+- @felanny 在 #38 中首次贡献
+- @Joechan11 在 #44 中首次贡献
+- @bevishe 在 #47 中首次贡献
+- @kathy32 在 #39 中首次贡献
+- @gleami 在 #46 中首次贡献
 
 </Accordion>
 </Update>
@@ -936,9 +974,9 @@ Comet 0.2.0 是一次综合性优化版本：涵盖 Skill 可靠性、CLI 完整
 
 - **State File Separation**: Comet 工作流状态现在存储在独立的 `.comet.yaml` 文件中，不再放在 `.openspec.yaml` 的子树里
 - **Three-Layer Reliability Defense**:
-	- 所有阶段的入口校验，带 `[HARD STOP]` 诊断
-	- 所有状态变更采用先写入后校验的模式
-	- schema 校验脚本（`comet-yaml-validate.sh`），支持字段、枚举和路径校验
+  - 所有阶段的入口校验，带 `[HARD STOP]` 诊断
+  - 所有状态变更采用先写入后校验的模式
+  - schema 校验脚本（`comet-yaml-validate.sh`），支持字段、枚举和路径校验
 - **Path Traversal Protection**: 对 change 名称做输入校验，防止目录穿越攻击
 - **Guard Script Integration**: 在阶段转换时自动进行 schema 校验
 

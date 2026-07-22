@@ -1,40 +1,43 @@
 ---
-title: "archive 阶段"
-description: "archive 阶段在最终确认后用 comet archive 完成 delta spec 合并、产物标注和目录归档，关闭整个 spec 生命周期。"
+title: 'archive 阶段'
+description: 'archive 阶段在最终确认后用 comet archive 完成 delta spec 合并、产物标注和目录归档，关闭整个 spec 生命周期。'
 ---
 
 archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产物，并移动到 archive 目录。它**关闭整个 spec 生命周期**。从你的角度看，这是一个**不可逆的收尾动作**——Comet 会先给你看清楚要做什么，等你确认才执行。
 
 <Tip>
-  <strong>正常情况下你只需要 <code>/comet</code>。</strong>verify 通过后，<code>/comet</code> 会自动衔接调用 <code>/comet-archive</code>。本文描述的 <code>/comet-archive</code> 是它内部调用的阶段 Skill——只有当你想<strong>手动控制</strong>（例如关闭了 <code>auto_transition</code>、或想只跑这一个阶段）时，才需要直接输入 <code>/comet-archive</code>。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
+  正常情况下你只需要 <code>/comet</code>。
+  配置选择 Classic 后，内部 <code>/comet-classic</code> 会读取状态，并在 verify 通过后自动调用{' '}
+  <code>/comet-archive</code>。本文描述的是内部阶段 Skill；只有想<strong>手动控制</strong>
+  时才需要直接输入。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
 </Tip>
 
 ## 本阶段如何触发
 
-`/comet-archive` 通常**不是你手敲的命令**，而是 `/comet` 自动衔接的结果。
+`/comet-archive` 通常**不是你手敲的命令**，而是 `/comet-classic` 自动衔接的结果。
 
 ### 默认：用 /comet 自动衔接
 
-verify 阶段通过后（`verify_result: pass`），`/comet` 会先做归档前确认，确认后自动衔接调用 `/comet-archive`。下一次调用 `/comet` 时，如果检测到 `verify_result: pass`，也会路由到 archive。archive 不受 workflow 类型影响，始终返回标准 Skill。详见[自动推进机制](/zh/concepts/auto-transition)。
+verify 阶段通过后（`verify_result: pass`），`/comet-classic` 会先做归档前确认，确认后自动衔接调用 `/comet-archive`。下一次调用 `/comet-classic` 时，如果检测到 `verify_result: pass`，也会路由到 archive。archive 不受 workflow 类型影响，始终返回标准 Skill。详见[自动推进机制](/zh/concepts/auto-transition)。
 
 ### 手动：什么时候才需要直接 /comet-archive
 
-- 关闭了自动衔接（`auto_transition: false`）——verify 通过后 `/comet` 会停下并打印 HINT。
+- 关闭了自动衔接（`auto_transition: false`）——verify 通过后 `/comet-classic` 会停下并打印 HINT。
 - 只想单独跑 archive（恢复一个 `phase: archive` 的 change 完成归档）。
 
-**自动推进开着就用 `/comet`，关了才需要手动用各阶段命令。**
+**正常使用统一入口 `/comet`；只有手动控制阶段时才直接调用阶段命令。**
 
 ---
 
 ## 前置条件
 
-进入 archive 需要：验证已通过（`verify_result: pass`）、归档提交和分支处理仍未完成（`branch_status: pending`）。
+进入 archive 需要：验证已通过（`verify_result: pass`）、分支已处理（`branch_status: handled`）。
 
 ## 你会经历什么
 
 ```mermaid
 flowchart TD
-    Entry["入口状态验证<br/>phase=archive, verify_result=pass"] --> Stop1["停顿点 8：归档前最终确认<br/>三选一"]
+    Entry["入口状态验证<br/>phase=archive, verify_result=pass"] --> Stop1["停顿点 13：归档前最终确认<br/>三选一"]
     Stop1 -->|确认归档| Confirm["comet state transition<br/>archive-confirm"]
     Confirm --> Run["comet archive 执行"]
     Stop1 -->|需要调整| Reopen["archive-reopen 回 verify"]
@@ -46,13 +49,15 @@ flowchart TD
     S4 --> S5["标注 Design Doc + Plan frontmatter"]
     S5 --> S6["移动目录 + archived: true"]
     S6 --> Done["生命周期闭合"]
-    Done --> Commit["Step 4：用显式 pathspec 提交归档变更"]
-    Commit --> Branch["停顿点 9：分支处理<br/>按 isolation 选择推送 / 合并 / PR / 保留"]
-    Branch --> Final["写 branch_status: handled<br/>comet guard archive"]
+    Done --> Commit["停顿点 14：提示提交归档变更<br/>git add -A && git commit"]
 ```
 
 <p align="center">
-  <img src="/assets/archive-phase-illustrations/01-delta-spec-archive-closeout.png" alt="小鱼把通过验证的 delta spec 贴入主 spec，并用 final 印章完成归档收尾" width="800" />
+  <img
+    src="/assets/archive-phase-illustrations/01-delta-spec-archive-closeout.png"
+    alt="小鱼把通过验证的 delta spec 贴入主 spec，并用 final 印章完成归档收尾"
+    width="800"
+  />
 </p>
 
 <p align="center">archive 阶段把验证通过的 delta 合入主 spec，并关闭这次 change 的生命周期</p>
@@ -65,22 +70,22 @@ comet state check <name> archive
 
 要求 `phase: archive`、`verify_result: pass`、`archived != true`。
 
-### 停顿点 8：归档前最终确认
+### 停顿点 13：归档前最终确认
 
 Comet **暂停等你确认**——不会因为验证通过就自动归档。它给你看清楚：
 
 - change 名称
 - 验证报告路径和结论
-- 当前分支/工作区和已有未提交改动的归属摘要
+- 分支处理状态
 - 本次将执行的**不可逆动作**：按 delta 语义合并主 spec、标注 design doc/plan、移动 change 到 archive 目录
 
 然后让你**三选一**：
 
-| 选项 | 含义 |
-| --- | --- |
-| **确认归档** | 立即执行归档脚本，完成 spec 合并和 change 移动 |
+| 选项                   | 含义                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| **确认归档**           | 立即执行归档脚本，完成 spec 合并和 change 移动                                                  |
 | **需要调整或重新验证** | 不执行；`comet state transition <name> archive-reopen` 回 `phase: verify`，再调 `/comet-verify` |
-| **暂不归档** | 不执行，保留 `phase: archive`，等你稍后再调 `/comet-archive` |
+| **暂不归档**           | 不执行，保留 `phase: archive`，等你稍后再调 `/comet-archive`                                    |
 
 只有“确认归档”才会先执行 `comet state transition <name> archive-confirm`，把 machine-owned `archive_confirmation` 写为 `confirmed`，再进入真实归档。“需要调整”必须用 `archive-reopen`（**不能手工编辑 `.comet.yaml`**），它会设 `verify_result: pending`、`phase: verify`，并清除 `verified_at` 和旧确认。
 
@@ -92,15 +97,15 @@ comet archive "<change-name>"
 
 脚本按顺序执行（每步打印 `[OK]`/`[FAIL]`）：
 
-| 步骤 | 内容 |
-| --- | --- |
-| 1 | 校验共同入口状态（`phase: archive`、`verify_result: pass`、`archived: false`）；真实归档另要求 `archive_confirmation: confirmed` |
-| 2 | 检查归档目标可用（`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在） |
-| 3 | 真实归档写 pending checkpoint（支持中断恢复），调用 `openspec archive --yes` 合并 delta 并移动目录；dry-run 不执行这些写入 |
-| 4 | 校验主 spec 无 delta-only 标题残留（有残留 **FATAL**） |
-| 5 | 标注 Design Doc frontmatter（`archived-with` + `status: final`） |
-| 6 | 标注 Plan frontmatter（`archived-with`） |
-| 7 | 更新归档状态（`archived: true`，Run 转 `completed`） |
+| 步骤 | 内容                                                                                                                             |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | 校验共同入口状态（`phase: archive`、`verify_result: pass`、`archived: false`）；真实归档另要求 `archive_confirmation: confirmed` |
+| 2    | 检查归档目标可用（`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在）                                                      |
+| 3    | 真实归档写 pending checkpoint（支持中断恢复），调用 `openspec archive --yes` 合并 delta 并移动目录；dry-run 不执行这些写入       |
+| 4    | 校验主 spec 无 delta-only 标题残留（有残留 **FATAL**）                                                                           |
+| 5    | 标注 Design Doc frontmatter（`archived-with` + `status: final`）                                                                 |
+| 6    | 标注 Plan frontmatter（`archived-with`）                                                                                         |
+| 7    | 更新归档状态（`archived: true`，Run 转 `completed`）                                                                             |
 
 可以用 `--dry-run` 预览不执行：
 
@@ -113,7 +118,10 @@ dry-run 跑前两步，OpenSpec archive 和标注只打印 `[DRY-RUN]` 不执行
 `--dry-run` 只要求 change 已进入 archive 且 verify 通过，不要求先写入 `archive_confirmation: confirmed`，也不会写 pending checkpoint。它适合在最终确认前检查归档目标和将要执行的动作。
 
 <Note>
-  delta → 主 spec 的合并由 <strong>OpenSpec CLI</strong> 执行（<code>openspec archive &lt;change&gt; --yes</code>），Comet 只调用它然后校验结果。如果 OpenSpec CLI 找不到，会 <code>FATAL: OpenSpec CLI not found</code>——装 OpenSpec 或设 <code>COMET_OPENSPEC</code>。
+  delta → 主 spec 的合并由 <strong>OpenSpec CLI</strong> 执行（
+  <code>openspec archive &lt;change&gt; --yes</code>），Comet 只调用它然后校验结果。如果 OpenSpec
+  CLI 找不到，会 <code>FATAL: OpenSpec CLI not found</code>——装 OpenSpec 或设{' '}
+  <code>COMET_OPENSPEC</code>。
 </Note>
 
 ### Step 3：生命周期闭合
@@ -124,7 +132,7 @@ brainstorming → delta spec → 实施 → 验证 → 主 spec 合并 → desig
 
 流程全部完成。活跃 change 列表不再包含它，后续改动需要创建新 change。
 
-### Step 4：用显式 pathspec 提交归档变更
+### Step 4：提交归档变更（停顿点 14）
 
 归档脚本只移动文件、合并 spec，**不会自动提交**。执行完后，工作树里会留下这些未提交的变更：
 
@@ -132,40 +140,18 @@ brainstorming → delta spec → 实施 → 验证 → 主 spec 合并 → desig
 - delta spec 已按 ADDED/MODIFIED/REMOVED/RENAMED 语义合并进主 spec
 - Design Doc / Plan 的 frontmatter 加上了归档标注
 
-归档后读 `git status --short`，与归档前的脏工作区归属基线对比，**只 stage 可归属到本次 change 的路径**：原始活跃路径、命令打印的实际归档路径、本次 delta 改动的主 spec、本 Design Doc/Plan 的归档元数据。有路径无法归属时停止。用显式 pathspec 后检查 staged diff，不要 stage 整个仓库，也不要把用户已有的未提交改动混进归档提交：
+Comet 会**提示你提交这些变更**，否则归档结果就一直悬在工作树里。展示待提交文件后，建议：
 
 ```bash
-git add -- <逐个核实的归档路径...>
-git diff --cached --stat
+git add -A
 git commit -m "chore: archive <change-name>"
 ```
 
-提交失败或 staged diff 含无关路径时停止。
-
-### Step 5：归档提交后处理分支（停顿点 9）
-
-归档提交成功后，**立即加载** Superpowers `finishing-a-development-branch`。这个顺序确保最终分支或 PR 包含主 spec 合并和归档元数据。skill 不可用时停止并提示安装/启用，不写 `branch_status: handled`。
-
-加载后按 `comet/reference/decision-point.md` 暂停让你选。`isolation: current` 表示 change 就在当前目标分支上，因此只提供“推送当前分支”或“保留本地”；不会再提供面向功能分支的本地合并或创建 PR。`isolation: branch|worktree` 才提供下表选项：
-
-| 选项 | 行为 |
-| --- | --- |
-| 1 | 本地合并到主分支 |
-| 2 | 推送并创建 PR |
-| 3 | 保持当前分支稍后处理 |
-
-归档已完成，所以**不提供"丢弃工作"选项"。只有选定操作成功（或你明确选择保留分支）后才写：
-
-```bash
-comet state set <change-name> branch_status handled
-comet guard <change-name> archive
-comet state clear-selection
-```
-
-archive guard 会校验归档完整性和 `branch_status: handled`；失败说明工作流仍未完成。
+归档提交成功后再处理分支。`isolation: current` 表示 change 已经位于目标分支，因此只提供“推送当前分支”或“保留本地”；不会再提供面向功能分支的本地合并或创建 PR。`isolation: branch|worktree` 才提供合并、推送并创建 PR、保留或丢弃分支等收尾选项。
 
 <Note>
-  分支处理在 verify 和 archive 之间曾经属于 verify 阶段。0.4.0-beta.5 起移到 archive，<strong>在归档提交之后</strong>进行，使最终分支或 PR 包含合并后的 spec 和归档元数据。
+  如果 phase 4 的分支处理选择了"暂不合并到主分支"，把选定的收尾方式（合并 / PR /
+  保留分支）和这次提交一起完成。归档脚本本身不接管分支操作。
 </Note>
 
 ---
@@ -176,21 +162,24 @@ archive guard 会校验归档完整性和 `branch_status: handled`；失败说�
 
 ## 产物
 
-| 产物 | 说明 |
-| --- | --- |
-| 归档目录 | `openspec/changes/archive/YYYY-MM-DD-<name>/`（日期取 UTC） |
-| 主 spec 更新 | delta 按 ADDED/MODIFIED/REMOVED/RENAMED 合并 |
-| Design Doc 标注 | `archived-with` + `status: final` |
-| Plan 标注 | `archived-with` |
+| 产物            | 说明                                                        |
+| --------------- | ----------------------------------------------------------- |
+| 归档目录        | `openspec/changes/archive/YYYY-MM-DD-<name>/`（日期取 UTC） |
+| 主 spec 更新    | delta 按 ADDED/MODIFIED/REMOVED/RENAMED 合并                |
+| Design Doc 标注 | `archived-with` + `status: final`                           |
+| Plan 标注       | `archived-with`                                             |
 
 这样归档后检索 Design Doc/Plan 时，能直接从 frontmatter 知道它属于哪次归档、是否已结案，不必反查 `.comet.yaml`。
 
 ## 何时进入
 
-正常情况下由 `/comet` 在 verify 通过后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。前置条件：`verify_result: pass` 且 `branch_status: pending`（分支处理在 archive 内完成）。
+正常情况下用户调用 `/comet`，配置进入 Classic 后由内部路由在 verify 通过时自动衔接本阶段。前置条件：`verify_result: pass` 且分支已处理（`branch_status: handled`）。
 
 <Warning>
-  归档应由 <code>/comet-archive</code> 或 <code>comet archive</code> 完成。不要手工写 <code>archive_confirmation</code> 或 <code>archived</code>；前者只能由确认 transition 写入，后者由真实归档完成。归档后 <code>comet guard &lt;name&gt; archive</code> 会从原始 change 名解析实际归档目录，不要手工构造带日期的归档路径。
+  归档应由 <code>/comet-archive</code> 或 <code>comet archive</code> 完成。不要手工写{' '}
+  <code>archive_confirmation</code> 或 <code>archived</code>；前者只能由确认 transition
+  写入，后者由真实归档完成。归档成功后不要再跑 <code>comet guard &lt;name&gt; archive</code>
+  ——活跃目录已不存在。归档完整性以命令退出码和归档目录状态判断。
 </Warning>
 
 ## 恢复（中断后可继续）
@@ -206,7 +195,7 @@ archive guard 会校验归档完整性和 `branch_status: handled`；失败说�
 openspec/changes/archive/YYYY-MM-DD-<change-name>/
 ```
 
-活跃 change 列表中不再包含这个 change。要开始新工作，用 `/comet` 或 `/comet-open`。
+活跃 change 列表中不再包含这个 change。要开始新的工作，使用 `/comet`；配置选择 Classic 后会自动创建或选择下一条 Classic change。
 
 ## 下一步
 

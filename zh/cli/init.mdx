@@ -1,9 +1,9 @@
 ---
-title: "comet init"
-description: "初始化项目或全局 Comet 环境，安装 Skill、规则、脚本和可选依赖。"
+title: 'comet init'
+description: '初始化项目或全局 Comet 环境，选择 Native 或 Classic，并安装对应能力。'
 ---
 
-`comet init` 是安装入口。它会检测平台、安装或更新组件，并把 Comet Skill 部署到目标位置。
+`comet init` 是安装入口。它会检测平台、安装 Comet Skill，并在项目级初始化时确定 `/comet` 的默认工作流。
 
 ## 基本用法
 
@@ -14,14 +14,44 @@ comet init
 
 常用选项：
 
-| 选项 | 说明 |
-| --- | --- |
-| `--yes` | 非交互模式，自动安装缺失组件并跳过已有组件 |
-| `--scope <scope>` | 安装范围：`project` 或 `global` |
-| `--language <lang>` | Skill 语言：`zh` 或 `en` |
-| `--skip-existing` | 跳过已有组件 |
-| `--overwrite` | 覆盖 manifest 管理的文件 |
-| `--json` | 输出 JSON |
+| 选项                | 说明                                       |
+| ------------------- | ------------------------------------------ |
+| `--yes`             | 非交互模式，自动安装缺失组件并跳过已有组件 |
+| `--scope <scope>`   | 安装范围：`project` 或 `global`            |
+| `--language <lang>` | Skill 语言：`zh` 或 `en`                   |
+| `--workflow <mode>` | 启用 `native`、`classic` 或 `both`         |
+| `--root <path>`     | Native 产物根目录，例如 `docs`             |
+| `--skip-existing`   | 跳过已有组件                               |
+| `--overwrite`       | 覆盖 manifest 管理的文件                   |
+| `--json`            | 输出 JSON                                  |
+
+## Native 与 Classic 初始化
+
+交互式项目初始化会说明并提供 Native、Classic 或同时启用两者。非交互初始化按以下规则选择默认工作流：
+
+1. 合法的 `.comet/config.yaml` 是事实源。
+2. `--workflow native|classic|both` 是显式选择，不迁移已有 change；`both` 默认让 `/comet` 进入 Native。
+3. 没有有效 workflow 配置，但存在 Classic `.comet.yaml` 或旧版 Ambient Resume 证据时，保持 Classic。
+4. 其他项目默认 Native；已有代码、普通 `openspec/` 或 `docs/superpowers/` 不会改变这个默认值。
+
+Native 初始化安装 Comet 自有 Skill/runtime、统一工作流 Rule，以及平台支持时的单一 Hook Router，并创建：
+
+```text
+.comet/config.yaml
+<artifact-root>/comet/
+```
+
+它不会安装 OpenSpec、Superpowers 或 CodeGraph，也不会创建 Classic/OpenSpec change 或 `docs/superpowers/`。统一 Rule 与 Router 会按 `.comet/current-change.json` 把一次写入交给唯一 workflow Guard，不会同时运行 Native 与 Classic Guard。Classic 初始化保留原来的完整依赖与阶段治理。
+
+Comet 只会在**所有选中平台的必需资产安装成功**，且已有 `/comet` 入口与 bundled routing contract 兼容后，才写入并激活 `.comet/config.yaml`。如果检测到不兼容的自定义 `/comet` 内容，初始化会原样保留它并把本次结果标记为 incomplete；确认要替换时显式重跑 `comet init --workflow native --overwrite`。
+
+```bash
+comet init --workflow native --root docs
+comet init --workflow classic
+comet init --workflow both
+```
+
+`--root` 只允许项目级 Native。global 初始化只安装全局能力，不写目标项目配置，因此不能与 `--workflow` 或 `--root` 组合。
 
 ## 项目级安装索引
 
@@ -31,7 +61,7 @@ comet init
 
 ## 安装模式（复制 vs 符号链接）
 
-选择平台后，`comet init` 会询问**安装模式**（0.4.0-beta.1 起新增符号链接模式）：
+Classic 或 global 初始化在选择平台后会询问**安装模式**（0.4.0-beta.1 起新增符号链接模式）。项目级 Native 固定使用 Copy，避免创建 `.comet/skills/`；Native change 状态只存在于 `<artifact-root>/comet/`，共享项目配置与 selection 位于 `.comet/`。
 
 - **Copy**（复制）：为每个平台独立复制一份 Skill 文件（传统方式）。
 - **Symlink**（符号链接）：在各平台目录创建指向 `.comet/skills/` 的符号链接，所有平台共享同一份中央存储，节省空间且一次更新即全部生效。
@@ -40,21 +70,22 @@ comet init
 
 两种模式的详细区别和适用场景见 [支持的平台 · 安装模式](/zh/platforms#安装模式：复制-vs-符号链接)。
 
-## 项目配置合并
+## 共享项目配置合并
 
-`comet init` 会把 Comet 管理的项目配置写入 `.comet/config.yaml`。0.4.0-beta.1 起，**当该文件已存在时不再跳过**，而是做**字段级合并**：
+Native 与 Classic 现在共用 `.comet/config.yaml`。初始化会按启用的工作流合并托管字段：
 
-- **保留**你的现有配置值（如 `review_mode`、`tdd_mode`）
+- **保留**你的现有配置值（如 `native.artifact_root`、`classic.review_mode`）
 - **补齐**缺失的托管字段默认值
 - **刷新**注释，对齐当前版本
 - **保留**你额外添加的自定义字段
-- 损坏的 YAML 文件会**优雅回退**到全部默认值，而不是报错
+- 共享的 `default_workflow`、`workflows`、`ambient_resume` 与 `native.*`、`classic.*` 保持独立语义
+- 无法安全解析的 workflow 配置会失败关闭，不会猜测默认值后覆盖
 
 终端会提示 `项目配置已合并 (.comet/config.yaml)`。
 
 ## OpenSpec CLI 的安装范围
 
-OpenSpec CLI 是跨项目使用的命令行工具。即使 Comet 选择项目级安装，`comet init` 也会把 OpenSpec CLI 作为全局工具安装或升级；它不会为了这个依赖在当前项目创建 `node_modules/`。Comet Skill、规则和项目配置仍按你选择的 project/global 范围部署。
+OpenSpec CLI 是 Classic 的跨项目命令行工具。Classic 即使选择项目级安装，也会把 OpenSpec CLI 作为全局工具安装或升级；它不会为了这个依赖在当前项目创建 `node_modules/`。Native 不检查或安装它。
 
 ## 初始化后检查
 
@@ -69,17 +100,20 @@ comet doctor
 `comet init`（和 `comet update`）按平台输出每个组件的安装状态。Skill/脚本复制是这样展示的：
 
 ```text
-Comet -> claude: installed (12 files) -> .claude/skills/comet
+Comet -> claude: installed (12 files) -> .claude/skills/
 Comet -> claude: skipped (alreadyExists)
 Comet -> opencode: failed (12 files, 1 failed) -> .opencode/skills/comet
 ```
 
-| 状态 | 含义 |
-| --- | --- |
-| `installed` | 全部文件复制成功 |
-| `skipped` | 已存在（未指定 `--overwrite`） |
-| `failed` | 有文件复制失败 |
+| 状态        | 含义                           |
+| ----------- | ------------------------------ |
+| `installed` | 全部文件复制成功               |
+| `skipped`   | 已存在（未指定 `--overwrite`） |
+| `failed`    | 有文件复制失败                 |
 
 <Warning>
-  从 0.4.0-beta.1 起，<strong>部分失败的安装不再被掩盖成成功</strong>。如果某个平台有文件复制失败（例如 <code>comet-hook-guard.mjs</code> 没装上），该平台会标记 <code>failed</code> 并带失败计数（如 <code>failed (12 files, 1 failed)</code>）——而不是把半安装状态报告为成功。缺 <code>comet-hook-guard.mjs</code> 会静默破坏 phase guard，所以这类失败必须先修。重跑 <code>comet init</code> 或 <code>comet update</code> 补齐缺失文件。
+  从 0.4.0-beta.1 起，<strong>部分失败的安装不再被掩盖成成功</strong>
+  。如果某个平台有文件复制失败，该平台会标记 <code>failed</code> 并带失败计数。Classic 缺少{' '}
+  <code>comet-hook-guard.mjs</code> 会破坏阶段检查；Native 缺少入口或 runtime
+  同样不能写入项目默认配置。重跑 <code>comet init</code> 或 <code>comet update</code> 补齐缺失文件。
 </Warning>

@@ -1,0 +1,54 @@
+---
+title: 'Native Batch 与 Sequential 澄清模式评估'
+description: '在同一 Native 任务上各运行 10 次，比较 Batch 与 Sequential 的 pass@3、交互轮次、工具调用、耗时和失败归因。'
+---
+
+import { RawHtmlReportFrame } from '/snippets/raw-html-report-frame.jsx';
+
+这次实验比较的是 Comet Native 的两种澄清模式：`batch` 一次提出所有独立问题，再单独确认共同理解；`sequential` 每次只解决一个决策。
+
+我们选择同一个包含 3 个独立产品决策的 `wordcount-cli` 任务，在完全相同的模型、运行器、验证器和环境下分别重复 10 次。20 个样本全部完成且进入 analysis set。
+
+## 核心数据
+
+| 指标             |       Batch |  Sequential | Batch 差异 |
+| ---------------- | ----------: | ----------: | ---------: |
+| strict pass@1    | 60%（6/10） | 70%（7/10） |     -10 pp |
+| pass@3           |       96.7% |       99.2% |    -2.5 pp |
+| pass^3           |          0% |          0% |       持平 |
+| 平均外层交互轮次 |         2.7 |         4.5 |     -40.0% |
+| 平均累计模型耗时 |      617 秒 |      712 秒 |     -13.3% |
+
+`pass@3` 使用 HumanEval 的至少一次成功估计：10 次观测中 Batch 成功 6 次，Sequential 成功 7 次。这里的 10 组是同一任务的重复运行，不是 10 个不同任务。
+
+## 如何理解结果
+
+Batch 明显减少了用户交互，并在双方都严格通过的 5 组配对中减少了 13.1% Agent 轮次、12.5% 工具调用、16.6% 累计模型耗时和 22.8% 总 Token。但这次样本中 Batch 的严格成功率低 10 个百分点，主要原因是 4 次运行把共同理解确认和首次批量回答合并成了一轮。
+
+Sequential 的失败面不同：一次多问了一个决策轮；另两次虽然完成了预期的 3 个决策点，但业务行为或归档产物不完整。因此少轮次不能单独作为优势，必须与业务结果、澄清协议和终态证据一起判断。
+
+<Warning>
+  这是一个任务、每种模式 10 次重复的小样本实验。它能揭示该任务上的交互成本与失败模式，不能单独证明
+  Batch 或 Sequential 在所有任务上更可靠。
+</Warning>
+
+## HTML 可视化报告
+
+下面的报告包含 pass@k、配对效率、逐次运行矩阵、任务完成度和失败归因。
+
+<RawHtmlReportFrame
+  src="/assets/eval-reports/comet-native-clarification-20260722/report.html"
+  title="Comet Native Batch 与 Sequential 澄清模式评估"
+  height={920}
+/>
+
+## 实验口径
+
+- 实验标识：`experiment_20260722_002221`
+- 模型：`mimo-v2.5-pro`
+- 样本：Batch 10 次、Sequential 10 次，严格配对 10 组
+- 数据质量：20/20 included，全部 high confidence，无剔除样本
+- 耗时：累加每次运行所有顶层 result 事件，不包含 Docker 准备和 validator 时间
+- 效率主视图：只统计同一 repetition 上双方都 strict pass 的 5 组
+
+延伸阅读：[Native 与 0.4.0 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)与[评分指标与双 Agent 评测](/zh/eval/scoring)。

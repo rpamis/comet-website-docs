@@ -1,29 +1,32 @@
 ---
-title: "design 阶段"
-description: "design 阶段用 handoff 交接包把 open 阶段的 artifacts 交给 Superpowers brainstorming，带你做多轮深度技术设计，产出 Design Doc。"
+title: 'design 阶段'
+description: 'design 阶段用 handoff 交接包把 open 阶段的 artifacts 交给 Superpowers brainstorming，带你做多轮深度技术设计，产出 Design Doc。'
 ---
 
 design 阶段做**深度技术设计**。它先用脚本把 open 阶段的 OpenSpec artifacts 打包成交接包，再交给 Superpowers `brainstorming`，带你做多轮方案探讨，最后产出 Design Doc。从你的角度看，这是一段**真正的头脑风暴**——Comet 会反复和你探讨实现方案、权衡、风险，确认方案后才会写文档。
 
 <Tip>
-  <strong>正常情况下你只需要 <code>/comet</code>。</strong>open 阶段完成后，<code>/comet</code> 会自动衔接调用 <code>/comet-design</code>。本文描述的 <code>/comet-design</code> 是它内部调用的阶段 Skill——只有当你想<strong>手动控制</strong>（例如关闭了 <code>auto_transition</code>、或想只跑这一个阶段）时，才需要直接输入 <code>/comet-design</code>。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
+  正常情况下你只需要 <code>/comet</code>。
+  配置选择 Classic 后，内部 <code>/comet-classic</code> 会读取状态，并在 open 完成后自动调用{' '}
+  <code>/comet-design</code>。本文描述的是内部阶段 Skill；只有想<strong>手动控制</strong>
+  时才需要直接输入。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
 </Tip>
 
 ## 本阶段如何触发
 
-`/comet-design` 通常**不是你手敲的命令**，而是 `/comet` 自动衔接的结果。
+`/comet-design` 通常**不是你手敲的命令**，而是 `/comet-classic` 自动衔接的结果。
 
 ### 默认：用 /comet 自动衔接
 
-open 阶段退出后（`comet guard <name> open --apply` 推进 `phase: design`），`/comet` 会自动衔接调用 `/comet-design`——你不需要在 open 完成后手动输入下一个阶段命令。下一次调用 `/comet` 时，如果检测到 `phase: design` 或有 change 但缺 Design Doc，也会路由到 design。详见[自动推进机制](/zh/concepts/auto-transition)。
+open 阶段退出后（`comet-guard <name> open --apply` 推进 `phase: design`），`/comet-classic` 会自动衔接调用 `/comet-design`——你不需要在 open 完成后手动输入下一个阶段命令。下一次调用 `/comet-classic` 时，如果检测到 `phase: design` 或有 change 但缺 Design Doc，也会路由到 design。详见[自动推进机制](/zh/concepts/auto-transition)。
 
 ### 手动：什么时候才需要直接 /comet-design
 
-- 关闭了自动衔接（`auto_transition: false`）——open 完成后 `/comet` 会停下并打印 HINT，你需要手动调用 `/comet-design`。
+- 关闭了自动衔接（`auto_transition: false`）——open 完成后 `/comet-classic` 会停下并打印 HINT，你需要手动调用 `/comet-design`。
 - 只想单独跑 design（恢复一个已有 change 但缺 Design Doc，或想重新做技术设计）。
 - hotfix/tweak 命中质变升级信号，回退到 design 补完整设计。
 
-**自动推进开着就用 `/comet`，关了才需要手动用各阶段命令。**
+**正常使用统一入口 `/comet`；只有手动控制阶段时才直接调用阶段命令。**
 
 ---
 
@@ -35,7 +38,7 @@ design 阶段的核心是一段**基于真实上下文的 brainstorming**。关�
 flowchart TD
     Entry["入口状态验证"] --> S1a["脚本生成 handoff 交接包<br/>（不是 agent 摘要）"]
     S1a --> S1b["加载 brainstorming<br/>带交接包做多轮探讨"]
-    S1b --> S1c["停顿点 4：确认设计方案"]
+    S1b --> S1c["停顿点 5：确认设计方案"]
     S1c -->|需要调整| S1b
     S1c -->|确认| S1d["定稿 brainstorm-summary.md<br/>（恢复检查点）"]
     S1d --> S1e["主动式上下文压缩门禁<br/>（可能需要你手动压缩）"]
@@ -46,7 +49,7 @@ flowchart TD
 ### Step 0：入口状态验证
 
 ```bash
-comet state check <name> design
+node "$COMET_STATE" check <name> design
 ```
 
 如果 `handoff_context` 和 `handoff_hash` 已存在，先确认它们是否匹配当前 artifacts，再决定是否重新生成。
@@ -56,22 +59,26 @@ comet state check <name> design
 **必须由脚本生成，不允许 agent 临场手写摘要代替。** 这是 design 阶段可靠性的核心。
 
 ```bash
-comet handoff <change-name> design --write
+node "$COMET_HANDOFF" <change-name> design --write
 ```
 
 交接包形态取决于 `context_compression` 配置：
 
-| 模式 | 产出 | 内容 |
-| --- | --- | --- |
-| `off`（默认） | `design-context.json` + `.md` | 完整摘要，每文件带 sha256，超 80 行截断（保留完整源路径） |
-| `beta` | `spec-context.json` + `.md` | delta spec verbatim 投影，其他文件 hash 引用（省约 25–30% token） |
+| 模式          | 产出                          | 内容                                                              |
+| ------------- | ----------------------------- | ----------------------------------------------------------------- |
+| `off`（默认） | `design-context.json` + `.md` | 完整摘要，每文件带 sha256，超 80 行截断（保留完整源路径）         |
+| `beta`        | `spec-context.json` + `.md`   | delta spec verbatim 投影，其他文件 hash 引用（省约 25–30% token） |
 
 同时把 `handoff_context` 和 `handoff_hash` 写入 `.comet.yaml`。需要完整上下文时加 `--full`。
 
 交接包的来源是 open 阶段的四个 artifacts：`proposal.md`（目标动机范围）、`design.md`（高层架构）、`tasks.md`（任务边界）、`specs/*/spec.md`（delta spec）。
 
 <p align="center">
-  <img src="/assets/design-phase-illustrations/01-scripted-handoff-package.png" alt="小鱼用脚本夹板把真实 OpenSpec artifacts 压成带 sha256 标记的 handoff 交接包" width="800" />
+  <img
+    src="/assets/design-phase-illustrations/01-scripted-handoff-package.png"
+    alt="小鱼用脚本夹板把真实 OpenSpec artifacts 压成带 sha256 标记的 handoff 交接包"
+    width="800"
+  />
 </p>
 
 <p align="center">handoff 交接包来自脚本读取真实 artifacts，而不是 Agent 临场复述</p>
@@ -86,14 +93,18 @@ comet handoff <change-name> design --write
 - 设计过程中会**增量更新** `brainstorm-summary.md`（恢复检查点，不是 Design Doc），把确认的事实、约束、候选方案、权衡、Spec Patch 候选记下来，未确认项标"待确认"或"候选"
 
 <Warning>
-  Comet 不能在 Design Doc 里写<strong>第二份需求 spec</strong>。如果 delta spec 缺验收场景，只能写 <strong>Spec Patch</strong>（回写到 OpenSpec delta spec）——仅限补充验收场景、修正模糊措辞、加边界条件。结构或范围的实质性变更必须作为设计发现返回 brainstorming 确认。
+  Comet 不能在 Design Doc 里写<strong>第二份需求 spec</strong>。如果 delta spec 缺验收场景，只能写{' '}
+  <strong>Spec Patch</strong>（回写到 OpenSpec delta
+  spec）——仅限补充验收场景、修正模糊措辞、加边界条件。结构或范围的实质性变更必须作为设计发现返回
+  brainstorming 确认。
 </Warning>
 
 <Note>
-  如果 <code>brainstorming</code> skill 不可用，Comet 会停下提示你安装/启用 Superpowers，<strong>不会</strong>用普通对话代替。
+  如果 <code>brainstorming</code> skill 不可用，Comet 会停下提示你安装/启用 Superpowers，
+  <strong>不会</strong>用普通对话代替。
 </Note>
 
-### 停顿点 4：确认设计方案
+### 停顿点 5：确认设计方案
 
 brainstorming 产出方案后，Comet 暂停**等你明确确认**。确认前不会创建 Design Doc、不会写 `design_doc`、不会跑 design guard、不会进 `/comet-build`。它展示的摘要包括：
 
@@ -134,11 +145,11 @@ canonical_spec: openspec
 ### Step 3：更新状态 + 推进
 
 ```bash
-comet state set <name> design_doc <path>
+node "$COMET_STATE" set <name> design_doc <path>
 # 如果 delta spec 改了，重新生成 handoff 更新 hash
-comet handoff <change-name> design --write
+node "$COMET_HANDOFF" <change-name> design --write
 # 阶段 guard 推进
-comet guard <change-name> design --apply
+node "$COMET_GUARD" <change-name> design --apply
 ```
 
 如果没改 delta spec，跳过 handoff 重新生成。推进到 `phase: build`。
@@ -147,20 +158,20 @@ comet guard <change-name> design --apply
 
 ## 调用的 skill
 
-| Skill | 用途 | 何时调用 |
-| --- | --- | --- |
-| `brainstorming` | 深度技术设计（方案、风险、测试策略） | Step 1b，立即执行，不可跳过 |
-| `brainstorming`（再次） | 中等规模 spec 更新时重新设计 | build 阶段发现接口/组件/数据流变化时 |
+| Skill                   | 用途                                 | 何时调用                             |
+| ----------------------- | ------------------------------------ | ------------------------------------ |
+| `brainstorming`         | 深度技术设计（方案、风险、测试策略） | Step 1b，立即执行，不可跳过          |
+| `brainstorming`（再次） | 中等规模 spec 更新时重新设计         | build 阶段发现接口/组件/数据流变化时 |
 
 design 阶段不调用 OpenSpec skill——OpenSpec artifacts 已在 open 阶段创建。
 
 ## 产物
 
-| 产物 | 位置 | 说明 |
-| --- | --- | --- |
-| Design Doc | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | 最终技术设计文档 |
-| handoff 交接包 | `.comet/handoff/design-context.json` + `.md` | OpenSpec→Superpowers 交接上下文 |
-| brainstorm-summary.md | `.comet/handoff/brainstorm-summary.md` | 上下文压缩恢复检查点 |
+| 产物                  | 位置                                                  | 说明                            |
+| --------------------- | ----------------------------------------------------- | ------------------------------- |
+| Design Doc            | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | 最终技术设计文档                |
+| handoff 交接包        | `.comet/handoff/design-context.json` + `.md`          | OpenSpec→Superpowers 交接上下文 |
+| brainstorm-summary.md | `.comet/handoff/brainstorm-summary.md`                | 上下文压缩恢复检查点            |
 
 ## 退出条件（guard 检查）
 
@@ -175,7 +186,7 @@ guard 在离开 design 时检查：
 
 ## 何时进入
 
-正常情况下由 `/comet` 在 open 完成后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。手动场景：hotfix/tweak 命中质变升级信号需要补完整设计，或恢复时发现已有 change 但缺 Design Doc。
+正常情况下由 `/comet-classic` 在 open 完成后自动衔接进入（见[本阶段如何触发](#本阶段如何触发)）。手动场景：hotfix/tweak 命中质变升级信号需要补完整设计，或恢复时发现已有 change 但缺 Design Doc。
 
 <Warning>
   full workflow 不应跳过 design。hotfix 和 tweak 可以跳过，但一旦范围变质，就应升级回 full。

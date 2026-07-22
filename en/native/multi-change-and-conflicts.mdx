@@ -1,0 +1,81 @@
+---
+title: 'Multiple changes and specification conflicts'
+description: 'Manage several Native changes, understand current selection, conflict findings, canonical-spec baselines, and safe rebasing.'
+---
+
+A Native project can keep several active changes at once. `.comet/current-change.json` records only which workflow and change own the next write; it is not a concurrency limit. This single selection lets the Hook Router send one atomic write to one Guard, preventing two changes from claiming the same modifications.
+
+## Inspect and select a change
+
+Start with read-only commands:
+
+```bash
+comet native list
+comet native status
+comet native show <change-name>
+comet native status <change-name> --details
+```
+
+After confirming the target, select it explicitly:
+
+```bash
+comet native select <change-name>
+```
+
+`new` and `select` update the shared selection. `list`, `show`, and `status` never switch the current change as a side effect. When several active changes exist and the selection is absent, invalid, or points to another workflow, writes stop and require an explicit selection.
+
+<Info>
+  Native has no separate <code>resume</code> command. Recovery consists of read-only state inspection,
+  target confirmation, and <code>select</code>. In the Agent, you still enter through
+  <code>/comet</code> or <code>/comet-native</code>.
+</Info>
+
+## What can proceed in parallel
+
+Changes can proceed in parallel when they affect different capabilities and project artifacts without shared behavioral constraints. Before parallel work, check whether:
+
+- complete target specifications modify the same capability;
+- two changes claim the same project artifacts;
+- one change's acceptance criteria depend on behavior that another change has not archived;
+- the current workspace contains modifications not attributed to the selected change.
+
+Runtime reports provable capability conflicts and possible overlap inside the current Native root. It is not a distributed lock across machines or remote branches. Teams must still coordinate unintegrated worktrees, other devices, and remote commits that have not been fetched.
+
+## Why canonical specifications conflict
+
+Shape freezes the current canonical specification's `base_hash` for each target capability. Before Archive, Runtime reads the current canonical specification again:
+
+- If the hash is unchanged, the two-step Archive can continue.
+- If the hash changed, another change updated the same capability first, so the current change cannot overwrite it directly.
+- If Runtime can prove a scope conflict in the current root, Archive preflight stops and returns a finding.
+
+Comet does not resolve this by letting the last archive overwrite the first. The older target specification may no longer represent the latest product behavior.
+
+## Use spec rebase
+
+Follow this sequence:
+
+1. Read the latest canonical specification, the current brief, and the proposed complete target specification.
+2. Rewrite the complete target specification against the latest baseline, resolving any new user decisions if necessary.
+3. Rebase the specification:
+
+```bash
+comet native spec rebase <change-name> --summary <adjustment-summary>
+```
+
+4. Return to Build, update the implementation, and create a new implementation scope.
+5. Run Verify again, then perform the two-step Archive.
+
+`spec rebase` refreshes the operation and base hash and makes the previous verification conclusion stale. Do not hand-edit hashes in `comet-state.yaml` or reuse a pre-conflict pass.
+
+<p align="center">
+  <img src="/assets/native-illustrations/08-spec-rebase.png" alt="Xiaoyu compares the newest bookmarked specification, rewrites her page, and prepares to verify again, showing safe rebase after concurrent changes" />
+</p>
+
+## Plan archive order
+
+When several changes modify the same capability, it is usually easier to review the base behavior first, archive it, then rebase later changes onto the new canonical specification. Independent capabilities can be verified and archived separately, but each Archive still rechecks the current root, evidence, and selection.
+
+For cross-device work, sync both the formal Native artifacts and project code, and ensure `.comet/config.yaml` points to the same artifact root on every device. Copying only `changes/` while keeping different local root configuration prevents the recovery probe from discovering the existing change.
+
+Continue with [Native artifacts and state](/en/native/artifacts-and-state), [Verification evidence and autonomous repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).
