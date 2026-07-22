@@ -1,14 +1,14 @@
 ---
-title: "Phase 3: Plan and Build — Plan, Isolate, and Execute"
-sidebarTitle: "Build"
-description: "The Build phase creates an implementation plan, then executes it through your chosen isolation method and build mode — committing one task at a time."
+title: 'Phase 3: Plan and Build — Plan, Isolate, and Execute'
+sidebarTitle: 'Build'
+description: 'The Build phase creates an implementation plan, then executes it through your chosen isolation method and build mode — committing one task at a time.'
 ---
 
 The Build phase turns the Design Doc into working code. `/comet-build` first creates a structured implementation plan, then pauses to let you choose how to isolate and execute the work, and finally runs through every task in sequence — checking off `tasks.md` and committing after each one. The result is a traceable commit history that maps directly back to your design intent.
 
 ## Trigger
 
-Run `/comet-build` directly, or let `/comet` auto-dispatch after Phase 2 completes. If you paused at `build_pause: plan-ready`, running `/comet` or `/comet-build` again resumes from where you left off without regenerating the plan.
+Normally, invoke `/comet`. When configuration selects Classic, the internal `/comet-classic` router dispatches `/comet-build` after Phase 2 completes. If paused at `build_pause: plan-ready`, invoking `/comet` resumes without regenerating the plan; call `/comet-build` directly only for manual phase control.
 
 ## What Happens
 
@@ -23,14 +23,16 @@ Run `/comet-build` directly, or let `/comet` auto-dispatch after Phase 2 complet
     base-ref: <git rev-parse HEAD before implementation>
     ---
     ```
+
   </Step>
   <Step title="Plan-ready pause — you choose isolation method and build mode">
     After the plan is recorded in `.comet.yaml`, the workflow pauses at a user decision point. You have two options:
 
     - **Continue now** — stay in the current model and immediately choose your workspace isolation method and execution mode
-    - **Pause to switch model** — record `build_pause: plan-ready` and stop this invocation; resume later with `/comet` or `/comet-build` and Comet will reuse the existing plan without regenerating it
+    - **Pause to switch model** — record `build_pause: plan-ready` and stop this invocation; resume normally with `/comet`, or use `/comet-build` for manual phase control
 
     If you continue, the AI asks you to choose both your **workspace isolation method** and **build mode** in a single interaction (see tables below). These choices are recorded in `.comet.yaml` before any code is written.
+
   </Step>
   <Step title="Workspace is isolated">
     Based on your choice, the AI either continues on the current branch, creates a new git branch (`git checkout -b <change-name>`), or loads the Superpowers `using-git-worktrees` skill to set up a fully isolated worktree. The worktree path cannot be bypassed with plain shell commands — the skill must be loaded.
@@ -41,6 +43,7 @@ Run `/comet-build` directly, or let `/comet` auto-dispatch after Phase 2 complet
     - The code is committed with a message that reflects the design intent
 
     If `build_mode` is `executing-plans`, a code review (`requesting-code-review` skill) is required before the build phase can close. CRITICAL review findings must be fixed; non-CRITICAL findings may be accepted with a recorded rationale.
+
   </Step>
   <Step title="Guard validates exit conditions and advances state">
     Once all tasks are checked and committed, the phase guard runs project-specific build and verify commands (from `.comet.yaml` or the repo root config), confirms `isolation` and `build_mode` are both set, and auto-transitions `.comet.yaml` to `phase: verify`.
@@ -51,14 +54,11 @@ Run `/comet-build` directly, or let `/comet` auto-dispatch after Phase 2 complet
 
 Choose the method that fits your situation. Your choice is recorded in `.comet.yaml` as `isolation`.
 
-| Method | Description | Best For |
-|--------|-------------|----------|
-| `current` | Works directly on the current branch and truthfully binds that Git branch | The current branch is already the intended target branch |
-| `branch` | Creates a new git branch in the current repo (`git checkout -b <change-name>`) | Changes touching ≤ 3 files, simple linear work |
+| Method     | Description                                                                           | Best For                                                              |
+| ---------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `current`  | Works directly on the current branch and truthfully binds that Git branch             | The current branch is already the intended target branch              |
+| `branch`   | Creates a new git branch in the current repo (`git checkout -b <change-name>`)        | Changes touching ≤ 3 files, simple linear work                        |
 | `worktree` | Creates a fully isolated git worktree via the Superpowers `using-git-worktrees` skill | Parallel development, or when the current branch has uncommitted work |
-| `current` | Truthfully records the current workspace without creating a branch or worktree | Hotfix/tweak presets (default); full-workflow changes must use `branch` or `worktree` before leaving build |
-
-A full-workflow change must select `branch` or `worktree` before it can leave the build phase; `current` is only valid for the hotfix and tweak presets.
 
 All three methods are available to full, hotfix, and tweak workflows and require an explicit user choice. Comet records the selected mode in `isolation` and the actual execution branch in `bound_branch`; later entry checks block accidental branch switches.
 
@@ -66,14 +66,17 @@ All three methods are available to full, hotfix, and tweak workflows and require
 
 Your choice of build mode determines how the AI executes the plan. It is recorded in `.comet.yaml` as `build_mode`.
 
-| Mode | Skill Loaded | Description |
-|------|-------------|-------------|
-| `subagent-driven-development` | Superpowers `subagent-driven-development` | AI spawns subagents for parallel task execution — best for independent tasks, high complexity, or changes requiring two-phase review |
-| `executing-plans` | Superpowers `executing-plans` | Single-agent sequential execution — lightweight and fast; requires a code review gate before the phase closes |
-| `direct` | *(none — bypass)* | Single-agent direct execution without a plan skill; **only the default for hotfix/tweak presets**. Full-workflow changes require an explicit `direct_override: true` flag, otherwise the guard blocks the transition |
+| Mode                          | Skill Loaded                              | Description                                                                                                                                                                                                          |
+| ----------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subagent-driven-development` | Superpowers `subagent-driven-development` | AI spawns subagents for parallel task execution — best for independent tasks, high complexity, or changes requiring two-phase review                                                                                 |
+| `executing-plans`             | Superpowers `executing-plans`             | Single-agent sequential execution — lightweight and fast; requires a code review gate before the phase closes                                                                                                        |
+| `direct`                      | _(none — bypass)_                         | Single-agent direct execution without a plan skill; **only the default for hotfix/tweak presets**. Full-workflow changes require an explicit `direct_override: true` flag, otherwise the guard blocks the transition |
 
 <Note>
-**`direct` mode in full workflow**: To use `direct` mode outside of a hotfix or tweak preset, you must explicitly opt in. The AI will record `direct_override: true` in `.comet.yaml` — without it, both the guard and the build→verify state transition will block. This is intentional: full-workflow changes are expected to go through a proper plan execution skill.
+  **`direct` mode in full workflow**: To use `direct` mode outside of a hotfix or tweak preset, you
+  must explicitly opt in. The AI will record `direct_override: true` in `.comet.yaml` — without it,
+  both the guard and the build→verify state transition will block. This is intentional:
+  full-workflow changes are expected to go through a proper plan execution skill.
 </Note>
 
 ## Plan File
@@ -86,27 +89,31 @@ The plan is saved to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` and linked
 
 ## The `plan-ready` Pause
 
-`build_pause: plan-ready` is a **recoverable pause point**, not a build mode. It records that the plan has been generated and the AI has stopped — waiting for you to resume, possibly in a different model or session. When you run `/comet` or `/comet-build` again, Comet reads the existing plan and picks up from the isolation/execution-mode selection step. The plan is never regenerated on resume.
+`build_pause: plan-ready` is a **recoverable pause point**, not a build mode. It records that the plan has been generated and the AI has stopped. Resume normally with `/comet`; after configuration selects Classic, it reads the existing plan and continues from isolation/execution-mode selection. `/comet-build` remains available for manual phase control.
 
 <Tip>
-**Commit frequently.** One commit per task is the Comet convention — it creates a traceable history where each commit maps to a specific task and design decision. This also makes the verify phase more reliable: the `base-ref` + commit range gives an accurate picture of everything that changed.
+  **Commit frequently.** One commit per task is the Comet convention — it creates a traceable
+  history where each commit maps to a specific task and design decision. This also makes the verify
+  phase more reliable: the `base-ref` + commit range gives an accurate picture of everything that
+  changed.
 </Tip>
 
 ## Spec Incremental Updates
 
 Specs evolve during implementation. When you discover the initial spec is incomplete mid-build, handle it based on scale:
 
-| Scale | When | What to Do |
-|-------|------|------------|
-| **Small** | Missing acceptance scenarios, edge cases | Edit the delta spec and `design.md` directly; append tasks to `tasks.md` |
+| Scale      | When                                                 | What to Do                                                                                                                             |
+| ---------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Small**  | Missing acceptance scenarios, edge cases             | Edit the delta spec and `design.md` directly; append tasks to `tasks.md`                                                               |
 | **Medium** | Interface changes, new components, data flow changes | The AI pauses for your confirmation, then loads the Superpowers `brainstorming` skill to update the Design Doc and delta spec together |
-| **Large** | Brand-new capability requirements | The AI pauses and asks you to confirm splitting into a new, independent change started via `/comet-open` |
+| **Large**  | Brand-new capability requirements                    | The AI pauses and asks you to confirm splitting into a new, independent change started via `/comet-open`                               |
 
 **50% threshold rule**: If new tasks would exceed half of the original task count in `tasks.md`, the change is considered outside its original scope. The AI must pause and ask whether you want to split the work into a new change — it cannot continue expanding the current change automatically.
 
 When creating a new change from within build, always invoke `/comet-open` (not any OpenSpec command directly) to ensure the new change gets its own `.comet.yaml` and enters the state machine correctly.
 
 **Principles for keeping specs current:**
+
 - The delta spec is a living document — edit it freely during build whenever the implementation evolves
 - Commit each spec edit with a message explaining the change reason, so design doc drift can be assessed during archiving
 - Never sync delta specs to main specs during build — that happens only at archive, once the change is fully verified
@@ -128,7 +135,7 @@ The build phase is the longest in the workflow and may span many tasks across mu
 - **After context compaction**: run the recovery command to get a structured summary of isolation method, build mode, plan path, task progress, and the recommended next action:
 
 ```bash
-comet state check <change-name> build --recover
+"$COMET_BASH" "$COMET_STATE" check <change-name> build --recover
 ```
 
 - **Single task too large**: if one task would exceed ~200 lines of code changes, split it into subtasks with separate commits to keep the history granular.

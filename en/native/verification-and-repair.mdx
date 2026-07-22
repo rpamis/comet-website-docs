@@ -1,0 +1,49 @@
+---
+title: 'Verification evidence and autonomous repair'
+description: 'Understand implementation scopes, acceptance evidence, stale verification, and bounded autonomous repair in Native.'
+---
+
+Native does not prescribe TDD or a fixed review method, but verification has deterministic requirements: conclusions must match the current requirements, specifications, and real implementation scope, and an unrun check cannot be reported as passed.
+
+## Implementation scope
+
+At the end of Build, the model submits real project-relative paths. The Runtime content-addresses those artifacts together with the current change contract, creation baseline, and current project snapshot to form an implementation scope and derive stable Acceptance IDs.
+
+A Git project snapshot contains only tracked and non-ignored untracked files and treats each submodule/gitlink as one atomic entry. Non-Git projects use the bounded physical-tree provider. An incomplete current snapshot never turns a missing path into a guessed deletion. When change details exceed the budget, bounded items remain and `scope-detail-overflow` represents the rest with a count and content hash.
+
+If the Runtime cannot prove that the scope is complete, it remains in Build and returns a partial-scope hash with unowned items. Add the missing artifacts or remove the unexplained changes first. Proceeding with partial scope requires explicit user acceptance of a concrete gap that the Runtime permits for authorization, the same hash, a reason, and `--confirmed`. `git-selection-changed` requires a retry after the Git index settles and is never authorizable. For `git-enumeration-limit`, first reduce or clean the project-owned set, or use a later product version that adjusts the budget. A later current snapshot may use the ordinary partial protocol only when recovery is impossible, the Runtime returns an authorizable scope bound to a count and content hash, and the user understands the unknown-tail risk. In non-Git projects, `physical-selection-changed` requires a stable project tree and `physical-enumeration-limit` requires reducing that tree; neither can bind its unknown tail and neither is authorizable. No integrity failure may be bypassed through edited evidence.
+
+## Verification report
+
+`verification.md` records at least:
+
+- commands actually run and their results;
+- skipped checks and reasons;
+- known limitations and the overall conclusion;
+- a project-relative evidence reference or honest `skipped_reason` for every Runtime Acceptance ID.
+
+Optional `comet native check` performs only a bounded read-only text hygiene scan. It does not call Git, a shell, test scripts, or an external Skill, and it does not replace project tests. Its result is stored as a content-addressed receipt.
+
+## Why evidence becomes stale
+
+Verification binds the brief, complete target specifications, implementation scope, revision, report snapshot, and optional receipt. Changing any input makes the old evidence stale.
+
+If the contract or project snapshot changes during Verify, status returns a summary-only `next`. Run it to retreat to Build and seal a new scope. Reconfirm only when the brief/spec contract hash also changed. If only the project snapshot or implementation changed, retain the existing approval instead of introducing another confirmation. Never submit a conclusion against the old scope. A changed report, receipt, or other bound fact in Archive uses the same retreat protocol; never reuse the old pass.
+
+<p align="center">
+  <img src="/assets/native-illustrations/07-verification-evidence.png" alt="Xiaoyu removes a faded verification receipt from a photo board and prepares a fresh check at the workbench, showing that changed inputs stale old evidence" />
+</p>
+
+## Why repair is bounded
+
+A Verify failure returns to Build. Runtime forms a failure signature from the failure category, failed checks, contract, and scope:
+
+- the second identical failure on one scope warns;
+- the third identical failure without real scope progress causes a manual stop;
+- a real scope change starts a new repair episode;
+- one explicit new hypothesis may override the same unchanged signature once;
+- one episode records at most 12 failures.
+
+This preserves autonomous repair without treating repetition as progress. At the stop boundary, the user decides whether to change scope, constraints, or stop; the model must not weaken checks or invent a pass.
+
+Continue with [Native workflow](/en/concepts/native-workflow#four-phase-workflow), [Safety and recovery](/en/native/safety-and-recovery), and [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts).

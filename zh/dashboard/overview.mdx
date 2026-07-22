@@ -1,9 +1,9 @@
 ---
-title: "Dashboard 总览"
-description: "comet dashboard 是一个本地只读浏览器仪表盘：用图形界面查看活跃和归档的 change、五阶段进度、产物分组、任务完成度、风险和 Git 快照，支持亮色/暗色主题与持久化偏好。"
+title: 'Dashboard 总览'
+description: 'comet dashboard 是一个本地只读浏览器仪表盘：在同一入口切换 Classic 与 Native 工作区。'
 ---
 
-`comet dashboard` 启动一个**本地只读**的浏览器仪表盘，把命令行里散落在多个文件里的状态——活跃和归档的 change、五阶段进度、产物清单、任务完成度、verify 结果、下一步建议、风险项和 Git 快照——汇总成一个可视化界面。
+`comet dashboard` 启动一个**本地只读**的浏览器仪表盘。在左上角切换 Classic 与 Native 后，页面只显示当前工作流的概览和变更工作区：Classic 提供活跃/归档 change、五阶段进度、产物、任务、风险和 Git 快照；Native 提供轻量状态、验证、归档预检和冲突摘要。
 
 它**只读**，不会修改任何文件，可以随时安全启动，适合在开发过程中常驻一个标签页观察进度。
 
@@ -43,10 +43,44 @@ Press Ctrl+C to stop.
 完整命令选项和脚本/CI 用法见 [comet dashboard 命令](/zh/cli/dashboard)。
 
 <Info>
-  服务器只绑定 <code>127.0.0.1</code>（localhost），不对外暴露。静态文件服务有路径穿越防护，产物预览有大小限制（256 KiB，超出标记 <code>truncated</code>）。
+  服务器只绑定 <code>127.0.0.1</code>
+  （localhost），不对外暴露。静态文件服务有路径穿越防护，产物预览有大小限制（256 KiB，超出标记{' '}
+  <code>truncated</code>）。
 </Info>
 
-## 界面布局
+## Classic / Native 切换
+
+Dashboard 左上角提供 **Classic / Native** 工作流切换。两种工作区复用相同的项目概览、Changes Explorer、变更详情和状态侧栏布局，但不会同时显示。切换到 Native 后，Dashboard 直接使用 Native Runtime 生成的只读 projection，并结合归档预检和冲突雷达；Dashboard 不自行推导工作流事实。
+
+每个 Native change 显示：
+
+- 当前 phase：Shape、Build、Verify、Archive，或状态异常
+- 验证证据新鲜度：尚无、无效、过期、完整、部分或未知
+- 归档是否就绪
+- continuation：可继续、等待用户、阻塞或完成；需要时明确标记“需要用户决定”
+- 结构化 finding code
+- 与其他 Native change 的明确冲突或可能重叠
+- 需求简报、变更 Spec 和验证报告等用户可读 Markdown 产物
+- 最近 checkpoint 摘要、下一步动作和进展时间
+- capability 变更范围与新增/替换/删除统计
+- Acceptance 总数、已有证据、跳过与待补充数量
+- 有界的实现范围、Repair 状态和项目 Git 摘要
+
+Native 视图提供“活跃 / 已归档 / 全部”筛选，并采用与 Classic 相同的 Markdown 预览抽屉。它仍是有界视图：单次最多显示 32 个 change，每个 change 最多显示 8 个 finding code、8 个冲突关联和 8 个用户产物。完整诊断仍以 [`comet native status --details`](/zh/cli/native) 和其他 Native CLI 输出为准。
+
+<Note>
+  Native 视图只预览需求简报、变更 Spec 和验证报告，并只显示 checkpoint 与 evidence
+  的有界汇总；不会暴露 hash、Runtime 路径、原始 evidence 或其他内部状态文件，也没有推进、修复或归档按钮。所有状态变更仍由 Native CLI 和 Runtime 执行。
+</Note>
+
+| 能力        | Classic 工作区                           | Native 工作区                                 |
+| ----------- | ---------------------------------------- | --------------------------------------------- |
+| change 范围 | 活跃与已归档                             | 活跃与已归档                                  |
+| 阶段        | open → design → build → verify → archive | Shape → Build → Verify → Archive              |
+| 主要视图    | 产物、任务、verify、风险、Git            | 进展、范围、验收、用户产物、Repair、冲突、Git |
+| 写操作      | 无                                       | 无                                            |
+
+## Classic 工作区布局
 
 仪表盘采用三栏布局：左侧导航栏、中间变更详情、右侧侧边面板，顶部是项目信息和工具栏。
 
@@ -62,13 +96,13 @@ flowchart LR
 
 页面顶部是五张汇总卡片，每张都有一个从 0 开始的数字动画，一眼看清整个项目的健康度：
 
-| 卡片 | 含义 | 健康状态 |
-| --- | --- | --- |
-| **活跃变更** | 当前 repo 中进行中的 change 数 | 标记「进行中」 |
-| **已归档变更** | 历史迭代数 | 标记「已完成」 |
-| **Verify 失败** | verify 阶段失败的 change 数 | 0 时标记「健康」，否则标记「阻塞」 |
-| **未完成任务** | 跨变更统计的未完成任务项 | 0 时标记「清零」，否则标记「待办」 |
-| **Git 未提交** | 工作区脏文件数 | 0 时标记「干净」，否则标记「未提交」 |
+| 卡片            | 含义                           | 健康状态                             |
+| --------------- | ------------------------------ | ------------------------------------ |
+| **活跃变更**    | 当前 repo 中进行中的 change 数 | 标记「进行中」                       |
+| **已归档变更**  | 历史迭代数                     | 标记「已完成」                       |
+| **Verify 失败** | verify 阶段失败的 change 数    | 0 时标记「健康」，否则标记「阻塞」   |
+| **未完成任务**  | 跨变更统计的未完成任务项       | 0 时标记「清零」，否则标记「待办」   |
+| **Git 未提交**  | 工作区脏文件数                 | 0 时标记「干净」，否则标记「未提交」 |
 
 ### 变更工作区
 
@@ -82,7 +116,7 @@ flowchart LR
 - **搜索框**：按 change 名称、工作流、阶段实时筛选
 - **每张卡片**显示：change 名称、当前阶段、任务完成度进度条（completed/total）和 verify 状态药丸（通过/失败/待验证/未知）
 
-## 每个 change 能看到什么
+## 每个 Classic change 能看到什么
 
 选中一个 change 后，中间和右侧会展示它的完整状态。
 
@@ -100,11 +134,11 @@ flowchart LR
 
 产物不再是一个平铺列表，而是**按来源分三组**展示，并显示每个产物的状态：
 
-| 分组 | 产物 | 来源 |
-| --- | --- | --- |
-| **OpenSpec** | proposal、design、tasks、deltaSpec | 变更目录内的规格文件 |
-| **Superpowers** | designDoc、plan、verifyReport | 通过 `.comet.yaml` 路径指针引用的 `docs/superpowers/` 文件 |
-| **Comet** | .comet.yaml、handoff、checkpoint、brainstorm、subagentProgress | `.comet/` 中间产物 |
+| 分组            | 产物                                                           | 来源                                                       |
+| --------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
+| **OpenSpec**    | proposal、design、tasks、deltaSpec                             | 变更目录内的规格文件                                       |
+| **Superpowers** | designDoc、plan、verifyReport                                  | 通过 `.comet.yaml` 路径指针引用的 `docs/superpowers/` 文件 |
+| **Comet**       | .comet.yaml、handoff、checkpoint、brainstorm、subagentProgress | `.comet/` 中间产物                                         |
 
 每个产物行显示三种状态：
 
@@ -131,16 +165,12 @@ flowchart LR
 
 <Columns>
   <Column>
-    **活跃 change**
-    - **下一步建议**：推荐的 slash 命令 + 原因 + 说明
-    - **风险提示**：检测到的 info/warning/error 级风险项和恢复建议
-    - **Git 快照**：分支、HEAD、最近提交、未提交文件
+    **活跃 change** - **下一步建议**：推荐的 slash 命令 + 原因 + 说明 - **风险提示**：检测到的
+    info/warning/error 级风险项和恢复建议 - **Git 快照**：分支、HEAD、最近提交、未提交文件
   </Column>
   <Column>
-    **已归档 change**
-    - **归档摘要**：归档名、原名、归档时间和路径、任务完成度
-    - **风险提示**：归档时的遗留风险
-    - **Git 快照**：归档时的 Git 状态
+    **已归档 change** - **归档摘要**：归档名、原名、归档时间和路径、任务完成度 -
+    **风险提示**：归档时的遗留风险 - **Git 快照**：归档时的 Git 状态
   </Column>
 </Columns>
 
@@ -166,7 +196,8 @@ flowchart LR
 </Note>
 
 <Tip>
-  如果产物文件存在但抽屉显示「当前 dashboard 服务返回的数据里没有全文内容」，重启 dashboard 服务后再刷新页面即可。
+  如果产物文件存在但抽屉显示「当前 dashboard 服务返回的数据里没有全文内容」，重启 dashboard
+  服务后再刷新页面即可。
 </Tip>
 
 ## 主题切换：亮色 / 暗色
@@ -178,7 +209,8 @@ flowchart LR
 - 切换在 `<html data-theme>` 属性上生效，避免首次渲染闪烁
 
 <Note>
-  主题偏好存储在浏览器本地，不会跨设备同步。在另一台机器或另一个浏览器上打开 dashboard 时，会重新读取系统偏好。
+  主题偏好存储在浏览器本地，不会跨设备同步。在另一台机器或另一个浏览器上打开 dashboard
+  时，会重新读取系统偏好。
 </Note>
 
 ## 自动刷新
@@ -202,24 +234,27 @@ http://localhost:4321/?demo
 
 仪表盘的风险提示卡片会显示检测到的风险码：
 
-| 风险码 | 含义 |
-| --- | --- |
-| `MISSING_COMET_YAML` | change 缺少 `.comet.yaml` |
-| `UNKNOWN_PHASE` | 阶段无法识别 |
-| `TASKS_MISSING` | 缺少 tasks 文件 |
-| `TASKS_INCOMPLETE` | 任务未完成 |
-| `VERIFY_FAILED` | verify 失败 |
-| `VERIFY_PENDING` | verify 待跑 |
-| `ARTIFACT_MISSING` | 缺少关键产物 |
-| `ARCHIVE_METADATA_MISSING` | 归档元数据缺失 |
-| `GIT_DIRTY` | （项目级）工作区有未提交改动 |
+| 风险码                     | 含义                         |
+| -------------------------- | ---------------------------- |
+| `MISSING_COMET_YAML`       | change 缺少 `.comet.yaml`    |
+| `UNKNOWN_PHASE`            | 阶段无法识别                 |
+| `TASKS_MISSING`            | 缺少 tasks 文件              |
+| `TASKS_INCOMPLETE`         | 任务未完成                   |
+| `VERIFY_FAILED`            | verify 失败                  |
+| `VERIFY_PENDING`           | verify 待跑                  |
+| `ARTIFACT_MISSING`         | 缺少关键产物                 |
+| `ARCHIVE_METADATA_MISSING` | 归档元数据缺失               |
+| `GIT_DIRTY`                | （项目级）工作区有未提交改动 |
 
 <Info>
-  仪表盘读取 <code>openspec/changes/</code>（活跃）和 <code>openspec/changes/archive/</code>（归档），采用<strong>尽力而为</strong>策略：单个 change 出错不会让整个页面空白，错误会被隔离并跳过。
+  Classic 工作区读取 <code>openspec/changes/</code>（活跃）和 <code>openspec/changes/archive/</code>
+  （归档）。Native 工作区依据项目配置读取 Native artifact root 下的状态。两部分都采用
+  <strong>只读、尽力而为</strong>策略；Native 采集失败不会阻止 Classic 数据显示。
 </Info>
 
 ## 下一步
 
 - [comet dashboard 命令](/zh/cli/dashboard) — 完整命令选项和脚本/CI 用法
+- [Native CLI](/zh/cli/native) — 查看详情、推进、修复和归档 Native change
 - [comet status](/zh/cli/status) — 命令行版的活跃 change 状态
 - [中间产物](/zh/concepts/intermediate-artifacts) — `.comet/` 中间产物的作用

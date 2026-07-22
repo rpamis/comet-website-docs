@@ -1,0 +1,137 @@
+---
+title: 'Native 配置'
+description: '配置 /comet 的默认路由、启用的工作流、自动恢复，以及 Native 的产物根目录、文档语言和澄清模式。'
+---
+
+Native 与 Classic 共用项目级 `.comet/config.yaml`。引入 Native 后，配置文件不再只保存 Classic 的四个默认值；它同时承担 `/comet` 入口路由、工作流启用范围和自动恢复策略，并把 Native 专属设置放在 `native` 命名空间中。
+
+## 完整示例
+
+同时启用 Native 与 Classic 的项目可以生成如下配置：
+
+```yaml
+schema: comet.project.v1
+default_workflow: native
+workflows:
+  - native
+  - classic
+ambient_resume: true
+
+native:
+  artifact_root: docs
+  language: zh-CN
+  clarification_mode: sequential
+
+classic:
+  language: zh-CN
+  context_compression: off
+  review_mode: standard
+  auto_transition: true
+```
+
+共享字段决定入口和恢复；`native.*` 只影响 Native，`classic.*` 只影响新建 Classic change。两套状态机、change 目录和 Guard 不会因为共用配置文件而合并。
+
+## 共享入口字段
+
+| 字段 | 允许值 / 默认值 | 作用 |
+| --- | --- | --- |
+| `schema` | `comet.project.v1` | 当前结构化项目配置版本；由 Comet 管理 |
+| `default_workflow` | `native` \| `classic` | 用户调用 `/comet` 时进入哪套永久 Skill |
+| `workflows` | `native`、`classic` 或两者 | 此项目已经启用并安装的工作流；必须包含默认工作流 |
+| `ambient_resume` | `true`（默认）\| `false` | 是否允许 Agent 对普通自然语言续接请求自动运行只读恢复探测 |
+
+`default_workflow` 只控制入口，不迁移已有 change。`workflows` 也不是安装命令：不要只在 YAML 中加入 `native` 或 `classic`，应使用 `comet init . --workflow native|classic|both` 安装对应 Skill、Rule 与 Hook Router。
+
+## Native 字段
+
+| 字段 | 允许值 / 默认值 | 作用 |
+| --- | --- | --- |
+| `native.artifact_root` | 项目内相对路径；默认 `docs` | 决定 `<artifact-root>/comet/` 中 specs、changes、archive 和 runtime 的位置 |
+| `native.language` | `en` \| `zh-CN`；默认 `en` | 新建 Native change 的 brief、规格和报告语言 |
+| `native.clarification_mode` | `sequential` \| `batch`；默认 `sequential` | 每轮询问一个最上游问题，或一次提出本轮全部可回答问题 |
+
+`artifact_root: .` 对应 `<project>/comet/`，`artifact_root: docs` 对应 `<project>/docs/comet/`。已有 Native 项目不能只改这个字段再手动移动目录；使用事务化命令：
+
+```bash
+comet native root show
+comet native root move docs
+```
+
+修改后续新 change 的默认语言可以运行：
+
+```bash
+comet native init --language zh-CN
+```
+
+已有 change 会继续使用创建时写入的语言，不会被项目默认值追溯改写。
+
+`clarification_mode` 只改变提问的组织方式，不新增 phase，也不改变 Guard、安全确认或调用方停点。切换模式不会清除 brief 中已保存的 `[blocking]` 问题；应先处理当前问题，再按新模式计算下一轮。
+
+<Warning>
+  <code>native.pending_root_move</code> 是 root move 中断恢复使用的机器字段，不是用户配置项。看到它时运行 <code>comet native doctor</code>，不要手工删除或修改。
+</Warning>
+
+## Classic 字段
+
+Classic Runtime 从 `.comet/config.yaml` 的 `classic:` 块读取以下默认值，并在新建 change 时写入该 change 的 `.comet.yaml`：
+
+| 字段 | 允许值 | 默认值 |
+| --- | --- | --- |
+| `language` | `en` \| `zh-CN` | `en` |
+| `context_compression` | `off` \| `beta` | `off` |
+| `review_mode` | `off` \| `standard` \| `thorough` | `standard` |
+| `auto_transition` | `true` \| `false` | `true` |
+
+这些字段不会改变 Native 的执行方法；Native 没有 context compression、review mode 或按阶段 Skill 自动衔接配置。
+
+## 常见配置
+
+### 只启用 Native
+
+```yaml
+schema: comet.project.v1
+default_workflow: native
+workflows:
+  - native
+ambient_resume: true
+native:
+  artifact_root: docs
+  language: zh-CN
+  clarification_mode: sequential
+```
+
+### 两套工作流都启用，但默认进入 Classic
+
+```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+native:
+  artifact_root: docs
+  language: zh-CN
+  clarification_mode: batch
+classic:
+  language: zh-CN
+  context_compression: off
+  review_mode: standard
+  auto_transition: true
+```
+
+### 关闭普通请求的自动恢复探测
+
+```yaml
+ambient_resume: false
+```
+
+这只关闭 Agent 对自然语言续接请求的自动探测；显式 `/comet` 仍按 `default_workflow` 工作。
+
+## 旧 Classic 配置迁移
+
+只有顶层 `language`、`context_compression`、`review_mode` 和 `auto_transition` 的旧文件，入口解析仍会使用 `legacy-fallback` 进入 Classic，不会猜测 Native。Classic Runtime 不再直接读取这些顶层默认值。
+
+运行 `comet init` 或 `comet update` 时，Comet 会把旧顶层值迁入 `classic:`，保留已经明确写在新块中的值，并移除旧字段。启用 Native 时使用 `comet init . --workflow native` 或 `--workflow both`，不要手工拼接两套配置。
+
+继续阅读：[单 Skill 与入口路由](/zh/native/skills-and-routing)、[产物与状态](/zh/native/artifacts-and-state) 和 [Classic 状态与配置](/zh/concepts/state-management)。

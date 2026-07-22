@@ -1,32 +1,38 @@
 ---
-title: "自动推进机制"
-description: "理解 /comet 如何自动检测阶段、推进状态、衔接下一阶段，以及阶段推进和自动衔接的区别、预设升级和断点恢复。"
+title: '自动推进机制'
+description: '理解 /comet 进入 Classic 后，内部路由如何自动检测阶段、推进状态、衔接下一阶段，以及如何恢复。'
 ---
 
-`/comet` 的核心能力之一是自动推进——它能检测当前在哪个阶段、推进状态、衔接下一个阶段 Skill，而不需要你手动记住"现在该做什么"。本页解释这个机制的完整工作方式。
+用户正常调用 `/comet`。项目配置进入 Classic 后，内部 `/comet-classic` 会自动检测当前阶段、推进状态并衔接下一阶段 Skill；你不需要先判断“现在该做什么”。本页解释这个内部机制。
 
 ## 阶段推进 vs 自动衔接
 
 理解自动推进，首先要区分两个容易被混淆的概念:
 
-| 概念 | 谁做 | 做什么 | 受 auto_transition 影响 |
-| --- | --- | --- | --- |
-| **阶段推进** | guard `--apply` | 更新 `.comet.yaml` 的 `phase` 字段 | 否，始终发生 |
-| **自动衔接** | `comet-state next` | 决定是否自动调用下一个阶段 Skill | 是 |
+| 概念         | 谁做               | 做什么                             | 受 auto_transition 影响 |
+| ------------ | ------------------ | ---------------------------------- | ----------------------- |
+| **阶段推进** | guard `--apply`    | 更新 `.comet.yaml` 的 `phase` 字段 | 否，始终发生            |
+| **自动衔接** | `comet-state next` | 决定是否自动调用下一个阶段 Skill   | 是，读取 `classic.auto_transition` |
 
 <Warning>
-  <strong>阶段推进一定发生</strong>——guard 的 <code>--apply</code> 总是更新 <code>phase</code>。<code>auto_transition</code> 只控制是否自动调用下一个 Skill，不影响 phase 推进。用户决策点无论 <code>auto_transition</code> 取何值都必须阻塞。
+  <strong>阶段推进一定发生</strong>——guard 的 <code>--apply</code> 总是更新 <code>phase</code>。
+  <code>auto_transition</code> 只控制是否自动调用下一个 Skill，不影响 phase 推进。用户决策点无论{' '}
+  <code>auto_transition</code> 取何值都必须阻塞。
 </Warning>
 
 <p align="center">
-  <img src="/assets/auto-transition-illustrations/01-phase-vs-next.png" alt="小鱼用 guard 推动阶段珠子，同时用 auto_transition 开关控制下一步衔接" width="800" />
+  <img
+    src="/assets/auto-transition-illustrations/01-phase-vs-next.png"
+    alt="小鱼用 guard 推动阶段珠子，同时用 auto_transition 开关控制下一步衔接"
+    width="800"
+  />
 </p>
 
 <p align="center">阶段推进负责更新状态，自动衔接只决定下一张 Skill 卡片是否继续递出去</p>
 
 ## 自动检测怎么工作
 
-每次调用 `/comet`，Comet 不依赖对话历史，而是重新读取文件状态判断当前阶段。
+每次调用 `/comet` 并进入 Classic 后，内部 `/comet-classic` 不依赖对话历史，而是重新读取文件状态判断当前阶段。
 
 ### Step 0：发现活跃 change
 
@@ -34,13 +40,13 @@ description: "理解 /comet 如何自动检测阶段、推进状态、衔接下�
 2. 未命中预设时运行 `openspec list --json` 获取所有活跃 change
 3. 按 change 数量和用户输入决定行为:
 
-| 活跃 change | 用户输入 | 行为 |
-| --- | --- | --- |
-| 无 | 非预设 | 调用 `/comet-open` |
-| 1 个 | `/comet <描述>` | 询问：继续还是创建新 |
-| 多个 | `/comet <描述>` | 询问：继续还是创建新；选继续则列出清单选择 |
-| 1 个 | `/comet`（无描述） | 自动选中 |
-| 多个 | `/comet`（无描述） | 列出清单让用户选择 |
+| 活跃 change | 用户输入           | 行为                                                      |
+| ----------- | ------------------ | --------------------------------------------------------- |
+| 无          | 非预设             | 调用 `/comet-open`                                        |
+| 1 个        | `/comet <描述>`    | 配置进入 Classic 后询问：继续还是创建新                   |
+| 多个        | `/comet <描述>`    | 配置进入 Classic 后询问：继续还是创建新；选继续则列出清单 |
+| 1 个        | `/comet`（无描述） | 配置进入 Classic 后自动选中                               |
+| 多个        | `/comet`（无描述） | 配置进入 Classic 后列出清单让用户选择                     |
 
 ### Step 1：读取状态
 
@@ -50,16 +56,16 @@ description: "理解 /comet 如何自动检测阶段、推进状态、衔接下�
 
 按以下顺序判断,命中即停（以文件状态为准,冲突时修正 `.comet.yaml`）:
 
-| 判定条件 | 路由到 |
-| --- | --- |
-| `archived: true` 或已移入 archive | 流程已完成 |
-| `verify_result: pass` | `/comet-archive`（先做归档前确认） |
-| `verify_result: fail` | 验证失败决策阻塞点 |
-| `phase: verify` 或 tasks 全部勾选 | `/comet-verify` |
-| `phase: build` 或有 Design Doc 但执行未完成 | hotfix→`/comet-hotfix`、tweak→`/comet-tweak`、full→`/comet-build` |
-| `phase: design` 或有 change 无 Design Doc | `/comet-design` |
-| `phase: open` 或有活跃 change 无 `.comet.yaml` | `/comet-open` |
-| 无活跃 change | `/comet-open` |
+| 判定条件                                       | 路由到                                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------- |
+| `archived: true` 或已移入 archive              | 流程已完成                                                        |
+| `verify_result: pass`                          | `/comet-archive`（先做归档前确认）                                |
+| `verify_result: fail`                          | 验证失败决策阻塞点                                                |
+| `phase: verify` 或 tasks 全部勾选              | `/comet-verify`                                                   |
+| `phase: build` 或有 Design Doc 但执行未完成    | hotfix→`/comet-hotfix`、tweak→`/comet-tweak`、full→`/comet-build` |
+| `phase: design` 或有 change 无 Design Doc      | `/comet-design`                                                   |
+| `phase: open` 或有活跃 change 无 `.comet.yaml` | `/comet-open`                                                     |
+| 无活跃 change                                  | `/comet-open`                                                     |
 
 ## 状态转换
 
@@ -101,28 +107,28 @@ SKILL: <skill-name>     # done 时省略
 HINT: <message>         # 仅 manual 时
 ```
 
-| 输出 | 含义 | 触发条件 |
-| --- | --- | --- |
-| `NEXT: auto` | 自动调用下一阶段 Skill | `auto_transition` 不是 `false` |
-| `NEXT: manual` | 不调用下一 Skill,打印 HINT 让用户手动运行 | `auto_transition: false` |
-| `NEXT: done` | 流程已完成 | `archived: true` |
+| 输出           | 含义                                      | 触发条件                       |
+| -------------- | ----------------------------------------- | ------------------------------ |
+| `NEXT: auto`   | 自动调用下一阶段 Skill                    | `auto_transition` 不是 `false` |
+| `NEXT: manual` | 不调用下一 Skill,打印 HINT 让用户手动运行 | `auto_transition: false`       |
+| `NEXT: done`   | 流程已完成                                | `archived: true`               |
 
 ### Skill 路由
 
 `next` 根据 `phase` 和 `workflow` 决定下一个 Skill:
 
-| phase | full | hotfix | tweak |
-| --- | --- | --- | --- |
-| open | `/comet-design` | `/comet-build`(→`/comet-hotfix`) | `/comet-build`(→`/comet-tweak`) |
-| design | `/comet-build` | — | — |
-| build | `/comet-verify` | `/comet-verify` | `/comet-verify` |
-| verify | `/comet-archive` | `/comet-archive` | `/comet-archive` |
+| phase  | full             | hotfix                           | tweak                           |
+| ------ | ---------------- | -------------------------------- | ------------------------------- |
+| open   | `/comet-design`  | `/comet-build`(→`/comet-hotfix`) | `/comet-build`(→`/comet-tweak`) |
+| design | `/comet-build`   | —                                | —                               |
+| build  | `/comet-verify`  | `/comet-verify`                  | `/comet-verify`                 |
+| verify | `/comet-archive` | `/comet-archive`                 | `/comet-archive`                |
 
 verify 和 archive 阶段不受 workflow 类型影响,始终返回标准 Skill。
 
 ## 连续执行
 
-单次 `/comet` 调用从检测到的阶段开始,退出条件满足后自动推进后续阶段。
+单次 `/comet` 调用由配置进入 Classic 后，从检测到的阶段开始；退出条件满足后自动推进后续阶段。
 
 ```text
 /comet
@@ -140,10 +146,10 @@ verify 和 archive 阶段不受 workflow 类型影响,始终返回标准 Skill�
 change 级 .comet.yaml > 环境变量 > 项目级 .comet/config.yaml > 默认值(true)
 ```
 
-| 值 | 行为 |
-| --- | --- |
-| `true`（默认） | `NEXT: auto`,自动调用下一 Skill |
-| `false` | `NEXT: manual`,打印 HINT,由你手动运行 |
+| 值             | 行为                                  |
+| -------------- | ------------------------------------- |
+| `true`（默认） | `NEXT: auto`,自动调用下一 Skill       |
+| `false`        | `NEXT: manual`,打印 HINT,由你手动运行 |
 
 ### 什么时候用 false
 
@@ -160,30 +166,30 @@ export COMET_AUTO_TRANSITION=false
 
 hotfix/tweak 执行过程中，如果命中升级信号,会暂停让你二选一:
 
-| 信号类型 | 触发 | 决策 |
-| --- | --- | --- |
-| 质变信号 | 跨模块协调、新增 capability、schema 变更、新 public API、深层架构问题 | 命中任一即暂停 |
-| 文件数 tripwire | 改动文件数超阈值 | 暂停交用户决定 |
+| 信号类型        | 触发                                                                  | 决策           |
+| --------------- | --------------------------------------------------------------------- | -------------- |
+| 质变信号        | 跨模块协调、新增 capability、schema 变更、新 public API、深层架构问题 | 命中任一即暂停 |
+| 文件数 tripwire | 改动文件数超阈值                                                      | 暂停交用户决定 |
 
-| 选项 | 结果 |
-| --- | --- |
-| 继续预设轻量流程 | 继续当前预设 |
-| 升级为完整 `/comet` | `transition preset-escalate` → 回退到 design → 补 Design Doc → 回到完整流程 |
+| 选项                        | 结果                                                                        |
+| --------------------------- | --------------------------------------------------------------------------- |
+| 继续预设轻量流程            | 继续当前预设                                                                |
+| 升级为完整 `/comet-classic` | `transition preset-escalate` → 回退到 design → 补 Design Doc → 回到完整流程 |
 
 `preset-escalate` 是预设→full 升级的唯一合法通道——原子地设 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`,清除 `design_doc`。
 
 ## 断点恢复
 
-上下文压缩或会话中断后,`/comet` 重新读取文件状态恢复:
+上下文压缩或会话中断后，重新调用 `/comet`；配置进入 Classic 后，内部路由重新读取文件状态恢复：
 
-| 场景 | 恢复行为 |
-| --- | --- |
-| `phase: build` + `build_pause: plan-ready` + 已设 isolation/build_mode | stale pause,自动清除并继续 |
-| `phase: build` + `build_pause: plan-ready` + 未设 isolation/build_mode | 回到 plan-ready 恢复点 |
-| `phase: build` + `build_pause: plan-ready` + plan 缺失 | 状态损坏,重新生成 plan |
-| `phase: verify` + `verify_result: fail` | 进入验证失败决策阻塞点 |
-| `phase: open` + artifacts 已完整 | 先 guard `--apply` 修正状态再判定 |
-| `phase: archive` | 只允许调用 `/comet-archive` |
+| 场景                                                                   | 恢复行为                          |
+| ---------------------------------------------------------------------- | --------------------------------- |
+| `phase: build` + `build_pause: plan-ready` + 已设 isolation/build_mode | stale pause,自动清除并继续        |
+| `phase: build` + `build_pause: plan-ready` + 未设 isolation/build_mode | 回到 plan-ready 恢复点            |
+| `phase: build` + `build_pause: plan-ready` + plan 缺失                 | 状态损坏,重新生成 plan            |
+| `phase: verify` + `verify_result: fail`                                | 进入验证失败决策阻塞点            |
+| `phase: open` + artifacts 已完整                                       | 先 guard `--apply` 修正状态再判定 |
+| `phase: archive`                                                       | 只允许调用 `/comet-archive`       |
 
 断点恢复不依赖对话历史——每次都重新执行 Step 0 和 Step 1。
 
@@ -191,12 +197,12 @@ hotfix/tweak 执行过程中，如果命中升级信号,会暂停让你二选一
 
 Comet 的自动推进有明确的边界。以下想法出现时必须停下检查:
 
-| Agent 心理 | 实际风险 |
-| --- | --- |
-| "用户应该会同意这个方案" | 不能替用户决策,必须等待明确选择 |
-| "这只是个小改动,不需要确认" | 决策点无大小之分 |
-| "用户之前选过 A,这次也选 A" | 历史偏好不能替代当前确认 |
-| "流程走到这里应该没问题了" | 验证不通过不等于通过,检查 verify_result |
+| Agent 心理                  | 实际风险                                |
+| --------------------------- | --------------------------------------- |
+| "用户应该会同意这个方案"    | 不能替用户决策,必须等待明确选择         |
+| "这只是个小改动,不需要确认" | 决策点无大小之分                        |
+| "用户之前选过 A,这次也选 A" | 历史偏好不能替代当前确认                |
+| "流程走到这里应该没问题了"  | 验证不通过不等于通过,检查 verify_result |
 
 ## 下一步
 

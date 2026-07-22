@@ -1,23 +1,26 @@
 ---
-title: "Skill 与 Engine（进阶）"
-description: "理解 Comet Skill 的三类来源、Skill 包结构、Engine 运行循环、pending action/resume 机制、不可变快照、guardrails、runtime checks，以及 /comet-any 生成物和 Engine 的关系。"
+title: 'Skill 与 Engine（进阶）'
+description: '理解 Comet Skill 的三类来源、Skill 包结构、Engine 运行循环、pending action/resume 机制、不可变快照、guardrails、runtime checks，以及 /comet-any 生成物和 Engine 的关系。'
 ---
 
 <Tip>
-  创建、优化或组合 Skill 时，通常只需要在 Agent 里调用 <code>/comet-any</code> 并按提示确认。除非你要调试 Engine Run、runtime checks 或生成物结构，不需要先理解本页的底层机制。经典 Spec 模式的 <code>/comet</code> 用户也不需要理解 Engine 就能使用五阶段工作流。
+  创建、优化或组合 Skill 时，通常只需要在 Agent 里调用 <code>/comet-any</code>{' '}
+  并按提示确认。除非你要调试 Engine Run、runtime checks
+  或生成物结构，不需要先理解本页的底层机制。经典 Spec 模式的 <code>/comet-classic</code>{' '}
+  用户也不需要理解 Engine 就能使用五阶段工作流。
 </Tip>
 
 Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置了 **Skill Engine**——一个确定性运行时，负责执行、约束、持久化、恢复和评估 Comet Skill。它为多步骤 Skill 提供稳定内容 hash、不可变快照、pending action 恢复、guardrails 和 runtime check。
 
 ## 你是否需要读本页
 
-| 你的目标 | 建议 |
-| --- | --- |
-| 使用 `/comet` 跑经典五阶段工作流 | 不需要读本页，先看[快速开始](/zh/quickstart) |
-| 用 `/comet-any` 创建或组合 Skill | 先看[快速上手：组合任意 Skill](/zh/skill-creator/getting-started) |
-| 发布 Skill | 先看[发布和分发 Skill](/zh/skill-creator/publishing) |
-| 调试 `comet skill run/continue/check` | 读本页 |
-| 编写 Engine-enabled Skill 包 | 读本页 |
+| 你的目标                              | 建议                                                              |
+| ------------------------------------- | ----------------------------------------------------------------- |
+| 使用 `/comet` 跑经典五阶段工作流      | 不需要读本页，先看[快速开始](/zh/quickstart)                      |
+| 用 `/comet-any` 创建或组合 Skill      | 先看[快速上手：组合任意 Skill](/zh/skill-creator/getting-started) |
+| 发布 Skill                            | 先看[发布和分发 Skill](/zh/skill-creator/publishing)              |
+| 调试 `comet skill run/continue/check` | 读本页                                                            |
+| 编写 Engine-enabled Skill 包          | 读本页                                                            |
 
 日常使用只需要记住三点：
 
@@ -27,11 +30,11 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 
 ## 三类 Skill
 
-| 类型 | 来源 | 常见入口 | 说明 |
-| --- | --- | --- | --- |
-| 内置工作流 Skill | 随包分发在 `assets/skills/` | `/comet`、`/comet-open`、`/comet-any` | 驱动五阶段流程和 Skill Creator |
-| 项目 Skill | 安装到 `.comet/skills/<name>` | `comet skill add` | 按名称覆盖内置 Skill，无效覆盖 fail closed |
-| Factory 生成 Skill | `/comet-any` 创建或组合 | `/comet-any`、`comet publish` | 生成后就是普通 Skill 包，可评估、可发布、可分发 |
+| 类型               | 来源                          | 常见入口                                      | 说明                                            |
+| ------------------ | ----------------------------- | --------------------------------------------- | ----------------------------------------------- |
+| 内置工作流 Skill   | 随包分发在 `assets/skills/`   | `/comet-classic`、`/comet-open`、`/comet-any` | 驱动五阶段流程和 Skill Creator                  |
+| 项目 Skill         | 安装到 `.comet/skills/<name>` | `comet skill add`                             | 按名称覆盖内置 Skill，无效覆盖 fail closed      |
+| Factory 生成 Skill | `/comet-any` 创建或组合       | `/comet-any`、`comet publish`                 | 生成后就是普通 Skill 包，可评估、可发布、可分发 |
 
 ### Skill 发现顺序
 
@@ -43,7 +46,8 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 4. 都没找到 → **fail closed**，不静默回退。
 
 <Warning>
-  项目 Skill 按名称覆盖内置 Skill 时，如果项目 Skill 无效，会直接失败而不是回退到内置。这避免"你以为在用自定义版本，实际静默用了内置"的问题。
+  项目 Skill 按名称覆盖内置 Skill 时，如果项目 Skill
+  无效，会直接失败而不是回退到内置。这避免"你以为在用自定义版本，实际静默用了内置"的问题。
 </Warning>
 
 ## Skill 包结构
@@ -71,15 +75,18 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 
 ### 各文件职责
 
-| 文件 | 生命周期 | 职责 | 被谁加载 |
-| --- | --- | --- | --- |
-| `comet/skill.yaml` | 运行期 + 创建期 | Skill 定义：goal、orchestration、skills、agents、tools | `loadSkillPackage` |
-| `comet/guardrails.yaml` | 运行期 | 覆盖默认 guardrails（允许列表、预算、确认要求） | `loadSkillPackage` |
-| `comet/checks.yaml` 或 `comet/evals.yaml` | 运行期 | runtime checks（progress/step/completion），二选一 | `loadSkillPackage` → `SkillPackage.evals` |
-| `comet/eval.yaml` | 创建期 | 创建期评估 manifest（task、quality gates、expected evidence） | `comet eval` / Bundle 后端 |
+| 文件                                      | 生命周期        | 职责                                                          | 被谁加载                                  |
+| ----------------------------------------- | --------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| `comet/skill.yaml`                        | 运行期 + 创建期 | Skill 定义：goal、orchestration、skills、agents、tools        | `loadSkillPackage`                        |
+| `comet/guardrails.yaml`                   | 运行期          | 覆盖默认 guardrails（允许列表、预算、确认要求）               | `loadSkillPackage`                        |
+| `comet/checks.yaml` 或 `comet/evals.yaml` | 运行期          | runtime checks（progress/step/completion），二选一            | `loadSkillPackage` → `SkillPackage.evals` |
+| `comet/eval.yaml`                         | 创建期          | 创建期评估 manifest（task、quality gates、expected evidence） | `comet eval` / Bundle 后端                |
 
 <Note>
-  <strong>容易混淆的命名：</strong>复数 <code>evals.yaml</code>（或 <code>checks.yaml</code>）是运行期 eval，由 Engine 在运行时检查；单数 <code>eval.yaml</code> 是创建期评估 manifest，由 <code>comet eval</code> 在发布前验证。两者生命周期不同，不能混为一谈。<code>checks.yaml</code> 和 <code>evals.yaml</code> 不能同时存在。
+  <strong>容易混淆的命名：</strong>复数 <code>evals.yaml</code>（或 <code>checks.yaml</code>
+  ）是运行期 eval，由 Engine 在运行时检查；单数 <code>eval.yaml</code> 是创建期评估 manifest，由{' '}
+  <code>comet eval</code> 在发布前验证。两者生命周期不同，不能混为一谈。<code>checks.yaml</code> 和{' '}
+  <code>evals.yaml</code> 不能同时存在。
 </Note>
 
 ## Skill 定义：skill.yaml
@@ -91,9 +98,9 @@ apiVersion: comet/v1alpha1
 kind: Skill
 metadata:
   name: comet-classic
-  version: "1"
+  version: '1'
 goal:
-  statement: "驱动五阶段可恢复工作流"
+  statement: '驱动五阶段可恢复工作流'
   inputs: []
   outputs: []
   success: []
@@ -114,25 +121,25 @@ tools: []
 
 关键字段：
 
-| 字段 | 含义 |
-| --- | --- |
-| `goal` | Skill 目标、输入、输出和成功标准——runtime completion eval 的基础，必须可观测 |
-| `orchestration.mode` | `deterministic`（静态步骤图）或 `adaptive`（Agent 驱动） |
-| `orchestration.entry` | deterministic 模式必须指定，引用一个已知 step id |
-| `orchestration.steps` | 步骤图，每个 step 有 `id`、`action`、`next`、可选 `completionEvals` |
-| `skills` / `agents` / `tools` | 声明可用的能力，guardrails 的允许列表只能引用已声明项 |
+| 字段                          | 含义                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `goal`                        | Skill 目标、输入、输出和成功标准——runtime completion eval 的基础，必须可观测 |
+| `orchestration.mode`          | `deterministic`（静态步骤图）或 `adaptive`（Agent 驱动）                     |
+| `orchestration.entry`         | deterministic 模式必须指定，引用一个已知 step id                             |
+| `orchestration.steps`         | 步骤图，每个 step 有 `id`、`action`、`next`、可选 `completionEvals`          |
+| `skills` / `agents` / `tools` | 声明可用的能力，guardrails 的允许列表只能引用已声明项                        |
 
 ### 步骤动作类型
 
 每个 step 的 `action.type` 是以下之一：
 
-| 类型 | 含义 |
-| --- | --- |
-| `invoke_skill` | 调用另一个 Comet Skill |
-| `call_tool` | 调用工具（含脚本工具） |
-| `handoff` | 移交控制 |
-| `ask_user` | 向用户提问（必须有 `question`） |
-| `checkpoint` | 检查点（通常用于终止 step） |
+| 类型           | 含义                            |
+| -------------- | ------------------------------- |
+| `invoke_skill` | 调用另一个 Comet Skill          |
+| `call_tool`    | 调用工具（含脚本工具）          |
+| `handoff`      | 移交控制                        |
+| `ask_user`     | 向用户提问（必须有 `question`） |
+| `checkpoint`   | 检查点（通常用于终止 step）     |
 
 ## 两种编排模式
 
@@ -153,7 +160,8 @@ tools: []
 - 循环层已就绪并有测试覆盖，但 `comet skill run` 的公开入口目前会拒绝 adaptive 包。
 
 <Tip>
-  如果你写的是多步骤、需要恢复的 Skill，用 deterministic。adaptive 是为 Agent 自主决策场景准备的，目前 loop-ready 但尚未通过 CLI 暴露。
+  如果你写的是多步骤、需要恢复的 Skill，用 deterministic。adaptive 是为 Agent
+  自主决策场景准备的，目前 loop-ready 但尚未通过 CLI 暴露。
 </Tip>
 
 ## Engine 运行循环
@@ -174,7 +182,11 @@ flowchart LR
 ```
 
 <p align="center">
-  <img src="/assets/skill-creator-engine-illustrations/01-engine-pending-action-loop.png" alt="小鱼记录 Engine 提议的 pending action，外部执行后再通过 resume 提交 outcome" width="800" />
+  <img
+    src="/assets/skill-creator-engine-illustrations/01-engine-pending-action-loop.png"
+    alt="小鱼记录 Engine 提议的 pending action，外部执行后再通过 resume 提交 outcome"
+    width="800"
+  />
 </p>
 
 <p align="center">Engine 只提议、约束和记录；真正的副作用由外部执行后再 resume</p>
@@ -278,22 +290,24 @@ guardrails 约束 Engine 能执行什么动作，由 `guardrails.yaml` 覆盖默
 
 每个动作在提议前都过 `checkAction`：
 
-| 检查 | 失败行为 |
-| --- | --- |
-| `iteration >= maxIterations` | 阻塞：iteration 预算耗尽 |
-| 动作的 ref 不在允许列表 | 阻塞：skill/tool/agent 未声明 |
-| ref 需要 confirmation 但未提供 | 阻塞：需要用户确认 |
-| `retries[actionId] > maxRetriesPerAction` | 阻塞：重试预算耗尽 |
+| 检查                                      | 失败行为                      |
+| ----------------------------------------- | ----------------------------- |
+| `iteration >= maxIterations`              | 阻塞：iteration 预算耗尽      |
+| 动作的 ref 不在允许列表                   | 阻塞：skill/tool/agent 未声明 |
+| ref 需要 confirmation 但未提供            | 阻塞：需要用户确认            |
+| `retries[actionId] > maxRetriesPerAction` | 阻塞：重试预算耗尽            |
 
 <Warning>
-  动态重新规划<strong>不能放宽 guardrails</strong>。允许列表和预算由 Skill 固定，运行时的 Agent 不能协商扩大。这是 Engine 安全性的核心——Skill 定义了边界，执行者只能在边界内行动。
+  动态重新规划<strong>不能放宽 guardrails</strong>。允许列表和预算由 Skill 固定，运行时的 Agent
+  不能协商扩大。这是 Engine 安全性的核心——Skill 定义了边界，执行者只能在边界内行动。
 </Warning>
 
 ### 示例
 
 ```yaml
 # comet-classic 的 guardrails
-allowedSkills: [comet-open, comet-design, comet-build, comet-verify, comet-archive, comet-hotfix, comet-tweak]
+allowedSkills:
+  [comet-open, comet-design, comet-build, comet-verify, comet-archive, comet-hotfix, comet-tweak]
 allowedAgents: []
 allowedTools: []
 maxIterations: 500
@@ -307,18 +321,18 @@ runtime checks 是 Engine 在运行时检查 Run 是否满足条件，和创建�
 
 ### 两种检查类型
 
-| 类型 | 判断方式 |
-| --- | --- |
+| 类型              | 判断方式                          |
+| ----------------- | --------------------------------- |
 | `artifact_exists` | artifacts 存储里有对应的 artifact |
-| `state_equals` | Run state 的某个字段等于指定值 |
+| `state_equals`    | Run state 的某个字段等于指定值    |
 
 ### 三个作用域
 
-| scope | 何时运行 | 命令 |
-| --- | --- | --- |
-| `step` | 每次提交 action outcome 后自动运行 | 自动 |
-| `completion` | Run 到达 completed 时自动运行 | 自动 |
-| `progress` | 按需运行 | `comet skill check --scope progress` |
+| scope        | 何时运行                           | 命令                                 |
+| ------------ | ---------------------------------- | ------------------------------------ |
+| `step`       | 每次提交 action outcome 后自动运行 | 自动                                 |
+| `completion` | Run 到达 completed 时自动运行      | 自动                                 |
+| `progress`   | 按需运行                           | `comet skill check --scope progress` |
 
 ### 示例
 
@@ -335,21 +349,23 @@ runtime:
 这个 eval 在 Run 完成时检查 `status === completed`。
 
 <Warning>
-  <code>comet skill check</code> 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill 的产品能力能否发布，用 <a href="/zh/cli/eval">comet eval</a>。详见 <a href="/zh/eval/runtime">Runtime check</a>。
+  <code>comet skill check</code> 只检查某次 Engine Run 的完成度，不是通用 Skill 评估。评估一个 Skill
+  的产品能力能否发布，用 <a href="/zh/cli/eval">comet eval</a>。详见{' '}
+  <a href="/zh/eval/runtime">Runtime check</a>。
 </Warning>
 
 ## 产物通道（authoring lanes）
 
 `/comet-any` 生成 Skill 包时，通过**产物通道**（authoring lanes）组装产物，而不是一次性渲染所有文件。每个通道负责一类产物，有自己的作者（deterministic-adapter 或 subagent）。
 
-| 通道 | 产出 | 关键 artifact |
-| --- | --- | --- |
-| `workflow-entry` | 入口 Skill | `SKILL.md` |
-| `skill-core` | 每个 Workflow Node 对应的内部 Skill | 各节点 `../<node-skill>/SKILL.md` |
-| `script-contract` | 控制面脚本 | `scripts/workflow-state.mjs`、`workflow-guard.mjs`、`workflow-handoff.mjs`、`comet-plan.mjs`、`comet-check.mjs`、`comet-hook-guard.mjs` |
-| `reference` | 真实来源、协议和组合证据 | `reference/resolved-skills.json`、`workflow-protocol.json`、`composition-report.md`、`decision-points.md`、`recovery.md`、`authoring-lanes.json` |
-| `eval` | 评估清单（Engine 启用时） | `comet/eval.yaml` |
-| `skill-review` | 作者自审（最后跑） | `reference/skill-review.md`、`authoring-lanes.json` |
+| 通道              | 产出                                | 关键 artifact                                                                                                                                    |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workflow-entry`  | 入口 Skill                          | `SKILL.md`                                                                                                                                       |
+| `skill-core`      | 每个 Workflow Node 对应的内部 Skill | 各节点 `../<node-skill>/SKILL.md`                                                                                                                |
+| `script-contract` | 控制面脚本                          | `scripts/workflow-state.mjs`、`workflow-guard.mjs`、`workflow-handoff.mjs`、`comet-plan.mjs`、`comet-check.mjs`、`comet-hook-guard.mjs`          |
+| `reference`       | 真实来源、协议和组合证据            | `reference/resolved-skills.json`、`workflow-protocol.json`、`composition-report.md`、`decision-points.md`、`recovery.md`、`authoring-lanes.json` |
+| `eval`            | 评估清单（Engine 启用时）           | `comet/eval.yaml`                                                                                                                                |
+| `skill-review`    | 作者自审（最后跑）                  | `reference/skill-review.md`、`authoring-lanes.json`                                                                                              |
 
 每个通道的产出都会带 `protocolHash`，必须等于 `workflowProtocolHash(workflow)`，否则抛 `Factory authoring protocol hash drift`。
 
@@ -365,7 +381,9 @@ runtime:
 如果评审不通过（`passed === false`），`generateFactorySkillPackage` 抛 `Generated Skill package failed authoring review`，**不写任何文件**。
 
 <Tip>
-  这套通道设计是为了让平台可以用原生 subagent 并行产出 artifact（每个 subagent 只读自己的 brief）。当平台不支持 subagent 时，相同的 brief 会内联运行作为兜底。日常使用不需要关心这些，理解"每个产物都有作者和评审"即可。
+  这套通道设计是为了让平台可以用原生 subagent 并行产出 artifact（每个 subagent 只读自己的
+  brief）。当平台不支持 subagent 时，相同的 brief
+  会内联运行作为兜底。日常使用不需要关心这些，理解"每个产物都有作者和评审"即可。
 </Tip>
 
 ## Run state 存储
@@ -374,10 +392,10 @@ Run state 是 machine-owned 的，不要手工编辑。
 
 ### 两种存储位置
 
-| runnerMode | 存储位置 | 特点 |
-| --- | --- | --- |
-| `change` | `<changeDir>/.comet/` | 绑定 OpenSpec change 目录，一个目录一个 Run。经典 `/comet` 工作流用这种。 |
-| `standalone` | `<projectRoot>/.comet/runs/<runId>/` | 独立 Run，用 runId 寻址，多个 Run 并存 |
+| runnerMode   | 存储位置                             | 特点                                                                              |
+| ------------ | ------------------------------------ | --------------------------------------------------------------------------------- |
+| `change`     | `<changeDir>/.comet/`                | 绑定 OpenSpec change 目录，一个目录一个 Run。经典 `/comet-classic` 工作流用这种。 |
+| `standalone` | `<projectRoot>/.comet/runs/<runId>/` | 独立 Run，用 runId 寻址，多个 Run 并存                                            |
 
 ### run-state.json 字段
 
@@ -398,23 +416,23 @@ Run state 是 machine-owned 的，不要手工编辑。
 
 ### 五个附属文件
 
-| 文件 | 内容 |
-| --- | --- |
-| `.comet/pending-action.json` | 当前等待的 pending action |
-| `.comet/trajectory.jsonl` | append-only 轨迹审计记录 |
-| `.comet/context.md` | 当前 Agent 上下文 |
-| `.comet/artifacts.json` | 产出的 artifacts 映射 |
-| `.comet/checkpoint.json` | 一致性检查点（经典迁移时写入） |
+| 文件                         | 内容                           |
+| ---------------------------- | ------------------------------ |
+| `.comet/pending-action.json` | 当前等待的 pending action      |
+| `.comet/trajectory.jsonl`    | append-only 轨迹审计记录       |
+| `.comet/context.md`          | 当前 Agent 上下文              |
+| `.comet/artifacts.json`      | 产出的 artifacts 映射          |
+| `.comet/checkpoint.json`     | 一致性检查点（经典迁移时写入） |
 
 所有文件 IO 都沙箱化在 change/run 目录内，拒绝绝对路径、`~`、盘符和 `..` 路径穿越。写入是原子的（写 tmp 再 rename）。
 
 ## 经典工作流和 Engine 的关系
 
-经典 `/comet` 五阶段工作流在底层由 Engine 驱动，但用户不需要直接操作 Engine。
+经典 `/comet-classic` 五阶段工作流在底层由 Engine 驱动，但用户不需要直接操作 Engine。
 
 ```mermaid
 flowchart LR
-  A["/comet"] --> B[".comet.yaml 用户可见状态"]
+  A["/comet-classic"] --> B[".comet.yaml 用户可见状态"]
   B --> C["run_id 链接"]
   C --> D[".comet/run-state.json<br/>machine-owned Run state"]
   B --> E["workflow / phase / verify_result"]
@@ -430,20 +448,22 @@ flowchart LR
 - 首次进入一个 change 时，`ensureClassicRun` 从 `.comet.yaml` 的 classic 字段推导当前 step，创建快照和 Run state，建立 `run_id` 链接。
 
 <Note>
-  <code>comet-classic</code> 本身是一个 deterministic Skill，有 30 个步骤覆盖 full/hotfix/tweak 三种 profile。它是内部 Skill——用户从不直接调用它，而是用 <code>/comet</code>、<code>/comet-open</code> 等，Engine 在底层运行。
+  Engine 内部的 <code>comet-classic</code> 定义是一个 deterministic Skill，有 30 个步骤覆盖
+  full/hotfix/tweak 三种 profile。用户通过永久入口 <code>/comet-classic</code>（或由项目配置驱动的{' '}
+  <code>/comet</code> 别名转发）进入，不直接操作这些内部 YAML；Engine 在底层加载并运行它们。
 </Note>
 
 #### Classic 控制包的打包方式
 
 `comet-classic` 作为**内部控制包**以纯 YAML 形式打包在 `comet/runtime/classic/` 下，包含三个文件：
 
-| 文件 | 内容 |
-| --- | --- |
-| `comet/runtime/classic/skill.yaml` | deterministic 编排图（30 步，full/hotfix/tweak 三种 profile） |
-| `comet/runtime/classic/guardrails.yaml` | 允许的 7 个公开 Skill、`maxIterations: 500`、`maxRetriesPerAction: 3` |
-| `comet/runtime/classic/checks.yaml` | runtime check（`classic-completed`：completion 时 `status == completed`） |
+| 文件                                    | 内容                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------- |
+| `comet/runtime/classic/skill.yaml`      | deterministic 编排图（30 步，full/hotfix/tweak 三种 profile）             |
+| `comet/runtime/classic/guardrails.yaml` | 允许的 7 个公开 Skill、`maxIterations: 500`、`maxRetriesPerAction: 3`     |
+| `comet/runtime/classic/checks.yaml`     | runtime check（`classic-completed`：completion 时 `status == completed`） |
 
-它**不是**一个顶层、像用户 Skill 一样的 `comet-classic/` 目录——安装产物只暴露这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册，运行时由 Engine 加载。所有 `/comet*` 命令的用户面行为完全不变。
+这里的 Engine 定义**不是**用户调用的顶层 `comet-classic/` 入口目录。内部安装产物是这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册并由 Engine 加载；顶层 `/comet-classic` 只负责稳定入口与工作流编排。
 
 ## 什么时候用 /comet-any
 
@@ -478,7 +498,7 @@ comet skill continue --run-id demo-run --upgrade my-skill --project .
 
 ## 下一步
 
-- [工作流概念](/zh/concepts/workflow) — `/comet` 如何在底层使用 Engine
+- [工作流概念](/zh/concepts/workflow) — `/comet-classic` 如何在底层使用 Engine
 - [comet skill](/zh/cli/skill) — 完整命令参考
 - [Runtime check](/zh/eval/runtime) — `comet skill check` 和 `comet eval` 的区别
 - [Skill Creator 概览](/zh/skill-creator/overview) — 用 `/comet-any` 创建 Engine-enabled Skill

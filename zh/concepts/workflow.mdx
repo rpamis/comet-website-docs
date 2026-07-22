@@ -1,27 +1,33 @@
 ---
-title: "工作流概念"
-description: "理解 /comet 为什么把 OpenSpec 的 Spec管理能力 和 Superpowers 的 执行能力 串成五阶段，产物如何交接，重叠 spec 如何处理，以及如何归档。"
+title: '工作流概念'
+description: '理解 /comet 如何按项目配置进入经典 Spec 模式，以及 Classic 如何把 OpenSpec 和 Superpowers 串成五阶段。'
 ---
 
-`/comet` 是 Comet 的经典 Spec 模式入口。它把一次变更拆成五个阶段：open、design、build、verify、archive。这五个阶段把 OpenSpec 和 Superpowers 两套工具连成一条可恢复的工作流。组合 OpenSpec + Superpowers 不是 Comet 的最终目的，我们希望持续追踪这类长程任务 Skill，找到能让长链路 Skill 稳定执行的 Harness 能力；如果你也感兴趣，欢迎参与项目贡献，或通过源码进行学习。
+用户正常只需要调用 `/comet`。它读取 `.comet/config.yaml`，按项目配置确定性地进入 Native 或 Classic；配置选择 Classic 时，内部转发到永久入口 `/comet-classic`，再由 Classic 把一次变更拆成 open、design、build、verify、archive 五个阶段。两套工作流的 change、状态和产物彼此独立。
+
+Classic 把 OpenSpec 和 Superpowers 连成一条可恢复的工作流。`/comet-classic` 自带意图识别，会读取活跃 change、`.comet.yaml` 和实际文件状态，判断应该新建、恢复、进入轻量预设，还是调用当前阶段 Skill。用户无需先判断自己是否处于 open、design、build、verify 或 archive。
+
+**Classic 主要适配 Fable 5、GPT-5.6 以下的模型能力档。对这类模型，明确的 Spec、设计、计划、TDD、调试和审查阶段能够减少遗漏与流程漂移**；Comet 的现有真实基线评估已验证，这种约束在较低能力档模型上能保持良好的任务覆盖和完成效果。Fable 5、GPT-5.6 及同档强模型通常更适合使用执行方法更轻的 [Native 工作流](/zh/concepts/native-workflow)。模型名称用于帮助选择能力档，Comet 不会自动检测模型并切换模式。
 
 ## 哪些值得注意
 
-| 什么是需要关心的 | 结论 |
-| --- | --- |
-| 入口 | 大多数时候只输入 `/comet`，让 Comet 判断当前阶段 |
-| 流程 | `open` → `design` → `build` → `verify` → `archive` |
-| 你什么时候参与 | 需求、设计、执行模式、验证失败、归档前确认 |
-| 恢复靠什么 | OpenSpec 产物、`.comet.yaml` 和运行证据 |
-| 哪些是高级细节 | handoff hash、归档目录、路由判断，排障时再读 |
+| 什么是需要关心的 | 结论                                                   |
+| ---------------- | ------------------------------------------------------ |
+| 用户入口         | 使用 `/comet`；项目配置决定进入 Classic 还是 Native    |
+| Classic 内部入口 | `/comet-classic`，负责意图识别、文件状态读取和阶段路由 |
+| 适用模型         | Fable 5、GPT-5.6 以下、需要更细步骤与过程约束的模型    |
+| 流程             | `open` → `design` → `build` → `verify` → `archive`     |
+| 你什么时候参与   | 需求、设计、执行模式、验证失败、归档前确认             |
+| 恢复靠什么       | OpenSpec 产物、`.comet.yaml` 和运行证据                |
+| 哪些是高级细节   | handoff hash、归档目录、路由判断，排障时再读           |
 
 ## 为什么把 OpenSpec 和 Superpowers 连接起来
 
 OpenSpec 和 Superpowers 各有所长，但单独使用时都有短板：
 
-| 工具 | 擅长 | 短板 |
-| --- | --- | --- |
-| OpenSpec | WHAT — 需求、提案、spec 生命周期、delta spec、归档 | 提案和 tasks 缺少深度设计的细节 |
+| 工具        | 擅长                                                  | 短板                                                                    |
+| ----------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| OpenSpec    | WHAT — 需求、提案、spec 生命周期、delta spec、归档    | 提案和 tasks 缺少深度设计的细节                                         |
 | Superpowers | HOW — brainstorming、技术设计、计划、执行、收尾、验证 | 缺少状态化设计，spec 完成后只有勾选，Agent 恢复时容易反复回看文档和代码 |
 
 ```mermaid
@@ -36,7 +42,11 @@ flowchart LR
 ```
 
 <p align="center">
-  <img src="/assets/workflow-illustrations/01-what-how-bridge.png" alt="小鱼把 OpenSpec 的 WHAT 和 Superpowers 的 HOW 连接到 Comet 工作流" width="800" />
+  <img
+    src="/assets/workflow-illustrations/01-what-how-bridge.png"
+    alt="小鱼把 OpenSpec 的 WHAT 和 Superpowers 的 HOW 连接到 Comet 工作流"
+    width="800"
+  />
 </p>
 
 <p align="center">OpenSpec 记录 WHAT，Superpowers 组织 HOW，Comet 把两者夹到同一条可恢复链路上</p>
@@ -49,13 +59,13 @@ Comet 的职责不是替代任何一方，而是：
 
 ## 五个阶段
 
-| 阶段 | 负责方 | 目标 | 主要产物 |
-| --- | --- | --- | --- |
-| open | OpenSpec | 把想法变成 OpenSpec change | `proposal.md`、`design.md`、`tasks.md`、delta spec |
-| design | Superpowers | 做深度技术设计 | `docs/superpowers/specs/...-design.md`、handoff 包 |
-| build | Superpowers | 写计划并执行 | `docs/superpowers/plans/...md`、代码改动、测试证据 |
-| verify | 双方 | 验证实现符合设计和 spec | 验证报告、分支处理结果 |
-| archive | OpenSpec | 合并 delta spec 并归档，给 Superpowers 文档打标 | `openspec/changes/archive/YYYY-MM-DD-name/`、design doc/plan 的 `archived-with` 标注 |
+| 阶段    | 负责方      | 目标                                            | 主要产物                                                                             |
+| ------- | ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| open    | OpenSpec    | 把想法变成 OpenSpec change                      | `proposal.md`、`design.md`、`tasks.md`、delta spec                                   |
+| design  | Superpowers | 做深度技术设计                                  | `docs/superpowers/specs/...-design.md`、handoff 包                                   |
+| build   | Superpowers | 写计划并执行                                    | `docs/superpowers/plans/...md`、代码改动、测试证据                                   |
+| verify  | 双方        | 验证实现符合设计和 spec                         | 验证报告、分支处理结果                                                               |
+| archive | OpenSpec    | 合并 delta spec 并归档，给 Superpowers 文档打标 | `openspec/changes/archive/YYYY-MM-DD-name/`、design doc/plan 的 `archived-with` 标注 |
 
 ### open — OpenSpec 记录 WHAT
 
@@ -77,7 +87,8 @@ Comet 的职责不是替代任何一方，而是：
 Comet 会用 OpenSpec 的 `openspec instructions` 流程逐个生成 proposal、design、tasks，遵守项目的 `template`、`instruction`、`dependencies` 和 `resolvedOutputPath`，而不是一次性批量生成。完整工作流禁止跳过 brainstorming 直接 one-shot 生成提案。
 
 <Warning>
-  必须用 `/comet-open` 而不是 `/opsx:new` 创建 change。`/opsx:new` 只创建 OpenSpec artifacts，不会创建 `.comet.yaml`，change 会落在 Comet 状态机之外。
+  必须用 `/comet-open` 而不是 `/opsx:new` 创建 change。`/opsx:new` 只创建 OpenSpec
+  artifacts，不会创建 `.comet.yaml`，change 会落在 Comet 状态机之外。
 </Warning>
 
 ### design — Superpowers 深度设计，OpenSpec 保持权威
@@ -99,7 +110,7 @@ Design Doc 的 frontmatter 显式声明 OpenSpec 是权威来源：
 ---
 comet_change: <name>
 role: technical-design
-canonical_spec: openspec   # OpenSpec 是权威，不是 Design Doc
+canonical_spec: openspec # OpenSpec 是权威，不是 Design Doc
 ---
 ```
 
@@ -168,14 +179,18 @@ flowchart TD
   J -->|否| L["全文重读所有 artifacts"]
 ```
 
-| 阶段 | hash 的作用 |
-| --- | --- |
-| design | 生成 hash，写入 `.comet.yaml` 的 `handoff_hash` 和 `handoff_context` |
-| guard（离开 design） | 重算 hash，如果和记录的不一致就 FATAL，提示重新生成 handoff |
-| verify | 用 `--hash-only` 快速重算，hash 一致说明 OpenSpec artifacts 没变，可省略全文重读；不一致则全文重读 |
+| 阶段                 | hash 的作用                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| design               | 生成 hash，写入 `.comet.yaml` 的 `handoff_hash` 和 `handoff_context`                               |
+| guard（离开 design） | 重算 hash，如果和记录的不一致就 FATAL，提示重新生成 handoff                                        |
+| verify               | 用 `--hash-only` 快速重算，hash 一致说明 OpenSpec artifacts 没变，可省略全文重读；不一致则全文重读 |
 
 <p align="center">
-  <img src="/assets/workflow-illustrations/02-handoff-hash.png" alt="小鱼用 hash 夹子把 OpenSpec 产物和后续阶段证据连接起来" width="800" />
+  <img
+    src="/assets/workflow-illustrations/02-handoff-hash.png"
+    alt="小鱼用 hash 夹子把 OpenSpec 产物和后续阶段证据连接起来"
+    width="800"
+  />
 </p>
 
 <p align="center">handoff hash 像一枚可靠的夹子，把前后阶段的证据绑在一起</p>
@@ -184,15 +199,16 @@ flowchart TD
 
 `comet-handoff.mjs ... --write` 在 `openspec/changes/<name>/.comet/handoff/` 下产出：
 
-| 模式 | 产出文件 | 内容 |
-| --- | --- | --- |
-| `off`（默认） | `design-context.json` + `design-context.md` | 完整 artifacts 内容，每文件带 SHA256 |
-| `beta`（压缩） | `spec-context.json` + `spec-context.md` | spec 文件 verbatim 投影 + supporting 文件只存 hash，节省约 25–30% token |
+| 模式           | 产出文件                                    | 内容                                                                    |
+| -------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
+| `off`（默认）  | `design-context.json` + `design-context.md` | 完整 artifacts 内容，每文件带 SHA256                                    |
+| `beta`（压缩） | `spec-context.json` + `spec-context.md`     | spec 文件 verbatim 投影 + supporting 文件只存 hash，节省约 25–30% token |
 
 JSON 包含 `change`、`phase`、`mode`、`canonical_spec: openspec`、`context_hash` 和 `files` 数组。guard 会额外验证 markdown 包带有 `Generated-by:` 标记和每个文件的 `Source:`/`SHA256:` 引用，保证 Superpowers 消费的上下文可追溯。
 
 <Tip>
-  beta 压缩模式是 Comet 的上下文压缩 beta 功能在 handoff 环节的体现——两种模式的原理、token 节省测算和何时该开 beta，见[上下文压缩机制](/zh/concepts/context-compression)。
+  beta 压缩模式是 Comet 的上下文压缩 beta 功能在 handoff 环节的体现——两种模式的原理、token
+  节省测算和何时该开 beta，见[上下文压缩机制](/zh/concepts/context-compression)。
 </Tip>
 
 ## 如何处理 spec 范围
@@ -200,7 +216,8 @@ JSON 包含 `change`、`phase`、`mode`、`canonical_spec: openspec`、`context_
 Comet **不做 spec 去重或重叠检测**。它处理 spec 范围问题的方式是 delta spec 生命周期 + 归档时委托 OpenSpec 合并。
 
 <Tip>
-  大型 PRD 拆分是 Comet 贴近现实需求开发的独立特性——把一个大需求拆成多个可独立设计、交付、归档的 change。详见[大型 PRD 拆分](/zh/guides/prd-splitting)。
+  大型 PRD 拆分是 Comet 贴近现实需求开发的独立特性——把一个大需求拆成多个可独立设计、交付、归档的
+  change。详见[大型 PRD 拆分](/zh/guides/prd-splitting)。
 </Tip>
 
 ### delta spec 语义
@@ -215,11 +232,11 @@ delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 **OpenSpec 原生概�
 
 build 阶段允许小改 delta spec（补充验收场景、边界条件等），这些改动不一定同步回 Design Doc。verify 阶段会把 delta spec 和 Design Doc 放在一起查——如果发现 delta spec 里有内容、Design Doc 没反映（即 spec 漂移），**这是一个需要你做决策的阻塞点**，Comet 不会自动选，会暂停等你三选一：
 
-| 选项 | 适用场景 | 做什么 | 之后 |
-| --- | --- | --- | --- |
-| A | 偏差合理但 Design Doc 漏了，想留个说明 | 在 Design Doc 追加 "Implementation Divergence" 段，记录偏差原因 | 继续验证，不再触发改动归因 |
-| B | 偏差较大，设计没跟上 | `verify-fail` 回 build，加载 `brainstorming` 重新对齐 Design Doc 和 delta spec | 修完重新走 build→verify |
-| C | 偏差可接受，不想补 Design Doc | 确认接受，继续验证 | 归档时 Design Doc 自动标记 `superseded-by-main-spec`，让位给主 spec |
+| 选项 | 适用场景                               | 做什么                                                                         | 之后                                                                |
+| ---- | -------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| A    | 偏差合理但 Design Doc 漏了，想留个说明 | 在 Design Doc 追加 "Implementation Divergence" 段，记录偏差原因                | 继续验证，不再触发改动归因                                          |
+| B    | 偏差较大，设计没跟上                   | `verify-fail` 回 build，加载 `brainstorming` 重新对齐 Design Doc 和 delta spec | 修完重新走 build→verify                                             |
+| C    | 偏差可接受，不想补 Design Doc          | 确认接受，继续验证                                                             | 归档时 Design Doc 自动标记 `superseded-by-main-spec`，让位给主 spec |
 
 判断口径：偏差是**说明性问题**（Design Doc 漏记，但实现没问题）选 A；是**设计性问题**（Design Doc 跟不上现实）选 B；偏差无关紧要、不值得回头补，选 C。
 
@@ -271,32 +288,33 @@ openspec/changes/archive/YYYY-MM-DD-<change-name>/
 
 `comet-archive.mjs ... --dry-run` 可以预览归档流程而不真正执行 OpenSpec，用 `[DRY-RUN]` 标记标注，报告多少步会成功。
 
-## `/comet` 如何判断入口
+## Classic 如何判断当前入口
 
-每次调用 `/comet`，Comet 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。入口判断不再只靠提示词里的经验规则；Comet 会把用户原话、active change 列表和风险信号整理成结构化路由上下文（实现类型名为 `CometIntentFrame`），再交给运行时评分得到最终 route。
+每次用户调用 `/comet` 并由项目配置进入 Classic 后，`/comet-classic` 都会重新读取活跃 change 和 `.comet.yaml`，而不是依赖聊天历史。入口判断不再只靠提示词里的经验规则；Comet 会把用户原话、active change 列表和风险信号整理成结构化路由上下文（实现类型名为 `CometIntentFrame`），再交给运行时评分得到最终 route。
 
 从用户视角，你只需要知道这些结果：
 
-| route | 什么时候出现 | 下一步 |
-| --- | --- | --- |
-| `full` | 新能力、public API、schema、跨模块或架构变更 | 进入 `/comet-open` |
-| `hotfix` | 修已有异常、回归或错误行为，且没有新增能力/API/schema/跨模块风险 | 进入 `/comet-hotfix` |
-| `tweak` | 文案、配置、文档、prompt 或单一 OpenSpec change 的轻中量修改 | 进入 `/comet-tweak` |
-| `resume` | 用户明确继续某个 active change | 读取该 change 的 `.comet.yaml` 并恢复阶段 |
-| `ask_user` | 置信度不足、多个 active change、证据缺失或用户显式路径与风险信号冲突 | 暂停让你选择 |
-| `out_of_scope` | 你只是提问，没有要求启动或恢复工作流 | 不初始化 change |
+| route          | 什么时候出现                                                         | 下一步                                    |
+| -------------- | -------------------------------------------------------------------- | ----------------------------------------- |
+| `full`         | 新能力、public API、schema、跨模块或架构变更                         | 进入 `/comet-open`                        |
+| `hotfix`       | 修已有异常、回归或错误行为，且没有新增能力/API/schema/跨模块风险     | 进入 `/comet-hotfix`                      |
+| `tweak`        | 文案、配置、文档、prompt 或单一 OpenSpec change 的轻中量修改         | 进入 `/comet-tweak`                       |
+| `resume`       | 用户明确继续某个 active change                                       | 读取该 change 的 `.comet.yaml` 并恢复阶段 |
+| `ask_user`     | 置信度不足、多个 active change、证据缺失或用户显式路径与风险信号冲突 | 暂停让你选择                              |
+| `out_of_scope` | 你只是提问，没有要求启动或恢复工作流                                 | 不初始化 change                           |
 
 ```mermaid
 flowchart TD
-  A["调用 /comet"] --> B["openspec list --json"]
-  B --> C["整理路由上下文"]
-  C --> D["运行时评分 route"]
-  D --> E{"route?"}
-  E -->|full| F["/comet-open"]
-  E -->|hotfix| G["/comet-hotfix"]
-  E -->|tweak| H["/comet-tweak"]
-  E -->|resume| I["读取 .comet.yaml 并恢复"]
-  E -->|ask_user| J["停顿点：让用户选择"]
+  A["用户调用 /comet"] --> B["配置路由到 /comet-classic"]
+  B --> C["openspec list --json"]
+  C --> D["整理路由上下文"]
+  D --> E["运行时评分 route"]
+  E --> F{"route?"}
+  F -->|full| G["/comet-open"]
+  F -->|hotfix| H["/comet-hotfix"]
+  F -->|tweak| I["/comet-tweak"]
+  F -->|resume| J["读取 .comet.yaml 并恢复"]
+  F -->|ask_user| K["停顿点：让用户选择"]
 ```
 
 路由上下文让路由可解释：如果 Comet 没有足够证据证明某条路径安全，它会问你，而不是把 `hotfix`、`tweak` 或 `full` 猜到底。

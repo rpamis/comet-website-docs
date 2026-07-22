@@ -1,6 +1,6 @@
 ---
-title: "hotfix preset"
-description: "hotfix is the lightweight bug-fix preset: open -> build -> verify -> archive, skipping brainstorming and full planning while keeping recovery, root-cause checks, verification, and archive."
+title: 'hotfix preset'
+description: 'hotfix is the lightweight bug-fix preset: open -> build -> verify -> archive, skipping brainstorming and full planning while keeping recovery, root-cause checks, verification, and archive.'
 ---
 
 `hotfix` is a lightweight Comet preset for fixing a clear bug. It runs `open -> build -> verify -> archive`, skips full brainstorming and planning, but still keeps OpenSpec state, **root-cause elimination checks**, verification, and archive.
@@ -8,13 +8,23 @@ description: "hotfix is the lightweight bug-fix preset: open -> build -> verify 
 hotfix is not “no process.” It reduces up-front design cost while preserving recovery, verification, and traceability.
 
 <p align="center">
-  <img src="/assets/hotfix-preset-illustrations/01-hotfix-repair-clinic.png" alt="Xiaoyu repairs a bug at a hotfix desk, checks the root cause, applies the smallest patch, verifies, archives, and marks the scope as unchanged" width="800" />
+  <img
+    src="/assets/hotfix-preset-illustrations/01-hotfix-repair-clinic.png"
+    alt="Xiaoyu repairs a bug at a hotfix desk, checks the root cause, applies the smallest patch, verifies, archives, and marks the scope as unchanged"
+    width="800"
+  />
 </p>
 
-<p align="center">hotfix is faster because the design overhead is lower, not because verification and archive disappear.</p>
+<p align="center">
+  hotfix is faster because the design overhead is lower, not because verification and archive
+  disappear.
+</p>
 
 <Tip>
-  Normally you only need <code>/comet</code>. When your request is about fixing existing broken behavior, routing prefers the hotfix preset and invokes <code>/comet-hotfix</code> automatically. Use <code>/comet-hotfix</code> directly only when you want manual control.
+  Normally you only need <code>/comet</code>. When project configuration selects Classic, the
+  internal <code>/comet-classic</code> router recognizes a request to fix existing broken behavior,
+  prefers hotfix, and invokes <code>/comet-hotfix</code>. Use the preset command directly only for
+  manual control.
 </Tip>
 
 ## When to use it
@@ -30,14 +40,14 @@ Do not use hotfix for cross-module redesign, database schema changes, new capabi
 
 ## Relationship to full and tweak
 
-| Dimension | hotfix | full | tweak |
-| --- | --- | --- | --- |
-| Goal | Fix a bug | New feature, architecture, large requirement | Adjust behavior or content |
-| Flow | open -> build -> verify -> archive | open -> design -> build -> verify -> archive | open -> build -> verify -> archive |
-| Brainstorming | Skipped | Required | Skipped |
-| Design Doc | Not required | Required | Not required |
-| Delta spec | Exception only | Normal | First-class artifact |
-| Build style | Direct task loop | Selected during build | OpenSpec apply |
+| Dimension     | hotfix                             | full                                         | tweak                              |
+| ------------- | ---------------------------------- | -------------------------------------------- | ---------------------------------- |
+| Goal          | Fix a bug                          | New feature, architecture, large requirement | Adjust behavior or content         |
+| Flow          | open -> build -> verify -> archive | open -> design -> build -> verify -> archive | open -> build -> verify -> archive |
+| Brainstorming | Skipped                            | Required                                     | Skipped                            |
+| Design Doc    | Not required                       | Required                                     | Not required                       |
+| Delta spec    | Exception only                     | Normal                                       | First-class artifact               |
+| Build style   | Direct task loop                   | Selected during build                        | OpenSpec apply                     |
 
 ## Flow
 
@@ -46,7 +56,7 @@ flowchart TD
     Start["Bug description"] --> S1["Fast open\nminimal OpenSpec artifacts"]
     S1 --> S2["Direct build\nbuild_mode: direct"]
     S2 --> Esc{"Upgrade signal?"}
-    Esc -->|yes| Stop["Pause point 10:\ncontinue hotfix or upgrade full"]
+    Esc -->|yes| Stop["Pause: continue hotfix or upgrade full"]
     Esc -->|no| S3["Root-cause elimination check"]
     Stop -->|continue| S3
     Stop -->|upgrade| Up["preset-escalate -> design"]
@@ -54,45 +64,24 @@ flowchart TD
     Root -->|no| S2
     Root -->|yes| S4["Verify"]
     S4 --> V{"Pass?"}
-    V -->|no, fixable| Auto["Auto verify-fail back to build\n(first 3, verify_failures counter)"]
-    V -->|no, needs judgment / 4th| VfStop["Pause point 7:\nverify exception decision"]
-    Auto --> S2
-    VfStop -->|fix / continue| S2
-    V -->|yes| S5["Archive after confirmation\n(archive confirmation + branch handling)"]
+    V -->|no| Fix["Verification failure decision"]
+    Fix --> S2
+    V -->|yes| S5["Archive after confirmation"]
 ```
 
 ## Default state
 
-```bash
-comet state init <name> hotfix
-comet state select <name>
-```
+`comet-state init <name> hotfix` defaults to:
 
-`init <name> hotfix` writes these defaults to `.comet.yaml`:
+| Field         | Default  |
+| ------------- | -------- |
+| `build_mode`  | `direct` |
+| `tdd_mode`    | `direct` |
+| `review_mode` | `off`    |
+| `isolation`   | `null` until the entry choice |
+| `verify_mode` | `light`  |
 
-| Field | Default |
-| --- | --- |
-| `build_mode` | `direct` |
-| `tdd_mode` | `direct` |
-| `review_mode` | `off` |
-| `isolation` | `null` until the entry choice |
-| `verify_mode` | `light` |
-
-At entry, hotfix pauses once and asks you to explicitly keep the current branch, create a branch, or create a worktree; it no longer silently defaults to `current`. The confirmed `isolation` and `bound_branch` describe the real execution workspace, and later accidental branch switches are blocked. `tdd_mode: direct` skips Red-Green-Refactor but still requires relevant tests and regression evidence.
-
-## Build requires RED evidence
-
-Before implementation, **reproduce the bug and record failing evidence first**: confirm the reported old behavior with minimal repeatable steps; when automatable, add a regression test that fails for this bug and confirm the failure is caused by the bug. Only after RED evidence exists does Comet proceed task by task — and each task re-runs the new failing regression test to confirm it turns green before running related tests.
-
-## Must-stop points
-
-Hotfix runs as one continuous execution, but these genuine user decisions always pause:
-
-1. An upgrade-assessment signal is hit (pause point 10)
-2. Verify-phase acceptance of a WARNING/SUGGESTION deviation, spec drift handling, or the strategy after the 4th failure (pause point 7) — the first 3 repairable failures return to build automatically
-3. Final archive confirmation (pause point 8) and branch handling after the archive commit (pause point 9)
-
-With `auto_transition: false`, each phase boundary ends the current invocation and returns control with `HINT` — this is a manual handoff, not a new confirmation point.
+At entry, hotfix pauses once and asks you to explicitly keep the current branch, create a branch, or create a worktree; it no longer silently selects an isolation mode. The confirmed `isolation` and `bound_branch` describe the real execution workspace, and later accidental branch switches are blocked. `tdd_mode: direct` skips Red-Green-Refactor but still requires relevant tests and regression evidence.
 
 ## Root-cause check
 
@@ -105,14 +94,14 @@ Comet pauses when it sees qualitative signals such as cross-module coordination,
 Upgrade through the legal transition:
 
 ```bash
-comet state transition <name> preset-escalate
+node "$COMET_STATE" transition <name> preset-escalate
 ```
 
-This atomically sets `workflow: full` and clears the preset-only lightweight build settings, then returns to design without discarding existing artifacts. After upgrading to full, the full workflow configuration is re-selected in the joint decision after the Design Doc. `preset-escalate` can only be triggered from hotfix/tweak at `phase: build`.
+This switches the workflow to full and returns to design without discarding existing artifacts.
 
 ## Recovery
 
-Hotfix is idempotent. After interruption, run `/comet`; it reads `.comet.yaml` and routes back to `/comet-hotfix` when the change is in `phase: build`.
+Hotfix is idempotent. After interruption, run `/comet`. When configuration selects Classic, the internal `/comet-classic` router reads `.comet.yaml` and returns to `/comet-hotfix` when the change is in `phase: build`.
 
 ## Next steps
 

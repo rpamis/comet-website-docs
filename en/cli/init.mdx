@@ -1,152 +1,121 @@
 ---
-title: "comet init — Initialize Comet in Your Project"
-sidebarTitle: "comet init"
-description: "Set up Comet by installing OpenSpec, Superpowers, and Comet skills to AI coding platforms. Flags: --yes, --scope, --skip-existing, --overwrite, --json."
+title: 'comet init'
+description: 'Initialize a project or global Comet environment, choose Native or Classic, and install the corresponding capabilities.'
 ---
 
-`comet init` is the first command you run when setting up Comet. It interactively installs OpenSpec, Superpowers, and Comet skills to your chosen AI coding platforms.
+`comet init` is the installation entry point. It detects platforms, installs Comet Skills, and, for project-scope initialization, sets the default workflow behind `/comet`.
 
-## Usage
+## Basic usage
 
 ```bash
 cd your-project
 comet init
 ```
 
-## What `init` Does
+Common options:
 
-Running `comet init` walks you through the following steps in order:
+| Option              | Description                                                                     |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `--yes`             | Run non-interactively, installing missing components and skipping existing ones |
+| `--scope <scope>`   | Installation scope: `project` or `global`                                       |
+| `--language <lang>` | Skill language: `en` or `zh`                                                    |
+| `--workflow <mode>` | Enable `native`, `classic`, or `both`                                           |
+| `--root <path>`     | Native artifact root, such as `docs`                                            |
+| `--skip-existing`   | Skip existing components                                                        |
+| `--overwrite`       | Overwrite manifest-managed files                                                |
+| `--json`            | Output JSON                                                                     |
 
-1. **Detect existing platforms** — Scans for existing AI platform config directories (e.g. `.claude/`, `.cursor/`) and pre-selects them in the platform picker.
-2. **Choose install scope** — `project` (current directory) or `global` (home directory).
-3. **Select language** — `English` or `中文` for Comet skill files.
-4. **Select platforms** — Choose one or more of the supported AI coding platforms to install skills on. Detected platforms are pre-checked.
-5. **Install OpenSpec skills** — Deploys OpenSpec spec-lifecycle skills to the selected platforms.
-6. **Install Superpowers skills** — Deploys Superpowers development-methodology skills to the selected platforms.
-7. **Deploy Comet skills** — Copies Comet phase-command skills (in your chosen language) to each selected platform's `skills/` directory.
-8. **Create working directories** — For project-scope installs, creates `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+## Native and Classic initialization
+
+Interactive project initialization explains and offers Native, Classic, or both. Non-interactive initialization selects the default using these rules:
+
+1. A valid `.comet/config.yaml` is the source of truth.
+2. `--workflow native|classic|both` is an explicit choice and does not migrate existing changes. `both` keeps `/comet` on Native by default.
+3. Without valid workflow configuration, Classic `.comet.yaml` state or legacy Ambient Resume evidence preserves Classic.
+4. Every other project defaults to Native. Existing code, an ordinary `openspec/` directory, or `docs/superpowers/` does not change that default.
+
+Native initialization installs Comet-owned Skills and runtime, one shared workflow Rule, and one Hook Router where the platform supports Hooks. It creates:
+
+```text
+.comet/config.yaml
+<artifact-root>/comet/
+```
+
+It does not install OpenSpec, Superpowers, or CodeGraph and does not create Classic/OpenSpec changes or `docs/superpowers/`. The shared Rule and Router use `.comet/current-change.json` to send each write to one workflow Guard, never both Native and Classic. Classic initialization preserves its complete dependency set and phase governance.
+
+Comet writes and activates `.comet/config.yaml` only after required assets succeed on **every selected platform** and any existing `/comet` entry is compatible with the bundled routing contract. If an incompatible custom `/comet` entry exists, initialization preserves it and reports the run as incomplete. Re-run `comet init --workflow native --overwrite` only when you intend to replace that custom entry.
+
+```bash
+comet init --workflow native --root docs
+comet init --workflow classic
+comet init --workflow both
+```
+
+`--root` is valid only for project-scope Native initialization. Global initialization installs global capabilities without writing configuration into the target project, so it cannot be combined with `--workflow` or `--root`.
 
 ## Project installation registry
 
-Starting in 0.4.0-beta.4, a successful project-scope install is recorded in a user-level registry. The registry stores the project location and installed targets needed for later update or uninstall; it does not copy project content or send usage data.
+Starting in 0.4.0-beta.4, a successful project-scope installation is recorded in a user-level project registry. The registry stores only the project location and installed platforms needed for later updates and uninstallation. It neither copies project content nor uploads usage data.
 
-Interactive `comet update` and `comet uninstall` can then offer the current project or all indexed projects. `--json` and explicit `--current-project` stay local, `comet uninstall --force` also stays local, and batch operations require `--all-projects`. Automation should pass an explicit scope option instead of relying on terminal detection.
+After registration, interactive `comet update` and `comet uninstall` can offer the current project or every registered project. `--json` and explicit `--current-project` remain limited to the current project, and `comet uninstall --force` does too. Batch operations require an explicit `--all-projects`. Automation should pass one of these scope options instead of relying on terminal detection.
 
-## Symlink safety and OpenSpec scope
+## Installation mode: copy or symlink
 
-When a platform already has a `skills/` directory, symlink mode preserves that directory and adds links only for Comet Skills. Local and third-party Skills are not replaced.
+Classic or global initialization asks for an **installation mode** after platform selection. Project-scope Native always uses Copy and avoids `.comet/skills/`. Native change state stays under `<artifact-root>/comet/`, while shared project configuration and selection live under `.comet/`. Symlink mode was added in 0.4.0-beta.1:
 
-OpenSpec CLI is a cross-project tool. Even during project-scope Comet setup, `comet init` installs or upgrades OpenSpec CLI as a global tool, so that dependency does not create a project `node_modules/` directory. Comet Skills, rules, and project config still follow the selected scope.
+- **Copy**: copy an independent set of Skill files to each platform.
+- **Symlink**: create links in each platform directory that point to the shared `.comet/skills/` store, saving space and making one update apply everywhere.
 
-## Flags
+If a platform already has its own `skills/` directory, Comet preserves it and adds links only for Comet-managed Skills. Existing local and third-party Skills are not deleted or replaced when you choose Symlink.
 
-<ParamField query="--yes" type="boolean">
-  Non-interactive mode. Auto-selects all detected platforms (or all supported platforms if none are detected), defaults scope to `project`, and skips any existing components rather than prompting.
-</ParamField>
+See [Supported platforms · Copy or symlink](/en/platforms#copy-or-symlink) for details and guidance.
 
-<ParamField query="--scope" type="string">
-  Set the install scope without being prompted. Accepted values: `project` (installs into the current directory) or `global` (installs into the home directory).
-</ParamField>
+## Shared project configuration merge
 
-<ParamField query="--skip-existing" type="boolean">
-  Automatically skip any skill components that are already installed, without prompting. Mutually exclusive in intent with `--overwrite`.
-</ParamField>
+Native and Classic now share `.comet/config.yaml`. Initialization merges managed fields for the enabled workflows:
 
-<ParamField query="--overwrite" type="boolean">
-  Automatically overwrite any skill components that are already installed, without prompting. Mutually exclusive in intent with `--skip-existing`.
-</ParamField>
+- preserves existing values such as `native.artifact_root` and `classic.review_mode`;
+- adds defaults for missing managed fields;
+- refreshes comments to match the current version;
+- preserves extra custom fields;
+- keeps shared `default_workflow`, `workflows`, and `ambient_resume` semantics separate from `native.*` and `classic.*` settings;
+- fails closed when workflow configuration cannot be parsed safely instead of guessing defaults and overwriting it.
 
-<ParamField query="--json" type="boolean">
-  Suppress all interactive output and print a single structured JSON result when the command finishes. See [JSON output](#json-output) below.
-</ParamField>
+The terminal reports `Project config merged (.comet/config.yaml)`.
 
-## Interactive Mode
+## OpenSpec CLI installation scope
 
-When neither `--skip-existing` nor `--overwrite` is set, `comet init` detects which components are already installed on each platform before writing anything.
+OpenSpec CLI is a cross-project tool used by Classic. Even for project-scope Classic initialization, Comet installs or upgrades OpenSpec CLI globally, so this dependency does not create a project `node_modules/` directory. Native neither checks nor installs it.
 
-- **Multiple existing components on the same platform** — You are offered a single bulk choice: *Overwrite all existing components*, *Skip all existing components*, or *Choose per component*. Selecting "Choose per component" drops into individual prompts for each conflicting component (OpenSpec, Superpowers, Comet).
-- **Single existing component** — You are prompted per component to overwrite or skip.
-
-## Example Output
-
-```
-   ██████╗ ██████╗ ███╗   ███╗███████╗████████╗
-  ██╔════╝██╔═══██╗████╗ ████║██╔════╝╚══██╔══╝
-  ██║     ██║   ██║██╔████╔██║█████╗     ██║
-  ██║     ██║   ██║██║╚██╔╝██║██╔══╝     ██║
-  ╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗   ██║
-   ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝   ╚═╝
-            OpenSpec + Superpowers Workflow
-
-  Setting up Comet in /your/project
-
-  Language: English
-
-  Installing OpenSpec for: claude, cursor
-  OpenSpec: installed
-
-  Installing Superpowers for: claude, cursor
-  Superpowers: installed
-
-  Comet -> Claude Code: installed (8 files) -> .claude/skills/
-  Comet -> Cursor: installed (8 files) -> .cursor/skills/
-
-  Comet setup complete! (scope: project)
-
-  Installed:
-    Claude Code -> .claude/skills/
-    Cursor      -> .cursor/skills/
-
-  Working directories: docs/superpowers/specs/, docs/superpowers/plans/
-
-  Get started:
-    /comet "your idea"  — Start a new change with full workflow
-    /comet-hotfix       — Quick bug fix (skip brainstorming)
-    /comet-tweak        — Small change (skip brainstorming and plan)
-```
-
-## JSON Output
-
-Pass `--json` to suppress interactive prompts and receive a machine-readable result:
+## Check after initialization
 
 ```bash
-comet init --yes --json
+comet doctor
 ```
 
-```json
-{
-  "projectPath": "/your/project",
-  "scope": "project",
-  "language": "en",
-  "selectedPlatforms": ["claude", "cursor"],
-  "results": [
-    {
-      "platform": "claude",
-      "platformName": "Claude Code",
-      "openspec": "installed",
-      "superpowers": "installed",
-      "comet": "installed"
-    },
-    {
-      "platform": "cursor",
-      "platformName": "Cursor",
-      "openspec": "installed",
-      "superpowers": "installed",
-      "comet": "installed"
-    }
-  ],
-  "workingDirsCreated": true
-}
+If platform directories, Skill files, or scripts are missing, repair them before starting `/comet`.
+
+## Reading the installation summary
+
+`comet init` and `comet update` report each component's installation status per platform. Skill and script copies look like this:
+
+```text
+Comet -> claude: installed (12 files) -> .claude/skills/
+Comet -> claude: skipped (alreadyExists)
+Comet -> opencode: failed (12 files, 1 failed) -> .opencode/skills/comet
 ```
 
-Each entry in `results` has one of three status values per component:
+| Status      | Meaning                                                          |
+| ----------- | ---------------------------------------------------------------- |
+| `installed` | Every file was copied successfully                               |
+| `skipped`   | The component already exists and `--overwrite` was not specified |
+| `failed`    | One or more files could not be copied                            |
 
-| Value | Meaning |
-|---|---|
-| `installed` | The component was written successfully. |
-| `skipped` | The component already existed and was not overwritten. |
-| `failed` | An error occurred while installing the component. |
-
-<Note>
-  After `comet init`, run [`comet doctor`](/en/cli/doctor) to verify the installation is complete and healthy.
-</Note>
+<Warning>
+  Since 0.4.0-beta.1,{' '}
+  <strong>a partially failed installation is no longer reported as success</strong>. When any file
+  copy fails on a platform, that platform is marked <code>failed</code> with a failure count.
+  Missing <code>comet-hook-guard.mjs</code> breaks Classic phase checks; a missing Native entry
+  point or runtime likewise prevents project default configuration from being written. Re-run{' '}
+  <code>comet init</code> or <code>comet update</code> to install the missing files.
+</Warning>
