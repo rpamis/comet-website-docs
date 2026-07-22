@@ -6,34 +6,30 @@ description: 'Comet 发布记录。'
 本页默认展开当前版本，历史版本按版本逐个折叠。日常升级时先看最新版本的重点变化、破坏性调整和修复项；只有排查旧版本行为时才需要展开对应版本。
 
 <Update label="0.4.0-beta.7" description="2026-07-22" rss={{ title: "Comet 0.4.0-beta.7", description: "2026-07-22 发布记录" }}>
+如果你从 Beta 6 升级，最明显的变化是新增了 Comet Native。它面向能够自行完成复杂代码推理、但仍需要需求澄清、状态、验证和归档证据的强模型。Classic 没有被替代；你可以继续使用 Classic，也可以在同一项目中安装两套工作流。
+
 ### Added（新增）
 
-- **Comet Native 工作流**：新增面向强模型的原生工作流。需求澄清支持默认的 `sequential` 模式和可配置的 `batch` 模式：前者每轮询问一个最上游问题，后者一次提出本轮所有可回答问题，并在 Build 前要求最终共享理解确认。Claude Code 在整轮可由一次调用完整表达时优先使用 `AskUserQuestion`；否则整轮降级为编号文本，不拆分问题轮次。单 Skill 持续推进、可配置产物根、默认语言、完整目标规格、checkpoint 和有界状态都不依赖 OpenSpec、Superpowers 或其他外部 Skill。
-- **证据绑定的自主执行**：新增 Git-owned 项目 snapshot，只纳入 tracked 与未被 ignore 的 untracked 文件并把 submodule/gitlink 作为原子条目；非 Git 项目使用带前后枚举围栏的有界物理树 snapshot。同时加入有界 overflow evidence、contract-hash-bound approval、Acceptance ID、不可变验证报告快照、可选内置只读 check receipt、证据失效回退、partial scope 授权和 repair episode。新建 change 或旧 schema migration 在提交状态前必须取得完整 baseline；不完整的当前 snapshot 不会伪造删除。没有真实 scope 进展时会停止重复失败。
-- **可恢复的 Native 安全边界**：新增 schema 迁移、revision/CAS 与 live mutation 串行化、受保护 Run/文件 I/O、workspace identity、当前 root 冲突检查、两步 Archive、exactly-once 事务恢复、安全 root move、显式陈旧锁接管、有界 evidence retention 和只读 Dashboard projection。
-- **稳定工作流入口**：新增永久 `/comet-native`、`/comet-classic` 与 `comet workflow resolve`。`/comet` 是配置驱动别名，只选择一套工作流，不转换或混合两边的 change、状态与产物；Skill-only 安装在 CLI 不可用时仍可使用随包 resolver。
-- **Native 基线评估**：对齐 0.4.0 基线的 16 个任务与重复运行，按 `task_id + repetition` 配对并修正多轮调用耗时；Wave A–F fixture/validator 单独验证机械契约，不把静态覆盖包装成真实模型性能。
-- **可选 Eval suite**：新增 `comet eval --suite local|langsmith`。Local 保持默认；LangSmith 模式复用同一任务语料和评分逻辑，由 CLI 启动 tracing-aware runner、报告目录与 Claude Code tracing plugin。
-- **统一工作流保护**：每个平台只安装一个跨工作流 Rule，支持 Hook 的平台只安装一个 Router；共享 current-change selection 把一次原子多文件写入最多路由给一个 Guard，避免 Native 与 Classic 双重阻塞，并迁移已有 Classic selection 与旧托管 Hook/Rule。
+- **Comet Native 工作流**：新增独立的 `/comet-native` 工作流，不依赖 OpenSpec、Superpowers 或其他外部 Skill。它使用 Shape、Build、Verify、Archive 四个阶段，支持可恢复 checkpoint、完整目标规格和独立的 change 状态。需求澄清默认使用 `sequential`，每轮只处理一个最上游问题；你也可以切换到 `batch`，一次回答当前所有独立问题。参见 [Native 工作流](https://docs.comet.rpamis.com/zh/concepts/native-workflow)和 [Native 快速开始](https://docs.comet.rpamis.com/zh/native/quickstart)。
+- **Native 与 Classic 真实评估**：两套工作流使用相同的 16 个业务任务，每个任务重复 3 次，共 96 次运行。Native 的 strict pass@1 为 95.83%，Classic 为 89.58%；两者的 pass@3 都是 100%，Native 的 pass^3 为 87.5%，Classic 为 75%。Native 的修正平均模型耗时低 47.8%。在双方都严格通过的 41 组配对样本中，Native 的总 Token 少 76.8%，模型成本低 75.1%。耗时数据来自不同运行时段，因此只作为方向性证据。参见 [完整对比报告](https://docs.comet.rpamis.com/zh/eval/comet-native-vs-040-experiment)。
+- **Native 澄清模式评估**：在同一个任务上，Batch 与 Sequential 各运行 10 次。Batch 的平均外层交互轮次从 4.5 降到 2.7，减少 40%；平均累计模型耗时从 712 秒降到 617 秒，减少 13.3%。但 Batch 的 strict pass@1 为 60%，低于 Sequential 的 70%。这是单任务小样本，说明两种模式存在效率与可靠性的取舍，不能据此认定 Batch 更可靠。参见 [澄清模式评估](https://docs.comet.rpamis.com/zh/eval/comet-native-clarification-experiment)。
+- **可选 Eval suite**：`comet eval --suite local|langsmith` 可以选择本地或 LangSmith 评估。Local 仍是默认值；LangSmith 使用同一套任务和评分逻辑，并自动选择 tracing runner、报告目录和 Claude Code tracing plugin。
 
 ### Changed（变更）
 
-- **Node.js 运行时要求**：Comet 现在要求 Node.js 22 或更高版本。
-- **对齐的 Eval 效率指标**：Native 对比报告现在从 raw trace 重新计算配对的模型启动/恢复、turn、tool call、累计耗时、token、成本与上下文压力，并使用严格成功交集，避免缺失 telemetry 或未完成任务夸大效率。
-- **可选项目工作流**：项目级 `comet init` 会说明并提供 Native、Classic 或同时启用两者；新项目默认 `/comet` 进入 Native，Native 产物默认位于 `docs/comet/`。`--workflow both` 安装两套独立能力，共享 `.comet/config.yaml` 但不合并状态；完成摘要只展示实际初始化的工作目录。
-- **明确的 Native 状态文件**：Active 与 archived Native change 统一使用 `comet-state.yaml`，同时保持与 Classic `.comet.yaml` 的 schema 和生命周期独立。
-- **分区状态与恢复**：`comet status` 展示配置入口，并分别报告 Native、Classic 与未托管 OpenSpec change；`comet resume-probe` 返回 workflow-aware v2 结果，只从 `/comet-native` 或 `/comet-classic` 恢复，并在配置或状态损坏时失败关闭。
-- **可配置环境感知恢复**：`.comet/config.yaml` 新增 Native 与 Classic 共用的 `ambient_resume` 开关；生成的配置注释跟随 init/update 语言，旧配置默认保持启用。
-- **Classic 配置命名空间**：Classic 的 `language`、`context_compression`、`review_mode` 和 `auto_transition` 默认值迁入 `.comet/config.yaml` 的 `classic:` 块。`comet init` 与 `comet update` 会迁移旧顶层值，优先保留明确的新格式配置。
-- **显式 npm 自更新**：current-project `comet update` 默认只刷新托管资产，不修改任何 npm 安装；需要更新 CLI 时必须传入 `--self-update`。显式 `--scope global` 也确定性使用 current-project 资产范围且不会隐式更新包；较宽更新可用 `--skip-self-update` 跳过包更新。自更新比较包含预发布版本的完整 semver、拒绝降级、隔离验证精确候选 CLI，并在安装失败时尝试恢复原精确版本。
+- **项目工作流选择**：项目级 `comet init` 现在提供 Native、Classic 和 Both 三种选择。新项目默认让 `/comet` 进入 Native，Native 产物默认写入 `docs/comet/`。Both 会安装两套独立工作流，但不会混合它们的 change、状态和产物。
+- **入口、状态与恢复分离**：`/comet-native` 和 `/comet-classic` 是固定入口，`/comet` 只按项目配置选择其中一个。`comet status`、`comet resume-probe` 和 Dashboard 会分别显示与恢复 Native、Classic 和未托管 OpenSpec change，双工作流项目不会对同一次写入重复拦截。
+- **Native 执行与恢复边界**：Native 在开始修改前记录完整项目基线，并把实现范围、验收条件和验证报告绑定到 change。快照不完整时不会推断文件已删除；验证连续失败且没有真实代码进展时会停止重试。中断后可以恢复状态、归档和产物根移动。
+- **Node.js 运行时要求**：Beta 7 要求 Node.js 22 或更高版本。升级前请先确认本地、CI 和 Docker 环境的 Node.js 版本。
+- **更新命令不再隐式升级 npm 包**：在当前项目运行 `comet update` 时，只刷新 Comet 托管的项目资产。需要同时更新 CLI 时使用 `comet update --self-update`。更新会校验完整预发布版本、拒绝降级，并在安装失败时尝试恢复原版本。Classic 的配置会迁入 `.comet/config.yaml` 的 `classic:` 块，现有明确配置会被保留。
 
 ### Fixed（修复）
 
-- **初始化与更新错误报告**：`comet init` 与 `comet update` 对 incomplete 工作返回非零退出码，在 JSON 中保留 npm 诊断，标出批量更新中的失败与未尝试项目，并在组件失败后不再显示成功横幅或隐藏清理错误。
-- **OpenSpec 安装诊断**：已安装的 OpenSpec CLI 版本过旧且未选择升级时，初始化会明确说明版本不满足要求，不再误报为 CLI 不可用。
-- **Windows 交互式 Eval**：Docker 交互评估优先使用 Git Bash，保留容器 prompt 路径，按真实 driver turn 计数，并正确区分用户决定、完成状态和环境失败。
-- **并行 Eval 协调**：Windows xdist worker 会等待共享 Docker build lock，不再把正常并发报告为资源死锁。
-- **npm 发布缓存清理**：发布预检会在文件系统检查前排除嵌套和平台特有的 pytest cache，避免不可读的本地 Eval 派生目录阻塞发布或进入 npm 包。
+- **初始化与更新结果**：`comet init` 和 `comet update` 在工作未完整完成时返回非零退出码，并保留 npm 诊断。批量更新会区分失败项目和未尝试项目；组件失败后不再显示成功横幅。
+- **OpenSpec 版本诊断**：如果已安装的 OpenSpec CLI 版本过旧且你没有选择升级，初始化会直接说明版本不满足要求，不再误报为 CLI 不可用。
+- **Windows 与并行 Eval**：Windows Docker 交互评估优先使用 Git Bash，保留容器内 prompt 路径，并按真实 driver turn 计数。并行 worker 会等待共享 Docker build lock，不再把正常并发误报为资源死锁。
+
+完整实现细节见 [GitHub Release](https://github.com/rpamis/comet/releases/tag/0.4.0-beta.7)。
 
 </Update>
 
