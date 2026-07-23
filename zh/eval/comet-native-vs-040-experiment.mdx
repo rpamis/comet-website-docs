@@ -1,86 +1,145 @@
 ---
 title: 'Comet Native 与 0.4.0 Classic 真实评估'
-description: '使用相同的 16 个任务和每任务 3 次重复，对比当前 Native 与历史 0.4.0 Classic 的严格通过率、重复运行稳定性和执行效率。'
+description: '使用相同的 16 个任务和 pass@3 样本规模，对比 Comet Native 与 0.4.0 Classic 的严格通过率、重复运行稳定性和修正耗时。'
 ---
 
 import { RawHtmlReportFrame } from '/snippets/raw-html-report-frame.jsx';
 
-这次复测回答一个具体问题：加强 Native 的 Sequential 澄清协议和 Build 前确认锁后，16 个既有业务任务的广度基线是否回归？
+这次实验回答一个更具体的问题：当模型本身已经足够强，Comet Native 能否在保留需求、状态、验证和归档证据的同时，比 0.4.0 Classic 更轻？
 
-我们对当前 Native 运行相同的 16 个任务，每个任务重复 3 次，共 48 次；再与历史 0.4.0 Classic 的 48 次运行按 `task + repetition` 严格对齐。
+我们把 Native 的样本规模对齐到 0.4.0 曾经运行过的 `pass@3` 实验：使用相同的 16 个业务任务，每个任务重复 3 次。两组共 96 次运行。
 
 <Note>
   Native 与 Classic 是两套面向不同模型能力的 workflow，不存在 Native 升级到 Classic
-  的关系。对齐的是业务任务和 repetition；workflow 产物仍分别按各自契约验证。
+  的关系。本文比较的是它们在相同业务任务上的完成能力、稳定性和模型耗时，不要求两者生成相同的流程产物。
 </Note>
 
-## 对齐口径
+## 实验如何对齐
 
-| 观察项        | 当前 Native                                    | 历史 0.4.0 Classic                                         |
-| ------------- | ---------------------------------------------- | ---------------------------------------------------------- |
-| 业务任务      | 相同的 16 个任务                               | 相同的 16 个任务                                           |
-| 重复次数      | 每任务 3 次，共 48 次                          | 每任务 3 次，共 48 次                                      |
-| Treatment     | `COMET_NATIVE_PHASE1`                          | `COMET_FULL_040_BETA`                                      |
-| 实验标识      | `experiment_20260723_195551`                   | `combined_comet_workflow_full_k3_20260705_v3_rerun_failed` |
-| 严格配对      | 48/48                                          | 48/48                                                      |
-| Workflow 验证 | Native brief、spec、状态、轨迹、验证和归档证据 | Classic Skill、OpenSpec、阶段和依赖 Skill 契约             |
+对齐实验并不意味着把 Classic 的检查原样套到 Native 上。业务目标和业务验证器保持一致，workflow 检查则分别遵循两种模式的真实契约。
 
-历史 Classic 记录早于完整 execution-identity manifest。对齐脚本只能用当前 canonical task tree 重建其 task-core hash，因此它证明比较时的任务结构一致，不能证明历史 checkout 的完整执行身份与当前完全相同。
+| 观察项        | Native                                          | 0.4.0 Classic                                              |
+| ------------- | ----------------------------------------------- | ---------------------------------------------------------- |
+| 业务任务      | 相同的 16 个任务                                | 相同的 16 个任务                                           |
+| 重复次数      | 每任务 3 次，共 48 次                           | 每任务 3 次，共 48 次                                      |
+| 业务验证      | 沿用相同 task validator                         | 沿用相同 task validator                                    |
+| workflow 验证 | Native Skill、`comet/` 产物、状态、轨迹和隔离性 | Classic Skill、OpenSpec、阶段、状态和依赖 Skill 契约       |
+| 执行方式      | 当前本地并发运行                                | 2026-07-04 至 05 的历史运行                                |
+| 实验标识      | `experiment_20260716_104344`                    | `combined_comet_workflow_full_k3_20260705_v3_rerun_failed` |
+| Analysis set  | 48/48 included，high confidence                 | 48/48 included，全部 flagged、medium confidence            |
+
+部分任务提示仍包含 Open、Design、Build、Verify、Archive 等 Classic 术语。Native treatment 会明确要求模型保留业务需求，但将它们映射到 Shape、Build、Verify、Archive，不创建 OpenSpec、Superpowers 或 `.comet` 流程产物。这样可以减少任务文案对 Classic 的先验偏置。
+
+0.4.0 的 48 个样本都因日志中出现 outer runner、API 或环境失败字样而被保守标记为 `flagged`，但仍全部进入 analysis set；它们不是 48 个被排除或判定失败的样本。本文保留其 strict pass 结果，同时把这一可观测性差异作为比较限制，而不是忽略它。
 
 ## 核心结果
 
-| 指标              | 当前 Native | 0.4.0 Classic |         差异 |
-| ----------------- | ----------: | ------------: | -----------: |
-| 严格运行通过      |       47/48 |         43/48 | Native +4 次 |
-| task-macro pass@1 |        0.98 |          0.90 | Native +0.08 |
-| task-macro pass@3 |        1.00 |          1.00 |         持平 |
-| task-macro pass^3 |        0.94 |          0.75 | Native +0.19 |
+| 指标          |        Native | 0.4.0 Classic |            差异 |
+| ------------- | ------------: | ------------: | --------------: |
+| strict pass@1 | 46/48，95.83% | 43/48，89.58% | Native +6.25 pp |
+| pass@3        |   16/16，100% |   16/16，100% |            持平 |
+| pass^3        |  14/16，87.5% |    12/16，75% | Native +12.5 pp |
+| 业务验证通过  |         48/48 |         47/48 |    Native +1 次 |
+| 修正平均耗时  |      183.971s |      352.375s |   Native -47.8% |
+| 修正中位耗时  |      174.493s |      328.192s |   Native -46.8% |
 
-两种 workflow 的 `pass@3` 都是 1.00，表示 16 个任务都至少在三次中成功一次。Native 的 `pass^3` 为 0.94：15 个任务三次全过；Classic 为 0.75：12 个任务三次全过。
+这组结果有两个层次。两种模式的 `pass@3` 都是 100%，说明每个任务在三次尝试中都至少成功过一次。Native 的 `pass^3` 更高，则说明它在重复运行稳定性上更好：16 个任务中有 14 个连续三次通过，0.4.0 Classic 为 12 个。
 
-本次 Native 唯一失败是 `comet-cross-file-refactor#r3`，业务实现完成，但 Native 终态的 brief、specification 或 verification 证据不完整。其他 15 个任务均为 3/3。
+## 为什么同时看 pass@3 和 pass^3
 
-## 双方都通过时的执行效率
+`pass@3` 衡量三次尝试中至少一次成功，适合观察能力覆盖。`pass^3` 衡量三次尝试全部成功，适合观察可靠性下限。
 
-主效率视图只统计双方在同一 task repetition 上都严格通过的 42 组：
+如果只看 `pass@3 = 100%`，会看不到 48 次运行中实际存在的失败。Native 有两次 strict failure；0.4.0 Classic 有五次。两种指标必须一起看，才能区分“模型有能力完成”和“模型每次都能稳定完成”。
 
-| 指标                     | 当前 Native | 0.4.0 Classic | Native 差异 |
-| ------------------------ | ----------: | ------------: | ----------: |
-| 模型启动/恢复次数        |        1.17 |          2.98 |      -60.8% |
-| Agent 轮次               |       57.93 |         92.52 |      -37.4% |
-| 工具调用                 |       55.76 |         82.95 |      -32.8% |
-| 非缓存输入 Token         |      39,498 |        82,315 |      -52.0% |
-| 输出 Token               |      10,662 |        14,012 |      -23.9% |
-| 总 Token（包含缓存读取） |   2,077,084 |     3,928,545 |      -47.1% |
-| 模型成本                 |      $1.480 |        $2.738 |      -45.9% |
-| 累计模型耗时             |      429 秒 |        353 秒 |      +21.4% |
+## 完成任务的执行效率
 
-这次 Native 的 Agent 轮次、工具调用、Token 和成本仍明显更低，但 wall duration 反而高 21.4%。因此新数据不再支持旧报告“Native 耗时下降约 47%”的结论。
+效率主视图只统计 Native 与 Classic 都通过的同一任务重复，共 41 组。这样不会把提前失败、因而消耗更少的运行误当成效率提升。一次“模型启动/恢复”表示评测器启动被测模型，或在用户回答、冷恢复后再次进入同一任务；它不同于调用内部累计的 Agent 轮次。
+
+| 指标                     |  Native | 0.4.0 Classic | Native 差异 |
+| ------------------------ | ------: | ------------: | ----------: |
+| 模型启动/恢复次数        |    1.80 |          2.85 |      -36.8% |
+| Agent 轮次               |   39.02 |         91.66 |      -57.4% |
+| 工具调用                 |   36.22 |         81.80 |      -55.7% |
+| 累计模型耗时             |  180.8s |        343.9s |      -47.4% |
+| 非缓存输入 Token         |  16,647 |        74,903 |      -77.8% |
+| 输出 Token               |   5,471 |        13,788 |      -60.3% |
+| 总 Token（包含缓存读取） | 891,631 |     3,840,975 |      -76.8% |
+| 模型成本                 |  $0.658 |        $2.638 |      -75.1% |
+
+Native 的 48 次运行都保留了逐消息上下文 usage：平均峰值为 34,771 Token，中位峰值为 34,568，最大值为 42,012；平均峰值占 200k 窗口的 17.4%。旧 Classic 轨迹只有 9/48 保存了同等粒度的数据，因此不能可靠计算两种 workflow 的上下文占用提升比例。
+
+## 修正耗时口径
+
+早期报告中的 `Duration` 只保留了最后一段 `result` 事件。当一次自动交互包含多轮模型调用时，这会把前面轮次的耗时漏掉，出现不合理的 4 秒或 5 秒样本。
+
+本次比较改为累加每个样本所有顶层 `result.duration_ms`：
+
+- Native：48 个可观测样本，平均 183.971 秒，中位数 174.493 秒。
+- 0.4.0 Classic：47 个可观测样本，平均 352.375 秒，中位数 328.192 秒；另有一次运行在产生 result 前失败。
+- 两者都不计入 Docker 准备和 task validator 运行时间。
+
+在这一口径下，Native 平均耗时降低 47.8%，中位耗时降低 46.8%。这与 Native 减少阶段切换、依赖 Skill 和重复流程读取的设计目标一致。
 
 <Warning>
-  Classic 来自历史运行，Native
-  来自当前运行；机器负载、服务时段和历史遥测完整度不同。Token、轮次和工具调用具有较强结构解释力，wall
-  duration 只能作为方向性观察，不能写成受控因果结论。
+  0.4.0 数据来自历史运行，Native
+  数据来自当前并发运行。模型、任务和样本规模相同，但机器负载和服务时段并未完全受控。因此耗时差异是强方向性证据，不应表述为严格的因果实验结果。
 </Warning>
 
-## 与 2026-07-16 Native 报告相比
+## 失败归因
 
-旧 Native 基线为 46/48、`pass^3 = 14/16`。本次为 47/48、`pass^3 = 15/16`。失败任务也从两个终态证据缺口收敛为一个。
+Native 的两次失败都不是业务实现失败：
 
-这支持“澄清与 Runtime 加强没有造成广度回归”：canonical 业务任务广度保持稳定，达到 47/48。
+| 任务                           | Run | 失败检查                                                        | 业务验证 |
+| ------------------------------ | --- | --------------------------------------------------------------- | -------- |
+| `comet-api-cache-ttl`          | r2  | `native_state`：brief、specification 或 verification 证据不完整 | 通过     |
+| `comet-graph-execution-review` | r3  | `native_state`：brief、specification 或 verification 证据不完整 | 通过     |
 
-## HTML 对齐报告
+0.4.0 Classic 的五次失败包括一次业务失败和四次流程契约失败：
 
-下面的报告由 48 个严格配对 report 直接生成，包含 pass@k / pass^k、逐任务矩阵、执行效率、case manifest 和对齐限制。
+| 类型            | 次数 | 主要信号                                        |
+| --------------- | ---: | ----------------------------------------------- |
+| 业务实现        |    1 | `full-workflow` 未实现要求的 `--sentences` 功能 |
+| 依赖 Skill 契约 |    3 | 未观测到要求的 Superpowers 依赖 Skill           |
+| 主流程与阶段    |    1 | 主 Comet Skill 未调用，只观察到 3/5 个阶段      |
+
+这反映了两套模式不同的失败面。Classic 的流程依赖更多，失败可能来自主 Skill、阶段、OpenSpec 或依赖 Skill 的任一环节。Native 的流程面更窄，但仍然保留终态证据检查；代码完成而 brief、specification 或 verification 不完整，依然不会计为 strict pass。
+
+## 关于 LLM Judge
+
+本次结论不使用 Native 旧报告中的 LLM Judge 定性文本。复核发现，生成该报告时 Judge 会读到适配前的 `_test_results.json` transport 文件，从而把其中的旧路径检查误认为 Native 最终产物。
+
+因此本文只采用：
+
+- task validator 和 workflow validator 的硬检查；
+- 每次运行的最终 `passed` 状态；
+- 原始顶层 result 事件中的累计耗时；
+- 可追溯的任务级失败原因。
+
+后续评估代码已经排除 `_test_context.json` 和 `_test_results.json`，但不会用修复后的代码反向改写这次历史实验的定性 Judge 结论。
+
+## 如何解读这次结果
+
+这次对齐实验支持三个判断：
+
+1. **轻执行没有牺牲任务覆盖。** Native 和 0.4.0 Classic 的任务级 `pass@3` 都是 100%。
+2. **Native 的重复运行更稳定。** strict pass@1 高 6.25 个百分点，`pass^3` 高 12.5 个百分点。
+3. **Native 的模型执行明显更短。** 修正后的平均值和中位数都下降约 47%，但仍需在完全相同的运行窗口中复测，才能形成更强的延迟因果结论。
+
+它不支持“Classic 已经没有必要”这一结论。Native 服务于能够自行完成复杂代码推理、但仍需要需求澄清、状态、检查和归档的强模型。Classic 则继续服务于需要更细阶段指导、更强过程约束和显式依赖 Skill 编排的模型与任务。
+
+## HTML 可视化报告
+
+下面的嵌入报告集中展示 headline metric、可靠性指标、完成任务的轮次、工具调用、Token、成本、修正耗时、16 个任务的三次运行矩阵、失败归因和比较边界。
 
 <RawHtmlReportFrame
-  src="/assets/eval-reports/comet-native-vs-040-20260723/report.html"
-  title="Comet Native 与 0.4.0 Classic 对齐报告"
-  height={900}
+  src="/assets/eval-reports/comet-native-vs-040-20260716/native-benchmark-report.json"
+  title="Comet Native 与 0.4.0 Classic 对比报告"
+  height={860}
 />
 
 ## 下一步
 
-- 在相同运行窗口同时复跑 Native 与 Classic，收紧 wall-duration 结论。
-- [Native Batch 与 Sequential 澄清模式评估](/zh/eval/comet-native-clarification-experiment)
-- [评分指标与双 Agent 评测](/zh/eval/scoring)
+- 在同一运行窗口、相同并发条件下复跑两种模式，进一步收紧耗时结论。
+- 继续提高 Native 终态证据完整性，重点检查 brief、specification 和 verification 的归档一致性。
+- [Comet 基线真实评估实验](/zh/eval/comet-baseline-experiment) - 查看 0.3.9 与 0.4.0 Classic 的完整基线对比。
+- [评分指标与双 Agent 评测](/zh/eval/scoring) - 理解 `pass@k`、`pass^k`、硬验证和 LLM Judge 的区别。
