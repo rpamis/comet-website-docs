@@ -1,6 +1,6 @@
 ---
 title: 'Native configuration'
-description: 'Configure the /comet default route, enabled workflows, automatic recovery, and Native artifact root, document language, and clarification mode.'
+description: 'Configure the /comet default route, enabled workflows, automatic recovery, and Native artifact root, document language, clarification mode, and content snapshots.'
 ---
 
 Native and Classic share the project-level `.comet/config.yaml`. After Native is enabled, this file no longer contains only four Classic defaults. It also owns `/comet` entry routing, enabled workflows, and automatic recovery, while Native-specific settings live under the `native` namespace.
@@ -21,6 +21,19 @@ native:
   artifact_root: docs
   language: en
   clarification_mode: sequential
+  # Auditable project scope and bounded work budget for Native content snapshots.
+  snapshot:
+    # Included project-relative paths; supports *, **, and ?.
+    include:
+      - '**/*'
+    # Explicitly exclude data or generated output outside the implementation scope.
+    exclude: []
+    # Maximum files captured by one snapshot.
+    max_files: 10000
+    # Maximum total content bytes hashed by one snapshot.
+    max_total_bytes: 268435456
+    # Maximum snapshot duration in milliseconds.
+    max_duration_ms: 60000
 
 classic:
   language: en
@@ -44,11 +57,16 @@ Shared fields control entry and recovery. `native.*` affects only Native, and `c
 
 ## Native fields
 
-| Field                       | Values / default                              | Purpose                                                                                  |
-| --------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `native.artifact_root`      | Project-relative path; default `docs`         | Locates specs, changes, archive, and runtime under `<artifact-root>/comet/`              |
-| `native.language`           | `en` \| `zh-CN`; default `en`                 | Language for briefs, specs, and reports of newly created Native changes                  |
-| `native.clarification_mode` | `sequential` \| `batch`; default `sequential` | Ask one upstream question per round, or ask every currently answerable question together |
+| Field                             | Values / default                              | Purpose                                                                                  |
+| --------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `native.artifact_root`            | Project-relative path; default `docs`         | Locates specs, changes, archive, and runtime under `<artifact-root>/comet/`              |
+| `native.language`                 | `en` \| `zh-CN`; default `en`                 | Language for briefs, specs, and reports of newly created Native changes                  |
+| `native.clarification_mode`       | `sequential` \| `batch`; default `sequential` | Ask one upstream question per round, or ask every currently answerable question together |
+| `native.snapshot.include`         | Project-relative globs; default `["**/*"]`    | Paths included in the baseline and later current snapshots                               |
+| `native.snapshot.exclude`         | Project-relative globs; default `[]`          | Versioned data or generated output explicitly outside the implementation scope           |
+| `native.snapshot.max_files`       | Positive integer; default `10000`             | Maximum files captured by one snapshot                                                   |
+| `native.snapshot.max_total_bytes` | Positive integer; default `268435456`         | Maximum total file-content bytes hashed by one snapshot                                  |
+| `native.snapshot.max_duration_ms` | Positive integer; default `60000`             | Maximum time allowed for one snapshot capture                                            |
 
 `artifact_root: .` maps to `<project>/comet/`; `artifact_root: docs` maps to `<project>/docs/comet/`. For an existing Native project, do not edit the field and move files manually. Use the transactional command:
 
@@ -66,6 +84,33 @@ comet native init --language en
 Existing changes keep the language written when they were created.
 
 `clarification_mode` changes only how product questions are organized. It does not add a phase or change the shared write safeguards or caller stop points. Sequential asks one most-upstream decision per round, while Batch asks every currently answerable decision in the round. Both modes require final shared-understanding confirmation before Build. Switching modes does not clear `[blocking]` questions already saved in the brief. Resolve the current question first, then let Native compute the next round under the new mode.
+
+### Content snapshot scope and budgets
+
+Native establishes baselines with streaming SHA-256 over actual file content. It does not use Git object hashes or Git LFS pointers as ordinary file identities. A Git project may use Git to enumerate tracked and non-ignored untracked files, but Git is only the selection provider. A non-Git project uses the physical-tree provider with the same content semantics.
+
+Native normalizes `include` and `exclude`, then persists the policy and its hash in the new change's `baseline-manifest.json`. Build, Verify, and check keep using that baseline scope, so changing project configuration mid-change cannot hide implementation changes. Resource budgets are not file-content identity: you can raise `max_files`, `max_total_bytes`, or `max_duration_ms` as the repository grows without switching to Git hashes.
+
+Large repositories normally use one of these paths:
+
+- If a file belongs to implementation or verification scope, raise the total-byte and duration budgets so Runtime can hash it completely.
+- If large data or generated output is outside implementation scope, exclude it explicitly and retain that policy in the baseline audit record.
+
+```yaml
+native:
+  snapshot:
+    include:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+    exclude:
+      - 'data/generated/**'
+    max_files: 50000
+    max_total_bytes: 1073741824
+    max_duration_ms: 120000
+```
+
+When capture exceeds a budget, `comet native new` still fails closed and removes the incomplete change. Its diagnostic reports the effective limits, policy hash, affected paths, configuration location, and supported fixes instead of returning only a generic action.
 
 <Warning>
   <code>native.pending_root_move</code> is a machine-managed recovery field for an interrupted root
@@ -99,6 +144,12 @@ native:
   artifact_root: docs
   language: en
   clarification_mode: sequential
+  snapshot:
+    include: ['**/*']
+    exclude: []
+    max_files: 10000
+    max_total_bytes: 268435456
+    max_duration_ms: 60000
 ```
 
 ### Both workflows, with Classic as the default
@@ -114,6 +165,12 @@ native:
   artifact_root: docs
   language: en
   clarification_mode: batch
+  snapshot:
+    include: ['**/*']
+    exclude: []
+    max_files: 10000
+    max_total_bytes: 268435456
+    max_duration_ms: 60000
 classic:
   language: en
   context_compression: off
