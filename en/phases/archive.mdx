@@ -1,42 +1,61 @@
 ---
 title: 'Phase 5: Archive'
 sidebarTitle: 'Archive'
-description: 'Confirm final approval, merge the OpenSpec delta, annotate workflow artifacts, and close the change.'
+description: 'Merge the delta spec, persist the complete archive state, and push or open a PR using the delivery method confirmed before archiving.'
 ---
 
-Archive closes the spec lifecycle. After verification passes and branch handling is complete, Comet shows the irreversible actions and waits for final user approval before mutating specs or moving the change.
+Archive merges a verified change into the main OpenSpec specs, annotates its artifacts, and moves it into the archive directory. Because this is irreversible, Comet confirms both archiving and immediate remote delivery before it starts.
 
 <Tip>
   Normally, invoke <code>/comet</code>. When project configuration selects Classic, the internal{' '}
-  <code>/comet-classic</code> router sends a verified change to <code>/comet-archive</code>. Call
-  the phase Skill directly only for manual control.
+  <code>/comet-classic</code> router sends a verified change to <code>/comet-archive</code>.
 </Tip>
 
 ## Prerequisites
 
 - `phase: archive`
 - `verify_result: pass`
-- `branch_status: handled`
+- `branch_status: pending`
+- The current branch matches the change's `bound_branch`
 
-## Final confirmation
+Verify records verification evidence only. `branch_status` remains `pending` until the user confirms immediate remote delivery in this phase.
 
-The user chooses one of three paths:
+## Flow
 
-| Choice                 | Result                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| Confirm archive        | Runs `comet state transition <name> archive-confirm`, then executes `comet archive`. |
-| Adjust or verify again | Runs `archive-reopen`, returns to verify, and clears the old confirmation.           |
-| Not yet                | Leaves the change in archive without mutation.                                       |
-
-`archive_confirmation` is machine-owned. A real archive requires `confirmed`; direct field edits cannot fabricate approval.
-
-## Preview before confirmation
-
-```bash
-comet archive "<change-name>" --dry-run
+```mermaid
+flowchart TD
+    Entry["Validate entry state"] --> Confirm["Final archive and delivery confirmation"]
+    Confirm -->|Archive and push| Archive["comet archive"]
+    Confirm -->|Archive, push, and open PR| Archive
+    Confirm -->|Adjust or verify again| Reopen["archive-reopen to verify"]
+    Confirm -->|Not yet| Keep["Keep active + pending"]
+    Archive --> State["Write branch_status: handled"]
+    State --> Guard["comet guard archive"]
+    Guard --> Commit["One archive commit"]
+    Commit --> Push["Push once"]
+    Push -->|PR selected| PR["Open PR"]
+    Push -->|Push only| Clear["clear-selection"]
+    PR --> Clear
 ```
 
-Dry-run requires archive phase and passing verification, but does not require final confirmation, write a pending checkpoint, call OpenSpec, or modify files.
+## Final archive and delivery confirmation
+
+Before confirmation, Comet shows the change, verification report, bound branch, ownership of existing uncommitted changes, and the irreversible archive operations it is about to perform.
+
+| Choice                            | Result                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Confirm archive and push now**  | Archives, creates one complete commit, and pushes the current bound branch                              |
+| **Confirm archive, push, and PR** | Archives, pushes the one complete commit, then opens a PR                                               |
+| **Adjust or verify again**        | Runs `archive-reopen`, returns to Verify, and invokes `/comet-verify`                                   |
+| **Do not archive yet**            | Does not confirm or archive; keeps the change active with `phase: archive` and `branch_status: pending` |
+
+Only the first two choices run:
+
+```bash
+comet state transition <change-name> archive-confirm
+```
+
+`archive_confirmation` is machine-owned and must not be edited by hand.
 
 ## Execute archive
 
@@ -44,31 +63,71 @@ Dry-run requires archive phase and passing verification, but does not require fi
 comet archive "<change-name>"
 ```
 
-The command writes a recoverable pending checkpoint, calls `openspec archive --yes`, validates main specs, annotates the Design Doc and Plan, and marks the Run complete. Annotation is idempotent and preserves a clean Markdown EOF.
+The command writes a recoverable checkpoint, invokes OpenSpec to merge the delta and move the change, validates the main specs, annotates the Design Doc and Plan, and writes `archived: true` in the actual archive directory.
 
-Archive does not commit the result. Commit the dated change move, merged main specs, and artifact annotations after review:
+Preview the operation without mutation:
 
 ```bash
-git add -A
+comet archive "<change-name>" --dry-run
+```
+
+## Put the final state in one archive commit
+
+After archiving, Comet runs these commands before committing:
+
+```bash
+comet state set <change-name> branch_status handled
+comet guard <change-name> archive
+```
+
+Here, `handled` means that the **remote delivery method has been confirmed**. It does not mean that the push or PR creation has already succeeded. The guard must pass before the commit so that `archived: true` and `branch_status: handled` enter the same, unique archive commit.
+
+Comet stages only paths attributable to the current change:
+
+- The former active change path and actual archive path
+- Main specs updated by this delta
+- Archive metadata in the Design Doc and Plan
+- The final `.comet.yaml` in the archive directory
+
+After reviewing the staged diff, it commits:
+
+```bash
+git add -- <reviewed archive paths...>
+git diff --cached --stat
 git commit -m "chore: archive <change-name>"
 ```
 
-## Handle the branch after the archive commit
+It must not use `git add -A` or include unrelated user changes.
 
-After the archive commit succeeds, the AI loads Superpowers `finishing-a-development-branch`. This ordering ensures the final branch or PR contains the main-spec merge and archive metadata. If the skill is unavailable, stop and prompt to enable it; do not write `branch_status: handled`.
+## Remote delivery and completion
 
-For `isolation: current`, the change is already on its intended branch, so the user chooses only whether to push the current branch or keep it local. Comet does not offer feature-branch merge or PR actions. For `isolation: branch|worktree`, the user chooses whether to merge locally, push and open a PR, keep the branch, or discard it.
+After the archive commit succeeds, Comet performs only the delivery method selected during confirmation:
 
-If archive was interrupted after OpenSpec moved the directory, rerunning `comet archive` locates the dated archive, revalidates it, finishes missing annotations, and closes state without duplicating the merge.
+- Push the current bound branch once; or
+- Push once, then open a PR.
 
-<Warning>
-  Do not hand-edit <code>archive_confirmation</code> or <code>archived</code>. After success, do not
-  rerun <code>comet guard &lt;name&gt; archive</code> against the old active path; use the archive
-  command exit status and dated directory as evidence.
-</Warning>
+Archive no longer loads Superpowers `finishing-a-development-branch` or asks about local merge, keeping the branch, or deferring the push after archiving. To defer delivery, choose “Do not archive yet” before the irreversible operation.
+
+Only after all selected remote operations succeed does Comet run:
+
+```bash
+comet state clear-selection
+```
+
+At that point, the remote archive state is `handled`, and Comet has left no uncommitted `.comet.yaml` behind.
+
+## Failure handling
+
+- If archive, state persistence, guard, or commit fails, stop without running remote operations.
+- If push fails, the complete archive commit remains local; retry only that same push in the current task.
+- If PR creation fails, the branch is already pushed; retry only PR creation in the current task.
+- Do not clear the current selection or declare the workflow complete after a failure.
+
+This flow does not promise automatic recovery after the user leaves the task and manually switches, deletes, rebases, or rewrites the branch.
 
 ## Next steps
 
-- [comet archive](/en/scripts/comet-archive)
 - [Open phase](/en/phases/open)
-- [Intermediate artifacts](/en/concepts/intermediate-artifacts)
+- [Decision points](/en/concepts/decision-points)
+- [comet archive script](/en/scripts/comet-archive)
+- [State and configuration](/en/concepts/state-management)
