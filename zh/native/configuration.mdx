@@ -91,26 +91,84 @@ Native 使用文件内容的流式 SHA-256 建立 baseline，不把 Git object h
 
 `include` 与 `exclude` 先规范化，再连同策略 hash 写入新 change 的 `baseline-manifest.json`。后续 Build、Verify 和 check 始终沿用 baseline 的范围，所以不能在实现中途修改配置来隐藏变化。资源预算不是内容身份：仓库增长后可以提高 `max_files`、`max_total_bytes` 或 `max_duration_ms`，而不必改用 Git hash。
 
-大型仓库通常有两种处理方式：
+#### Pattern 匹配规则
+
+所有 pattern 都相对于项目根目录，并使用 `/`：
+
+- `*` 匹配单个目录层级内的任意字符；
+- `**` 可以跨越多个目录层级；
+- `?` 匹配一个非 `/` 字符；
+- 不允许绝对路径、反斜杠、空 pattern 或 `..`；
+- 不支持 `!pattern`，排除项必须写入 `exclude`。
+
+一个路径只有在匹配至少一个 `include` 且不匹配任何 `exclude` 时才会进入快照，因此 `exclude` 最终优先。Pattern 会被去重、排序和规范化，再写入 baseline policy。
+
+`.gitignore` 与 `exclude` 不是同一层：Git provider 用 `.gitignore` 决定哪些未跟踪文件进入候选集合，Native policy 则记录一次 change 明确承诺观察的范围。非 Git provider 没有 Git ignore 语义，所以对大型生成物和数据目录写出明确 exclude，也能让不同 provider 保持一致意图。
+
+#### 如何选择范围与预算
+
+先定义交付范围，再考虑性能：
 
 - 文件属于实现或验证范围：提高总字节数和执行时间，让 Runtime 完整流式哈希。
 - 大型数据或生成物不属于实现范围：用明确的 `exclude` 模式排除，并让该策略随 baseline 留下审计记录。
+- 不确定文件是否相关：先保留，查看 Runtime 返回的实际限制和受影响路径后再决定。
+
+普通项目优先使用默认完整范围：
 
 ```yaml
 native:
   snapshot:
     include:
-      - 'src/**'
-      - 'test/**'
+      - '**/*'
+    exclude: []
+    max_files: 10000
+    max_total_bytes: 268435456
+    max_duration_ms: 60000
+```
+
+Monorepo 应同时包含目标应用、共享依赖、相关测试和根级构建身份文件：
+
+```yaml
+native:
+  snapshot:
+    include:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+      - 'packages/config/**'
       - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+    exclude:
+      - 'apps/web/dist/**'
+      - 'apps/web/coverage/**'
+    max_files: 20000
+    max_total_bytes: 536870912
+    max_duration_ms: 90000
+```
+
+大型仓库可以保持广泛 include，明确排除与交付无关的重型内容：
+
+```yaml
+native:
+  snapshot:
+    include:
+      - '**/*'
     exclude:
       - 'data/generated/**'
+      - 'artifacts/benchmarks/**'
+      - 'dist/**'
+      - 'coverage/**'
+      - '.cache/**'
     max_files: 50000
     max_total_bytes: 1073741824
     max_duration_ms: 120000
 ```
 
+不要只 include 当前准备修改的源码目录。如果构建、测试或运行时依赖共享 package、根配置、锁文件或迁移脚本，也必须纳入。不要为了让 snapshot 通过而排除源码、测试或交付所需配置；这会让 implementation scope 与真实风险脱节。
+
 超出预算时，`comet native new` 继续失败关闭并删除未完成 change，但诊断会返回实际限制、策略 hash、受影响路径、配置文件位置和支持的修复方向，不再只给出无法执行的笼统动作。
+
+更多可直接复制的场景和排障答案见 [Native 常见问题](/zh/native/faq#内容快照与实现范围)。
 
 <Warning>
   <code>native.pending_root_move</code> 是 root move

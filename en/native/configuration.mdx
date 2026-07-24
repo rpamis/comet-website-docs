@@ -91,26 +91,84 @@ Native establishes baselines with streaming SHA-256 over actual file content. It
 
 Native normalizes `include` and `exclude`, then persists the policy and its hash in the new change's `baseline-manifest.json`. Build, Verify, and check keep using that baseline scope, so changing project configuration mid-change cannot hide implementation changes. Resource budgets are not file-content identity: you can raise `max_files`, `max_total_bytes`, or `max_duration_ms` as the repository grows without switching to Git hashes.
 
-Large repositories normally use one of these paths:
+#### Pattern matching rules
+
+Every pattern is relative to the project root and uses `/`:
+
+- `*` matches characters within one directory level;
+- `**` may cross directory levels;
+- `?` matches one character other than `/`;
+- absolute paths, backslashes, empty patterns, and `..` are rejected;
+- `!pattern` is not supported; put exclusions under `exclude`.
+
+A path enters the snapshot only when it matches at least one `include` and no `exclude`, so exclude wins. Patterns are deduplicated, sorted, and normalized before Runtime stores the baseline policy.
+
+`.gitignore` and `exclude` operate at different layers. The Git provider uses `.gitignore` to decide which untracked files enter its candidate set. Native policy records the scope a change explicitly promises to observe. A non-Git provider has no Git-ignore semantics, so explicit excludes for large generated output and data preserve the same intent across providers.
+
+#### Choosing scope and budgets
+
+Define the deliverable boundary before optimizing capture:
 
 - If a file belongs to implementation or verification scope, raise the total-byte and duration budgets so Runtime can hash it completely.
 - If large data or generated output is outside implementation scope, exclude it explicitly and retain that policy in the baseline audit record.
+- If you are unsure whether a file is relevant, keep it included and inspect the actual limit and affected path reported by Runtime.
+
+Typical projects should start with the complete default scope:
 
 ```yaml
 native:
   snapshot:
     include:
-      - 'src/**'
-      - 'test/**'
+      - '**/*'
+    exclude: []
+    max_files: 10000
+    max_total_bytes: 268435456
+    max_duration_ms: 60000
+```
+
+A monorepo should include the target application, shared dependencies, relevant tests, and root build-identity files:
+
+```yaml
+native:
+  snapshot:
+    include:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+      - 'packages/config/**'
       - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+    exclude:
+      - 'apps/web/dist/**'
+      - 'apps/web/coverage/**'
+    max_files: 20000
+    max_total_bytes: 536870912
+    max_duration_ms: 90000
+```
+
+A large repository can keep a broad include while explicitly excluding heavy content outside the deliverable:
+
+```yaml
+native:
+  snapshot:
+    include:
+      - '**/*'
     exclude:
       - 'data/generated/**'
+      - 'artifacts/benchmarks/**'
+      - 'dist/**'
+      - 'coverage/**'
+      - '.cache/**'
     max_files: 50000
     max_total_bytes: 1073741824
     max_duration_ms: 120000
 ```
 
+Do not include only the source directory you expect to edit. Shared packages, root configuration, lockfiles, and migration scripts also belong in scope when build, test, or runtime behavior depends on them. Do not exclude source, tests, or delivery configuration merely to make capture pass; that disconnects the implementation scope from real risk.
+
 When capture exceeds a budget, `comet native new` still fails closed and removes the incomplete change. Its diagnostic reports the effective limits, policy hash, affected paths, configuration location, and supported fixes instead of returning only a generic action.
+
+See [Native FAQ](/en/native/faq#content-snapshots-and-implementation-scope) for copy-ready scenarios and troubleshooting answers.
 
 <Warning>
   <code>native.pending_root_move</code> is a machine-managed recovery field for an interrupted root

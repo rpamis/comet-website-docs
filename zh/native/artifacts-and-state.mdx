@@ -53,6 +53,7 @@ Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些�
 | `native.artifact_root`      | Native 的 `comet/` 产物根目录           |
 | `native.language`           | 新建 Native change 的默认文档语言       |
 | `native.clarification_mode` | 每轮询问一个问题或本轮全部可回答问题    |
+| `native.snapshot`           | 新 change 的内容快照范围策略与执行预算  |
 
 Classic 自有设置可以保留在同一个文件中，但不会改变 Native 状态机。修改 artifact root 应使用 `comet native root move`，让 Runtime 事务化迁移；不要只改 YAML 后手动移动目录。
 
@@ -107,7 +108,11 @@ Checkpoint 不替代 brief、规格或验证报告，也不推进 phase。
 
 Native 对 change 数量、规格大小、finding、Acceptance ID、输出和归档树设置预算。列表与详情使用绑定当前内容集合的 cursor；输入变化后旧 cursor 会明确失效。
 
-`baseline-manifest.json` 是创建 change 时捕获的有界项目快照。Git provider 只纳入 tracked 与未被 ignore 的 untracked 文件并原子表示 submodule/gitlink；非 Git 项目使用带前后枚举围栏的有界物理树 provider。创建或 v1/v2 migration cutover 时 baseline 必须完整；当前 v3 baseline 不能用当前文件自动重建。
+`baseline-manifest.json` 是创建 change 时捕获的有界项目快照。它不仅保存文件内容身份，还保存规范化后的 `include`、`exclude`、policy hash、执行限制、遗漏事实和完整性状态。Git provider 只纳入 tracked 与未被 ignore 的 untracked 文件并原子表示 submodule/gitlink；非 Git 项目使用带前后枚举围栏的有界物理树 provider。创建或 v1/v2 migration cutover 时 baseline 必须完整；当前 v3 baseline 不能用当前文件自动重建。
+
+后续 current snapshot 始终使用 baseline manifest 中固化的 policy，而不是重新读取项目配置中的 include/exclude。这样实现过程中即使有人修改 `.comet/config.yaml`，也不能把已纳入范围的变化隐藏掉。资源预算仍从当前项目配置读取，因此仓库增长后可以提高 `max_files`、`max_total_bytes` 或 `max_duration_ms`，继续完成同一审计范围。
+
+Pattern 语义、三套可复制配置以及如何判断“提高预算还是排除文件”，见 [Native 配置](/zh/native/configuration#内容快照范围与预算) 和 [Native 常见问题](/zh/native/faq#内容快照与实现范围)。
 
 实现范围、规格基线、当前 snapshot、验证报告、check receipt、checkpoint manifest 与归档预检都使用 hash 绑定。当前 snapshot 不完整时不会推断删除；变化明细超预算时，`scope-detail-overflow` 用计数与内容 hash 保留其余变化的结构化事实。这样可以判断证据是否仍对应当前事实，而不是只相信“已经验证过”的文字声明。
 
