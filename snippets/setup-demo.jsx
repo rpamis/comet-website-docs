@@ -2,6 +2,38 @@ export const SetupDemoController = () => {
   useEffect(() => {
     const demos = Array.from(document.querySelectorAll("[data-setup-demo]"));
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const versionTargets = Array.from(
+      document.querySelectorAll("[data-docs-version]")
+    );
+    const versionPattern = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+    let versionObserver = null;
+
+    const syncDocsVersion = () => {
+      const version = Array.from(
+        document.querySelectorAll('button[aria-haspopup="menu"] > span')
+      )
+        .map((element) => element.textContent?.trim() || "")
+        .find((value) => versionPattern.test(value));
+
+      if (version == null) return false;
+
+      const displayVersion = version.startsWith("v") ? version : `v${version}`;
+      versionTargets.forEach((target) => {
+        target.textContent = displayVersion;
+      });
+      return true;
+    };
+
+    if (
+      versionTargets.length > 0 &&
+      syncDocsVersion() === false &&
+      window.MutationObserver != null
+    ) {
+      versionObserver = new MutationObserver(() => {
+        if (syncDocsVersion()) versionObserver?.disconnect();
+      });
+      versionObserver.observe(document.body, { childList: true, subtree: true });
+    }
 
     const cleanups = demos.map((demo) => {
       const viewport = demo.querySelector("[data-setup-viewport]");
@@ -105,7 +137,10 @@ export const SetupDemoController = () => {
       };
     });
 
-    return () => cleanups.forEach((cleanup) => cleanup());
+    return () => {
+      versionObserver?.disconnect();
+      cleanups.forEach((cleanup) => cleanup());
+    };
   }, []);
 
   return null;
