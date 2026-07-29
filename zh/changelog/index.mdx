@@ -11,25 +11,28 @@ Beta 10 重点完善 Native 的验证闭环，并为 Classic 提供可选择、�
 ### Added（新增）
 
 - **定向平台安装与更新**：`comet init` 和 `comet update` 新增 `--platform <platform>`。需要修复或刷新单个平台时，不必重新处理项目中的其他平台；未指定该参数时，仍沿用现有的自动检测与回退行为。
-- **CodeGraph 索引生命周期**：非交互项目初始化可以显式选择 `comet init --codegraph init|skip`。`comet doctor` 会区分 CLI 缺失、索引缺失、不完整、过期和可用状态；只有经过授权的 `comet doctor --repair --yes` 才会执行初始化、重建或同步。
-- **Classic 可配置目录布局**：项目可通过 `classic.artifact_layout: legacy|docs` 在 `openspec/` 与 `docs/openspec/` 两种布局间选择。`comet classic root show` 可以查看当前布局；已有项目使用 `comet classic root move docs --dry-run` 和 `--apply` 安全迁移产物及配置。
-- **Native 验证交接**：Native 可以分别记录自动检查、人工观察、实现声明、独立审查和已批准 waiver。需要职责分离的团队可以保留明确的证据来源，而不必让实现者同时充当批准者。
+- **CodeGraph 索引生命周期**：非交互项目初始化可以显式选择 `comet init --codegraph init|skip`。`comet doctor` 会区分 CLI 缺失、索引缺失、不完整、过期和可用状态；只有经过授权的 `comet doctor --repair --yes` 才会执行初始化、重建或同步（[#245](https://github.com/rpamis/comet/issues/245)）。
+- **Classic 可配置目录布局**：项目可通过 `classic.artifact_layout: legacy|docs` 在 `openspec/` 与 `docs/openspec/` 两种布局间选择。`comet classic root show` 可以查看当前布局；已有项目使用 `comet classic root move docs --dry-run` 和 `--apply` 安全迁移产物及配置（[#173](https://github.com/rpamis/comet/issues/173)）。
+- **Native 证据化验收**：每条强制验收项都必须绑定当前 snapshot 和 scope 下的有效证据。Native 可以分别记录自动检查、人工观察、实现声明、独立审查和经批准的结构化豁免；失败、跳过、阻塞、过期或覆盖不完整的证据不能产生通过结果，高风险变更还需要独立复核（[#240](https://github.com/rpamis/comet/issues/240)）。
 
 ### Changed（变更）
 
-- **Classic 文档目录**：新建的 Classic 或双工作流项目默认把 OpenSpec 产物放在 `docs/openspec/`，与 `docs/comet/`、`docs/superpowers/` 组成统一文档目录。已有项目继续使用当前的根目录 `openspec/`，除非显式迁移。
-- **Native 完成闭环**：Verify 不通过时，Runtime 会把 failed/missing acceptance 和失败检查稳定回灌到 Build。实现者继续处理缺口并重新验证；只有完整验收通过后才进入 Archive。重复修改但缺口没有减少不算进展，达到停滞条件或失败预算后会停止并等待用户决定。
-- **Native 归档确认**：`native.archive_confirmation: required` 会在最终 Archive 候选上要求一次明确决定；保持默认配置时继续自动归档。中间修复轮次不会触发归档确认。
+- **Classic 文档目录**：新建的 Classic 或双工作流项目默认把 OpenSpec 产物放在 `docs/openspec/`，与 `docs/comet/`、`docs/superpowers/` 组成统一文档目录。已有项目继续使用当前的根目录 `openspec/`，除非显式迁移；所有 Classic 命令都会遵循所选布局（[#173](https://github.com/rpamis/comet/issues/173)）。
+- **Native 完成闭环**：Verify 不通过时，Runtime 会把 failed/missing acceptance 和失败检查稳定回灌到 Build。实现者按缺口分批修复并重新验证；只有完整验收通过后才进入 Archive。一次 Agent turn 或代码发生变化不代表完成，只有缺口减少、检查转绿或证据补全才算进展；达到停滞条件或失败预算后会停止并等待用户决定（[#209](https://github.com/rpamis/comet/issues/209)、[#242](https://github.com/rpamis/comet/issues/242)）。
+- **Native 归档确认**：`native.archive_confirmation: required` 会在最终 Archive 候选上要求一次明确决定；保持默认配置时继续自动归档。中间修复轮次不会触发归档确认，选择暂不归档也会保留当前 active change（[#238](https://github.com/rpamis/comet/issues/238)）。
 - **Native 渐进式指引**：Native 入口优先呈现当前阶段、验收缺口和下一动作，只有在需要时才加载澄清、命令、产物与恢复细节。
 
 ### Fixed（修复）
 
 - **Classic 归档引用**：归档时会把 change 内的 handoff 和相关产物引用更新为带日期的归档位置，并在完成前验证引用；成功归档后不再需要手工修正 `.comet.yaml`（[#244](https://github.com/rpamis/comet/issues/244)）。
 - **辅助 worktree 诊断**：`comet doctor` 会区分当前 worktree 资产、仅主 worktree 可见的资产和可用的全局兜底，不再把辅助 worktree 中有意未复制的忽略文件误报为损坏（[#246](https://github.com/rpamis/comet/issues/246)）。
+- **本地 Eval 执行环境**：本地任务镜像现在包含评估所需的 Claude Code，并以非 root 用户运行，quick 和 full Eval 可以稳定识别执行环境并启动 runner（[#229](https://github.com/rpamis/comet/issues/229)）。
+- **本地 Eval 校验器**：复制到任务中的轻量校验器可以可靠加载随附的 scaffold runtime；workflow Eval 只使用与工作流契约匹配的任务，无 Skill 的 CONTROL 结果保留为对照数据，不再错误阻断有效的 Dynamic Skill 结果（[#229](https://github.com/rpamis/comet/issues/229)）。
+- **Creator Bundle 可移植性**：Creator 生成的工作流 Bundle 使用项目相对的证据路径和平台无关的创作说明，不再把 Claude 专用自定义 Agent 声明为 Codex 发布所必需的运行能力；成功的本地 Eval 结果会写回当前 Bundle 的评估证据（[#229](https://github.com/rpamis/comet/issues/229)）。
 
 ### Security（安全）
 
-- **Native 审批隔离**：签名工作流的审批凭据保存在项目和实现者之外，项目内的变更不能自行取得批准权限。
+- **Native 审批隔离**：签名工作流的审批凭据保存在项目和实现者之外，项目内的变更不能自行取得批准权限（[#240](https://github.com/rpamis/comet/issues/240)）。
 
 </Update>
 
