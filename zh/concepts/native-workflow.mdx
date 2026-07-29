@@ -7,11 +7,30 @@ Comet Native 是专门适配 Fable 5、GPT-5.6 这一档强编码模型的 Skill
 
 它的核心原则是：**需求与验收要具体，执行方法保持轻量。** 轻量指减少对强模型不必要的过程编排，不是减少需求质量或取消验证。
 
-## Loop Engineer：把完成定义为收敛
+## 借鉴 Loop Engineering 的 Native Loop
 
-Loop Engineer 不是新增角色，也不是第五个阶段。它描述的是 Native 的工程方法：一次实现、一次提交或单次执行轮次都只是迭代，只有当前 contract 下的全部验收条件得到新鲜证据支持，工作才算完成。
+Native 的完成闭环参考了业界对 [Loop Engineering](https://addyosmani.com/blog/loop-engineering/) 的讨论：工程重点从逐轮提示 Agent，转向设计一个能够读取目标、执行工作、接收真实反馈、验证结果、保存状态并决定继续或停止的循环。这里的“loop”是受控反馈系统，不是让模型无限重试。
 
-每轮迭代遵循同一条反馈路径：读取当前 acceptance，完成一批相关实现，运行真实验证，再由 Runtime 判断缺口是否减少。Verify 失败时，failed/missing acceptance 和失败检查会回到 Build，成为下一轮明确输入，而不是留在对话里由模型自行回忆。
+Comet Native 借鉴这一思路，但没有新增名为 Loop Engineer 的角色，也没有增加第五个阶段。它把 loop 限定在 Build 与 Verify 之间：一次实现、一次提交或单次 Agent turn 都只是迭代；只有当前 contract 下的全部验收条件得到新鲜证据支持，工作才算完成。
+
+```mermaid
+flowchart LR
+  S["Shape<br/>目标、规格与验收"] --> B
+
+  subgraph L["Native Loop：仅发生在 Build ↔ Verify"]
+    B["Build<br/>调查、实现、修复"] --> V["Verify<br/>检查与逐项证据"]
+    V -->|"failed / missing acceptance"| G["Runtime 派生验收缺口"]
+    G --> B
+  end
+
+  V -->|"全部验收通过"| P["Archive preview"]
+  V -->|"停滞或失败预算耗尽"| U["停止并交还用户"]
+  P --> C{"archive_confirmation"}
+  C -->|"automatic"| A["Archive 完成"]
+  C -->|"required"| U
+```
+
+每轮迭代遵循同一条反馈路径：读取当前 acceptance，完成一批相关实现，运行真实验证，再由 Runtime 判断缺口是否减少。Verify 失败时，failed/missing acceptance 和失败检查会回到 Build，成为下一轮明确输入，而不是留在对话里由模型自行回忆。只有最终 Verify 通过后才会离开 loop 进入 Archive；停滞、预算耗尽或归档策略要求确认时，流程会停止并交还用户。
 
 这套方法有四个边界：
 
