@@ -1,24 +1,24 @@
 ---
-title: '连续推进与 Checkpoint'
-description: '理解 Native 的 continuation 契约、自动停止条件，以及跨会话恢复如何依赖文件而不是聊天记忆。'
+title: '连续推进与检查点'
+description: '理解 Native 的后续动作契约、自动停止条件，以及跨会话恢复如何依赖文件而不是聊天记忆。'
 ---
 
-Native 的自动推进不是后台任务，也不是无条件连跑。每次真实 transition 都返回下一阶段、是否自动衔接以及结构化 continuation；Skill 只在状态允许时继续。
+Native 的自动推进不是后台任务，也不是无条件连跑。每次真实阶段转换都会返回下一阶段、是否自动衔接以及结构化后续动作；Skill 只在状态允许时继续。
 
-## Continuation 结果
+## 后续动作结果
 
-| disposition | 含义 | 后续动作 |
-| --- | --- | --- |
-| `continue` | transition 已完成且下一动作明确 | 重新读取新 phase 与必要产物后继续 |
-| `await-user` | 仍有用户决定 | 提出一个最上游问题并结束本轮 |
-| `blocked` | 状态、证据、冲突或恢复条件不满足 | 按 finding 修复，不猜测绕过 |
-| `done` | 归档已完成 | 结束工作流 |
+| disposition  | 含义                             | 后续动作                       |
+| ------------ | -------------------------------- | ------------------------------ |
+| `continue`   | 阶段转换已完成且下一动作明确     | 重新读取新阶段与必要产物后继续 |
+| `await-user` | 仍有用户决定                     | 提出一个最上游问题并结束本轮   |
+| `blocked`    | 状态、证据、冲突或恢复条件不满足 | 按诊断项修复，不猜测绕过       |
+| `done`       | 归档已完成                       | 结束工作流                     |
 
-`next: auto` 只表示 Runtime 允许继续，不代表后台 daemon 已启动。调用方若明确要求在某个 transition 后停下，Skill 完成该 transition 后不会再调用工具；下一会话从磁盘恢复。
+`next: auto` 只表示 Runtime 允许继续，不代表后台守护进程已启动。调用方若明确要求在某次阶段转换后停下，Skill 完成该转换后不会再调用工具；下一会话从磁盘恢复。
 
-## Checkpoint 保存什么
+## 检查点保存什么
 
-长任务在同一 phase 内中断时，可以保存：
+长任务在同一阶段内中断时，可以保存：
 
 ```bash
 comet native checkpoint <change-name> \
@@ -28,23 +28,26 @@ comet native checkpoint <change-name> \
   --expect-revision <n>
 ```
 
-Checkpoint 包含简短事实摘要、下一动作和内容寻址 artifact manifest。它不会推进 phase，也不替代 brief、完整目标规格或 `verification.md`。
+检查点包含简短事实摘要、下一动作和内容寻址产物清单。它不会推进阶段，也不替代需求简述、完整目标规格或 `verification.md`。
 
-恢复时 Runtime 会检查 checkpoint 对应的 phase、revision 和 manifest。任何一项变化都会把 checkpoint 标为 stale；旧摘要仍可作为历史提示，但不能覆盖当前状态。
+恢复时 Runtime 会检查检查点对应的阶段、修订版本和清单。任何一项变化都会使检查点失效；旧摘要仍可作为历史提示，但不能覆盖当前状态。
 
-## 为什么不需要独立 handoff 文档
+## 为什么不需要独立交接文档
 
-Classic 需要在多个阶段 Skill 与外部方法之间交接，因此有 design context、计划和压缩投影。Native 始终由一个 Skill 重新读取正式产物：
+Classic 需要在多个阶段 Skill 与外部方法之间交接，因此有设计上下文、计划和压缩投影。Native 始终由一个 Skill 重新读取正式产物：
 
-- brief 和目标规格保存需求；
-- state 和 continuation 保存阶段；
-- checkpoint 保存阶段内进度；
-- verification 与 receipt 保存证据。
+- 需求简述和目标规格保存需求；
+- 状态和后续动作保存阶段；
+- 检查点保存阶段内进度；
+- 验证报告与凭据保存证据。
 
-因此 Native 没有 `context_compression` 模式，也不会生成只为阶段 Skill 传递上下文的 handoff。必要信息通过正式产物和 hash 绑定，减少摘要漂移。
+因此 Native 没有 `context_compression` 模式，也不会生成只为阶段 Skill 传递上下文的交接文档。必要信息通过正式产物和哈希绑定，减少摘要漂移。
 
 <p align="center">
-  <img src="/assets/native-illustrations/06-continuation-checkpoints.png" alt="小鱼把下一动作书签放入装有正式产物的透明记录盒，另一侧的小鱼准备接住它继续工作" />
+  <img
+    src="/assets/native-illustrations/06-continuation-checkpoints.png"
+    alt="小鱼把下一动作书签放入装有正式产物的透明记录盒，另一侧的小鱼准备接住它继续工作"
+  />
 </p>
 
 继续阅读：[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复与故障处理](/zh/native/recovery-playbook)。

@@ -1,9 +1,9 @@
 ---
-title: '多 Change 与规格冲突'
-description: '并行管理多个 Native change，理解 current selection、冲突提示、canonical spec 基线与安全 rebase。'
+title: '多 change 与规格冲突'
+description: '并行管理多个 Native change，理解当前选择、冲突提示、正式规格基线与安全变基。'
 ---
 
-一个 Native 项目可以同时保留多个 active change。`.comet/current-change.json` 只记录下一次写入归属于哪一个 workflow 和 change，不是并发数量限制。这个单一选择让 Hook Router 能把一次原子写入交给唯一 Guard，避免两个 change 同时声称拥有同一批修改。
+一个 Native 项目可以同时保留多个活跃 change。`.comet/current-change.json` 只记录下一次写入归属于哪一个工作流和 change，不是并发数量限制。这个单一选择让 Hook Router 能把一次原子写入交给唯一 Guard，避免两个 change 同时声称拥有同一批修改。
 
 ## 查看并选择 change
 
@@ -22,30 +22,31 @@ comet native status <change-name> --details
 comet native select <change-name>
 ```
 
-`new` 和 `select` 会更新共享 selection；`list`、`show` 和 `status` 不会靠副作用切换当前 change。多个 active change 存在且 selection 缺失、失效或指向另一套 workflow 时，写入会停止并要求明确选择。
+`new` 和 `select` 会更新共享选择；`list`、`show` 和 `status` 不会靠副作用切换当前 change。多个活跃 change 存在且当前选择缺失、失效或指向另一套工作流时，写入会停止并要求明确选择。
 
 <Info>
-  Native 没有单独的 <code>resume</code> 命令。恢复由只读状态检查、目标确认和 <code>select</code> 组成；在 Agent 中仍从 <code>/comet</code> 或 <code>/comet-native</code> 进入。
+  Native 没有单独的 <code>resume</code> 命令。恢复由只读状态检查、目标确认和 <code>select</code>{' '}
+  组成；在 Agent 中仍从 <code>/comet</code> 或 <code>/comet-native</code> 进入。
 </Info>
 
 ## 哪些工作可以并行
 
-不同 capability、不同项目产物且没有共享行为约束的 change 可以并行推进。并行前建议确认：
+不同能力、不同项目产物且没有共享行为约束的 change 可以并行推进。并行前建议确认：
 
-- 完整目标规格是否修改同一个 capability；
+- 完整目标规格是否修改同一个能力；
 - 两个 change 是否声明相同项目产物；
 - 一个 change 的验收是否依赖另一个尚未归档的行为；
 - 当前工作区是否包含另一个 change 未归属的修改。
 
-Runtime 会在当前 Native root 内报告可证明的 capability 冲突和可能重叠，但它不是跨机器或跨远端分支的分布式锁。未集成 worktree、其他设备和未获取的远端提交仍需要团队自行协调。
+Runtime 会在当前 Native 产物根目录内报告可证明的能力冲突和可能重叠，但它不是跨机器或跨远端分支的分布式锁。未集成的 worktree、其他设备和未获取的远端提交仍需要团队自行协调。
 
-## canonical spec 为什么会冲突
+## 正式规格为什么会冲突
 
-Shape 会为每个目标 capability 冻结当前 canonical spec 的 `base_hash`。Archive 前，Runtime 再读取当前 canonical spec：
+Shape 会为每个目标能力冻结当前正式规格的 `base_hash`。Archive 前，Runtime 再读取当前正式规格：
 
-- hash 未变化：可以继续两步 Archive；
-- hash 已变化：说明另一个 change 已先更新同一 capability，当前 change 不能直接覆盖；
-- 当前 root 中存在可证明的范围冲突：归档预检会停止并返回 finding。
+- 哈希未变化：可以继续两步 Archive；
+- 哈希已变化：说明另一个 change 已先更新同一能力，当前 change 不能直接覆盖；
+- 当前产物根目录中存在可证明的范围冲突：归档预检会停止并返回诊断项。
 
 冲突不会通过“后归档者覆盖先归档者”自动解决，因为旧目标规格可能已经不再代表最新产品行为。
 
@@ -53,7 +54,7 @@ Shape 会为每个目标 capability 冻结当前 canonical spec 的 `base_hash`�
 
 处理顺序如下：
 
-1. 阅读最新 canonical spec、当前 brief 和拟议完整目标规格；
+1. 阅读最新正式规格、当前需求简述和拟议完整目标规格；
 2. 按最新基线重写完整目标规格，必要时解决新出现的用户决定；
 3. 运行 rebase：
 
@@ -61,19 +62,22 @@ Shape 会为每个目标 capability 冻结当前 canonical spec 的 `base_hash`�
 comet native spec rebase <change-name> --summary <调整摘要>
 ```
 
-4. 重新进入 Build，更新实现并形成新的 implementation scope；
+4. 重新进入 Build，更新实现并形成新的实现范围；
 5. 重新 Verify，再执行两步 Archive。
 
-`spec rebase` 会刷新 operation 和 base hash，并使旧验证结论失效。不要手工修改 `comet-state.yaml` 中的 hash，也不要复用冲突前的 pass。
+`spec rebase` 会刷新操作与基线哈希，并使旧验证结论失效。不要手工修改 `comet-state.yaml` 中的哈希，也不要复用冲突前的通过结论。
 
 <p align="center">
-  <img src="/assets/native-illustrations/08-spec-rebase.png" alt="小鱼对照带蓝色书签的最新规格书重写自己的页面，再准备重新验证，表示并发 change 需要安全 rebase" />
+  <img
+    src="/assets/native-illustrations/08-spec-rebase.png"
+    alt="小鱼对照带蓝色书签的最新规格书重写自己的页面，再准备重新验证，表示并发 change 需要安全变基"
+  />
 </p>
 
 ## 规划归档顺序
 
-当多个 change 修改同一 capability 时，先归档基础行为，再让后续 change rebase 到新 canonical spec，通常比同时推进到 Archive 更容易审查。完全独立的 capability 可以分别验证和归档，但每次归档仍会重新检查当前 root、证据和 selection。
+当多个 change 修改同一能力时，先归档基础行为，再让后续 change 变基到新正式规格，通常比同时推进到 Archive 更容易审查。完全独立的能力可以分别验证和归档，但每次归档仍会重新检查当前产物根目录、证据和当前选择。
 
-若需要跨设备协作，应同时同步正式 Native 产物和项目代码，并确保每台设备的 `.comet/config.yaml` 指向同一个 artifact root。仅复制 `changes/` 目录而保留不同的本地根目录配置，会让恢复探针看不到已有 change。
+若需要跨设备协作，应同时同步正式 Native 产物和项目代码，并确保每台设备的 `.comet/config.yaml` 指向同一个产物根目录。仅复制 `changes/` 目录而保留不同的本地根目录配置，会让恢复探针看不到已有 change。
 
 继续阅读：[Native 产物与状态](/zh/native/artifacts-and-state)、[验证证据与自主修复](/zh/native/verification-and-repair) 和 [恢复与故障处理](/zh/native/recovery-playbook)。
