@@ -22,9 +22,9 @@ Native 与 Classic 的 Guard 保持独立：
 
 Runtime 把验证结论绑定到：
 
-- brief 与完整目标规格；
+- brief 与 target spec；
 - implementation scope 中的项目产物；
-- Acceptance ID 与验证报告快照；
+- Acceptance ID 与 verification report snapshot；
 - 当前 change revision；
 - 可选的内置 check receipt。
 
@@ -42,14 +42,14 @@ v1/v2 schema migration 是唯一 cutover 例外。`doctor --repair` 会在任何
 
 ## 自主修复不会无限循环
 
-Verify 失败会回到 Build。Runtime 根据失败分类、检查 ID、contract 与 implementation scope 形成失败签名：
+Verify 失败会回到 Build。Runtime 根据 contract、failed/missing Acceptance ID 与失败检查 ID 形成语义签名：
 
-- 相同 scope 下第三次出现相同签名时转为 manual stop；
-- 真实 implementation scope 变化会开启新的 repair episode；
+- 相同语义缺口第二次出现时告警，第三次出现且没有进展时转为人工停止；
+- 只有缺口减少、检查转绿或缺失证据恢复有效才算进展；普通 implementation scope 变化不会重置计数；
 - 无进展 override 只允许一次，并与当前签名绑定；
-- 单个 episode 最多记录 12 次 failure。
+- 同一 contract 的 Verify fail 默认最多 5 次，可通过 `native.max_verify_failures` 配置正整数。
 
-停止条件基于证据是否有进展，不是简单计算 phase 往返次数。
+重复缺口停止与总失败预算独立生效。只有用户确认后的 contract 变化会开始新的目标周期；停止条件不按机械 phase 往返次数计算。
 
 ## 并发规格冲突
 
@@ -58,7 +58,7 @@ Verify 失败会回到 Build。Runtime 根据失败分类、检查 ID、contract
 处理步骤是：
 
 1. 阅读最新 canonical spec；
-2. 重写当前 change 的完整目标规格；
+2. 重写当前 change 的 target spec；
 3. 运行 `comet native spec rebase <change> --summary <text>`；
 4. 重新完成 Build 与 Verify；
 5. 再次执行两步 Archive。
@@ -67,7 +67,7 @@ Verify 失败会回到 Build。Runtime 根据失败分类、检查 ID、contract
 
 ## 事务与锁恢复
 
-阶段推进、checkpoint、Archive 与 root move 都有明确的 journal 或恢复协议。普通写命令不会擅自接管陈旧锁；只有 `doctor --repair` 能在证明本机 owner 已不存在、锁身份未变化且没有冲突事务时接管。
+阶段推进、checkpoint、Archive 与 root move 都有明确的 journal 或恢复协议。普通写命令不会擅自接管陈旧锁；只有 `doctor --repair` 能在证明本机所有者已不存在、锁身份未变化且没有冲突事务时接管。
 
 ```bash
 comet native doctor [<change-name>]
@@ -79,7 +79,7 @@ comet native doctor [<change-name>] --repair --strategy rollback
 - 普通阶段 transition 只允许继续；
 - Archive 与 root move 只有在 journal 所处阶段仍可逆时才能 rollback；
 - Archive 最终 marker 写入后只允许 exactly-once continue；
-- Doctor 不会重写用户的 brief、规格、验证报告或项目源码。
+- Doctor 不会重写用户的 brief、spec、verification report 或项目源码。
 
 ## 环境感知恢复
 
@@ -96,6 +96,6 @@ comet native doctor [<change-name>] --repair --strategy rollback
 
 ## Dashboard 的职责
 
-Dashboard 只读取 Runtime projection，展示 phase、证据新鲜度、continuation、结构化 finding、冲突摘要与归档就绪状态。它不重新推导事实，也不提供推进、修复或归档写按钮。CLI/Runtime 是唯一写入方。
+Dashboard 只读取 Runtime projection，展示 phase、证据有效性、continuation、结构化 finding、冲突摘要与归档就绪状态。它不重新推导事实，也不提供推进、修复或归档写按钮。CLI/Runtime 是唯一写入方。
 
 需要处理并行需求时，查看 [多 Change 与规格冲突](/zh/native/multi-change-and-conflicts)；遇到中断、跨设备发现或事务问题时，查看 [恢复与故障处理](/zh/native/recovery-playbook)。逐项命令和退出语义见 [Native CLI](/zh/cli/native)。

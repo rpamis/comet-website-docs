@@ -35,7 +35,7 @@ comet native root move artifacts
 ## Change 管理
 
 ```bash
-comet native new <change-name> [--language en|zh-CN]
+comet native new <change-name> --creation-authorization <path> [--language en|zh-CN]
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
 comet native list [--cursor <token>]
@@ -45,15 +45,15 @@ comet native status <change-name> [--details [--acceptance-cursor <token>]]
 comet native select <change-name>
 ```
 
-`change-name` 和 capability 使用字母开头的 lowercase kebab-case。`new` 在配置缺失时创建默认配置和 `<project>/docs/comet/`。
+`change-name` 和 capability 使用字母开头的 lowercase kebab-case。`new` 在配置缺失时创建默认配置和 `<project>/docs/comet/`。`--creation-authorization` 必须引用由项目外 controller 签发、与当前 change 绑定的授权文件；实现者不能用项目内密钥为自己授权。
 
-新增或替换长期行为时，把完整目标规格写入：
+新增或替换长期行为时，把 target spec 写入：
 
 ```text
 changes/<change-name>/specs/<capability>/spec.md
 ```
 
-Runtime 根据 canonical spec 是否存在推导 `create` 或 `replace`，并冻结 `base_hash`。删除 capability 使用 `spec remove`，不要手工维护 `comet-state.yaml` 的 `spec_changes`。若并行 change 已改变同一 canonical spec，先重读并改写完整目标规格，再使用 `spec rebase` 刷新基线、重开 Build 并清除旧验证结论。
+Runtime 根据 canonical spec 是否存在推导 `create` 或 `replace`，并冻结 `base_hash`。删除 capability 使用 `spec remove`，不要手工维护 `comet-state.yaml` 的 `spec_changes`。若并行 change 已改变同一 canonical spec，先重读并改写 target spec，再使用 `spec rebase` 刷新基线、重开 Build 并清除旧验证结论。
 
 ### Baseline 与 Git-aware snapshot
 
@@ -82,9 +82,9 @@ Git selection 需要一次稳定且有界的枚举：
 - `nextCursor` 非空时原样传入下一次 `--cursor`；
 - cursor 绑定完整 change 名称集合，增删 change 后旧 cursor 会明确失效。
 
-`status <change-name>` 返回阶段、证据新鲜度、finding 摘要、checkpoint、repair 状态和结构化 continuation。使用 `--details` 可以取得最多 50 条详细 findings、恢复信息以及首个 `acceptancePage`。若 `findingsTruncated` 为 `true`，不能把未展示项当作不存在。
+`status <change-name>` 返回阶段、证据有效性、finding 摘要、checkpoint、repair 状态和结构化 continuation。使用 `--details` 可以取得最多 50 条详细 findings、恢复信息以及首个 `acceptancePage`。若 `findingsTruncated` 为 `true`，不能把未展示项当作不存在。
 
-当 `acceptancePage.nextCursor` 非空时，用 `--acceptance-cursor` 逐页读取；每页最多 16 条，cursor 同时绑定 change 与当前 acceptance hash。`show` 对规格数量、单文件、累计读取和最终输出都有硬预算；超限时拒绝，不会通过截断需求正文伪装成功。
+当 `acceptancePage.nextCursor` 非空时，用 `--acceptance-cursor` 逐页读取；每页最多 16 条，cursor 同时绑定 change 与当前 acceptance hash。`show` 对 spec 数量、单文件、累计读取和最终输出都有硬预算；超限时拒绝，不会通过截断需求正文伪装成功。
 
 ## 阶段内 checkpoint
 
@@ -132,12 +132,12 @@ comet native next <change-name> --summary <text> \
 
 | 当前阶段 | Runtime 要求                                                          | 推进结果                           |
 | -------- | --------------------------------------------------------------------- | ---------------------------------- |
-| Shape    | 完整 brief、合法目标规格、无 `[blocking]` 问题                        | 进入 Build                         |
+| Shape    | 完整 brief、合法 target spec、无 `[blocking]` 问题                    | 进入 Build                         |
 | Build    | brief/spec 仍有效；真实产物或 no-code 原因；完整 implementation scope | 进入 Verify                        |
 | Verify   | 结构完整且绑定当前 acceptance/contract/scope 的报告                   | pass 进入 Archive；fail 返回 Build |
 | Archive  | 使用独立两步归档命令                                                  | 更新 canonical spec 并归档         |
 
-Shape 只有在用户刚确认当前共享理解后才传 `--confirmed`；Sequential 与 Batch 的正常 Skill 流程都会先保存这次最终确认，任何确认都不能绕过其他 `[blocking]` 问题。Sequential 缺少显式确认时 Runtime 会拒绝进入 Build；Batch 的既有 Runtime 兼容路径保持不变。进入 Build 时，Runtime 把 approval 绑定到当时的 `approved_contract_hash`。之后若 brief 或完整目标规格变化，Build 会保持阻塞并返回 `re-confirm-contract`；只有用户重新确认当前 contract 后才能再次传 `--confirmed`，不能复用旧确认或手改 hash。
+Shape 只有在用户刚确认当前共享理解后才传 `--confirmed`；Sequential 与 Batch 的正常 Skill 流程都会先保存这次最终确认，任何确认都不能绕过其他 `[blocking]` 问题。Sequential 缺少显式确认时 Runtime 会拒绝进入 Build；Batch 的既有 Runtime 兼容路径保持不变。进入 Build 时，Runtime 把 approval 绑定到当时的 `approved_contract_hash`。之后若 brief 或 target spec 变化，Build 会保持阻塞并返回 `re-confirm-contract`；只有用户重新确认当前 contract 后才能再次传 `--confirmed`，不能复用旧确认或手改 hash。
 
 Build 无法证明完整 scope 时，第一次调用只返回 scope hash 和未归属项，不推进。当前 snapshot 不完整时，Runtime 不会把未观察到的路径推断成删除；变化明细超过预算时，保留有界明细，并用带计数和内容 hash 的 `scope-detail-overflow` 表示其余变化。用户明确接受一组 Runtime 允许授权的具体风险后，使用完全匹配的 `--allow-partial-scope`、非空理由和 `--confirmed` 重试。Allowance 与 scope hash 绑定；实现变化后不能沿用旧授权。`git-selection-changed`、`physical-selection-changed` 与 `physical-enumeration-limit` 绝不可授权；`git-enumeration-limit` 只有在优先恢复无效、Runtime 返回可授权 scope 且用户理解未知尾部风险后，才能使用同一普通 partial 协议。
 
@@ -147,14 +147,15 @@ Verify 报告必须包含 Runtime 可解析的验收机器块，并逐项绑定�
 
 ## 自主修复与停止语义
 
-Verify fail 会自动返回 Build。模型可以自主修复，但 Runtime 会按失败分类、失败检查 ID、contract 和 implementation scope 形成语义签名：
+Verify fail 会自动返回 Build，并把已校验的 failed/missing Acceptance ID 与失败检查 ID 投影到详细状态。模型先修复这些缺口，再重新运行完整验证；中间轮次不会进入 Archive。
 
-- 相同 scope 下第三次出现相同失败签名时，continuation 变为 manual stop；
-- scope 真正变化后，新的 Build 推进会结束旧 repair episode；
-- scope 未变化时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
-- 单个 repair episode 最多记录 12 次 failure，达到上限后 hard stop。
+- Runtime 使用 contract、failed/missing Acceptance ID 和失败检查 ID 形成重复失败签名；
+- 缺口减少、检查转绿或缺失证据恢复为当前有效证据才算语义进展；只修改代码或 implementation scope 不会重置计数；
+- 相同语义缺口第二次出现时告警，第三次出现且没有进展时 continuation 进入人工停止；
+- 有明确新假设时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
+- 同一 contract 的 Verify fail 默认上限为 5，可通过 `native.max_verify_failures` 配置正整数；达到上限后停止。
 
-这些限制按“有没有真实证据进展”计算，不按机械 phase 切换次数计算，因此长期 change 不会因为固定 Run iteration 上限永久锁死。
+只有用户确认后的 contract 变化会开始新的目标周期。达到停止条件时，应让用户决定是否调整目标、约束或终止，不应反复调用 `next`、弱化检查或提前归档。
 
 ## 两步 Archive
 
@@ -187,13 +188,13 @@ comet native doctor [<change-name>] --repair [--strategy continue|rollback]
 - 未引用且超过保留窗口的派生 evidence/receipt；
 - 中断的 retention quarantine。
 
-Doctor 不会自动重写用户的 brief、规格、验证报告或项目源码。普通阶段 transition 只支持 `continue`；`rollback` 只适用于 journal 仍允许回滚的 Archive/root move。
+Doctor 不会自动重写用户的 brief、spec、verification report 或项目源码。普通阶段 transition 只支持 `continue`；`rollback` 只适用于 journal 仍允许回滚的 Archive/root move。
 
 新 change 和当前 schema 的 v3 change 都必须保留创建时的完整 baseline。v3 baseline 缺失或不完整时，doctor 不会用当前文件重新生成，因为那会抹掉 change 创建以来的差异；应从可信备份恢复，或保留用户产物和实现事实后新建 change。
 
 显式 v1/v2 schema migration 是唯一 cutover 例外。`doctor --repair` 会在任何状态写入前捕获完整的迁移时点 baseline；捕获不完整时保持旧状态并停止。迁移后的 implementation evidence 只证明 cutover 之后的变化，不能把迁移前聊天、旧 scope 或旧 pass 当作当前证据。v2 位于 Verify/Archive 时会受控退回 Build 重新建立证据。
 
-普通写命令不会自动接管陈旧锁。只有显式 `doctor --repair` 能在证明本机 owner 已不存在、锁身份未变化且没有冲突事务时接管；活动锁和无法证明陈旧的锁始终保留。
+普通写命令不会自动接管陈旧锁。只有显式 `doctor --repair` 能在证明本机所有者已不存在、锁身份未变化且没有冲突事务时接管；活动锁和无法证明陈旧的锁始终保留。
 
 Evidence retention 只清理 active change 中至少 30 天、每种 evidence kind 最新 32 份之外、且依赖闭包证明未引用的派生证据。当前状态引用、归档证据、依赖项、较新文件和每类最新 32 份始终保留。
 
@@ -204,9 +205,9 @@ Evidence retention 只清理 active change 中至少 30 天、每种 evidence ki
 - `continue-same-skill`：当前 Skill 可以按下一动作继续；
 - `await-user`：需要真实用户决定或 partial scope 授权；
 - `repair-runtime`：先执行 doctor/recovery；
-- `stop`：已完成、手动停止或达到 hard stop。
+- `stop`：已完成、手动停止或达到强制停止条件。
 
-`next: auto` 表示调用方可以继续同一个 Native Skill，不表示后台 daemon 会自行调用模型。
+`next: auto` 表示调用方可以继续同一个 Native Skill，不表示后台守护进程会自行调用模型。
 
 所有命令支持 `--json`。JSON 模式只输出一个对象，包含 `command`、`exitCode`、`data`，失败时增加结构化 `error`。
 
@@ -218,7 +219,7 @@ Evidence retention 只清理 active change 中至少 30 天、每种 evidence ki
 | `65`   | 配置、状态或产物无效                      |
 | `70`   | 未预期的内部失败                          |
 | `73`   | 锁、事务、并发 hash 或根目录冲突          |
-| `75`   | repair stagnation 或 hard stop 阻塞继续   |
+| `75`   | repair stagnation 或强制停止条件阻塞继续  |
 
 ## 只提供 Skill 文件的环境
 

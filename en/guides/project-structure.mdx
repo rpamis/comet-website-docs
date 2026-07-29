@@ -1,6 +1,6 @@
 ---
-title: "Project file structure"
-description: "Understand the directories and files Comet creates in a project, and how each category supports recovery and troubleshooting."
+title: 'Project file structure'
+description: 'Understand the directories and files Comet creates in a project, and how each category supports recovery and troubleshooting.'
 ---
 
 Comet keeps **requirements facts, design plans, runtime state, and user-generated Skills** in separate files. Knowing where each category lives helps you recover interrupted work, debug bad state, and integrate Comet with CI.
@@ -8,38 +8,65 @@ Comet keeps **requirements facts, design plans, runtime state, and user-generate
 All recovery state lives in repository files, not chat history. After a device switch, platform switch, or context compaction, `/comet` can rebuild state from files.
 
 <p align="center">
-  <img src="/assets/project-structure-illustrations/01-repo-evidence-layers.png" alt="Xiaoyu marks the repository layers that hold requirements facts, design plans, runtime state, and project Skills" width="800" />
+  <img
+    src="/assets/project-structure-illustrations/01-repo-evidence-layers.png"
+    alt="Xiaoyu marks the repository layers that hold requirements facts, design plans, runtime state, and project Skills"
+    width="800"
+  />
 </p>
 
-<p align="center">Comet splits recoverable facts across repository files so work can resume across devices and sessions.</p>
+<p align="center">
+  Comet splits recoverable facts across repository files so work can resume across devices and
+  sessions.
+</p>
 
 ## Classic workflow directories
 
-```text
-openspec/
-├── config.yaml
-├── changes/
-│   ├── <name>/
-│   │   ├── .openspec.yaml
-│   │   ├── .comet.yaml
-│   │   ├── proposal.md
-│   │   ├── design.md
-│   │   ├── tasks.md
-│   │   ├── specs/<capability>/spec.md
-│   │   └── .comet/
-│   └── archive/YYYY-MM-DD-<name>/
-└── specs/<capability>/spec.md
+New Classic and dual-workflow projects use the documentation layout by default:
 
-docs/superpowers/
-├── specs/YYYY-MM-DD-<topic>-design.md
-├── plans/YYYY-MM-DD-<feature>.md
-└── reports/YYYY-MM-DD-<name>-verify.md
+```yaml
+# .comet/config.yaml
+classic:
+  artifact_layout: docs
 ```
+
+`classic.artifact_layout` accepts `docs` or `legacy`. `docs` maps to `docs/openspec/`, while `legacy` maps to root-level `openspec/`. These are the two supported layouts; the field does not accept an arbitrary path.
+
+```text
+docs/
+├── openspec/
+│   ├── config.yaml
+│   ├── changes/
+│   │   ├── <name>/
+│   │   │   ├── .openspec.yaml
+│   │   │   ├── .comet.yaml
+│   │   │   ├── proposal.md
+│   │   │   ├── design.md
+│   │   │   ├── tasks.md
+│   │   │   ├── specs/<capability>/spec.md
+│   │   │   └── .comet/
+│   │   └── archive/YYYY-MM-DD-<name>/
+│   └── specs/<capability>/spec.md
+└── superpowers/
+    ├── specs/YYYY-MM-DD-<topic>-design.md
+    ├── plans/YYYY-MM-DD-<feature>.md
+    └── reports/YYYY-MM-DD-<name>-verify.md
+```
+
+Upgrading does not move an existing Classic project's root-level `openspec/`. Inspect the active layout and create a dry-run migration plan first:
+
+```bash
+comet classic root show
+comet classic root move docs --dry-run
+comet classic root move docs --apply --plan <plan-id>
+```
+
+Migration moves Classic artifacts within the project, updates `classic.artifact_layout`, and rewrites Comet-managed references. Commit or stash existing work first. To keep the legacy layout, do not run the migration and do not substitute a direct configuration edit for it.
 
 ## Runtime artifacts inside a change
 
 ```text
-openspec/changes/<name>/.comet/
+docs/openspec/changes/<name>/.comet/
 ├── run-state.json
 ├── state-events.jsonl
 ├── pending-action.json
@@ -54,7 +81,8 @@ openspec/changes/<name>/.comet/
 Most files in this directory are machine-owned. Do not edit them manually unless a recovery guide specifically tells you to.
 
 <Tip>
-  <code>brainstorm-summary.md</code> and <code>subagent-progress.md</code> are recovery anchors. Agents can reload them after context compaction.
+  <code>brainstorm-summary.md</code> and <code>subagent-progress.md</code> are recovery anchors.
+  Agents can reload them after context compaction.
 </Tip>
 
 ## Project-level .comet directory
@@ -77,32 +105,38 @@ Most files in this directory are machine-owned. Do not edit them manually unless
 Only directories for features you use will exist. A project that has never used `/comet-any` will not have bundle directories.
 
 <Warning>
-  A repository-root <code>.comet.yaml</code> or <code>comet.yaml</code> is not a Comet config file and is not read as workflow state. Project defaults live in <code>.comet/config.yaml</code>; change state lives in <code>openspec/changes/&lt;name&gt;/.comet.yaml</code>.
+  A repository-root <code>.comet.yaml</code> or <code>comet.yaml</code> is not a Comet config file
+  and is not read as workflow state. Project defaults live in <code>.comet/config.yaml</code>. New
+  projects store Classic change state in <code>docs/openspec/changes/&lt;name&gt;/.comet.yaml</code>
+  ; projects that retain the legacy layout continue to use{' '}
+  <code>openspec/changes/&lt;name&gt;/.comet.yaml</code>.
 </Warning>
 
 ## Responsibilities
 
-| Path | Responsibility | Who writes it |
-| --- | --- | --- |
-| `openspec/changes/<name>/.comet.yaml` | User-readable workflow projection: phase, workflow, language, execution settings, verification result, run id | Agent and Comet scripts |
-| `openspec/changes/<name>/.comet/run-state.json` | Engine Run details | Machine-owned |
-| `openspec/changes/<name>/.comet/state-events.jsonl` | Append-only phase transition audit | Comet scripts |
-| `openspec/changes/` | Active and archived changes | OpenSpec + Comet |
-| `openspec/specs/` | Main specifications after archive | OpenSpec |
-| `docs/superpowers/specs/` | Design Docs | Superpowers + Comet |
-| `docs/superpowers/plans/` | Implementation plans | Superpowers + Comet |
-| `.comet/config.yaml` | Project-level Comet settings. `native.*` and `classic.*` control defaults for their respective workflows | User |
-| `.comet/skill-preferences.yaml` | Skill Creator preferences | User or `/comet-any` |
-| `.comet/skills/` | Project Skill pool | `comet skill add` |
+| Path                                                     | Responsibility                                                                                                | Who writes it           |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `docs/openspec/changes/<name>/.comet.yaml`               | User-readable workflow projection: phase, workflow, language, execution settings, verification result, run id | Agent and Comet scripts |
+| `docs/openspec/changes/<name>/.comet/run-state.json`     | Engine Run details                                                                                            | Machine-owned           |
+| `docs/openspec/changes/<name>/.comet/state-events.jsonl` | Append-only phase transition audit                                                                            | Comet scripts           |
+| `docs/openspec/changes/`                                 | Active and archived changes                                                                                   | OpenSpec + Comet        |
+| `docs/openspec/specs/`                                   | Main specifications after archive                                                                             | OpenSpec                |
+| `docs/superpowers/specs/`                                | Design Docs                                                                                                   | Superpowers + Comet     |
+| `docs/superpowers/plans/`                                | Implementation plans                                                                                          | Superpowers + Comet     |
+| `.comet/config.yaml`                                     | Project-level settings; `native.*` and `classic.*` control their respective workflows                         | User                    |
+| `.comet/skill-preferences.yaml`                          | Skill Creator preferences                                                                                     | User or `/comet-any`    |
+| `.comet/skills/`                                         | Project Skill pool                                                                                            | `comet skill add`       |
 
 ## What to commit
 
-- **Commit**: `openspec/`, `docs/superpowers/`, `.comet/config.yaml`, `.comet/skill-preferences.yaml`.
+- **Commit**: the active Classic root (`docs/openspec/` for new projects or `openspec/` for retained legacy layouts), `docs/superpowers/`, `.comet/config.yaml`, and `.comet/skill-preferences.yaml`.
 - **Maybe commit**: `.comet/skills/`, `.comet/bundles/` if the team shares them.
 - **Usually ignore**: `.comet/tmp/` and temporary runtime files.
 
 <Note>
-  <code>.comet.yaml</code> is the user-readable projection. Full machine state lives in <code>run-state.json</code>. Use <code>.comet.yaml</code> to understand progress and event logs to investigate how it changed.
+  <code>.comet.yaml</code> is the user-readable projection. Full machine state lives in{' '}
+  <code>run-state.json</code>. Use <code>.comet.yaml</code> to understand progress and event logs to
+  investigate how it changed.
 </Note>
 
 ## Next steps

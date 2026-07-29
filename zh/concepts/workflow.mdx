@@ -7,6 +7,8 @@ description: '理解 /comet 如何按项目配置进入经典 Spec 模式，以�
 
 Classic 把 OpenSpec 和 Superpowers 连成一条可恢复的工作流。`/comet-classic` 自带意图识别，会读取活跃 change、`.comet.yaml` 和实际文件状态，判断应该新建、恢复、进入轻量预设，还是调用当前阶段 Skill。用户无需先判断自己是否处于 open、design、build、verify 或 archive。
 
+下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。实际位置由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
+
 **Classic 主要适配 Fable 5、GPT-5.6 以下的模型能力档。对这类模型，明确的 Spec、设计、计划、TDD、调试和审查阶段能够减少遗漏与流程漂移**；Comet 的现有真实基线评估已验证，这种约束在较低能力档模型上能保持良好的任务覆盖和完成效果。Fable 5、GPT-5.6 及同档强模型通常更适合使用执行方法更轻的 [Native 工作流](/zh/concepts/native-workflow)。模型名称用于帮助选择能力档，Comet 不会自动检测模型并切换模式。
 
 ## 哪些值得注意
@@ -59,20 +61,20 @@ Comet 的职责不是替代任何一方，而是：
 
 ## 五个阶段
 
-| 阶段    | 负责方      | 目标                                            | 主要产物                                                                             |
-| ------- | ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| open    | OpenSpec    | 把想法变成 OpenSpec change                      | `proposal.md`、`design.md`、`tasks.md`、delta spec                                   |
-| design  | Superpowers | 做深度技术设计                                  | `docs/superpowers/specs/...-design.md`、handoff 包                                   |
-| build   | Superpowers | 写计划并执行                                    | `docs/superpowers/plans/...md`、代码改动、测试证据                                   |
-| verify  | 双方        | 验证实现符合设计和 spec                         | 验证报告；`branch_status` 保持 `pending`                                             |
-| archive | OpenSpec    | 合并 delta spec 并归档，给 Superpowers 文档打标 | `openspec/changes/archive/YYYY-MM-DD-name/`、design doc/plan 的 `archived-with` 标注 |
+| 阶段    | 负责方      | 目标                                            | 主要产物                                                                                   |
+| ------- | ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| open    | OpenSpec    | 把想法变成 OpenSpec change                      | `proposal.md`、`design.md`、`tasks.md`、delta spec                                         |
+| design  | Superpowers | 做深度技术设计                                  | `docs/superpowers/specs/...-design.md`、handoff 包                                         |
+| build   | Superpowers | 写计划并执行                                    | `docs/superpowers/plans/...md`、代码改动、测试证据                                         |
+| verify  | 双方        | 验证实现符合设计和 spec                         | 验证报告；`branch_status` 保持 `pending`                                                   |
+| archive | OpenSpec    | 合并 delta spec 并归档，给 Superpowers 文档打标 | `<classic-root>/changes/archive/YYYY-MM-DD-name/`、design doc/plan 的 `archived-with` 标注 |
 
 ### open — OpenSpec 记录 WHAT
 
 `/comet-open` 创建一个 OpenSpec change，产出：
 
 <Tree>
-  <Tree.Folder name="openspec/changes/<name>/" defaultOpen>
+  <Tree.Folder name="<classic-root>/changes/<name>/" defaultOpen>
     <Tree.File name=".openspec.yaml" />
     <Tree.File name=".comet.yaml" />
     <Tree.File name="proposal.md" />
@@ -154,10 +156,10 @@ Comet 用一个 **handoff hash** 把 OpenSpec artifacts 和后续阶段绑在一
 `comet-handoff.mjs` 对这些文件计算内容 hash：
 
 ```text
-openspec/changes/<name>/proposal.md
-openspec/changes/<name>/design.md
-openspec/changes/<name>/tasks.md
-openspec/changes/<name>/specs/<capability>/spec.md   # 每个 delta spec
+<classic-root>/changes/<name>/proposal.md
+<classic-root>/changes/<name>/design.md
+<classic-root>/changes/<name>/tasks.md
+<classic-root>/changes/<name>/specs/<capability>/spec.md   # 每个 delta spec
 ```
 
 对每个文件先算 per-file sha256，再把"相对路径 + per-file sha256"拼起来算最终 sha256，得到 `handoff_hash`。路径统一用正斜杠，保证 macOS/Linux/Windows 的 hash 输入字节一致。
@@ -197,7 +199,7 @@ flowchart TD
 
 ### handoff 包格式
 
-`comet-handoff.mjs ... --write` 在 `openspec/changes/<name>/.comet/handoff/` 下产出：
+`comet-handoff.mjs ... --write` 在 `<classic-root>/changes/<name>/.comet/handoff/` 下产出：
 
 | 模式           | 产出文件                                    | 内容                                                                    |
 | -------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
@@ -264,18 +266,18 @@ flowchart TD
 1. **校验 change 名**（kebab-case）。
 2. **定位 change 目录**，如果已被之前的归档移走，扫描 archive 目录恢复。
 3. **校验入口状态**：`phase` 必须是 `archive`，`verify_result` 必须是 `pass`。
-4. **检查归档目标可用**：`openspec/changes/archive/YYYY-MM-DD-<name>` 不能已存在。
+4. **检查归档目标可用**：`<classic-root>/changes/archive/YYYY-MM-DD-<name>` 不能已存在。
 5. **写 pending action checkpoint**，支持归档中断后恢复。
 6. **调用 OpenSpec archive**：`openspec archive <change> --yes`，这一步真正执行 delta→主 spec 合并并移动 change 目录。
 7. **解析归档目录**：重新定位 OpenSpec 实际放的位置（日期前缀可能变化）。
-8. **校验主 spec 干净**：扫描 `openspec/specs/*/spec.md`，如果残留 `## ADDED/MODIFIED/REMOVED/RENAMED Requirements` 这类 delta-only 标题就 FATAL。
+8. **校验主 spec 干净**：扫描 `<classic-root>/specs/*/spec.md`，如果残留 `## ADDED/MODIFIED/REMOVED/RENAMED Requirements` 这类 delta-only 标题就 FATAL。
 9. **标注 Superpowers 文档 frontmatter**：在 design doc 和 plan 的 frontmatter 写入 `archived-with: <archiveName>`，把 Superpowers 产物锚定到具体的归档目录；design doc 额外加 `status: final`，表明设计文档生命周期结束。幂等设计，已有标注会先移除 `archived-with:` 旧值再重写。这样 Agent 在归档后检索 Design Doc/Plan 时，能直接从 frontmatter 知道它属于哪次归档、是否已结案，而不必反查 `.comet.yaml`。
 10. **更新归档状态**：设置 `archived: true`，Run 状态转为 `completed`，清除 pending action。
 
 ### 归档目录结构
 
 ```text
-openspec/changes/archive/YYYY-MM-DD-<change-name>/
+<classic-root>/changes/archive/YYYY-MM-DD-<change-name>/
 ```
 
 日期取 UTC（`new Date().toISOString().slice(0,10)`），保证跨时区一致。

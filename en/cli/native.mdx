@@ -35,7 +35,7 @@ Existing configuration rejects a conflicting `init --root`. Change directories t
 ## Change management
 
 ```bash
-comet native new <change-name> [--language en|zh-CN]
+comet native new <change-name> --creation-authorization <path> [--language en|zh-CN]
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
 comet native list [--cursor <token>]
@@ -45,7 +45,7 @@ comet native status <change-name> [--details [--acceptance-cursor <token>]]
 comet native select <change-name>
 ```
 
-`change-name` and capability IDs start with a letter and use lowercase kebab-case. `new` creates default configuration and `<project>/docs/comet/` when configuration is absent.
+`change-name` and capability IDs start with a letter and use lowercase kebab-case. `new` creates default configuration and `<project>/docs/comet/` when configuration is absent. `--creation-authorization` must reference an authorization file issued by an external controller and bound to the current change. The implementation Agent cannot authorize itself with a project-local key.
 
 For new or replaced durable behavior, write the complete target specification at:
 
@@ -147,14 +147,15 @@ If the contract or project snapshot changes after entering Verify, status return
 
 ## Autonomous repair and stop semantics
 
-A Verify failure automatically returns to Build. The model may repair autonomously, while the Runtime forms a semantic signature from failure categories, failed check IDs, contract, and implementation scope:
+A Verify failure automatically returns to Build and projects validated failed or missing Acceptance IDs and failed check IDs into detailed status. The model repairs those gaps before running complete verification again; intermediate iterations never enter Archive.
 
-- The third identical failure signature under the same scope changes continuation to manual stop.
-- A genuine scope change makes the next Build progression close the old repair episode.
-- With unchanged scope, the exact signature returned by `status` may be overridden once with a non-empty summary.
-- A repair episode records at most 12 failures; reaching the budget creates a hard stop.
+- The Runtime forms the repeated-failure signature from the contract, failed or missing Acceptance IDs, and failed check IDs.
+- Only fewer gaps, passing checks, or missing evidence restored as current valid evidence count as semantic progress. Code changes or implementation-scope changes alone do not reset the counters.
+- The second recurrence of the same semantic gap warns; the third recurrence without progress changes continuation to manual stop.
+- One explicit new hypothesis may override the exact signature returned by `status` once with a non-empty summary.
+- The default limit is five Verify failures per contract. Set `native.max_verify_failures` to a positive integer to change it; reaching the limit stops the loop.
 
-These limits measure real evidence progress rather than mechanical phase switches, so a long-lived change is not permanently locked by a fixed Run-iteration cap.
+Only a user-confirmed contract change starts a new goal cycle. At a stop boundary, let the user decide whether to change the goal or constraints or end the work. Do not keep calling `next`, weaken checks, or archive early.
 
 ## Two-step Archive
 
