@@ -1,9 +1,9 @@
 ---
 title: 'Native 产物与状态'
-description: '理解 .comet/config.yaml、brief、完整目标规格、comet-state.yaml、证据与归档目录的职责。'
+description: '理解 .comet/config.yaml、brief、target spec、comet-state.yaml、证据与归档目录的职责。'
 ---
 
-Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些文件和仓库现状为准，而不是依赖聊天记忆。用户通常只需要阅读 brief、规格和验证报告；状态、哈希、锁与事务由 Runtime 维护。
+Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些文件和仓库现状为准，而不是依赖聊天记忆。用户通常只需要阅读 brief、spec 和 verification report；状态、hash、锁与事务由 Runtime 维护。
 
 ## 项目布局
 
@@ -42,7 +42,7 @@ Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些�
 
 ## `.comet/config.yaml`
 
-这是 Native 与 Classic 共用的项目配置位置。完整配置结构、示例和修改方式见 [Native 配置](/zh/native/configuration)；这里列出与 Native 产物直接相关的字段：
+这是 Native 与 Classic 共用的项目配置位置。完整 schema、示例和修改方式见 [Native 配置](/zh/native/configuration)；这里列出与 Native 产物直接相关的字段：
 
 | 字段                        | 作用                                    |
 | --------------------------- | --------------------------------------- |
@@ -55,7 +55,7 @@ Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些�
 | `native.clarification_mode` | 每轮询问一个问题或本轮全部可回答问题    |
 | `native.snapshot`           | 新 change 的内容快照范围策略与执行预算  |
 
-Classic 自有设置可以保留在同一个文件中，但不会改变 Native 状态机。修改产物根目录应使用 `comet native root move`，让 Runtime 通过事务迁移；不要只改 YAML 后手动移动目录。
+Classic 自有设置可以保留在同一个文件中，但不会改变 Native 状态机。修改 artifact root 应使用 `comet native root move`，让 Runtime 事务化迁移；不要只改 YAML 后手动移动目录。
 
 <p align="center">
   <img
@@ -68,56 +68,56 @@ Classic 自有设置可以保留在同一个文件中，但不会改变 Native �
 
 ### `brief.md`
 
-Brief 定义这次 change 的目标和边界，包括目标、范围、不做事项、验收示例、约束、已确认决定、未解决问题和验证期望。`[blocking]` 表示仍存在必须由用户决定的行为。
+brief 定义这次 change 的目标和边界，包括 Outcome、Scope、Non-goals、Acceptance examples、约束、已确认决定、未解决问题和验证期望。`[blocking]` 表示仍存在必须由用户决定的行为。
 
-### 完整目标规格
+### target spec
 
-`changes/<change>/specs/<capability>/spec.md` 描述归档后该能力的完整行为。它不是只能与旧文档合并阅读的增量补丁。
+`changes/<change>/specs/<capability>/spec.md` 描述归档后该 capability 的完整行为。它不是只能与旧文档合并阅读的 delta patch。
 
-Runtime 根据正式规格是否存在推导操作：
+Runtime 根据 canonical spec 是否存在推导操作：
 
-- `create`：归档时创建新的正式规格；
-- `replace`：用完整目标规格替换旧版本，但要求旧版本哈希未变化；
-- `remove`：通过 CLI 明确删除能力。
+- `create`：归档时创建新的 canonical spec；
+- `replace`：用 target spec 替换旧版本，但要求旧版本 hash 未变化；
+- `remove`：通过 CLI 明确删除 capability。
 
-并发 change 导致基线变化时，使用 `spec rebase` 重新绑定最新正式规格；旧验证会失效。
+并发变更导致基线变化时，使用 `spec rebase` 重新绑定最新 canonical spec；旧验证会失效。
 
 ### `verification.md`
 
-验证报告记录实际命令、结果、跳过理由、已知限制、总体结论和逐项验收证据。Runtime 会保存不可变报告快照，并把它与当时的需求契约、实现范围和修订版本绑定。
+verification report 记录实际命令、结果、跳过理由、已知限制、总体结论和逐项 Acceptance evidence。Runtime 会保存不可变 report snapshot，并把它与当时的 contract、scope 和 revision 绑定。
 
 ## Runtime 管理的状态
 
 ### `comet-state.yaml`
 
-每个活跃或已归档的 Native change 都有独立的 `comet-state.yaml`。它记录 `phase`、`revision`、`approval`、`approved_contract_hash`、`verification` 与规格操作等机器状态。正常流程只有在 `approval: confirmed` 后进入 Build；`implicit` 只用于兼容旧 change，不能证明用户已经确认，离开 Build 前必须升级为明确确认。`approved_contract_hash` 把批准绑定到当时的 brief 与规格需求契约；后续需求契约漂移也必须取得用户重新确认。不要手改这些字段，也不要把它与 Classic change 的 `.comet.yaml` 混为一谈。
+每个 active 或 archived Native change 都有独立的 `comet-state.yaml`。它记录 phase、revision、approval、`approved_contract_hash`、verification 与 spec operation 等机器状态。正常流程只有在 `approval: confirmed` 后进入 Build；`implicit` 只用于兼容旧 change，不能证明用户已经确认，离开 Build 前必须升级为明确确认。`approved_contract_hash` 把 approval 绑定到当时的 brief/spec contract；后续 contract 漂移也必须取得用户重新确认。不要手改这些字段，也不要把它与 Classic change 的 `.comet.yaml` 混为一谈。
 
-### 运行记录、轨迹与检查点
+### Run、trajectory 与 checkpoint
 
-- 运行状态保存当前后续动作与修复状态；
-- 轨迹保存有界的阶段摘要、时间点和证据引用，不保存隐藏推理；
-- 检查点保存当前阶段内的摘要、下一动作和内容寻址产物清单，供新会话恢复。
+- Run state 保存当前 continuation 与修复状态；
+- trajectory 保存有界的阶段摘要、时间点和证据引用，不保存隐藏推理；
+- checkpoint 保存当前阶段内的摘要、下一动作和内容寻址 artifact manifest，供新会话恢复。
 
-检查点不替代 brief、规格或验证报告，也不推进阶段。
+Checkpoint 不替代 brief、spec 或 verification report，也不推进 phase。
 
-### 当前选择
+### Selection
 
-`.comet/current-change.json` 记录当前写入属于哪个工作流和 change。它让共享 Hook Router 在一个项目启用多套工作流或多个 change 时仍能把写入交给唯一 Guard。只读 `status` 不会附带改变当前选择；选择 change 使用 `comet native select <change-name>`。
+`.comet/current-change.json` 记录当前写入属于哪个 workflow/change。它让共享 Hook Router 在一个项目启用多套工作流或多个 change 时仍能把写入交给唯一 Guard。只读 `status` 不会靠副作用改变 selection；选择 change 使用 `comet native select <change-name>`。
 
 ## 有界读取与内容寻址
 
-Native 对 change 数量、规格大小、诊断项、验收项 ID、输出和归档树设置预算。列表与详情使用绑定当前内容集合的游标；输入变化后旧游标会明确失效。
+Native 对 change 数量、spec 大小、finding、Acceptance ID、输出和归档树设置预算。列表与详情使用绑定当前内容集合的 cursor；输入变化后旧 cursor 会明确失效。
 
-`baseline-manifest.json` 是创建 change 时捕获的有界项目快照。它不仅保存文件内容身份，还保存规范化后的 `include`、`exclude`、策略哈希、执行限制、遗漏事实和完整性状态。Git 提供器只纳入已跟踪与未被忽略的未跟踪文件，并把 submodule/gitlink 作为原子条目；非 Git 项目使用带前后枚举围栏的有界物理树提供器。创建或 v1/v2 迁移切换时，基线必须完整；当前 v3 基线不能用当前文件自动重建。
+`baseline-manifest.json` 是创建 change 时捕获的有界项目快照。它不仅保存文件内容身份，还保存规范化后的 `include`、`exclude`、policy hash、执行限制、遗漏事实和完整性状态。Git provider 只纳入 tracked 与未被 ignore 的 untracked 文件并原子表示 submodule/gitlink；非 Git 项目使用带前后枚举围栏的有界物理树 provider。创建或 v1/v2 migration cutover 时 baseline 必须完整；当前 v3 baseline 不能用当前文件自动重建。
 
-后续当前快照始终使用基线清单中固化的策略，而不是重新读取项目配置中的 `include` 和 `exclude`。这样实现过程中即使有人修改 `.comet/config.yaml`，也不能把已纳入范围的变化隐藏掉。资源预算仍从当前项目配置读取，因此仓库增长后可以提高 `max_files`、`max_total_bytes` 或 `max_duration_ms`，继续完成同一审计范围。
+后续 current snapshot 始终使用 baseline manifest 中固化的 policy，而不是重新读取项目配置中的 include/exclude。这样实现过程中即使有人修改 `.comet/config.yaml`，也不能把已纳入范围的变化隐藏掉。资源预算仍从当前项目配置读取，因此仓库增长后可以提高 `max_files`、`max_total_bytes` 或 `max_duration_ms`，继续完成同一审计范围。
 
-匹配模式语义、三套可复制配置以及如何判断“提高预算还是排除文件”，见 [Native 配置](/zh/native/configuration#内容快照范围与预算) 和 [Native 常见问题](/zh/native/faq#内容快照与实现范围)。
+Pattern 语义、三套可复制配置以及如何判断“提高预算还是排除文件”，见 [Native 配置](/zh/native/configuration#内容快照范围与预算) 和 [Native 常见问题](/zh/native/faq#内容快照与-implementation-scope)。
 
-实现范围、规格基线、当前快照、验证报告、检查凭据、检查点清单与归档预检都使用哈希绑定。当前快照不完整时不会推断删除；变化明细超预算时，`scope-detail-overflow` 用计数与内容哈希保留其余变化的结构化事实。这样可以判断证据是否仍对应当前事实，而不是只相信“已经验证过”的文字声明。
+implementation scope、spec baseline、current snapshot、verification report、check receipt、checkpoint manifest 与归档预检都使用 hash 绑定。current snapshot 不完整时不会推断删除；变化明细超预算时，`scope-detail-overflow` 用计数与内容 hash 保留其余变化的结构化事实。这样可以判断证据是否仍对应当前事实，而不是只相信“已经验证过”的文字声明。
 
-Git 枚举还会显式报告 `git-selection-changed` 与 `git-enumeration-limit`。前者必须等索引稳定后重试，绝不可授权；后者应优先通过缩小或清理项目所有范围、或后续产品预算调整来恢复。基线创建与迁移切换必须完整，不允许部分授权；仅在之后的当前快照中恢复不可行、Runtime 返回带计数与内容哈希的可授权范围，且用户理解未知尾部风险时，`git-enumeration-limit` 才可使用精确哈希、理由与 `--confirmed` 走普通部分范围协议。两者都不能通过手改证据绕过。
+Git 枚举还会显式报告 `git-selection-changed` 与 `git-enumeration-limit`。前者必须等 index 稳定后重试，绝不可授权；后者应优先通过缩小或清理项目所有范围、或后续产品预算调整来恢复。baseline 创建与 migration cutover 必须完整，没有 partial 授权；仅在之后的 current snapshot 中恢复不可行、Runtime 返回带计数与内容 hash 的可授权 scope，且用户理解未知尾部风险时，`git-enumeration-limit` 才可使用精确 hash、理由与 `--confirmed` 走普通 partial 协议。两者都不能通过手改 evidence 绕过。
 
-物理树枚举会显式报告 `physical-selection-changed` 与 `physical-enumeration-limit`。前者要求等待并发文件操作结束，后者要求缩小项目树或移出非项目内容；两者都无法稳定绑定未知尾部，在当前快照中也不能通过部分范围授权。
+物理树枚举会显式报告 `physical-selection-changed` 与 `physical-enumeration-limit`。前者要求等待并发文件操作结束，后者要求缩小项目树或移出非项目内容；两者都无法稳定绑定未知尾部，在 current snapshot 中也不能通过 partial scope 授权。
 
 下一步阅读 [安全与恢复](/zh/native/safety-and-recovery)，或在 [Native CLI](/zh/cli/native) 查看对应命令。
