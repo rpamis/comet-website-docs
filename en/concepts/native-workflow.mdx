@@ -7,6 +7,40 @@ Comet Native is a Skill designed specifically for strong coding models in the Fa
 
 Its core principle is: **make requirements and acceptance precise while keeping execution methods lightweight.** Lightweight means removing unnecessary process orchestration for capable models, not reducing requirement quality or skipping verification.
 
+## Native Loop, informed by Loop Engineering
+
+Native's completion loop draws on the industry's discussion of [Loop Engineering](https://addyosmani.com/blog/loop-engineering/): the engineering focus moves from prompting an Agent turn by turn to designing a system that reads a goal, performs work, observes real feedback, verifies the result, persists state, and decides whether to continue or stop. A loop here is a controlled feedback system, not permission for unlimited retries.
+
+Comet Native adopts that principle without introducing a Loop Engineer role or a fifth phase. It bounds Native Loop to Build and Verify. One implementation, one commit, or one Agent turn is only an iteration; work is complete only when fresh evidence supports every acceptance condition under the current contract.
+
+```mermaid
+flowchart LR
+  S["Shape<br/>Goal, specs, and acceptance"] --> B
+
+  subgraph L["Native Loop: only Build ↔ Verify"]
+    B["Build<br/>Investigate, implement, repair"] --> V["Verify<br/>Checks and acceptance evidence"]
+    V -->|"failed / missing acceptance"| G["Runtime-derived acceptance gaps"]
+    G --> B
+  end
+
+  V -->|"all acceptance passes"| P["Archive preview"]
+  V -->|"stagnation or budget exhausted"| U["Stop and return control"]
+  P --> C{"archive_confirmation"}
+  C -->|"automatic"| A["Archive complete"]
+  C -->|"required"| U
+```
+
+Each iteration follows the same feedback path: read current acceptance, implement a related batch, run real verification, and let the Runtime determine whether gaps decreased. On failure, failed or missing acceptance items and failed checks return to Build as explicit input instead of relying on conversation memory. Only a final Verify pass leaves Native Loop for Archive; stagnation, budget exhaustion, or a required archive decision returns control to the user.
+
+Four boundaries keep the loop controlled:
+
+- **Acceptance gaps drive work**: address unsatisfied outcomes instead of treating task narration or code volume as completion.
+- **Semantic change defines progress**: fewer gaps, passing checks, or restored evidence count as progress; implementation churn with an unchanged failure set does not reset stagnation.
+- **Autonomous repair is bounded**: the Runtime permits continued repair but stops on repeated gaps or an exhausted failure budget.
+- **Recovery uses repository state**: acceptance, checkpoints, verification reports, and continuation persist with the change, so a resumed session continues from the same facts rather than chat history.
+
+The implementer investigates, implements, and repairs. The Runtime owns completion decisions, evidence freshness, and stop boundaries. This separation keeps autonomous execution moving without giving up verifiability, recovery, or a reliable stop.
+
 <p align="center">
   <img
     src="/assets/native-illustrations/01-light-execution.png"
@@ -89,7 +123,7 @@ New product decisions return the workflow to clarification. Before Verify, the R
 
 Verify runs appropriate checks against Acceptance examples, complete target specifications, and implementation risk. `verification.md` records commands, results, skipped checks, known limitations, and evidence for each Acceptance ID.
 
-The Runtime binds the conclusion to the current brief, target specifications, implementation scope, and revision. Any input change makes old reports, receipts, and pass results stale. A failure returns to Build. Repeated identical failures on the same scope without real progress eventually stop autonomous repair instead of looping indefinitely.
+The Runtime binds the conclusion to the current brief, target specifications, implementation scope, and revision. Any input change makes old reports, receipts, and pass results stale. A failure returns to Build with unsatisfied acceptance items and failed checks as the next iteration's input. Only fewer gaps, passing checks, or restored evidence count as semantic progress. The third recurrence of the same gap without semantic progress stops the loop. The default limit is five Verify failures per contract and can be changed to a positive integer with `native.max_verify_failures`.
 
 ### Archive: commit after a two-step preflight
 
