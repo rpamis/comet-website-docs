@@ -21,12 +21,14 @@ native:
   artifact_root: docs
   language: zh-CN
   clarification_mode: sequential
+  archive_confirmation: automatic
+  max_verify_failures: 5
   # Native 内容快照使用的可审计项目范围与有界工作预算。
   snapshot:
     # 纳入的项目相对路径；支持 *、** 和 ?。
     include:
       - '**/*'
-    # 明确排除不属于实现范围的数据或生成物。
+    # 明确排除不属于 implementation scope 的数据或生成物。
     exclude: []
     # 单次快照最多捕获的文件数。
     max_files: 10000
@@ -57,16 +59,18 @@ classic:
 
 ## Native 字段
 
-| 字段                              | 允许值 / 默认值                            | 作用                                                                       |
-| --------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
-| `native.artifact_root`            | 项目内相对路径；默认 `docs`                | 决定 `<artifact-root>/comet/` 中 specs、changes、archive 和 runtime 的位置 |
-| `native.language`                 | `en` \| `zh-CN`；默认 `en`                 | 新建 Native change 的 brief、规格和报告语言                                |
-| `native.clarification_mode`       | `sequential` \| `batch`；默认 `sequential` | 每轮询问一个最上游问题，或一次提出本轮全部可回答问题                       |
-| `native.snapshot.include`         | 项目相对 glob；默认 `["**/*"]`             | 定义 baseline 和后续 current snapshot 纳入的路径                           |
-| `native.snapshot.exclude`         | 项目相对 glob；默认 `[]`                   | 显式排除不属于实现范围的版本化数据或生成物                                 |
-| `native.snapshot.max_files`       | 正整数；默认 `10000`                       | 单次快照最多捕获的文件数                                                   |
-| `native.snapshot.max_total_bytes` | 正整数；默认 `268435456`                   | 单次快照最多流式哈希的文件内容总字节数                                     |
-| `native.snapshot.max_duration_ms` | 正整数；默认 `60000`                       | 单次快照允许的最长执行时间                                                 |
+| 字段                              | 允许值 / 默认值                             | 作用                                                                       |
+| --------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------- |
+| `native.artifact_root`            | 项目内相对路径；默认 `docs`                 | 决定 `<artifact-root>/comet/` 中 specs、changes、archive 和 runtime 的位置 |
+| `native.language`                 | `en` \| `zh-CN`；默认 `en`                  | 新建 Native change 的 brief、spec 和 report 语言                           |
+| `native.clarification_mode`       | `sequential` \| `batch`；默认 `sequential`  | 每轮询问一个最上游问题，或一次提出本轮全部可回答问题                       |
+| `native.archive_confirmation`     | `automatic` \| `required`；默认 `automatic` | 最终 Archive 候选自动归档，或要求一次明确确认                              |
+| `native.max_verify_failures`      | 正整数；默认 `5`                            | 同一 contract 可以接受的 Verify fail 总次数                                |
+| `native.snapshot.include`         | 项目相对 glob；默认 `["**/*"]`              | 定义 baseline 和后续 current snapshot 纳入的路径                           |
+| `native.snapshot.exclude`         | 项目相对 glob；默认 `[]`                    | 显式排除不属于 implementation scope 的版本化数据或生成物                   |
+| `native.snapshot.max_files`       | 正整数；默认 `10000`                        | 单次快照最多捕获的文件数                                                   |
+| `native.snapshot.max_total_bytes` | 正整数；默认 `268435456`                    | 单次快照最多流式哈希的文件内容总字节数                                     |
+| `native.snapshot.max_duration_ms` | 正整数；默认 `60000`                        | 单次快照允许的最长执行时间                                                 |
 
 `artifact_root: .` 对应 `<project>/comet/`，`artifact_root: docs` 对应 `<project>/docs/comet/`。已有 Native 项目不能只改这个字段再手动移动目录；使用事务化命令：
 
@@ -84,6 +88,10 @@ comet native init --language zh-CN
 已有 change 会继续使用创建时写入的语言，不会被项目默认值追溯改写。
 
 `clarification_mode` 只改变产品问题的组织方式，不新增 phase，也不改变共享写入保护或调用方停点。Sequential 每轮只问一个最上游决定，Batch 提出本轮所有可回答决定；两种模式都必须在进入 Build 前完成最终共享理解确认。切换模式不会清除 brief 中已保存的 `[blocking]` 问题；应先处理当前问题，再按新模式计算下一轮。
+
+`archive_confirmation` 只在最终 Verify pass 后生效。`automatic` 继续完成归档；`required` 在最终 Archive 候选处停下等待一次明确决定。Verify 失败后的 Build ↔ Verify 修复轮次不会触发该确认。
+
+`max_verify_failures` 是同一 contract 的总失败预算。缺口减少、检查转绿或证据恢复有效仍可继续下一轮；相同语义缺口第三次出现且没有进展时会更早停止。只有用户确认后的 contract 变化会开始新的预算周期。
 
 ### 内容快照范围与预算
 
@@ -110,7 +118,7 @@ Native 使用文件内容的流式 SHA-256 建立 baseline，不把 Git object h
 先定义交付范围，再考虑性能：
 
 - 文件属于实现或验证范围：提高总字节数和执行时间，让 Runtime 完整流式哈希。
-- 大型数据或生成物不属于实现范围：用明确的 `exclude` 模式排除，并让该策略随 baseline 留下审计记录。
+- 大型数据或生成物不属于 implementation scope：用明确的 `exclude` 模式排除，并让该策略随 baseline 留下审计记录。
 - 不确定文件是否相关：先保留，查看 Runtime 返回的实际限制和受影响路径后再决定。
 
 普通项目优先使用默认完整范围：
@@ -168,7 +176,7 @@ native:
 
 超出预算时，`comet native new` 继续失败关闭并删除未完成 change，但诊断会返回实际限制、策略 hash、受影响路径、配置文件位置和支持的修复方向，不再只给出无法执行的笼统动作。
 
-更多可直接复制的场景和排障答案见 [Native 常见问题](/zh/native/faq#内容快照与实现范围)。
+更多可直接复制的场景和排障答案见 [Native 常见问题](/zh/native/faq#内容快照与-implementation-scope)。
 
 <Warning>
   <code>native.pending_root_move</code> 是 root move
