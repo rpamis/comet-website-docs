@@ -41,14 +41,19 @@ Current snapshot 沿用 change 创建时写入 baseline manifest 的 include/exc
 
 ## 修复为什么有上限
 
-Verify fail 会回到 Build。Runtime 用 failure category、failed check、contract 和 scope 形成失败签名：
+Verify fail 会回到 Build。Runtime 从已校验的 acceptance matrix 中返回 failed/missing acceptance 和失败检查；下一轮先处理这些缺口，不会直接重试 Verify。
 
-- 同一 scope 下第二次相同失败会告警；
-- 第三次相同失败且没有真实 scope 进展时进入 manual stop；
-- scope 真正变化会开启新的 repair episode；
-- scope 未变化但出现一个明确新假设时，同一签名最多 override 一次；
-- 单个 episode 最多记录 12 次 failure。
+重复失败签名由当前 contract、排序后的 failed/missing Acceptance ID 和失败检查 ID 组成：
 
-这使强模型可以自主修复，同时避免把重复尝试误当成进展。达到停止条件后，应让用户决定范围、约束或是否终止，而不是弱化检查或伪造 pass。
+- 同一语义缺口第二次出现时告警；
+- 第三次出现且没有语义进展时进入 manual stop；
+- 缺口减少、失败检查转绿或缺失证据变为当前有效证据，才算语义进展；
+- 修改文件、改变 implementation scope 或重写说明，但失败集合不变，不会重置停滞计数；
+- 存在一个明确的新假设时，同一失败签名最多允许 override 一次；
+- 同一 contract 默认最多接受 5 次 Verify fail；可以通过 `.comet/config.yaml` 的 `native.max_verify_failures` 设置大于等于 1 的整数。
+
+重复缺口停止和总失败预算彼此独立，因此工作流可能在达到总预算前停止。只有用户确认后的 contract 变化才会开始新的目标周期；普通实现变化不会清空累计次数。
+
+这使强模型可以连续修复，同时避免把代码活动误当成完成进展。达到停止条件后，应让用户决定范围、约束或是否终止，而不是弱化检查、提前进入 Archive 或伪造 pass。
 
 继续阅读：[Native 工作流](/zh/concepts/native-workflow#四阶段工作流)、[Native 常见问题](/zh/native/faq)、[安全与恢复](/zh/native/safety-and-recovery) 和 [多 Change 与规格冲突](/zh/native/multi-change-and-conflicts)。

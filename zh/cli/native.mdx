@@ -35,7 +35,7 @@ comet native root move artifacts
 ## Change 管理
 
 ```bash
-comet native new <change-name> [--language en|zh-CN]
+comet native new <change-name> --creation-authorization <path> [--language en|zh-CN]
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
 comet native list [--cursor <token>]
@@ -45,7 +45,7 @@ comet native status <change-name> [--details [--acceptance-cursor <token>]]
 comet native select <change-name>
 ```
 
-`change-name` 和 capability 使用字母开头的 lowercase kebab-case。`new` 在配置缺失时创建默认配置和 `<project>/docs/comet/`。
+`change-name` 和 capability 使用字母开头的 lowercase kebab-case。`new` 在配置缺失时创建默认配置和 `<project>/docs/comet/`。`--creation-authorization` 必须引用由项目外 controller 签发、与当前 change 绑定的授权文件；实现者不能用项目内密钥为自己授权。
 
 新增或替换长期行为时，把完整目标规格写入：
 
@@ -147,14 +147,15 @@ Verify 报告必须包含 Runtime 可解析的验收机器块，并逐项绑定�
 
 ## 自主修复与停止语义
 
-Verify fail 会自动返回 Build。模型可以自主修复，但 Runtime 会按失败分类、失败检查 ID、contract 和 implementation scope 形成语义签名：
+Verify fail 会自动返回 Build，并把已校验的 failed/missing Acceptance ID 与失败检查 ID 投影到详细状态。模型先修复这些缺口，再重新运行完整验证；中间轮次不会进入 Archive。
 
-- 相同 scope 下第三次出现相同失败签名时，continuation 变为 manual stop；
-- scope 真正变化后，新的 Build 推进会结束旧 repair episode；
-- scope 未变化时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
-- 单个 repair episode 最多记录 12 次 failure，达到上限后 hard stop。
+- Runtime 使用 contract、failed/missing Acceptance ID 和失败检查 ID 形成重复失败签名；
+- 缺口减少、检查转绿或缺失证据恢复为当前有效证据才算语义进展；只修改代码或 implementation scope 不会重置计数；
+- 相同语义缺口第二次出现时告警，第三次出现且没有进展时 continuation 变为 manual stop；
+- 有明确新假设时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
+- 同一 contract 的 Verify fail 默认上限为 5，可通过 `native.max_verify_failures` 配置正整数；达到上限后停止。
 
-这些限制按“有没有真实证据进展”计算，不按机械 phase 切换次数计算，因此长期 change 不会因为固定 Run iteration 上限永久锁死。
+只有用户确认后的 contract 变化会开始新的目标周期。达到停止条件时，应让用户决定是否调整目标、约束或终止，不应反复调用 `next`、弱化检查或提前归档。
 
 ## 两步 Archive
 
