@@ -7,7 +7,7 @@ Native 不把 Shape、Build、Verify、Archive 拆成四个 Skill，也不加载
 
 ## 用户入口
 
-正常情况下使用 `/comet`。入口只读取 `.comet/config.yaml`，按 `default_workflow` 确定性转发：
+明确要使用 Comet、但不需要指定 Native 或 Classic 时，使用 `/comet`。入口只读取 `.comet/config.yaml`，按 `default_workflow` 确定性转发：
 
 ```yaml
 schema: comet.project.v1
@@ -20,7 +20,8 @@ workflows:
 `/comet-native` 是显式目标，适合诊断路由或明确要求进入 Native。它是宿主 Skill 调用，不是 shell 命令。Runtime 命令统一使用 `comet native ...`。
 
 <Note>
-  Comet 不根据任务大小、提示词或模型名称猜测模式。修改默认模式要改项目配置；切换入口不会迁移现有
+  Comet
+  不根据任务大小、提示词或模型名称猜测模式。修改默认模式要改项目配置；切换入口不会迁移现有
   change。
 </Note>
 
@@ -35,7 +36,9 @@ workflows:
 | Verify  | 按验收与风险运行检查，写入逐项证据                                |
 | Archive | 两步预检，更新 canonical spec 并归档 change                       |
 
-阶段 transition 返回结构化 `continuation`。只有 `continue` 才会在当前调用中接着工作；`await-user`、`blocked`、`manual` 或 `done` 会分别等待用户、处理阻塞、停止自动修复或结束。
+阶段 transition 返回结构化 `continuation`。`continue` 会在当前调用中接着工作；`await-user` 会等待确实需要用户决定的输入；`blocked` 会暂停正常循环并进入恢复分支，处理 finding 后根据新的 continuation 继续；`done` 才表示 change 已完成。
+
+Build 中如果出现新的用户决定，Skill 会保持在 Build，把决定保存为 `[blocking]` 并暂停实现。用户确认后，Skill 更新 Decisions、brief 和完整 target spec，再执行 Runtime 返回的 transition 命令并传入 `--confirmed`。
 
 <p align="center">
   <img
@@ -46,7 +49,7 @@ workflows:
 
 ## 写入归属
 
-`.comet/current-change.json` 记录当前写入属于哪个 workflow 和 change。项目只有一个共享 Hook Router，一次原子写入最多交给一个 Guard。多个 active change 时，先显式选择：
+`.comet/current-change.json` 记录当前写入属于哪个 workflow 和 change。项目只有一个共享 Hook Router，一次原子写入最多交给一个 Guard。selection 缺失或指向已不存在/已归档的 change 时，Router 会重新枚举 active change：零个表示当前没有 Comet 需求，恰好一个时只读推断，多个候选时要求显式选择：
 
 ```bash
 comet native select <change-name>
