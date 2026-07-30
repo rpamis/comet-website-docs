@@ -3,7 +3,7 @@ title: 'Native CLI'
 description: 'Initialize Native, manage changes, preserve in-phase progress, advance state, bind verification evidence, and recover or archive safely.'
 ---
 
-`comet native` is the deterministic Runtime entry for the Native workflow. Its state and workflow artifacts belong only to the shared `.comet/config.yaml` project configuration and configured `<artifact-root>/comet/`; it neither reads nor converts Classic/OpenSpec changes. To build baselines and implementation scopes, the Runtime reads project-owned file content within fixed budgets. When Git metadata exists, it invokes Git only as part of building the Git-aware snapshot. It never invokes external Skills, a shell, or project commands. The built-in `comet native check` still invokes neither Git nor any external process.
+`comet native` is the deterministic Runtime entry for the Native workflow. Its state and workflow artifacts belong only to the shared `.comet/config.yaml` project configuration and configured `<artifact-root>/comet/`; it neither reads nor converts Classic/OpenSpec changes. To build baselines and implementation scopes, the Runtime reads project-owned file content within fixed budgets. When Git metadata exists, it invokes Git only as part of building the Git-aware snapshot. Except for explicit `receipt automated` commands, Runtime does not invoke a shell, project commands, or external Skills. The built-in `comet native check` still invokes neither Git nor any external process.
 
 ## Initialize and manage the artifact root
 
@@ -38,7 +38,6 @@ Existing configuration rejects a conflicting `init --root`. Change directories t
 comet native new <change-name> [--language en|zh-CN]
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
-comet native list [--cursor <token>]
 comet native show <change-name>
 comet native status [--cursor <token>]
 comet native status <change-name> [--details [--acceptance-cursor <token>]]
@@ -75,7 +74,7 @@ Ordinary omissions include a reason, counts, and bounded sample paths. Baseline 
 
 ### Bounded status views
 
-`list` and `status` without a change name return the same read-only paginated projection:
+`status` without a change name returns a read-only paginated projection of active changes:
 
 - At most 24 active changes per page.
 - At most 4096 visible changes are accepted.
@@ -98,6 +97,26 @@ comet native checkpoint <change-name> \
 
 A checkpoint stores an in-phase summary, next action, and content-addressed artifact manifest without changing phase. `--expect-revision` uses CAS so an old session cannot overwrite newer state. Resume from the checkpoint returned by `status`, not from chat memory.
 
+## Acceptance evidence receipts
+
+```bash
+comet native receipt manual <change-name> \
+  --acceptance <id> \
+  --step <text> \
+  --observation <text>
+
+comet native receipt automated <change-name> \
+  --acceptance <id> \
+  [--timeout-ms <n>] \
+  -- <executable> [args...]
+
+comet native evidence format [--entries <path>]
+```
+
+A manual receipt records reviewable steps and observations with fixed Runtime provenance; it does not accept `--responsible` or `--confirmed`. An automated receipt runs the explicit command from the project root with the current project environment, supports Windows `.cmd`, `.bat`, and `.ps1` shims, and redacts credential-like text before storing a bounded output summary. The receipt also records command status, timeout, before/after worktree identity, and the output hash.
+
+Reference the receipt for each Acceptance ID in `verification.md`, then use `evidence format` to produce the canonical Runtime-readable block. A failed acceptance item may reference a non-passing automated or manual receipt. Runtime derives failed checks and repair gaps from that evidence without caller-supplied classifications.
+
 ## Built-in read-only checks
 
 ```bash
@@ -112,7 +131,7 @@ It does not:
 - Accept arbitrary commands, environment variables, paths, or timeout arguments.
 - Modify source code, change phase, Run state, or trajectory.
 
-A check that finds issues or a stale scope exits with `1`, but still saves its receipt. The model should continue to run real project tests according to task risk. The built-in check is reviewable supplemental evidence, not a general test runner.
+A check that finds issues or a stale scope exits with `1`, but still saves its receipt. When `next --result pass --report ...` is submitted, Runtime runs and binds this required check automatically; the caller does not supply its receipt. The model should continue to run real project tests according to task risk. The built-in check is not a general test runner.
 
 ## Phase progression
 
@@ -124,9 +143,6 @@ comet native next <change-name> --summary <text> \
   [--allow-partial-scope <sha256> --partial-reason <text> --confirmed] \
   [--result pass|fail] \
   [--report <change-relative-path>] \
-  [--receipt <runtime/evidence/check-receipts/...json>] \
-  [--failure-category <token>]... \
-  [--failed-check <token>]... \
   [--override-repair <sha256> --override-summary <text>]
 ```
 
@@ -137,7 +153,7 @@ comet native next <change-name> --summary <text> \
 | Verify        | Structurally complete report bound to current acceptance, contract, and scope     | pass enters Archive; fail returns to Build         |
 | Archive       | Use the separate two-step archive command                                         | Update canonical specifications and archive change |
 
-Pass `--confirmed` in Shape only after the user has just confirmed the current shared understanding. The normal Skill flow for both Sequential and Batch persists that final confirmation first, and no confirmation can bypass another `[blocking]` question. The Runtime refuses a Sequential transition into Build without explicit confirmation; the existing Batch Runtime compatibility path remains unchanged. On entry to Build, the Runtime binds approval to that moment's `approved_contract_hash`. If the brief or complete target specifications later change, Build remains blocked and returns `re-confirm-contract`. Pass `--confirmed` again only after the user reconfirms the current contract; never reuse an old confirmation or edit the hash.
+Pass `--confirmed` in Shape only after the user has just confirmed the current shared understanding. The normal Skill flow for both Sequential and Batch persists that final confirmation first, and no confirmation can bypass another `[blocking]` question. The Runtime refuses a Sequential transition into Build without explicit confirmation; the existing Batch Runtime compatibility path remains unchanged. On entry to Build, the Runtime binds approval to that moment's `approved_contract_hash`. When changed requirements introduce a new user decision, stay in Build: record a `[blocking]` item, pause implementation, and clarify again. After the user confirms, update Decisions, the brief, and complete target specifications, remove the blocker, and pass `--confirmed` in the transition returned by Runtime. Never reuse an old confirmation or edit the hash.
 
 When Build cannot prove complete scope, the first call returns a scope hash and unattributed items without advancing. An incomplete current snapshot never turns an unobserved path into a deletion. When change details exceed the budget, bounded details remain and `scope-detail-overflow` represents the rest with a count and content hash. Only after the user explicitly accepts a concrete risk that the Runtime permits for authorization should you retry with the exact `--allow-partial-scope`, a non-empty reason, and `--confirmed`. The allowance binds to the scope hash and cannot authorize a changed implementation. `git-selection-changed`, `physical-selection-changed`, and `physical-enumeration-limit` are never authorizable. `git-enumeration-limit` may use the same ordinary partial protocol only after recovery attempts fail, the Runtime returns an authorizable scope, and the user understands the unknown-tail risk.
 
@@ -151,11 +167,11 @@ A Verify failure automatically returns to Build and projects validated failed or
 
 - The Runtime forms the repeated-failure signature from the contract, failed or missing Acceptance IDs, and failed check IDs.
 - Only fewer gaps, passing checks, or missing evidence restored as current valid evidence count as semantic progress. Code changes or implementation-scope changes alone do not reset the counters.
-- The second recurrence of the same semantic gap warns; the third recurrence without progress changes continuation to manual stop.
-- One explicit new hypothesis may override the exact signature returned by `status` once with a non-empty summary.
+- The second recurrence of the same semantic gap warns. On the third recurrence without progress, continuation remains Agent-owned while one override is available and requires a concrete new repair hypothesis.
+- The exact signature returned by `status` and a non-empty hypothesis summary may be used for one override. This Agent-owned step must not be delegated to the user.
 - The default limit is five Verify failures per contract. Set `native.max_verify_failures` to a positive integer to change it; reaching the limit stops the loop.
 
-Only a user-confirmed contract change starts a new goal cycle. At a stop boundary, let the user decide whether to change the goal or constraints or end the work. Do not keep calling `next`, weaken checks, or archive early.
+Only a user-confirmed contract change starts a new goal cycle. After the override is used or the verification budget is exhausted, Runtime returns one explicit decision: increase the budget, change the confirmed contract, or stop. Do not keep calling `next`, weaken checks, or archive early.
 
 ## Two-step Archive
 
