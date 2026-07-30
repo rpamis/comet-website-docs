@@ -7,7 +7,7 @@ Native 不把 Shape、Build、Verify、Archive 拆成四个 Skill，也不加载
 
 ## 用户入口
 
-正常情况下使用 `/comet`。入口只读取 `.comet/config.yaml`，按 `default_workflow` 确定性转发：
+明确调用 `/comet`，或明确要求使用 Comet 但未指定 Native 或 Classic 时，使用 `/comet`。入口只读取 `.comet/config.yaml`，按 `default_workflow` 确定性转发：
 
 ```yaml
 schema: comet.project.v1
@@ -35,7 +35,7 @@ workflows:
 | Verify  | 按验收与风险运行检查，写入逐项证据                                |
 | Archive | 两步预检，更新 canonical spec 并归档 change                       |
 
-阶段 transition 返回结构化 `continuation`。只有 `continue` 才会在当前调用中接着工作；`await-user`、`blocked`、`manual` 或 `done` 会分别等待用户、处理阻塞、停止自动修复或结束。
+阶段 transition 返回结构化 `continuation`。只有 `continue` 才会在当前调用中接着工作；`await-user` 会等待用户，`blocked` 会进入恢复分支，`manual` 会停止自动修复，`done` 才结束工作。处理完 `blocked` 返回的 finding 后，会按新的 continuation 继续，而不会因 `blocked` 本身结束任务。
 
 <p align="center">
   <img
@@ -46,7 +46,7 @@ workflows:
 
 ## 写入归属
 
-`.comet/current-change.json` 记录当前写入属于哪个 workflow 和 change。项目只有一个共享 Hook Router，一次原子写入最多交给一个 Guard。多个 active change 时，先显式选择：
+`.comet/current-change.json` 记录当前写入属于哪个 workflow 和 change。项目只有一个共享 Hook Router，一次原子写入最多交给一个 Guard。若该选择指向已不存在或已归档的 change，Comet 会重新检查活跃 change：没有候选时不绑定当前工作，唯一候选只用于只读恢复，多个候选时需要先显式选择：
 
 ```bash
 comet native select <change-name>
