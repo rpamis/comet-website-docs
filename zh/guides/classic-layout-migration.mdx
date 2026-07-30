@@ -1,0 +1,134 @@
+---
+title: "迁移 Classic 布局"
+description: "在恢复和排查 Classic Spec 时，安全地将 openspec/ 迁移到 docs/openspec/，并处理迁移中断。"
+---
+
+Classic 有两种受支持的 OpenSpec 布局：旧项目使用仓库根目录的 `openspec/`，新建项目使用 `docs/openspec/`。布局由 `.comet/config.yaml` 中的 `classic.artifact_layout` 选择，但**不能只改这个字段来迁移目录**。
+
+本页只处理 Classic 布局迁移和迁移事务的恢复。普通的会话中断、换设备或上下文压缩，请直接重新输入 [`/comet`](/zh/guides/resuming-workflow)。
+
+## 先确认是否需要迁移
+
+在项目根目录运行：
+
+```bash
+comet classic root show
+```
+
+命令会输出当前已解析的布局和路径。例如，`artifactLayout` 为 `legacy` 时，Classic 根目录是 `openspec/`；为 `docs` 时，根目录是 `docs/openspec/`。
+
+| 当前布局 | 该怎么做                                                    |
+| -------- | ----------------------------------------------------------- |
+| `legacy` | 若要采用新布局，继续执行本页的 dry-run。                    |
+| `docs`   | 无需迁移。继续使用 `/comet` 恢复或推进 change。             |
+| 命令报错 | 先运行 `comet doctor`，修复配置、安装或未完成迁移，再重试。 |
+
+`docs` 是新建 Classic 项目的默认布局，但已有项目会保留检测到的 `legacy` 布局。两者都受支持；没有业务原因时，不必为了迁移而中断已有工作。
+
+## 迁移前检查
+
+迁移会移动**完整的** `openspec/` 树，其中包括活跃 change、归档 change、规格和配置。先让所有协作者暂停对 Classic 产物的写入，并提交或暂存当前工作区改动。
+
+然后执行只读预检：
+
+```bash
+comet classic root move docs --dry-run
+```
+
+预检不修改文件。它会报告源目录与目标目录、文件清单摘要、配置变更、冲突、阻塞项和可用的恢复策略。只有输出 `可执行迁移: 是` 时，才继续下一步。
+
+<Warning>
+  不要在 dry-run 和 apply 之间继续编辑 <code>openspec/</code>、
+  <code>docs/openspec/</code> 或<code>.comet/config.yaml</code>
+  。迁移会重新核对目录和配置身份；它们变了就会停止，以免覆盖新内容。
+</Warning>
+
+常见阻塞及处理方式：
+
+| 预检结果                       | 原因                                              | 处理方式                                                 |
+| ------------------------------ | ------------------------------------------------- | -------------------------------------------------------- |
+| `docs` 目标目录非空            | `docs/openspec/` 已有内容，无法证明它属于这次迁移 | 先保留并检查目标内容；不要用迁移命令覆盖它。             |
+| 有待恢复的根目录迁移           | 上一次迁移留下了事务记录                          | 按“迁移中断后恢复”处理完，再重新 dry-run。               |
+| Classic 未启用或项目配置不兼容 | 当前项目不是可迁移的 Classic 项目                 | 用 `comet doctor` 诊断配置和安装；不要手工创建迁移记录。 |
+| 冲突或阻塞项                   | 源、目标或配置不满足安全条件                      | 先解决报告中的实际冲突，再重新运行 dry-run。             |
+
+## 执行迁移
+
+预检通过后，在同一项目根目录运行：
+
+```bash
+comet classic root move docs --apply
+```
+
+当前版本的 `--apply` 不需要传入 plan ID。执行时，Comet 会再次检查预检边界，复制并校验完整树，切换 `classic.artifact_layout` 为 `docs`，再清理旧根目录。迁移过程中会保留 change 的运行状态、检查点、轨迹、handoff 和归档证据指针。
+
+命令显示“迁移已完成”后，确认新的根目录：
+
+```bash
+comet classic root show
+```
+
+输出应显示 `artifactLayout: "docs"` 和 `openSpecRoot: "docs/openspec"`。此时可以重新输入 `/comet`，让 Classic 按新路径发现并恢复活跃 change。
+
+## 迁移中断后恢复
+
+如果 `--apply` 因为进程中断、文件变化或其他错误而停止，不要手动移动目录、删除 `.comet/classic-root-move.json`，或直接改 `classic.artifact_layout`。这些操作会破坏 Comet 用来判断哪棵目录可信的证据。
+
+先诊断事务：
+
+```bash
+comet doctor
+```
+
+诊断会说明迁移所在阶段、源和目标目录的状态，以及当前允许的恢复策略。确定要完成原迁移时，运行：
+
+```bash
+comet doctor --repair --strategy continue
+```
+
+确定要放弃本次迁移，且诊断允许回滚时，运行：
+
+```bash
+comet doctor --repair --strategy rollback
+```
+
+`continue` 和 `rollback` 不是可互换的。Comet 只接受当前事务阶段仍可安全证明的策略；例如配置已经切换后不能回滚。命令拒绝某个策略时，保留现场，按诊断输出处理冲突或从可信备份恢复，不要强制清理目录。
+
+恢复完成后，重新运行：
+
+```bash
+comet classic root show
+comet classic root move docs --dry-run
+```
+
+第一条确认当前权威根目录。第二条会在项目已经使用 `docs/openspec/` 时明确提示无需重复迁移；若仍是 `legacy`，它会重新给出可执行性和阻塞项。
+
+## 迁移后的排查顺序
+
+迁移完成但 `/comet` 没有找到预期 change 时，按以下顺序检查：
+
+1. 运行 `comet classic root show`，确认 `changesRoot` 指向 `docs/openspec/changes/`。
+2. 确认原来的 change 位于该目录，已归档 change 位于 `docs/openspec/changes/archive/`。
+3. 运行 `comet status`，查看 change 的阶段、任务完成度和 `runtime_eval`。
+4. 运行 `comet doctor`，处理安装、配置或证据诊断。
+5. 重新输入 `/comet`，让 Classic 从当前文件状态恢复。
+
+<Note>
+  `classic.artifact_layout` 只决定 Classic 的 OpenSpec 根目录。Native 使用独立的
+  `native.artifact_root`，迁移 Classic 不会移动 Native 的 `comet/` 产物。
+</Note>
+
+## 不要这样做
+
+- 不要用文件管理器或 `mv` 手工移动 `openspec/`。
+- 不要只把 `classic.artifact_layout` 改为 `docs`。
+- 不要在迁移事务未恢复时继续创建、归档或编辑 Classic change。
+- 不要删除迁移 journal、暂存目录或隔离目录来“解除阻塞”。
+
+这些目录和配置字段必须作为同一个事务切换。使用 `comet classic root move` 和 `comet doctor --repair`，才能让恢复逻辑验证并保留所有 Classic 事实。
+
+## 下一步
+
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 正常中断时如何恢复 Classic change
+- [状态损坏与恢复](/zh/guides/state-recovery) — 路由、状态或证据异常时如何诊断
+- [项目文件结构](/zh/guides/project-structure) — Classic 产物、运行状态与配置分别在哪里
