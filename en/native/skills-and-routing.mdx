@@ -7,7 +7,7 @@ Native does not split Shape, Build, Verify, and Archive into four Skills, and it
 
 ## User entry point
 
-Normally, invoke `/comet`. The entry reads `.comet/config.yaml` and deterministically forwards according to `default_workflow`:
+Use `/comet` when you explicitly want Comet without choosing Native or Classic. The entry reads `.comet/config.yaml` and deterministically forwards according to `default_workflow`:
 
 ```yaml
 schema: comet.project.v1
@@ -20,29 +20,36 @@ workflows:
 `/comet-native` is the explicit target for routing diagnostics or an intentional Native entry. It is a host Skill invocation, not a shell command. Runtime commands use `comet native ...`.
 
 <Note>
-  Comet does not infer the mode from task size, prompt wording, or model name. Change the project configuration to change the default. Selecting another entry does not migrate existing changes.
+  Comet does not infer the mode from task size, prompt wording, or model name.
+  Change the project configuration to change the default. Selecting another
+  entry does not migrate existing changes.
 </Note>
 
 ## How one Skill covers four phases
 
 On every entry, the Skill rereads configuration, selection, `comet-state.yaml`, the brief, target specifications, and repository facts, then continues from the current phase:
 
-| Phase | Skill responsibility |
-| --- | --- |
-| Shape | Investigate facts, resolve user decisions, and establish the brief and complete target specifications |
-| Build | Let the model choose implementation methods and submit real project artifacts as the implementation scope |
-| Verify | Run checks based on acceptance and risk, then record itemized evidence |
-| Archive | Run a two-step preflight, update canonical specs, and archive the change |
+| Phase   | Skill responsibility                                                                                      |
+| ------- | --------------------------------------------------------------------------------------------------------- |
+| Shape   | Investigate facts, resolve user decisions, and establish the brief and complete target specifications     |
+| Build   | Let the model choose implementation methods and submit real project artifacts as the implementation scope |
+| Verify  | Run checks based on acceptance and risk, then record itemized evidence                                    |
+| Archive | Run a two-step preflight, update canonical specs, and archive the change                                  |
 
-Transitions return a structured `continuation`. Only `continue` proceeds in the current invocation. `await-user`, `blocked`, `manual`, and `done` respectively wait for a decision, require remediation, stop autonomous repair, or finish.
+Transitions return a structured `continuation`. `continue` proceeds in the current invocation. `await-user` waits for input that genuinely requires a user decision. `blocked` pauses the normal loop and enters recovery; after resolving the finding, the Skill follows the new continuation. Only `done` means the change is complete.
+
+If a new user decision appears during Build, the Skill stays in Build, records the decision as `[blocking]`, and pauses implementation. After the user confirms, it updates Decisions, the brief, and the complete target specifications, then runs the transition command returned by the Runtime with `--confirmed`.
 
 <p align="center">
-  <img src="/assets/native-illustrations/02-single-skill-routing.png" alt="Xiaoyu turns to the bookmarked current page of a notebook beside a /comet entry sign, showing one Skill continuing from state" />
+  <img
+    src="/assets/native-illustrations/02-single-skill-routing.png"
+    alt="Xiaoyu turns to the bookmarked current page of a notebook beside a /comet entry sign, showing one Skill continuing from state"
+  />
 </p>
 
 ## Write ownership
 
-`.comet/current-change.json` records which workflow and change owns the next write. A project installs one shared Hook Router, and one atomic write is routed to at most one Guard. With multiple active changes, select the target explicitly:
+`.comet/current-change.json` records which workflow and change owns the next write. A project installs one shared Hook Router, and one atomic write is routed to at most one Guard. When the selection is missing or points to a missing or archived change, the Router enumerates active changes again: zero means no Comet request is active, exactly one is inferred read-only, and multiple candidates require an explicit selection:
 
 ```bash
 comet native select <change-name>
