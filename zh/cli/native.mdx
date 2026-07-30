@@ -3,7 +3,7 @@ title: 'Native CLI'
 description: '初始化 Native、管理 change、保存阶段内进度、推进状态、验证证据以及安全恢复和归档。'
 ---
 
-`comet native` 是 Native 工作流的确定性 Runtime 入口。它的状态与工作流产物只归属共享项目配置 `.comet/config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取或转换 Classic/OpenSpec change。为生成 baseline 与 implementation scope，Runtime 会有界读取项目所有范围内的文件内容；项目存在 Git metadata 时，仅在构建 Git-aware snapshot 时调用 Git。它不会调用外部 Skill、shell 或项目命令；内置 `comet native check` 仍不调用 Git 或任何外部进程。
+`comet native` 是 Native 工作流的确定性 Runtime 入口。它的状态与工作流产物只归属共享项目配置 `.comet/config.yaml` 和配置指定的 `<artifact-root>/comet/`，不会读取或转换 Classic/OpenSpec change。为生成 baseline 与 implementation scope，Runtime 会有界读取项目所有范围内的文件内容；项目存在 Git metadata 时，仅在构建 Git-aware snapshot 时调用 Git。除显式的 `receipt automated` 外，Runtime 不调用 shell、项目命令或外部 Skill；内置 `comet native check` 仍不调用 Git 或任何外部进程。
 
 ## 初始化与根目录
 
@@ -38,7 +38,6 @@ comet native root move artifacts
 comet native new <change-name> [--language en|zh-CN]
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
-comet native list [--cursor <token>]
 comet native show <change-name>
 comet native status [--cursor <token>]
 comet native status <change-name> [--details [--acceptance-cursor <token>]]
@@ -75,7 +74,7 @@ Git selection 需要一次稳定且有界的枚举：
 
 ### 有界状态视图
 
-`list` 与不带 change 的 `status` 返回同一种只读分页投影：
+不带 change 的 `status` 返回 active change 的只读分页投影：
 
 - 每页最多 24 个 active change；
 - 最多接受 4096 个可见 change；
@@ -98,6 +97,26 @@ comet native checkpoint <change-name> \
 
 Checkpoint 保存同阶段摘要、下一动作和内容寻址的产物 manifest，不改变 phase。`--expect-revision` 使用 CAS 防止旧会话覆盖更新后的状态。恢复会话应从 `status` 返回的 checkpoint 继续，而不是依赖聊天记忆。
 
+## 验收证据 receipt
+
+```bash
+comet native receipt manual <change-name> \
+  --acceptance <id> \
+  --step <text> \
+  --observation <text>
+
+comet native receipt automated <change-name> \
+  --acceptance <id> \
+  [--timeout-ms <n>] \
+  -- <executable> [args...]
+
+comet native evidence format [--entries <path>]
+```
+
+Manual receipt 记录可复核的操作步骤与观察结果，身份固定为 Runtime 来源，不接受 `--responsible` 或 `--confirmed`。Automated receipt 从项目根目录运行明确给出的命令，继承当前项目环境，支持 Windows 的 `.cmd`、`.bat` 和 `.ps1` shim，并在保存有界输出摘要前清理疑似凭据。命令的退出状态、超时、工作区前后身份和输出 hash 都会写入 receipt。
+
+把每条 Acceptance ID 对应的 receipt 引用写入 `verification.md`，再用 `evidence format` 生成 Runtime 可解析的规范区块。失败验收可以引用非通过的 automated 或 manual receipt；Runtime 会据此推导失败检查与修复缺口，无需调用方另行分类。
+
 ## 内置只读检查
 
 ```bash
@@ -112,7 +131,7 @@ comet native check <change-name>
 - 接受任意命令、环境变量、路径或超时参数；
 - 修改项目源码、change phase、Run state 或 trajectory。
 
-检查发现问题或 scope 已 stale 时返回退出码 `1`，但 receipt 仍会保存。模型仍应按任务风险自行运行真实项目测试；内置 check 是可复核的补充证据，不是通用测试执行器。
+检查发现问题或 scope 已 stale 时返回退出码 `1`，但 receipt 仍会保存。提交 `next --result pass --report ...` 时，Runtime 会自动运行并绑定这项必需检查；无需调用方传入 receipt。模型仍应按任务风险自行运行真实项目测试；内置 check 不是通用测试执行器。
 
 ## 阶段推进
 
@@ -124,9 +143,6 @@ comet native next <change-name> --summary <text> \
   [--allow-partial-scope <sha256> --partial-reason <text> --confirmed] \
   [--result pass|fail] \
   [--report <change-relative-path>] \
-  [--receipt <runtime/evidence/check-receipts/...json>] \
-  [--failure-category <token>]... \
-  [--failed-check <token>]... \
   [--override-repair <sha256> --override-summary <text>]
 ```
 
@@ -151,11 +167,11 @@ Verify fail 会自动返回 Build，并把已校验的 failed/missing Acceptance
 
 - Runtime 使用 contract、failed/missing Acceptance ID 和失败检查 ID 形成重复失败签名；
 - 缺口减少、检查转绿或缺失证据恢复为当前有效证据才算语义进展；只修改代码或 implementation scope 不会重置计数；
-- 相同语义缺口第二次出现时告警，第三次出现且没有进展时 continuation 进入人工停止；
-- 有明确新假设时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
+- 相同语义缺口第二次出现时告警；第三次出现且没有进展、但仍有 override 时，continuation 保持 Agent-owned，并要求一个具体的新修复假设；
+- 使用 `status` 返回的精确签名和非空假设摘要最多 override 一次；不能把这个 Agent-owned 步骤转交给用户；
 - 同一 contract 的 Verify fail 默认上限为 5，可通过 `native.max_verify_failures` 配置正整数；达到上限后停止。
 
-只有用户确认后的 contract 变化会开始新的目标周期。达到停止条件时，应让用户决定是否调整目标、约束或终止，不应反复调用 `next`、弱化检查或提前归档。
+只有用户确认后的 contract 变化会开始新的目标周期。Override 已使用或验证预算耗尽时，Runtime 返回一次明确决策，由用户选择扩大预算、修改已确认 contract 或停止；不应反复调用 `next`、弱化检查或提前归档。
 
 ## 两步 Archive
 
