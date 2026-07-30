@@ -1,0 +1,136 @@
+---
+title: "Migrate the Classic layout"
+description: "Safely migrate Classic Spec from openspec/ to docs/openspec/ during recovery and troubleshooting, and recover an interrupted migration."
+---
+
+Classic supports two OpenSpec layouts: older projects use root-level `openspec/`, while new projects use `docs/openspec/`. `.comet/config.yaml` selects the layout with `classic.artifact_layout`, but **changing that field alone does not migrate the directory**.
+
+This page covers Classic layout migration and recovery of its migration transaction. For a normal interrupted session, device switch, or context compaction, run [`/comet`](/en/guides/resuming-workflow) again.
+
+## Check whether migration is needed
+
+From the project root, run:
+
+```bash
+comet classic root show
+```
+
+The command reports the resolved layout and paths. `artifactLayout: "legacy"` means the Classic root is `openspec/`; `artifactLayout: "docs"` means it is `docs/openspec/`.
+
+| Current layout | What to do                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------- |
+| `legacy`       | Continue to the dry run if you want the new layout.                                             |
+| `docs`         | No migration is needed. Resume or advance the change with `/comet`.                             |
+| Command fails  | Run `comet doctor`, repair configuration, installation, or an incomplete migration, then retry. |
+
+`docs` is the default layout for new Classic projects. Existing projects retain their detected `legacy` layout. Both are supported, so do not interrupt active work only to migrate.
+
+## Check before migrating
+
+Migration moves the **complete** `openspec/` tree, including active changes, archived changes, specifications, and configuration. Ask collaborators to stop writing Classic artifacts, then commit or stash the current worktree.
+
+Run the read-only preflight:
+
+```bash
+comet classic root move docs --dry-run
+```
+
+The preflight does not change files. It reports the source and target, file summary, configuration change, conflicts, blockers, and available recovery strategies. Continue only when it reports `ready to apply: yes`.
+
+<Warning>
+  Do not edit <code>openspec/</code>, <code>docs/openspec/</code>, or{" "}
+  <code>.comet/config.yaml</code>
+  between dry run and apply. The migration checks their identities again and
+  stops rather than overwriting new content.
+</Warning>
+
+Common blockers and how to handle them:
+
+| Preflight result                                     | Cause                                                                                       | What to do                                                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| The `docs` target is non-empty                       | `docs/openspec/` already contains content that cannot be proven to belong to this migration | Preserve and inspect that content; do not overwrite it with the migration command.                       |
+| A root migration is pending recovery                 | A previous migration left a transaction record                                              | Complete “Recover an interrupted migration”, then run the dry run again.                                 |
+| Classic is disabled or configuration is incompatible | The project cannot be migrated as a Classic project                                         | Use `comet doctor` to diagnose configuration and installation; do not create migration records manually. |
+| Conflicts or blockers                                | The source, target, or configuration does not meet the safety conditions                    | Resolve the reported conflict, then run the dry run again.                                               |
+
+## Apply the migration
+
+After the preflight succeeds, run this from the same project root:
+
+```bash
+comet classic root move docs --apply
+```
+
+In the current release, `--apply` does not take a plan ID. Comet rechecks the preflight boundaries, copies and verifies the complete tree, changes `classic.artifact_layout` to `docs`, and then cleans up the old root. It preserves change runtime state, checkpoints, trajectory, handoffs, and archived evidence pointers.
+
+After the command reports completion, confirm the new root:
+
+```bash
+comet classic root show
+```
+
+The output should show `artifactLayout: "docs"` and `openSpecRoot: "docs/openspec"`. You can now run `/comet` again so Classic discovers and resumes active changes from the new path.
+
+## Recover an interrupted migration
+
+If `--apply` stops because of an interrupted process, changed files, or another error, do not move directories manually, delete `.comet/classic-root-move.json`, or edit `classic.artifact_layout` directly. Doing so removes the evidence Comet uses to determine which tree is trustworthy.
+
+Diagnose the transaction first:
+
+```bash
+comet doctor
+```
+
+The diagnostic reports the migration stage, the source and target state, and the recovery strategies that are currently allowed. To finish the original migration, run:
+
+```bash
+comet doctor --repair --strategy continue
+```
+
+To abandon the migration, when diagnostics allow rollback, run:
+
+```bash
+comet doctor --repair --strategy rollback
+```
+
+`continue` and `rollback` are not interchangeable. Comet accepts only a strategy that is still safe for the transaction stage. For example, it cannot roll back after configuration has switched. If a strategy is rejected, preserve the current files, resolve the reported conflict or restore from a trusted backup, and do not force-clean directories.
+
+After recovery, run:
+
+```bash
+comet classic root show
+comet classic root move docs --dry-run
+```
+
+The first command confirms the authoritative root. The second explicitly reports that `docs/openspec/` needs no repeat migration when it is already active; otherwise it gives fresh readiness and blockers for the `legacy` layout.
+
+## Troubleshoot after migration
+
+If `/comet` does not find the expected change after migration, check in this order:
+
+1. Run `comet classic root show` and confirm that `changesRoot` is `docs/openspec/changes/`.
+2. Confirm that active changes are in that directory and archived changes are in `docs/openspec/changes/archive/`.
+3. Run `comet status` to inspect phase, task progress, and `runtime_eval`.
+4. Run `comet doctor` to repair installation, configuration, or evidence findings.
+5. Run `/comet` again so Classic resumes from the current file state.
+
+<Note>
+  `classic.artifact_layout` selects only the Classic OpenSpec root. Native uses
+  its separate `native.artifact_root`; migrating Classic does not move Native
+  `comet/` artifacts.
+</Note>
+
+## Do not do this
+
+- Do not move `openspec/` manually with a file manager or `mv`.
+- Do not change only `classic.artifact_layout` to `docs`.
+- Do not create, archive, or edit Classic changes while a migration transaction is unresolved.
+- Do not delete the migration journal, staging directory, or quarantine directory to “unblock” the migration.
+
+These directories and configuration fields must switch in one transaction. Use `comet classic root move` and `comet doctor --repair` so recovery can verify and preserve all Classic facts.
+
+## Next steps
+
+- [Resuming interrupted work](/en/guides/resuming-workflow) — Recover a normally interrupted Classic change
+- [Broken state and recovery](/en/guides/state-recovery) — Diagnose routing, state, and evidence problems
+- [Project file structure](/en/guides/project-structure) — See where Classic artifacts, runtime state, and configuration live
