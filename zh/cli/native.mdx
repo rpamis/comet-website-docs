@@ -38,6 +38,7 @@ comet native root move artifacts
 comet native new <change-name> [--language en|zh-CN]
 comet native spec remove <change-name> <capability>
 comet native spec rebase <change-name> --summary <text>
+comet native list [--cursor <token>]
 comet native show <change-name>
 comet native status [--cursor <token>]
 comet native status <change-name> [--details [--acceptance-cursor <token>]]
@@ -74,7 +75,7 @@ Git selection 需要一次稳定且有界的枚举：
 
 ### 有界状态视图
 
-不带 change 的 `status` 返回 active change 的只读分页投影：
+`list` 与不带 change 的 `status` 返回同一种只读分页投影：
 
 - 每页最多 24 个 active change；
 - 最多接受 4096 个可见 change；
@@ -113,8 +114,6 @@ comet native check <change-name>
 
 检查发现问题或 scope 已 stale 时返回退出码 `1`，但 receipt 仍会保存。模型仍应按任务风险自行运行真实项目测试；内置 check 是可复核的补充证据，不是通用测试执行器。
 
-提交 Verify `pass` 时，Runtime 会自动运行这项内置 required check 并把 receipt 绑定到当前验证。`comet native check` 仍可用于提前查看同一检查结果。
-
 ## 阶段推进
 
 ```bash
@@ -125,6 +124,9 @@ comet native next <change-name> --summary <text> \
   [--allow-partial-scope <sha256> --partial-reason <text> --confirmed] \
   [--result pass|fail] \
   [--report <change-relative-path>] \
+  [--receipt <runtime/evidence/check-receipts/...json>] \
+  [--failure-category <token>]... \
+  [--failed-check <token>]... \
   [--override-repair <sha256> --override-summary <text>]
 ```
 
@@ -149,11 +151,11 @@ Verify fail 会自动返回 Build，并把已校验的 failed/missing Acceptance
 
 - Runtime 使用 contract、failed/missing Acceptance ID 和失败检查 ID 形成重复失败签名；
 - 缺口减少、检查转绿或缺失证据恢复为当前有效证据才算语义进展；只修改代码或 implementation scope 不会重置计数；
-- 相同语义缺口第二次出现时告警，第三次出现且没有进展时进入 `repair-stagnation-stop` 恢复分支；
-- 仍有 override 时，Agent 先提出明确的新修复假设，再使用 `status` 返回的签名和非空摘要继续一次；
-- 同一 contract 的 Verify fail 默认上限为 5，可通过 `native.max_verify_failures` 配置正整数；override 或验证预算耗尽后，Runtime 才要求用户决定。
+- 相同语义缺口第二次出现时告警，第三次出现且没有进展时 continuation 进入人工停止；
+- 有明确新假设时，只允许使用 `status` 返回的签名和非空摘要 override 一次；
+- 同一 contract 的 Verify fail 默认上限为 5，可通过 `native.max_verify_failures` 配置正整数；达到上限后停止。
 
-只有用户确认后的 contract 变化会开始新的目标周期。进入恢复分支时先按 finding 形成新假设，不应反复调用 `next`、弱化检查或提前归档；只有 continuation 明确要求用户决定时才等待用户。
+只有用户确认后的 contract 变化会开始新的目标周期。达到停止条件时，应让用户决定是否调整目标、约束或终止，不应反复调用 `next`、弱化检查或提前归档。
 
 ## 两步 Archive
 
