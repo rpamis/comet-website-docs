@@ -3,7 +3,7 @@ title: 'Native 产物与状态'
 description: '理解 .comet/config.yaml、brief、target spec、comet-state.yaml、证据与归档目录的职责。'
 ---
 
-Native 把需要跨会话保留的事实写入文件。Agent 恢复时以这些文件和仓库现状为准，而不是依赖聊天记忆。用户通常只需要阅读 brief、spec 和 verification report；状态、hash、锁与事务由 Runtime 维护。
+会话关掉再打开，工作不丢。Native 把需要跨会话保留的事实全部写成文件，恢复靠磁盘事实，不靠聊天记忆。你通常只需要阅读 brief、spec 和 verification report；状态、hash、锁与事务由 Runtime 维护，不用你管。
 
 ## 项目布局
 
@@ -106,18 +106,12 @@ Checkpoint 不替代 brief、spec 或 verification report，也不推进 phase�
 
 ## 有界读取与内容寻址
 
-Native 对 change 数量、spec 大小、finding、Acceptance ID、输出和归档树设置预算。列表与详情使用绑定当前内容集合的 cursor；输入变化后旧 cursor 会明确失效。
+Native 用 hash 把验证结论、归档预检、checkpoint 等都和当时的文件内容绑在一起。这样判断"证据是否还作数"时，看的是当前文件的实际内容，而不是一句"已经验证过"的文字声明。文件一变，对应的旧结论自动失效。
 
-`baseline-manifest.json` 是创建 change 时捕获的有界项目快照。它不仅保存文件内容身份，还保存规范化后的 `include`、`exclude`、policy hash、执行限制、遗漏事实和完整性状态。Git provider 只纳入 tracked 与未被 ignore 的 untracked 文件并原子表示 submodule/gitlink；非 Git 项目使用带前后枚举围栏的有界物理树 provider。创建或 v1/v2 migration cutover 时 baseline 必须完整；当前 v3 baseline 不能用当前文件自动重建。
+范围（`include`/`exclude`）在 change 创建时就定死，写进了 `baseline-manifest.json`。实现过程中就算有人去改 `.comet/config.yaml`，也没法让已纳入范围的改动消失。但资源预算（`max_files`、`max_total_bytes`、`max_duration_ms`）是从当前配置读的——仓库变大了，直接调高预算就行，不必动范围。
 
-后续 current snapshot 始终使用 baseline manifest 中固化的 policy，而不是重新读取项目配置中的 include/exclude。这样实现过程中即使有人修改 `.comet/config.yaml`，也不能把已纳入范围的变化隐藏掉。资源预算仍从当前项目配置读取，因此仓库增长后可以提高 `max_files`、`max_total_bytes` 或 `max_duration_ms`，继续完成同一审计范围。
+如果范围或预算超了，Runtime 会停下来，告诉你实际受影响的路径和该怎么调，而不是笼统报错。这里有个底线：范围不完整时 Runtime 不会靠猜补全（比如不会把缺失文件当成删除），也不能靠手改 evidence 绕过。
 
-Pattern 语义、三套可复制配置以及如何判断“提高预算还是排除文件”，见 [Native 配置](/zh/native/configuration#内容快照范围与预算) 和 [Native 常见问题](/zh/native/faq#内容快照与-implementation-scope)。
-
-implementation scope、spec baseline、current snapshot、verification report、check receipt、checkpoint manifest 与归档预检都使用 hash 绑定。current snapshot 不完整时不会推断删除；变化明细超预算时，`scope-detail-overflow` 用计数与内容 hash 保留其余变化的结构化事实。这样可以判断证据是否仍对应当前事实，而不是只相信“已经验证过”的文字声明。
-
-Git 枚举还会显式报告 `git-selection-changed` 与 `git-enumeration-limit`。前者必须等 index 稳定后重试，绝不可授权；后者应优先通过缩小或清理项目所有范围、或后续产品预算调整来恢复。baseline 创建与 migration cutover 必须完整，没有 partial 授权；仅在之后的 current snapshot 中恢复不可行、Runtime 返回带计数与内容 hash 的可授权 scope，且用户理解未知尾部风险时，`git-enumeration-limit` 才可使用精确 hash、理由与 `--confirmed` 走普通 partial 协议。两者都不能通过手改 evidence 绕过。
-
-物理树枚举会显式报告 `physical-selection-changed` 与 `physical-enumeration-limit`。前者要求等待并发文件操作结束，后者要求缩小项目树或移出非项目内容；两者都无法稳定绑定未知尾部，在 current snapshot 中也不能通过 partial scope 授权。
+Pattern 怎么写、三套可复制的范围配置，以及"该提高预算还是排除文件"怎么判断，见 [Native 配置](/zh/native/configuration#内容快照范围与预算) 和 [Native 常见问题](/zh/native/faq#内容快照与-implementation-scope)。
 
 下一步阅读 [安全与恢复](/zh/native/safety-and-recovery)。

@@ -1,38 +1,46 @@
 ---
 title: 'Verification evidence and autonomous repair'
-description: 'Understand implementation scopes, acceptance evidence, stale verification, and bounded autonomous repair in Native.'
+description: 'Understand how Native forms an implementation scope, acceptance evidence, stale evidence, and bounded repair.'
 ---
 
-Native does not prescribe TDD or a fixed review method, but verification has deterministic requirements: conclusions must match the current requirements, specifications, and real implementation scope, and an unrun check cannot be reported as passed.
+Native does not prescribe a fixed TDD or review method, but it does have one hard rule: the verification conclusion must correspond to the current requirements and the real implementation, and a check that has not actually been run cannot be written as passed. **The Agent finds and repairs gaps; the Runtime judges whether it is done.**
 
 ## Implementation scope
 
-At the end of Build, the model submits real project-relative paths. The Runtime content-addresses those artifacts together with the current change contract, creation baseline, and current project snapshot to form an implementation scope and derive stable Acceptance IDs.
+At the end of Build, the model submits the files it actually changed. Based on those artifacts and the current project state, the Runtime confirms exactly which scope this implementation covered (the implementation scope).
 
-A Git project snapshot contains only tracked and non-ignored untracked files and treats each submodule/gitlink as one atomic entry. Non-Git projects use the bounded physical-tree provider. An incomplete current snapshot never turns a missing path into a guessed deletion. When change details exceed the budget, bounded items remain and `scope-detail-overflow` represents the rest with a count and content hash.
+This scope is fixed when the change is created — it is the scope circumscribed by `snapshot.include`/`exclude` in the configuration. Changing the configuration during implementation can only affect future new changes; it cannot make the current change's differences disappear into thin air. If you find that an excluded path is in fact an implementation dependency, the correct move is to update the requirement and create a new change with a complete scope, rather than reusing the old scope.
 
-The current snapshot reuses the include/exclude policy stored in the baseline manifest when the change was created. This keeps baseline and current comparisons on the same boundary. Editing project configuration during implementation affects future changes only and cannot make current-change differences disappear. You may raise capture budgets without changing scope identity. If an excluded path later becomes a real implementation dependency, update the requirement boundary and establish a baseline that covers the complete scope instead of reusing the old scope.
-
-If the Runtime cannot prove that the scope is complete, it remains in Build and returns a partial-scope hash with unowned items. Add the missing artifacts or remove the unexplained changes first. Proceeding with partial scope requires explicit user acceptance of a concrete gap that the Runtime permits for authorization, the same hash, a reason, and `--confirmed`. `git-selection-changed` requires a retry after the Git index settles and is never authorizable. For `git-enumeration-limit`, first decide whether affected files belong in scope: raise snapshot budgets or clean unrelated project content when they do, or configure an explicit exclude for a future change when they do not. A later current snapshot may use the ordinary partial protocol only when recovery is impossible, the Runtime returns an authorizable scope bound to a count and content hash, and the user understands the unknown-tail risk. In non-Git projects, `physical-selection-changed` requires a stable project tree and `physical-enumeration-limit` requires reducing that tree; neither can bind its unknown tail and neither is authorizable. No integrity failure may be bypassed through edited evidence.
+If the scope contains changes that cannot be accounted for, the Runtime stops at Build and tells you what is missing. Fill it in first; if it genuinely cannot be filled in, you must explicitly accept the residual risk before you can continue. But there is a bottom line: an incomplete scope cannot be bypassed by hand-editing the evidence.
 
 ## Verification report
 
-`verification.md` records at least:
+A verification report records at least:
 
-- commands actually run and their results;
-- skipped checks and reasons;
+- the commands actually run and their results;
+- which checks were skipped, and why;
 - known limitations and the overall conclusion;
-- a current manual or automated receipt reference, or an honest `skipped_reason`, for every Runtime Acceptance ID.
+- the evidence for each acceptance item; anything that could not be run is marked honestly, never written as passed.
 
-`comet native receipt manual` records reviewable steps and observations. `receipt automated` runs an explicit check command from the project root and stores its exit status, timeout, worktree identity, and a bounded credential-redacted output summary in a content-addressed receipt. A failed acceptance item may cite a non-passing receipt; Runtime derives repair gaps from that evidence without separate caller-supplied failure classifications.
+Use these two commands to record evidence:
 
-`comet native check` performs only a bounded read-only text hygiene scan. It does not call Git, a shell, test scripts, or an external Skill, and it does not replace project tests. Runtime runs and binds this required check automatically when a passing conclusion is submitted, so the caller does not provide its receipt.
+- `comet native receipt manual` — records reviewable manual steps and observations;
+- `comet native receipt automated` — runs one explicit check command and stores the result as reviewable evidence.
 
-## Why evidence becomes stale
+A failed acceptance may also cite a non-passing receipt; the Runtime derives what is still missing from it, so you do not need to submit a separate failure classification.
 
-Verification binds the brief, complete target specifications, implementation scope, revision, report snapshot, built-in required check, and acceptance receipts referenced by the report. Changing any input makes the old evidence stale.
+In addition, when you submit a passing conclusion the Runtime automatically runs one built-in `comet native check` — a read-only text hygiene scan that does not call Git, a shell, or test scripts, does not replace project tests, and is simply a required check bound to a passing conclusion.
 
-If the contract or project snapshot changes during Verify, status returns a summary-only `next`. Run it to retreat to Build and seal a new scope. Reconfirm only when the brief/spec contract hash also changed. If only the project snapshot or implementation changed, retain the existing approval instead of introducing another confirmation. Never submit a conclusion against the old scope. A changed report, receipt, or other bound fact in Archive uses the same retreat protocol; never reuse the old pass.
+## Evidence goes stale
+
+A verification conclusion is not once-and-for-all. It binds to the requirements, the implementation scope, and the project state at that moment — change any of those and the old evidence is void.
+
+There are two sources of change:
+
+- **The requirements or spec changed**: you must be asked to confirm again, because the requirement itself changed.
+- **Only the project files changed** (the requirements did not move): keep the existing confirmation. The Runtime retreats to Build, rebuilds the scope, and re-verifies, without bothering you further.
+
+So never submit a conclusion against the old scope. After entering Archive, if the report or evidence changes again, the same applies: start over, do not reuse the old pass.
 
 <p align="center">
   <img
@@ -41,21 +49,18 @@ If the contract or project snapshot changes during Verify, status returns a summ
   />
 </p>
 
-## Why repair is bounded
+## Bounds on repair
 
-A Verify failure returns to Build. Runtime returns failed or missing acceptance items and failed checks from the validated acceptance matrix. The next iteration addresses those gaps instead of retrying Verify immediately.
+A Verify failure returns to Build. The Runtime hands the unpassed acceptance items to the next round so you close those gaps first, rather than retrying directly.
 
-The repeated-failure signature contains the current contract, sorted failed or missing Acceptance IDs, and failed check IDs:
+But repair cannot loop forever. The bar for "progress" is substantive: fewer gaps, a check turning green, or missing evidence restored count as progress; merely changing files or rewriting explanations while the failure set stays unchanged does not. The rules are roughly:
 
-- the second recurrence of the same semantic gap warns;
-- on the third recurrence without semantic progress, continuation remains Agent-owned while one override remains and requires a concrete new repair hypothesis;
-- only fewer gaps, passing checks, or missing evidence restored as current valid evidence count as semantic progress;
-- changing files, changing implementation scope, or rewriting an explanation without changing the failure set does not reset stagnation;
-- the exact failure signature from `status` and a non-empty hypothesis summary may be used for one override; this step is not delegated to the user;
-- one contract accepts at most five Verify failures by default; set `native.max_verify_failures` to an integer of at least one to change the budget.
+- the second occurrence of the same issue warns;
+- the third occurrence without progress gives one last chance and requires you to propose a new repair hypothesis;
+- the same contract accepts at most five Verify failures by default, adjustable in the configuration with `native.max_verify_failures`.
 
-Repeated-gap stopping and the total failure budget are independent. Only after the override is used or the total failure budget is exhausted does Runtime return one explicit user decision: increase the budget, change the confirmed contract, or stop. Only a user-confirmed contract change starts a new goal cycle; ordinary implementation changes do not clear accumulated failures.
+When the count is spent, the Runtime stops and hands it to you, laying out the current evidence and three directions: raise the limit, change the confirmed requirement, or stop. Only a requirement change you have confirmed resets the count; ordinary implementation changes do not.
 
-This permits continuous repair without treating code activity as completion progress. When a user decision is required, present the current evidence and those three directions once. The model must not weaken checks, enter Archive early, or invent a pass.
+A strong model may repair for several rounds in a row, but the basis for judging completion is whether the gaps are shrinking, not how much code changed.
 
 Continue with [Native workflow](/en/concepts/native-workflow#four-phase-workflow), [Native FAQ](/en/native/faq), [Safety and recovery](/en/native/safety-and-recovery), and [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts).

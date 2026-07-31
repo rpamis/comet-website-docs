@@ -3,15 +3,17 @@ title: 'Native 工作流'
 description: '面向 Fable 5、GPT-5.6 等强模型的自包含需求工作流：详细约束、轻量执行、可恢复证据。'
 ---
 
-Comet Native 是专门适配 Fable 5、GPT-5.6 这一档强编码模型的 Skill。它假设模型能够自主调查代码、形成实现方案并按风险选择测试，因此不再强制固定的设计、计划、TDD、调试或审查方法；同时仍用 Comet 自有 Runtime 管理需求、target spec、阶段、证据、冲突与归档。
+强模型的能力瓶颈不在"会不会写代码"，而在"能不能被信任地完成"。Comet Native 就是为此而生：**需求与验收要具体，执行方法保持轻量。**
 
-它的核心原则是：**需求与验收要具体，执行方法保持轻量。** 轻量指减少对强模型不必要的过程编排，不是减少需求质量或取消验证。
+它假设模型能够自主调查代码、形成实现方案并按风险选择测试，因此不再强制固定的设计、计划、TDD、调试或审查方法；同时用 Comet 自有 Runtime 管理需求、target spec、阶段、证据、冲突与归档，把完成判定权从模型手里收回 Runtime。这样强模型才能放手去干，结果又跑不偏。
 
-## 借鉴 Loop Engineering 的 Native Loop
+## Native Loop：把完成判定权收归 Runtime
 
-Native Loop 参考了 Claude Code 团队对 [Loop Engineering](https://claude.com/blog/getting-started-with-loops) 的说明：loop 是 Agent 重复执行工作周期，直到满足停止条件。设计重点不只是提示词，还包括触发方式、完成标准、验证方式和次数边界。这里的 loop 是受控反馈系统，不是让模型无限重试。
+普通 agent loop 是模型主导的——模型自己判断"做完了没"，框架只提供工具。这给了模型自欺欺人的空间：说一句"完成"，实际没测、没改、甚至没碰代码。
 
-Comet Native 把 loop 限定在 Build 与 Verify 之间：一次实现、一次提交或单次 Agent 执行轮次都只是迭代；只有当前 contract 下的全部验收条件得到当前有效证据支持，工作才算完成。
+Native 借鉴了 Claude Code 团队提出的 [Loop Engineering](https://claude.com/blog/getting-started-with-loops)：loop 是 Agent 重复执行工作周期、直到满足停止条件的受控反馈系统，设计重点包括触发方式、完成标准、验证方式和次数边界。Native 把这套思想做成了 Runtime 主导的收敛机器——**模型负责想和干，Runtime 负责判断是否完成。**
+
+Native 把 loop 限定在 Build 与 Verify 之间：一次实现、一次提交或单次 Agent 执行轮次都只是迭代；只有当前契约下的全部验收条件得到当前有效证据支持，工作才算完成。
 
 ```mermaid
 flowchart LR
@@ -30,18 +32,16 @@ flowchart LR
   C -->|"required"| U
 ```
 
-每轮迭代遵循同一条反馈路径：读取当前 acceptance，完成一批相关实现，运行真实验证，再由 Runtime 判断缺口是否减少。Verify 失败时，failed/missing acceptance 和失败检查会回到 Build，成为下一轮明确输入，而不是留在对话里由模型自行回忆。只有最终 Verify 通过后才会离开 loop 进入 Archive；停滞、预算耗尽或归档策略要求确认时，流程会停止并交还用户。
+每轮迭代遵循同一条反馈路径：读取当前验收条件，完成一批相关实现，运行真实验证，再由 Runtime 判断缺口是否减少。Verify 失败时，未满足的验收项和失败检查会作为结构化输入回到 Build，而不是留在对话里由模型自行回忆。只有最终 Verify 通过后才会离开 loop 进入 Archive。
 
-例如，Agent 在一轮 Build 中按 spec 完成实现，但 Verify 对照完整 target spec 后发现遗漏了一个边界条件。这个遗漏会作为未满足的 acceptance 返回 Build；Agent 在下一轮补齐细节，再运行完整验证。只要仍有可修复的 spec 缺口且尚未触发停止边界，Native Loop 就会继续，而不会把“一轮已经写完代码”误判为完成。
+四个机制让这个 loop 可信收敛，而不是无限打转：
 
-这套方法有四个边界：
+- **以验收缺口驱动工作**：优先处理尚未满足的结果。Runtime 从已校验的验收矩阵派生缺口，强制下一轮先补这些缺口。
+- **以语义变化判断进展**：缺口减少、检查转绿或证据恢复有效才算进展。反复改写代码但失败集合不变，不会重置停滞计数。
+- **自主修复有上限**：同一语义缺口第三次出现且没有进展时停下；同一契约默认最多 5 次 Verify 失败。用完预算，Runtime 把决定权交还用户。
+- **恢复依赖仓库状态**：验收条件、checkpoint、验证报告都持久化在 change 中。会话中断后从同一事实继续，不依赖聊天记忆。
 
-- **以验收缺口驱动工作**：优先处理尚未满足的结果，不以任务叙述或代码数量代替完成度。
-- **以语义变化判断进展**：缺口减少、检查转绿或证据恢复有效才算进展；反复改写实现但失败集合不变，不会重置停滞判断。
-- **自主修复必须有上限**：Runtime 允许连续修复，也会在重复缺口或失败预算耗尽时停止，交还给用户决定。
-- **恢复依赖仓库状态**：acceptance、checkpoint、verification report 和 continuation 都持久化在 change 中；会话中断后从同一事实继续，不依赖聊天记录维持循环。
-
-执行者负责调查、实现和修复，Runtime 负责完成判定、证据有效性与停止边界。两者分工的目的不是增加流程，而是让自主执行能够持续推进，同时保持可验证、可恢复和可停止。
+执行者负责调查、实现和修复，Runtime 负责完成判定、证据有效性与停止边界。一次 Agent 轮次、一次 checkpoint、或 Agent 自述"完成"都不是终态——这是 Native 最硬的一条规则。
 
 <p align="center">
   <img
@@ -54,16 +54,18 @@ flowchart LR
 
 | 维度           | Native                                            | Classic Spec 模式                                        |
 | -------------- | ------------------------------------------------- | -------------------------------------------------------- |
-| 主要适用模型   | Fable 5、GPT-5.6 及同档强模型                     | 低于 Fable 5、GPT-5.6 这一能力档、需要更细步骤指导的模型 |
+| 主要适用模型   | Fable 5、GPT-5.6 及同档强模型                     | 低于这一能力档、需要更细步骤指导的模型                   |
 | 工作流         | Shape → Build → Verify → Archive                  | open → design → build → verify → archive                 |
 | 需求与状态     | Comet 自有 brief、target spec、`comet-state.yaml` | OpenSpec change/delta spec、`.comet.yaml`                |
 | 实现过程       | 模型按仓库事实与风险自主选择                      | 显式组织设计、计划、TDD、调试与审查协议                  |
-| 依赖           | Comet Native Skill 与 Runtime                     | Comet Classic、OpenSpec 与 Superpowers                   |
+| 依赖           | Comet Native Skill 与 Runtime（零外部 Skill）     | Comet Classic、OpenSpec 与 Superpowers                   |
 | 适合的约束强度 | 强结果约束，较少方法约束                          | 更细阶段指导与过程约束                                   |
 
-Classic 并不是旧版 Native，也不是失败后的降级路径。对于 Fable 5、GPT-5.6 以下的模型，更细的 Spec 与执行阶段可以减少遗漏和流程漂移；Comet 现有真实基线评估已经验证，Classic 的强约束能在这类任务中保持良好的任务覆盖与完成效果。Native 则面向已经具备更强自主推理能力的模型，减少重复阶段与依赖 Skill 带来的执行负担。
+如果你用的主力模型是 Fable 5、GPT-5.6 这一档，Native 是默认推荐：强模型被方法论束缚是最大的浪费，Native 把方法选择权还给它，只锁住结果与证据。
 
-现有 Native 与 0.4.0 Classic 的对齐实验包含 16 个任务、每个任务 3 次运行；两种模式的任务级 `pass@3` 都是 100%。该实验支持“两种工作流都能覆盖任务、Native 在该实验中执行更轻”的结论，但不能单独证明所有模型、仓库和任务上的因果优势。详见 [Native 与 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
+对于能力档更低的模型，更细的 Spec 与执行阶段能减少遗漏和流程漂移；Comet 现有真实基线评估已经验证，Classic 的强约束能在这类任务中保持良好的任务覆盖与完成效果。Classic 并不是旧版 Native，也不是失败后的降级路径——两套工作流针对不同的能力曲线，互不升级、互不替换。
+
+现有 Native 与 0.4.0 Classic 的对齐实验包含 16 个任务、每个任务 3 次运行；两种模式的任务级 `pass@3` 都是 100%。该实验支持"两种工作流都能覆盖任务、Native 在该实验中执行更轻"的结论，但不能单独证明所有模型、仓库和任务上的因果优势。详见 [Native 与 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
 
 <Info>
   模型名称是便于选择的能力档参考，不是 Runtime 的硬编码检测条件。Comet
@@ -109,7 +111,7 @@ flowchart LR
 
 Shape 先调查仓库事实，再把 Outcome、Scope、Non-goals、Acceptance examples、Constraints and invariants、Decisions、Open questions 与 Verification expectations 写入 `brief.md`。
 
-模型需要区分两类选择：
+模型区分两类选择：
 
 - 会改变用户可见结果、默认行为、兼容性、范围、风险或不可逆结果的，是用户决定；
 - 只改变实现方式而不改变可观察结果的，是模型自主选择。
@@ -126,9 +128,9 @@ Build 以 brief、target spec 和仓库规则为边界。模型自行决定是�
 
 Verify 对照 Acceptance examples、target spec 和实现风险运行实际检查。`verification.md` 记录命令、结果、跳过理由、已知限制和逐项 Acceptance evidence。
 
-Runtime 将验证结论绑定到当前 brief、target spec、implementation scope 和 revision。任一输入变化后，旧报告、旧 receipt 和旧 pass 都会变为 stale，不能用于归档。失败会返回 Build，并把未满足的 acceptance 与失败检查作为下一轮输入。Runtime 只把缺口减少、检查转绿或证据恢复有效视为语义进展；相同缺口第三次出现且没有语义进展时会停止。同一 contract 的 Verify fail 默认最多 5 次，也可以通过 `native.max_verify_failures` 配置正整数上限。
+Runtime 将验证结论绑定到当前 brief、target spec、implementation scope 和 revision。任一输入变化后，旧报告、旧 receipt 和旧 pass 都会变为 stale，不能用于归档。失败会返回 Build，并把未满足的验收与失败检查作为下一轮输入。详情见 [验证证据与自主修复](/zh/native/verification-and-repair)。
 
-### Archive：两步预检后提交
+### Archive：提交前两步检查
 
 Archive 先生成内容绑定的 `preflightHash`，再在提交时重新检查证据、路径与 canonical spec hash。并行 change 已改变同一 capability 时，归档会停止而不是覆盖；模型需要读取最新 canonical spec，使用 `spec rebase` 刷新基线，再重新实现和验证。
 
@@ -144,6 +146,6 @@ Archive 先生成内容绑定的 `preflightHash`，再在提交时重新检查�
 - canonical spec 存在并发冲突；
 - 相同失败在没有进展的情况下重复出现。
 
-因此，Native 的“自动”是有状态的连续推进，不是后台守护进程，也不是跳过用户决策或安全检查。
+因此，Native 的"自动"是有状态的连续推进，不是后台守护进程，也不是跳过用户决策或安全检查。
 
 继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native 配置](/zh/native/configuration)、[产物与状态](/zh/native/artifacts-and-state)、[安全与恢复](/zh/native/safety-and-recovery)。

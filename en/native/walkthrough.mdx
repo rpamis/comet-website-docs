@@ -1,0 +1,95 @@
+---
+title: 'Native walkthrough'
+description: 'Use a real avatar-upload requirement to run the full Shape -> Build -> Verify -> Archive, and see how the Native Loop converges, how evidence binds, and how an interruption recovers.'
+---
+
+Reading rules only goes so far — watching one real requirement run end to end teaches more. This page takes the requirement "add avatar upload to the user profile page" through Native's four phases, including one verification failure and one session interruption, so you can see how the Loop converges, how evidence binds, and how a broken session recovers.
+
+## The requirement's starting point
+
+You type into the Agent:
+
+```text
+/comet add avatar upload to the user profile page
+```
+
+`/comet` reads the configuration and forwards to `/comet-native`. The Skill re-reads disk state, confirms there is no matching active change, and creates a new one.
+
+## Shape: turning "I want an avatar" into a verifiable contract
+
+The Agent first investigates repository facts: the existing profile-page structure, whether there is any file-upload infrastructure, how authentication works, what storage is used. These checkable facts the Agent handles itself; it does not bother you with them.
+
+It then surfaces a few decisions that genuinely affect product behavior and cannot be inferred from existing code, and asks you one at a time in Sequential mode:
+
+**Round 1** (the most upstream decision):
+
+- **Question**: When avatar upload fails, keep the user's original avatar, or clear it?
+- **Recommendation**: Keep the original avatar; a failure should not cause data loss.
+- **Impact**: Choosing "clear" lets a network blip mid-upload delete an avatar the user already had.
+
+You pick "keep the original avatar." The Agent writes it into `brief.md` immediately and uses it to judge the next question.
+
+**Round 2**:
+
+- **Question**: Should the user be allowed to delete an existing avatar and restore the default?
+- **Recommendation**: Yes; provide a delete entry point.
+- **Impact**: Requires an extra frontend button and backend cleanup logic.
+
+You pick "allow delete." With two rounds done, the Agent decides no further decisions need you and produces a shared-understanding summary:
+
+- On upload failure, keep the original avatar; do not surface an error that confuses the user.
+- Support deleting the avatar and restoring the default.
+- Maximum 2 MB; JPG/PNG supported; server-side compression.
+- If it still exceeds 500 KB after compression, reject it.
+
+Once you confirm this summary, Shape writes `brief.md` and a target spec for each capability, and pins down the acceptance conditions (for example, "uploading a 2 MB JPG should produce a compressed avatar" or "after deleting the avatar the profile page shows the default image"). `--confirmed` advances to Build.
+
+Key point: implementation choices — which HTTP library to use, whether cropping runs on the frontend or backend, where temporary files live — the Agent never asked you about any of them. Those are the model's own choices.
+
+## Build: the Agent implements autonomously
+
+Entering Build, the Agent decides how to do the work on its own: it chooses to reuse the existing form component, compress with sharp on the backend, and place temporary files in the system tmp directory. Native does not require it to write a design document or follow TDD, as long as the implementation satisfies the brief and the target spec.
+
+After implementing a batch of related changes, the Agent self-checks against the complete spec and all acceptance conditions, then submits real project artifacts. The Runtime computes an implementation scope from these artifacts together with the project snapshot — not the Agent's verbal claim of "I changed these," but the fact computed from content hashes.
+
+## Verify: the first failure, the Loop begins to converge
+
+The Agent submits the Build artifacts, and the Runtime advances to Verify. The Agent runs real verification against the acceptance conditions, and one of them fails:
+
+- **Acceptance item**: after deleting the avatar, the profile page shows the default image.
+- **Failure reason**: the delete logic cleared the database record, but the frontend did not refresh and still showed the old avatar.
+
+The Runtime hands this unsatisfied acceptance item and the failed check back to Build **structured**, rather than leaving the Agent to recall what is still missing from the conversation. This is the first convergence round of the Native Loop.
+
+The Agent returns to Build, adds the frontend refresh logic, and submits again. This time the Runtime re-verifies — the post-delete refresh works, and the item turns green. But Verify keeps checking the other acceptance conditions...
+
+## Session interruption: continue from disk
+
+Halfway through verification your session breaks — you switched devices, or the context got compressed. You come back to the project the next day and type:
+
+```text
+/comet continue
+```
+
+Ambient recovery reads disk state, confirms the target change is unique, and enters it automatically. The Agent re-reads `comet-state.yaml`, the brief, the target spec, and the current acceptance progress — it knows precisely: two acceptance items still unrun, last interrupted in the Verify phase. **It does not depend on yesterday's chat history.**
+
+The Agent runs the remaining verification to completion. All acceptance items pass, and the evidence binds to the current brief, spec, scope, and revision.
+
+## Archive: the two-step check before commit
+
+Archive begins. The Runtime first generates a content-bound `preflightHash`, and only then performs the real archive commit — at commit time it re-checks the evidence, the paths, and the canonical spec hash. If someone changed the same capability in between, Archive stops rather than overwriting.
+
+This time there is no concurrent conflict, and the archive succeeds:
+
+- the target spec becomes the new canonical spec;
+- the active change moves into a dated archive directory;
+- the trajectory keeps only phase summaries and evidence references, recording no hidden reasoning.
+
+## After the full run, what you saw
+
+- **The Agent chose its methods**: throughout the run the Agent was never forced into TDD, a written plan, or a review step; it judged for itself how best to implement.
+- **The completion verdict belongs to the Runtime**: a verification failure is not closed by the Agent saying "fixed it" — the Runtime uses evidence to confirm the gap actually shrank.
+- **Recoverable**: after the session broke, it recovered precisely from disk, with no reliance on chat memory.
+- **Trustworthy evidence**: every acceptance item has matching real evidence; a check that was never run cannot be written as passed.
+
+For the engineering principles behind the Loop's convergence, see [Native Loop engineering principles](/en/native/native-loop). For a deep comparison of Native and Classic, see [How to choose between Native and Classic](/en/native/native-vs-classic). To start from your own requirement, see [Native quickstart](/en/native/quickstart).

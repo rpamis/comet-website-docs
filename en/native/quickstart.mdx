@@ -3,7 +3,24 @@ title: 'Native quickstart'
 description: 'Initialize Native for strong models such as Fable 5 and GPT-5.6, then complete a resumable change.'
 ---
 
-Native is Comet's self-contained Skill for strong coding models in the Fable 5 and GPT-5.6 capability tier. It preserves clarification, complete specifications, state, verification evidence, and archiving while leaving implementation plans, test depth, debugging, and review methods to the model's judgment based on repository facts and risk.
+Strong models do not need to be taught the method step by step. Comet Native hands the planning, implementation, testing, and review methods to the model to judge for itself, and locks the outcome down with only a hashable requirements contract, content-addressed verification evidence, and a recoverable archive.
+
+One Agent turn, one checkpoint, or the Agent's self-reported "done" does not count as the endpoint — the completion verdict belongs to the Runtime, not the model. Strong models can therefore swing freely and the result cannot drift off course.
+
+## Native's four phases
+
+```mermaid
+flowchart LR
+  S["Shape: requirements and decisions"] --> B["Build: autonomous implementation"]
+  B --> V["Verify: evidence and acceptance"]
+  V -->|pass| A["Archive: update specs and archive"]
+  V -->|fail| B
+```
+
+- **Shape** — turns a vague requirement into a hashable contract: investigate the facts, ask only about decisions that genuinely affect product behavior, and write down the goal and acceptance.
+- **Build** — the model chooses the implementation method itself; it does not need to follow a framework-mandated TDD, planning, or review flow.
+- **Verify** — checks acceptance against real verification evidence; a check that has not been run cannot be written as passed; on failure, return to Build and continue.
+- **Archive** — after verification passes, update the specs and archive; even if the run is interrupted midway, you can recover from disk.
 
 ## 1. Initialize the project
 
@@ -14,7 +31,7 @@ npm install -g @rpamis/comet
 comet init
 ```
 
-Interactive initialization explains Native, Classic, and enabling both. New projects default to Native in non-interactive mode. You can also choose explicitly:
+Interactive initialization explains the difference between Native, Classic, and enabling both at once. New projects default to Native in non-interactive mode. You can also choose explicitly:
 
 ```bash
 comet init --workflow native
@@ -22,9 +39,9 @@ comet init --workflow native --root .
 comet init --workflow both
 ```
 
-`--workflow both` installs two independent workflows while keeping `/comet` on Native by default. Native stores artifacts under `docs/comet/` by default. Pass `--root .` only when you explicitly want `<project>/comet/`. The option does not alter Classic directories.
+`--workflow both` installs two independent workflows, but `/comet` still defaults to Native. Native stores artifacts under `docs/comet/` by default; pass `--root .` only when you explicitly want `comet/` at the project root.
 
-The shared project configuration is stored at `.comet/config.yaml`:
+After initialization, the shared project configuration lives at `.comet/config.yaml`:
 
 ```yaml
 schema: comet.project.v1
@@ -45,9 +62,7 @@ native:
     max_duration_ms: 60000
 ```
 
-Native does not depend on OpenSpec, Superpowers, CodeGraph, or any external Skill. Project initialization still installs one Comet-owned workflow Rule and, on platforms with Hook support, one Hook Router that sends each write to the Guard for the current change's workflow.
-
-`snapshot` defines the auditable project scope and capture budgets for new changes. Keep the complete default scope for a typical project. Configure include/exclude for a monorepo or large repository only after identifying its dependency boundary. See [Native configuration](/en/native/configuration#content-snapshot-scope-and-budgets).
+For a typical project, keep the default complete snapshot scope and leave `snapshot` alone. Configure `include`/`exclude` for a monorepo or large repository in [Native configuration](/en/native/configuration#content-snapshot-scope-and-budgets).
 
 ## 2. Start from the shared entry
 
@@ -57,27 +72,25 @@ Enter this in your Agent:
 /comet add avatar uploads to the user profile
 ```
 
-`/comet` deterministically forwards to `/comet-native` from `default_workflow` in `.comet/config.yaml`. It does not guess from task size or convert a Native change into a Classic change.
+`/comet` forwards to `/comet-native` from `default_workflow` in `.comet/config.yaml`. It only reads the configuration and forwards deterministically; it does not guess the mode on the fly from task size.
 
-You can call `/comet-native` directly when you need to bypass the default. It is a Skill entry, not a shell command.
+To bypass routing and enter Native directly, or to diagnose "why did it not enter Native", use `/comet-native`. It is a Skill entry, not a shell command.
 
-## 3. Answer decisions that change product behavior
+## 3. Answer decisions that genuinely affect product behavior
 
-Native investigates repository facts first. It asks the user only about unresolved decisions that change scope, output, defaults, compatibility, risk, or irreversible results. The default `sequential` mode asks one upstream question per round. `batch` mode asks every question whose prerequisites are already settled. Both modes include a recommendation and the practical impact of each option.
+Native investigates repository facts first. Only decisions that still change scope, output, default behavior, compatibility, risk, or irreversible results go to the user; the implementation approach is the model's to decide.
 
-The model cannot substitute a “reasonable default,” adjacent implementation, or industry convention for a user decision. Once clarification is complete, the answer is recorded in the brief and complete target specification before Build begins.
+The default `sequential` mode asks one upstream question per round. `batch` mode asks every question whose prerequisites are already settled. Both modes provide a recommendation and the impact of each option, and require you to confirm the complete shared understanding before entering Build.
 
-## 4. Let the workflow continue
+## 4. Let the workflow keep advancing
 
-```mermaid
-flowchart LR
-  S["Shape: requirements and decisions"] --> B["Build: autonomous implementation"]
-  B --> V["Verify: evidence and acceptance"]
-  V -->|pass| A["Archive: update specs and archive"]
-  V -->|fail| B
-```
+After a phase passes, Native continues to the next phase in the same Skill; you do not need to switch manually. `next: auto` means the Runtime has allowed continuation — it is not a background daemon, it is a confirmation that "the current state can move forward".
 
-After a phase passes, Native continues in the same Skill. `next: auto` means the Runtime allows continuation; it does not mean a background service invokes the model. The workflow stops with a concrete reason when it needs a user decision, encounters damaged state or conflicts, or sees repeated no-progress failures.
+The workflow stops and returns a concrete reason instead of forcing through when:
+
+- there is still a product behavior that needs your decision;
+- state is damaged, the configuration cannot be interpreted, or a concurrency conflict appears;
+- the same verification failure recurs repeatedly without real progress.
 
 ## 5. Inspect and resume
 
@@ -87,9 +100,9 @@ comet native status <change-name> --details
 comet native doctor <change-name>
 ```
 
-After an interrupted session, enter `/comet continue`. Ambient Resume reads disk state first and resumes only when the target is unambiguous. It asks when several candidates or an unclear request remain and never guesses across workflows.
+After an interrupted session, enter `/comet continue` again. Context-aware recovery reads disk state first and enters the matching change automatically only when the target is unambiguous; with several candidates or an unclear request, it asks instead of guessing across workflows.
 
-To disable the read-only probe for ordinary requests, set this in `.comet/config.yaml`:
+To stop ordinary requests from triggering the read-only recovery probe, set this in `.comet/config.yaml`:
 
 ```yaml
 ambient_resume: false

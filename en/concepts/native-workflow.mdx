@@ -3,23 +3,25 @@ title: 'Native workflow'
 description: 'A self-contained requirements workflow for strong models such as Fable 5 and GPT-5.6: detailed constraints, lightweight execution, and recoverable evidence.'
 ---
 
-Comet Native is a Skill designed specifically for strong coding models in the Fable 5 and GPT-5.6 capability tier. It assumes the model can investigate code, form an implementation approach, and choose verification according to risk. It therefore does not mandate fixed design, planning, TDD, debugging, or review methods, while a Comet-owned Runtime still manages requirements, complete target specifications, phases, evidence, conflicts, and archiving.
+The capability bottleneck of strong models is not "can they write code", but "can they be trusted to finish". Comet Native is built for exactly this: **requirements and acceptance must be concrete, and the execution method stays lightweight.**
 
-Its core principle is: **make requirements and acceptance precise while keeping execution methods lightweight.** Lightweight means removing unnecessary process orchestration for capable models, not reducing requirement quality or skipping verification.
+It assumes the model can investigate code autonomously, form an implementation approach, and choose tests according to risk, so it no longer mandates a fixed design, planning, TDD, debugging, or review method; at the same time a Comet-owned Runtime manages requirements, the target spec, phases, evidence, conflicts, and archiving, and reclaims the completion verdict from the model back to the Runtime. Only this way can strong models swing freely and the result stay on course.
 
-## Native Loop, informed by Loop Engineering
+## Native Loop: reclaiming the completion verdict to the Runtime
 
-Native's completion loop draws on the Claude Code team's introduction to [loops](https://claude.com/blog/getting-started-with-loops): an Agent repeats a cycle of work until a stop condition is met. The design must define the trigger, completion criteria, verification, and iteration bounds. A loop here is a controlled feedback system, not permission for unlimited retries.
+An ordinary agent loop is model-led — the model judges for itself whether it is "done", and the framework only provides tools. This leaves room for the model to deceive itself: claim "complete", when nothing was tested, nothing was changed, or even nothing was touched.
 
-Comet Native bounds Native Loop to Build and Verify. One implementation, one commit, or one Agent turn is only an iteration; work is complete only when current evidence supports every acceptance condition under the current contract.
+Native borrows from the Claude Code team's [Loop Engineering](https://claude.com/blog/getting-started-with-loops): a loop is a controlled feedback system where the Agent repeats a work cycle until a stop condition is met, with the design focused on the trigger, completion criteria, verification method, and iteration bounds. Native turns that idea into a Runtime-led convergence machine — **the model thinks and does, the Runtime judges whether it is done.**
+
+Native bounds the loop to Build and Verify: one implementation, one commit, or a single Agent execution turn is only an iteration; only when every acceptance condition under the current contract is supported by currently valid evidence is the work complete.
 
 ```mermaid
 flowchart LR
   S["Shape<br/>Goal, specs, and acceptance"] --> B
 
   subgraph L["Native Loop: only Build ↔ Verify"]
-    B["Build<br/>Investigate, implement, repair"] --> V["Verify<br/>Checks and acceptance evidence"]
-    V -->|"failed / missing acceptance"| G["Runtime-derived acceptance gaps"]
+    B["Build<br/>Investigate, implement, repair"] --> V["Verify<br/>Checks and itemized evidence"]
+    V -->|"failed / missing acceptance"| G["Runtime derives acceptance gaps"]
     G --> B
   end
 
@@ -30,18 +32,16 @@ flowchart LR
   C -->|"required"| U
 ```
 
-Each iteration follows the same feedback path: read current acceptance, implement a related batch, run real verification, and let the Runtime determine whether gaps decreased. On failure, failed or missing acceptance items and failed checks return to Build as explicit input instead of relying on conversation memory. Only a final Verify pass leaves Native Loop for Archive; stagnation, budget exhaustion, or a required archive decision returns control to the user.
+Each iteration follows the same feedback path: read the current acceptance conditions, complete a related batch of implementation, run real verification, and then let the Runtime judge whether the gaps shrank. On Verify failure, unsatisfied acceptance items and failed checks return to Build as structured input rather than sitting in the conversation for the model to recall on its own. Only after a final Verify pass does the loop exit into Archive.
 
-For example, an Agent may finish one Build iteration and then discover in Verify that an edge case from the complete target spec was not implemented. Native records that omission as an unsatisfied acceptance item and returns it to Build. The Agent fills the gap in the next iteration and runs the complete verification again. Native Loop continues while repairable spec gaps remain and no stop boundary has been reached; finishing one coding pass is not completion.
+Four mechanisms make this loop converge trustworthily rather than spinning forever:
 
-Four boundaries keep the loop controlled:
+- **Driven by acceptance gaps**: address unsatisfied outcomes first. The Runtime derives gaps from the validated acceptance matrix and forces the next round to close them first.
+- **Semantic change defines progress**: fewer gaps, a check turning green, or evidence restored to valid count as progress. Repeatedly rewriting code while the failure set stays unchanged does not reset the stagnation count.
+- **Autonomous repair is bounded**: it stops the third time the same semantic gap appears without progress; the same contract accepts at most five Verify failures by default. When the budget is spent, the Runtime returns the decision to the user.
+- **Recovery relies on repository state**: acceptance conditions, checkpoints, and verification reports all persist with the change. After an interrupted session, work continues from the same facts, independent of chat memory.
 
-- **Acceptance gaps drive work**: address unsatisfied outcomes instead of treating task narration or code volume as completion.
-- **Semantic change defines progress**: fewer gaps, passing checks, or restored evidence count as progress; implementation churn with an unchanged failure set does not reset stagnation.
-- **Autonomous repair is bounded**: the Runtime permits continued repair but stops on repeated gaps or an exhausted failure budget.
-- **Recovery uses repository state**: acceptance, checkpoints, verification reports, and continuation persist with the change, so a resumed session continues from the same facts rather than chat history.
-
-The implementer investigates, implements, and repairs. The Runtime owns completion decisions, evidence validity, and stop boundaries. This separation keeps autonomous execution moving without giving up verifiability, recovery, or a reliable stop.
+The executor investigates, implements, and repairs; the Runtime owns the completion verdict, evidence validity, and stop boundaries. One Agent turn, one checkpoint, or the Agent's self-reported "done" is never a terminal state — this is Native's hardest rule.
 
 <p align="center">
   <img
@@ -52,27 +52,30 @@ The implementer investigates, implements, and repairs. The Runtime owns completi
 
 ## Choosing Native or Classic
 
-| Dimension              | Native                                                          | Classic Spec mode                                                                    |
-| ---------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Primary model tier     | Fable 5, GPT-5.6, and similarly capable models                  | Models below the Fable 5 or GPT-5.6 capability tier that benefit from finer guidance |
-| Workflow               | Shape → Build → Verify → Archive                                | open → design → build → verify → archive                                             |
-| Requirements and state | Comet brief, complete target specifications, `comet-state.yaml` | OpenSpec change/delta specs and `.comet.yaml`                                        |
-| Implementation process | Model chooses from repository facts and risk                    | Explicit design, planning, TDD, debugging, and review protocols                      |
-| Dependencies           | Comet Native Skill and Runtime                                  | Comet Classic, OpenSpec, and Superpowers                                             |
-| Constraint profile     | Strong outcome constraints with fewer method constraints        | Finer phase guidance and stronger process constraints                                |
+| Dimension              | Native                                            | Classic Spec mode                                                    |
+| ---------------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
+| Primary model tier     | Fable 5, GPT-5.6, and similarly capable models    | Models below this capability tier that need finer step guidance      |
+| Workflow               | Shape → Build → Verify → Archive                  | open → design → build → verify → archive                             |
+| Requirements and state | Comet brief, target spec, `comet-state.yaml`      | OpenSpec change/delta specs, `.comet.yaml`                           |
+| Implementation process | Model chooses autonomously from repo facts and risk | Explicit design, planning, TDD, debugging, and review protocols      |
+| Dependencies           | Comet Native Skill and Runtime (zero external Skills) | Comet Classic, OpenSpec, and Superpowers                             |
+| Constraint profile     | Strong outcome constraints with fewer method constraints | Finer phase guidance and process constraints                         |
 
-Classic is neither an obsolete Native version nor a fallback after Native fails. For models below the Fable 5 or GPT-5.6 capability tier, finer Spec and execution phases can reduce omissions and process drift. Comet's existing real-model baseline has shown that Classic's stronger constraints can deliver good task coverage and completion on this type of work. Native targets models that already have stronger autonomous reasoning and removes repeated phases and dependency-Skill overhead.
+If your primary model is in the Fable 5 / GPT-5.6 tier, Native is the default recommendation: the biggest waste of a strong model is being boxed in by methodology, so Native returns method choice to it and only locks down the outcome and evidence.
 
-The current aligned Native versus 0.4.0 Classic experiment used Mimo 2.5 Pro on 16 tasks with three repetitions each. Both workflows reached task-level `pass@3 = 100%`. That supports the narrower conclusions that both workflows covered the tasks and Native ran lighter in this experiment; it does not establish a universal causal advantage across every model, repository, or task. See [Native versus Classic real-model evaluation](/en/eval/comet-native-vs-040-experiment).
+For less capable models, finer Spec and execution phases reduce omissions and process drift; Comet's existing real-model baseline evaluation has already shown that Classic's strong constraints hold good task coverage and completion on this kind of work. Classic is neither an obsolete Native nor a downgrade path after failure — the two workflows target different capability curves, and neither upgrades to nor replaces the other.
+
+The current aligned Native versus 0.4.0 Classic experiment covers 16 tasks with three runs each; the task-level `pass@3` of both modes is 100%. That experiment supports the conclusion that "both workflows can cover the tasks and Native runs lighter in this experiment", but it alone cannot prove a causal advantage across all models, repositories, and tasks. See [Native versus Classic real-model evaluation](/en/eval/comet-native-vs-040-experiment).
 
 <Info>
-  Model names are capability-tier guidance, not a Runtime detection rule. Comet does not inspect the
-  model name and switch automatically; project configuration controls the workflow.
+  Model names are capability-tier guidance for convenience, not a Runtime detection rule. Comet does
+  not read the model name and switch workflows automatically; the final choice is decided by project
+  configuration.
 </Info>
 
 ## One entry, independent lifecycles
 
-`/comet` reads `.comet/config.yaml`, then deterministically forwards to `/comet-native` or `/comet-classic`. A project can enable one workflow or both:
+`/comet` reads `.comet/config.yaml`, then deterministically forwards to `/comet-native` or `/comet-classic`. A project can enable only one workflow, or both at once:
 
 ```yaml
 schema: comet.project.v1
@@ -93,7 +96,7 @@ classic:
   auto_transition: true
 ```
 
-`default_workflow` controls only where `/comet` enters. It does not migrate, delete, or merge changes. Native and Classic retain independent phases, schemas, changes, specifications, and archive directories even when both are enabled.
+`default_workflow` only decides which side `/comet` enters; it does not migrate, delete, or merge changes. Native and Classic keep their own phase, schema, change, spec, and archive directories, and even when both are enabled in the same project they never convert into each other.
 
 ## Four-phase workflow
 
@@ -107,43 +110,43 @@ flowchart LR
 
 ### Shape: fix the target and user decisions
 
-Shape investigates repository facts, then records Outcome, Scope, Non-goals, Acceptance examples, Constraints and invariants, Decisions, Open questions, and Verification expectations in `brief.md`.
+Shape first investigates repository facts, then writes Outcome, Scope, Non-goals, Acceptance examples, Constraints and invariants, Decisions, Open questions, and Verification expectations into `brief.md`.
 
 The model distinguishes two kinds of choices:
 
-- a choice that changes user-visible results, defaults, compatibility, scope, risk, or irreversible outcomes belongs to the user;
-- a choice that changes implementation without changing observable results belongs to the model.
+- a choice that changes user-visible results, default behavior, compatibility, scope, risk, or irreversible results is a user decision;
+- a choice that only changes the implementation approach without changing observable results is a model decision.
 
-When a user decision remains, Sequential mode asks one upstream question per round. Batch mode asks every currently answerable question in the round. Both modes include a recommendation and option impact, then require the user to confirm the final shared-understanding summary before Build. An unresolved `[blocking]` question or confirmation prevents Build. Changes to durable behavior also receive a complete target specification for each capability rather than an incremental patch alone.
+When a user decision remains, Sequential mode asks one upstream question per round; Batch mode asks every currently answerable question in the round. Both modes provide a recommendation and the impact of each option, and require the user to confirm the final shared understanding before entering Build; an unresolved `[blocking]` question or confirmation blocks entry to Build. When the change affects durable behavior, Shape also writes a target spec for each capability rather than recording only an incremental patch.
 
-### Build: autonomous implementation
+### Build: let the strong model implement autonomously
 
-Build is bounded by the brief, complete target specifications, and repository rules. The model decides whether to persist a plan, what test depth to use, and how to debug and review. Native does not create process documents for their own sake or mandate TDD.
+Build is bounded by the brief, the target spec, and repository rules. The model decides for itself whether to persist a plan, what test depth to adopt, and how to debug and review; Native does not demand extra documents created for the sake of process, nor does it mandate TDD.
 
-New product decisions return the workflow to clarification. Before Verify, the Runtime captures real project artifacts as the implementation scope. If it cannot prove the scope complete, progression stops; a partial scope requires explicit user acceptance bound to the exact scope hash.
+If a new product decision surfaces during implementation, the workflow returns to clarification. Before advancing to Verify, the Runtime freezes the real project artifacts into an implementation scope; when scope completeness cannot be proven it stops, and only after the user explicitly accepts the risk bound to the scope hash may it proceed on a partial scope.
 
 ### Verify: bind conclusions to current facts
 
-Verify runs appropriate checks against Acceptance examples, complete target specifications, and implementation risk. `verification.md` records commands, results, skipped checks, known limitations, and evidence for each Acceptance ID.
+Verify runs real checks against the Acceptance examples, target spec, and implementation risk. `verification.md` records commands, results, skipped reasons, known limitations, and itemized Acceptance evidence.
 
-The Runtime binds the conclusion to the current brief, target specifications, implementation scope, and revision. Any input change makes old reports, receipts, and pass results stale. A failure returns to Build with unsatisfied acceptance items and failed checks as the next iteration's input. Only fewer gaps, passing checks, or restored evidence count as semantic progress. The third recurrence of the same gap without semantic progress stops the loop. The default limit is five Verify failures per contract and can be changed to a positive integer with `native.max_verify_failures`.
+The Runtime binds the verification conclusion to the current brief, target spec, implementation scope, and revision. After any input changes, old reports, old receipts, and old passes become stale and cannot be used for archiving. A failure returns to Build, with the unsatisfied acceptance and failed checks fed as the next round's input. See [Verification evidence and autonomous repair](/en/native/verification-and-repair) for details.
 
-### Archive: commit after a two-step preflight
+### Archive: two-step check before commit
 
-Archive first produces a content-bound `preflightHash`, then rechecks evidence, paths, and canonical-spec hashes at commit time. If a parallel change has altered the same capability, archiving stops instead of overwriting it. The model must read the latest canonical specification, run `spec rebase`, then implement and verify again.
+Archive first generates a content-bound `preflightHash`, then rechecks evidence, paths, and canonical spec hash at commit time. When a parallel change has altered the same capability, archiving stops instead of overwriting; the model must read the latest canonical spec, run `spec rebase` to refresh the baseline, and then re-implement and re-verify.
 
-After success, complete target specifications become canonical specs and the active change moves to a dated archive directory. The trajectory stores phase summaries and evidence references, not hidden reasoning.
+After a successful archive, the target spec becomes the canonical spec and the active change moves into a dated archive directory. The trajectory stores only phase summaries and evidence references, not the hidden reasoning process.
 
 ## Boundaries of automatic progression
 
-When phase conditions pass, the Runtime returns a structured continuation so the same `/comet-native` Skill can continue. It stops when:
+When phase conditions pass, the Runtime returns a structured continuation so the same `/comet-native` Skill can keep executing. It stops when:
 
-- a user decision is unresolved;
-- configuration, state, locks, or transactions cannot be interpreted safely;
-- verification evidence is stale or implementation scope is incomplete;
-- a canonical specification has a concurrent conflict; or
-- the same failure repeats without progress.
+- there is still an unresolved user decision;
+- configuration, state, locks, or transactions cannot be safely interpreted;
+- verification evidence has gone stale or the implementation scope is incomplete;
+- a canonical spec has a concurrent conflict;
+- the same failure recurs without progress.
 
-Native automation is therefore stateful continuation, not a background daemon and not permission to skip user decisions or safety checks.
+Native's "automatic" is therefore stateful continuous progression — not a background daemon, and not a license to skip user decisions or safety checks.
 
 Continue with [Native quickstart](/en/native/quickstart), [Native configuration](/en/native/configuration), [Artifacts and state](/en/native/artifacts-and-state), and [Safety and recovery](/en/native/safety-and-recovery).

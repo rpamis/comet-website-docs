@@ -1,24 +1,26 @@
 ---
 title: 'Continuation and checkpoints'
-description: 'Understand Native continuation, automatic stop conditions, and cross-session recovery from files instead of chat memory.'
+description: 'Understand Native''s continuation contract, automatic stop conditions, and how cross-session recovery relies on files rather than chat memory.'
 ---
 
-Native continuation is neither a background job nor an unconditional loop. Every real transition returns the next phase, routing intent, and a structured continuation. The Skill proceeds only when state permits it.
+When a phase passes, it advances to the next phase automatically; you do not need to switch Skills manually. Native hands progression control to the Runtime: every transition returns a structured continuation, and the Skill proceeds only when the state permits; when it genuinely hits something that needs your decision or damaged state, it stops and gives a concrete reason.
 
 ## Continuation outcomes
 
-| Disposition | Meaning | Next action |
-| --- | --- | --- |
-| `continue` | The transition completed and the next action is unambiguous | Reread the new phase and required artifacts, then proceed |
+| disposition  | Meaning | Next action |
+| ------------ | ------- | ---------- |
+| `continue`   | The transition completed and the next action is unambiguous | Reread the new phase and required artifacts, then proceed |
 | `await-user` | A user decision remains | Ask one upstream question and end the turn |
-| `blocked` | State, evidence, conflict, or recovery conditions are not satisfied | Enter recovery, then follow the new continuation after resolving the finding |
-| `done` | Archive completed | End the workflow |
+| `blocked`    | State, evidence, conflict, or recovery conditions are not satisfied | Enter the recovery branch, handle the finding, then follow the new continuation |
+| `done`       | Archive completed | End the workflow |
 
-`blocked` pauses the normal Build → Verify loop, but it is not a task endpoint. After resolving the returned finding, reread the current phase and continuation, then resume from the point returned by Runtime. `next: auto` means the Runtime allows continuation; it does not start a daemon. If the caller explicitly asks to stop after a transition, the Skill makes no further tool call after that transition. A later session resumes from disk.
+`blocked` pauses the normal Build → Verify loop, but it is not a task endpoint. After resolving the returned finding, reread the current phase and continuation, then resume from the point the Runtime returns.
+
+`next: auto` only means the Runtime allows continuation; it does not mean a background daemon has started — it confirms that "the current state can move forward". If you explicitly ask to stop after a given transition, the Skill makes no further tool call after that transition; the next session resumes from disk.
 
 ## What a checkpoint stores
 
-For an interruption within one phase:
+When a long task is interrupted within one phase, you can save the current progress:
 
 ```bash
 comet native checkpoint <change-name> \
@@ -28,23 +30,26 @@ comet native checkpoint <change-name> \
   --expect-revision <n>
 ```
 
-A checkpoint stores a concise factual summary, the next action, and a content-addressed artifact manifest. It does not advance the phase or replace the brief, complete target specifications, or `verification.md`.
+A checkpoint contains a short factual summary, the next action, and a content-addressed artifact manifest. It stores in-phase progress; it does not advance the phase, nor does it replace the brief, the target spec, or `verification.md`.
 
-On recovery, Runtime checks the checkpoint phase, revision, and manifest. A change to any of them marks the checkpoint stale. The old summary remains historical context but cannot override current state.
+On recovery, the Runtime checks the checkpoint's phase, revision, and manifest. A change to any one of them marks the checkpoint stale; the old summary still works as a historical hint but cannot override the current state.
 
-## Why Native has no separate handoff document
+## Handoff documents
 
-Classic passes work across phase Skills and external methods, so it needs design context, plans, and compression projections. Native uses one Skill that rereads formal artifacts:
+Classic needs to hand off between multiple phase Skills and external methods, so it has design context, plans, and compression projections. Native is always one Skill that rereads the formal artifacts; every fact lives in files:
 
-- the brief and target specs retain requirements;
-- state and continuation retain phase;
-- checkpoints retain in-phase progress;
-- verification reports and receipts retain evidence.
+- the brief and target spec retain the requirements;
+- state and continuation retain the phase;
+- the checkpoint retains in-phase progress;
+- verification and receipts retain the evidence.
 
-Native therefore has no `context_compression` mode and does not generate a handoff solely to transfer context between phase Skills.
+So Native has no `context_compression` mode, nor does it generate handoff documents that exist only to pass context between phase Skills. The information you need is bound through the formal artifacts and hashes, with no risk of summary drift — a direct benefit of the single-Skill architecture.
 
 <p align="center">
-  <img src="/assets/native-illustrations/06-continuation-checkpoints.png" alt="Xiaoyu places a next-action bookmark into a transparent record box of formal artifacts while another Xiaoyu receives it to continue work" />
+  <img
+    src="/assets/native-illustrations/06-continuation-checkpoints.png"
+    alt="Xiaoyu places a next-action bookmark into a transparent record box of formal artifacts while another Xiaoyu receives it to continue work"
+  />
 </p>
 
 Continue with [Artifacts and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).

@@ -1,0 +1,98 @@
+---
+title: 'Native Loop engineering principles'
+description: 'Understand how Native uses acceptance-gap backfill, semantic-progress judgment, failure signatures, and disk recovery to turn the agent loop from model self-reported completion into evidence-driven convergence.'
+---
+
+An ordinary agent loop lets the model judge "am I done" itself. The Native Loop takes that verdict back into the Runtime and forces the loop toward true completion with a set of verifiable mechanisms — the model only thinks and does; the Runtime owns the verdict on whether it is done. This page lays out how that machinery works.
+
+## The flaws of an ordinary agent loop
+
+A typical agent loop is model-driven:
+
+```text
+while not done:
+    think -> act -> observe
+```
+
+The framework provides only tools; "done" is judged by the model. This leaves three gaps:
+
+- **Self-reported completion hallucination**: the model says "I am done" but in fact never tested, never fixed, or never even touched the code.
+- **Context amnesia**: after a long task is compressed or interrupted, the model recovers progress by guessing and loses track of "where it got to."
+- **Infinite spinning**: the same verification failure recurs repeatedly, and the model keeps "fixing" with no semantic progress.
+
+The Native Loop designs five convergence mechanisms against these three gaps.
+
+## Mechanism one: acceptance-gap backfill
+
+When an ordinary loop fails, the model describes "what is wrong" in free text and recalls it itself next round. Native does not allow this — on a Verify failure, the Runtime **derives** a structured gap from the verified acceptance matrix:
+
+- which acceptance items failed (ran but did not pass);
+- which acceptance items are missing (no evidence provided yet);
+- which required checks failed.
+
+These gaps are handed to the next Build round as structured input, forcing the model to **fill these gaps first** rather than start improvising anew. The model does not need to maintain a "what is still missing" memory in the conversation — the Runtime remembers for it, and remembers precisely.
+
+## Mechanism two: semantic-progress judgment
+
+This is the key to preventing "infinite spinning." In an ordinary loop, editing a file counts as "progress," so the model can keep editing forever. Native's standard is stricter:
+
+Only the following count as **semantic progress**:
+
+- the number of failed acceptance items decreased;
+- a failing check turned green;
+- missing evidence was supplied and restored to valid.
+
+Conversely, the following **do not count as progress**:
+
+- files were edited or the implementation rewritten, but the set of failed acceptance items is unchanged;
+- the implementation scope changed, but the gap is still there;
+- the prose was rewritten, but the checks are still red.
+
+The basis for judging progress is **outcome semantics** (whether the gap shrank), not **activity** (how much code changed). This stops the model from pretending to fix things by "just keep editing code."
+
+## Mechanism three: failure signature and three-stage stopping
+
+The Runtime computes a signature for every failure: the current contract hash plus the sorted, de-duplicated failed acceptance items plus the failed check items. The same signature recurring triggers a progressive stop:
+
+| Occurrence | Behavior |
+| --- | --- |
+| 1st | Return to Build and repair normally |
+| 2nd | Warn: the same gap appeared again |
+| 3rd (no semantic progress) | Stop; require a new repair hypothesis |
+
+On the 3rd stop, the model is allowed **one** override to try a different angle — but it must carry a concrete new hypothesis, and the same signature cannot be overridden twice. This gives a strong model room to "try another angle" without letting it retry forever.
+
+## Mechanism four: the total failure budget
+
+On top of per-signature stall detection, each contract also has a total budget: by default the same requirement tolerates at most five Verify failures (adjustable with `native.max_verify_failures`).
+
+When the budget is exhausted, the Runtime stops and hands control back to the user, stating the current evidence and three directions in one go:
+
+- raise the ceiling;
+- modify the confirmed requirement;
+- stop.
+
+Only a user-confirmed requirement change resets the budget — an ordinary implementation edit does not. This design lets a strong model repair across many rounds while drawing it a hard boundary.
+
+## Mechanism five: recovery depends on repository state
+
+The state of the whole loop lives on disk, not in the conversation:
+
+- acceptance conditions and gaps -> `comet-state.yaml`, the acceptance matrix;
+- in-phase progress -> checkpoints;
+- verification evidence -> `verification.md`, receipts;
+- implementation scope -> the implementation scope (content hashes).
+
+After a session is interrupted, the model re-enters, runs one state read, and recovers precisely: which phase it is in, which acceptance items are still outstanding, what the last failure was. **It does not depend on chat memory**, so context compression or switching devices never makes the loop lose its place.
+
+## Why no fifth phase is added
+
+Native deliberately refuses to build a standalone "Loop Engine" phase or a new CLI command for this loop. The convergence logic is woven directly into the existing Build <-> Verify state machine: Build owns implementation and repair, Verify owns checking and deriving gaps, and the Runtime drives convergence between them.
+
+This restraint is itself the design philosophy: Loop Engineering is not yet another Loop Engine — it makes the existing four-phase state machine convergence-capable on its own. One less layer of abstraction, one fewer place where state can go wrong.
+
+## One-line summary
+
+An ordinary loop is "the model judges done"; the Native Loop is "the Runtime uses content-addressed evidence, failure signatures, semantic-progress judgment, and disk recovery to force the loop toward true completion." The model can work freely, because the guarantee that it cannot run off course lives in the Runtime, not in the model's self-discipline.
+
+To see this machinery run through one real requirement, see [Native walkthrough](/en/native/walkthrough). For the full rules on verification evidence and repair ceilings, see [Verification evidence and autonomous repair](/en/native/verification-and-repair).
