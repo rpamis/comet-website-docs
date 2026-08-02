@@ -3,11 +3,11 @@ title: '单 Skill 与入口路由'
 description: '理解 /comet 如何按项目配置进入 Native，以及 /comet-native 如何在一个自包含 Skill 中持续推进。'
 ---
 
-Native 不把 Shape、Build、Verify、Archive 拆成四个 Skill，也不加载 OpenSpec、Superpowers 或其他外部方法 Skill。它由一个 `/comet-native` Skill 读取磁盘状态，在同一入口内完成调查、澄清、实现、验证和归档。
+一个入口、一个 Skill，跨会话从磁盘接着干。Native 不把工作流拆成多个 Skill，也不在阶段之间传递会丢失的上下文——单个 `/comet-native` 读完磁盘状态，就能从当前阶段继续。它也不依赖 OpenSpec、Superpowers 这类外部 Skill。
 
 ## 用户入口
 
-明确调用 `/comet`，或明确要求使用 Comet 但未指定 Native 或 Classic 时，使用 `/comet`。入口只读取 `.comet/config.yaml`，按 `default_workflow` 确定性转发：
+最常用的入口是 `/comet`。它只读 `.comet/config.yaml`，按 `default_workflow` 转发到对应工作流：
 
 ```yaml
 schema: comet.project.v1
@@ -17,25 +17,24 @@ workflows:
   - classic
 ```
 
-`/comet-native` 是显式目标，适合诊断路由或明确要求进入 Native。它是宿主 Skill 调用，不是 shell 命令。Runtime 命令统一使用 `comet native ...`。
+想跳过路由直接进 Native，或者排查"为什么没进 Native"这类问题，就用 `/comet-native`。它由宿主 Skill 调用，不是 shell 命令；底层命令统一是 `comet native ...`。
 
 <Note>
-  Comet 不根据任务大小、提示词或模型名称猜测模式。修改默认模式要改项目配置；切换入口不会迁移现有
+  Comet 不看任务大小、提示词或模型名去猜该用哪种模式。换默认模式改配置即可，切换入口不会迁移已有
   change。
 </Note>
 
-## 一个 Skill 如何覆盖四个阶段
+## 为什么一个 Skill 就够了
 
-每次进入后，Skill 会重新读取配置、selection、`comet-state.yaml`、brief、target spec 和当前仓库事实，然后根据 phase 继续：
+Native 的四个阶段（Shape → Build → Verify → Archive）共用同一个 `/comet-native`，不需要像 Classic 那样在多个阶段 Skill 之间交接。每次进入，Skill 都重新读配置、selection、`comet-state.yaml`、brief、target spec 和当前仓库状态，然后从当前阶段接着干。
 
-| phase   | Skill 的职责                                                      |
-| ------- | ----------------------------------------------------------------- |
-| Shape   | 调查事实，清空用户决定，固定 brief 与 target spec                 |
-| Build   | 让模型自主选择实现方法，提交真实项目产物形成 implementation scope |
-| Verify  | 按验收与风险运行检查，写入逐项证据                                |
-| Archive | 两步预检，更新 canonical spec 并归档 change                       |
+这样做的直接好处：
 
-阶段 transition 返回结构化 `continuation`。只有 `continue` 才会在当前调用中接着工作；`await-user` 会等待用户，`blocked` 会进入恢复分支，`manual` 会停止自动修复，`done` 才结束工作。处理完 `blocked` 返回的 finding 后，会按新的 continuation 继续，而不会因 `blocked` 本身结束任务。
+- **没有上下文交接损耗**。阶段之间不需要生成 design context、压缩投影或 handoff 文档来传递状态——所有事实都写在文件里，Skill 重新读取即可。
+- **跨会话不丢进度**。会话中断后重新进入，Skill 从磁盘的 continuation 恢复到中断前的精确位置，不依赖聊天记忆。
+- **阶段衔接由 Runtime 控制**。阶段之间靠结构化的 `continuation` 衔接：通过就继续，遇到需要你决定的地方就停下等你，遇到阻塞走恢复流程。
+
+四阶段各自的职责和必要结果，见 [Native 工作流](/zh/concepts/native-workflow#四阶段工作流)。
 
 <p align="center">
   <img
@@ -46,12 +45,12 @@ workflows:
 
 ## 写入归属
 
-`.comet/current-change.json` 记录当前写入属于哪个 workflow 和 change。项目只有一个共享 Hook Router，一次原子写入最多交给一个 Guard。若该选择指向已不存在或已归档的 change，Comet 会重新检查活跃 change：没有候选时不绑定当前工作，唯一候选只用于只读恢复，多个候选时需要先显式选择：
+Comet 用 `.comet/current-change.json` 记录当前在写哪个 change，保证一次写入只落在一个需求上，减少写错需求和重复阻塞。`status` 和 `show` 是只读的，不会偷偷改这个指向——所以查状态不会意外把后续写入绑到别的需求。
+
+如果选中的 change 已经被删或归档，Comet 会让你从当前活跃的 change 里重新选一个：
 
 ```bash
 comet native select <change-name>
 ```
-
-只读 `status` 和 `show` 不会暗中改变 selection。这样，读取状态不会意外把后续写入绑定到另一个需求。
 
 继续阅读：[用户决定协议](/zh/native/decision-ownership) 和 [连续推进与 Checkpoint](/zh/native/continuation-and-checkpoints)。

@@ -1,0 +1,157 @@
+---
+title: 'Native command overview'
+description: 'The command list for the Native workflow: create changes, view status, save progress, advance phases, verify, and archive.'
+---
+
+`comet native` is the command entry point for the Native workflow. The Native workflow splits a requirement into four phases — Shape, Build, Verify, Archive — and these commands create and manage each change, advance phases, save progress, and archive.
+
+Most users never need to type these directly — when you enter `/comet` in your Agent platform, the Skill calls them automatically. This page helps you understand what each command does, and how to use them for troubleshooting or automation.
+
+## Command overview
+
+| Command | What it does |
+| --- | --- |
+| `comet native new` | Create a new change |
+| `comet native status` | See which step a change is on |
+| `comet native show` | Read the brief and target specs of a change |
+| `comet native select` | When multiple changes coexist, pick which one to work on now |
+| `comet native checkpoint` | Save progress mid-phase |
+| `comet native check` | Run Comet's built-in read-only check |
+| `comet native receipt` | Record the result of a verification step |
+| `comet native next` | Advance to the next phase |
+| `comet native archive` | Archive a completed change |
+| `comet native doctor` | Diagnose and repair state issues |
+| `comet native init` / `root` | Configure Native's artifact directory |
+
+All commands support `--json` to output structured results for scripts and CI.
+
+## Create and view changes
+
+When starting a new requirement, create a change. `new` sets up the change directory, captures a snapshot of the project's current files, and selects it as the current change:
+
+```bash
+comet native new add-user-avatar
+```
+
+To see where things stand:
+
+```bash
+comet native status                  # list of all active changes
+comet native status add-user-avatar  # current phase and next step of a change
+```
+
+`status` without a change name lists all active changes; with a change name it shows the phase, verification status, and recovery hints. Add `--details` for more detailed checks and acceptance progress.
+
+`show` reads the brief and target specs written for a change:
+
+```bash
+comet native show add-user-avatar
+```
+
+## Save progress
+
+A change may take several rounds to complete. `checkpoint` saves what you've done so far and what's next, along with any files produced, without advancing the phase:
+
+```bash
+comet native checkpoint add-user-avatar \
+  --summary "Finished the avatar upload API" \
+  --next-action "Handle frontend cropping and compression"
+```
+
+After a session is interrupted, resume from the progress returned by `status` rather than relying on chat history.
+
+## Check and verify
+
+`check` runs Comet's built-in read-only check to see whether the code satisfies the target specs of this change. It does not run your test commands or modify any files; it only produces a check report during the Verify phase:
+
+```bash
+comet native check add-user-avatar
+```
+
+`receipt` records a concrete verification action. There are two kinds: `manual` records steps and observations you performed by hand; `automated` records a real command and its exit result:
+
+```bash
+# Record a manual verification
+comet native receipt manual add-user-avatar \
+  --acceptance upload-returns-url \
+  --step "Upload a 2MB image" \
+  --observation "Returned a CDN URL"
+
+# Record an automated verification (runs a real command and captures the result)
+comet native receipt automated add-user-avatar \
+  --acceptance upload-returns-url \
+  -- npm test
+```
+
+## Advance phases
+
+`next` advances a change to the next phase. It verifies that the current phase has all required evidence before allowing the advance:
+
+```bash
+comet native next add-user-avatar --summary "Requirement clarified, target specs complete"
+```
+
+The four Native phases advance like this:
+
+| Current phase | Required to advance | Result |
+| --- | --- | --- |
+| Shape | Clear requirement, complete target specs | Enter Build |
+| Build | Real code produced, or a reason given for no code changes | Enter Verify |
+| Verify | Verification report passes | Enter Archive |
+| Verify not passed | — | Return to Build to fix |
+
+A verification failure automatically returns to Build and tells you which checks didn't pass; fix them and verify again.
+
+## Archive
+
+When a change is done, archive it with `archive`. Archiving is a two-step process — first a dry run to confirm there are no conflicts, then the actual commit:
+
+```bash
+# Step 1: dry run to get a hash
+comet native archive add-user-avatar --dry-run
+
+# Step 2: commit with that hash
+comet native archive add-user-avatar --expect-preflight <hash-from-step-1>
+```
+
+Archiving merges this change's target specs into the project and files the change artifacts into the archive directory. The two-step design ensures nothing changed between the dry run and the actual commit.
+
+## Diagnose and repair
+
+When the state looks off, start with `doctor`. Without arguments it only checks and modifies no files:
+
+```bash
+comet native doctor                  # check the whole project
+comet native doctor add-user-avatar  # check a single change
+```
+
+When you're ready to repair, add `--repair`. It only handles items it can prove are safe, such as clearing stale locks or recovering interrupted transactions — it never rewrites your brief, specs, or code:
+
+```bash
+comet native doctor add-user-avatar --repair
+```
+
+## Configure the artifact directory
+
+`init` configures where Native stores its artifacts (change directories, state, evidence) — by default under `docs/comet/` in the project. Usually the default config is generated automatically when you first create a change, so you don't need to run it manually:
+
+```bash
+comet native init                 # default directory docs/comet/
+comet native init --root .        # place under <project>/comet/
+comet native init --language zh-CN # set the default language for future new changes
+```
+
+To switch directories in a project that's already configured, use `root move` for a transactional migration — don't edit the config file directly:
+
+```bash
+comet native root show            # show the current directory
+comet native root move artifacts  # migrate to <project>/artifacts/comet/
+```
+
+## When the comet command isn't available
+
+If your environment doesn't have the `comet` CLI installed (only the Skill files), you can call the bundled Runtime directly. It takes the same arguments and exit codes as `comet native`:
+
+```bash
+node <comet-native-skill-root>/scripts/comet-native-runtime.mjs <command> [options]
+```

@@ -3,7 +3,7 @@ title: '连续推进与 Checkpoint'
 description: '理解 Native 的 continuation 契约、自动停止条件，以及跨会话恢复如何依赖文件而不是聊天记忆。'
 ---
 
-Native 的自动推进不是后台任务，也不是无条件连跑。每次真实 transition 都返回下一阶段、是否自动衔接以及结构化 continuation；Skill 只在状态允许时继续。
+阶段通过就自动接下一阶段，不用你手动切换 Skill。Native 把推进控制权交给 Runtime：每次 transition 返回结构化的 continuation，Skill 只在状态允许时继续；真遇到需要你决定或状态损坏时，会停下并给出具体原因。
 
 ## Continuation 结果
 
@@ -14,11 +14,13 @@ Native 的自动推进不是后台任务，也不是无条件连跑。每次真�
 | `blocked`    | 状态、证据、冲突或恢复条件不满足 | 进入恢复分支，处理 finding 后按新的 continuation 继续 |
 | `done`       | 归档已完成                       | 结束工作流                        |
 
-`blocked` 会暂停正常的 Build → Verify 循环，但不是任务终点。处理返回的 finding 后，重新读取当前阶段和 continuation，再从 Runtime 指定的位置恢复。`next: auto` 只表示 Runtime 允许继续，不代表后台守护进程已启动。调用方若明确要求在某个 transition 后停下，Skill 完成该 transition 后不会再调用工具；下一会话从磁盘恢复。
+`blocked` 会暂停正常的 Build → Verify 循环，但不是任务终点。处理返回的 finding 后，重新读取当前阶段和 continuation，再从 Runtime 指定的位置恢复。
+
+`next: auto` 只表示 Runtime 允许继续，不代表后台守护进程已启动——它确认的是"当前状态可以往下走"。如果你明确要求在某个 transition 后停下，Skill 完成该 transition 后不会再调用工具；下一会话从磁盘恢复。
 
 ## Checkpoint 保存什么
 
-长任务在同一 phase 内中断时，可以保存：
+长任务在同一 phase 内中断时，可以保存当前进度：
 
 ```bash
 comet native checkpoint <change-name> \
@@ -28,20 +30,20 @@ comet native checkpoint <change-name> \
   --expect-revision <n>
 ```
 
-Checkpoint 包含简短事实摘要、下一动作和内容寻址 artifact manifest。它不会推进 phase，也不替代 brief、target spec 或 `verification.md`。
+Checkpoint 包含简短事实摘要、下一动作和内容寻址的 artifact manifest。它保存的是阶段内进度，不推进 phase，也不替代 brief、target spec 或 `verification.md`。
 
 恢复时 Runtime 会检查 checkpoint 对应的 phase、revision 和 manifest。任何一项变化都会把 checkpoint 标为 stale；旧摘要仍可作为历史提示，但不能覆盖当前状态。
 
-## 为什么不需要独立 handoff 文档
+## handoff 文档
 
-Classic 需要在多个阶段 Skill 与外部方法之间交接，因此有 design context、计划和压缩投影。Native 始终由一个 Skill 重新读取正式产物：
+Classic 需要在多个阶段 Skill 与外部方法之间交接，因此有 design context、计划和压缩投影。Native 始终由一个 Skill 重新读取正式产物，所有事实都在文件里：
 
 - brief 和 target spec 保存需求；
 - state 和 continuation 保存阶段；
 - checkpoint 保存阶段内进度；
 - verification 与 receipt 保存证据。
 
-因此 Native 没有 `context_compression` 模式，也不会生成只为阶段 Skill 传递上下文的 handoff。必要信息通过正式产物和 hash 绑定，减少摘要漂移。
+所以 Native 没有 `context_compression` 模式，也不生成只为阶段 Skill 传递上下文的 handoff 文档。需要的信息通过正式产物和 hash 绑定，没有摘要漂移的风险——这是单 Skill 架构的一个直接好处。
 
 <p align="center">
   <img

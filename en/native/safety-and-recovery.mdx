@@ -1,101 +1,53 @@
 ---
 title: 'Native safety and recovery'
-description: 'Understand shared Guard routing, stale evidence, concurrent conflicts, transaction recovery, repair stops, and Ambient Resume.'
+description: 'Understand Native two-layer safety model, write attribution, immutable baseline, repair stops, and ambient recovery.'
 ---
 
-Native uses two complementary safety layers. The Skill guides the model through requirement and phase protocols; the Runtime enforces deterministic state, evidence, and transaction invariants. A prose Rule alone is not an unbypassable state machine.
+The Skill makes the model follow the requirement and phase contracts; the Runtime backstops it with verifiable state, evidence, and transaction checks. The first is "how it should be done"; the second is "what it must do" — a prose rule alone is not an unbypassable invariant. The Runtime is the state machine you cannot route around.
 
 ## One write belongs to one change
 
-Project initialization installs one Comet workflow Rule per platform and only one `comet-hook-router.mjs` on platforms with Hook support. The Router reads `.comet/config.yaml` and `.comet/current-change.json`, then sends one atomic multi-file write to at most one workflow Guard.
+Comet runs an attribution check behind every write you make: one write lands on at most one change, reducing wrong-requirement writes and double blocking.
 
-Native and Classic Guards remain independent:
+How exactly writes are routed depends on which change is currently selected and which workflow your configuration has enabled. Read-only operations such as reading state or checking progress never trigger the write check, so you can use `status` and `show` freely without accidentally binding later writes to another requirement.
 
-- Native checks only Shape, Build, Verify, Archive, and Native paths;
-- Classic checks its five phases and OpenSpec/Superpowers paths;
-- invalid, stale, or ambiguous selection causes potential writes to fail closed;
-- explicitly recognized read-only tools do not trigger a write Guard.
+Note that this protection covers only the writes Comet can observe. For writes from a shell, an external process, or anything a platform does not expose to a Hook, the Runtime's state and evidence checks remain the final authority.
 
-This boundary reduces accidental writes and double blocking. For shell commands, external processes, or writes a platform does not expose to Hooks, the Native Runtime's state and evidence checks remain the final authority.
+## The immutable baseline
 
-## Why verification evidence becomes stale
+Every new change must obtain a complete baseline — a snapshot of the project's initial state — when it is created. This is an immutable fact. The Runtime does not fill gaps by guessing; it never treats a missing path as a deletion.
 
-The Runtime binds verification conclusions to:
+For a change already in use, a missing or corrupted baseline is not a problem `doctor` can repair automatically, because rebuilding from current files would erase the historical differences since creation. The only recourse is to restore the original baseline from a trusted backup, or preserve the requirement documents and implementation facts and create a new change.
 
-- the brief and complete target specifications;
-- project artifacts in the implementation scope;
-- Acceptance IDs and an immutable report snapshot;
-- the current change revision; and
-- an optional built-in check receipt.
+The sole exception is an upgrade from an older schema: before any state write, `doctor --repair` captures a complete baseline at the migration timepoint, and if the capture is incomplete it leaves the old state untouched. Post-migration evidence covers only changes after the upgrade and cannot inherit a pre-upgrade scope or pass.
 
-Changing any input marks old evidence stale. If the change occurs during Verify, status returns a controlled summary-only `next`. Run it to retreat to Build, generate a new scope, and verify again. Reconfirm with the user only when the brief/spec contract hash also changed; preserve the existing approval when only the project snapshot or implementation changed. Drift in a report, receipt, or another bound Archive fact uses the same retreat protocol. Never delete findings, edit evidence refs, or reuse the old pass.
+## The boundary of evidence and repair
 
-The Native Runtime invokes Git only in Git projects to enumerate project files and identify gitlink boundaries. Ordinary file identity always comes from streaming SHA-256 and does not depend on Git object hashes. A new change binds the normalized `native.snapshot.include` and `exclude` policy to its baseline, and later current snapshots reuse that scope. Resource budgets may be raised, but changing scope mid-change cannot hide implementation changes. `comet native check` is a separate built-in bounded read-only text-hygiene scan. It invokes no Git, shell, test command, external Skill, or other external process and does not replace project tests.
+These two topics are covered in full at [Verification evidence and autonomous repair](/en/native/verification-and-repair). Here we state only the safety-relevant conclusions:
 
-## Baselines and schema migration
+- **Verification evidence goes stale**: a conclusion is bound to the brief, spec, implementation scope, and revision. If any of them changes, the old evidence is void.
+- **Repair has a ceiling**: when the same semantic gap recurs for the third time with no progress, repair stops; by default the same contract tolerates at most five Verify failures. When the budget is exhausted, the Runtime hands the decision back to the user.
+- **Fail-closed**: no integrity failure can be bypassed by hand-editing evidence.
 
-A new change must obtain a complete baseline before committing state. A Git snapshot includes only tracked and non-ignored untracked files, treats each submodule/gitlink as one atomic entry, and excludes ignored caches and contents of unregistered nested repositories from the project-owned set. An incomplete current snapshot never turns a missing path into a deletion.
+## Ambient recovery
 
-For a change already using the v3 schema, a missing or incomplete baseline is not an automatic doctor repair. Rebuilding from current files would erase historical differences since creation. Restore the original baseline from a trusted backup, or preserve the brief/specifications and implementation facts while creating a new change.
-
-Explicit v1/v2 schema migration is the sole cutover exception. Before any state write, `doctor --repair` captures a complete baseline at the migration timepoint. An incomplete capture leaves the old state unchanged. Post-migration evidence proves only changes after the cutover and cannot inherit an old scope or pass. An old Verify/Archive change retreats to Build to establish fresh v3 evidence.
-
-## Autonomous repair does not loop forever
-
-A Verify failure returns to Build. The Runtime builds a semantic signature from the contract, failed or missing Acceptance IDs, and failed check IDs:
-
-- the second recurrence of the same gap warns; on the third recurrence without progress, an available override requires the Agent to provide a concrete new repair hypothesis;
-- only fewer gaps, passing checks, or missing evidence restored as current valid evidence count as progress; an ordinary implementation-scope change does not reset the counters;
-- one no-progress override is available, is bound to the current signature, and remains Agent-owned rather than being delegated to the user;
-- the default limit is five Verify failures per contract and can be changed to a positive integer with `native.max_verify_failures`.
-
-Repeated-gap stopping and the total failure budget apply independently. After the override is used or the total failure budget is exhausted, Runtime returns one user decision: increase the budget, change the confirmed contract, or stop. Only a user-confirmed contract change starts a new goal cycle; stop conditions do not mechanically count phase transitions.
-
-## Concurrent specification conflicts
-
-Several Native changes may exist in parallel, but safety for the same canonical specification has a precise boundary. Archive compares the `base_hash` frozen by the Runtime in Shape with the current canonical hash. A mismatch stops instead of applying last-write-wins.
-
-Recovery is:
-
-1. read the latest canonical specification;
-2. rewrite the change's complete target specification;
-3. run `comet native spec rebase <change> --summary <text>`;
-4. repeat Build and Verify; and
-5. run the two-step Archive again.
-
-The conflict radar reports capability overlap and scope signals provable inside the current Native root. It does not claim knowledge of arbitrary external branches or untracked parallel work.
-
-## Transaction and lock recovery
-
-Phase transitions, checkpoints, Archive, and root moves have explicit journals or recovery protocols. Ordinary writes never take over a stale lock on their own. Only `doctor --repair` can do so after proving the local owner no longer exists, lock identity is unchanged, and no conflicting transaction exists.
-
-```bash
-comet native doctor [<change-name>]
-comet native doctor [<change-name>] --repair
-comet native doctor [<change-name>] --repair --strategy continue
-comet native doctor [<change-name>] --repair --strategy rollback
-```
-
-- ordinary phase transitions can only continue;
-- Archive and root moves can roll back only while the journal is still reversible;
-- after Archive's final marker, only exactly-once continuation is allowed;
-- Doctor never rewrites a user's brief, specifications, verification report, or project source.
-
-## Ambient Resume
-
-`comet resume-probe` is read-only. It resolves the default workflow from `.comet/config.yaml`, then inspects only that side:
+`comet resume-probe` is a read-only probe. After a session is interrupted, it reads the default workflow from your configuration and inspects only that side for a resumable change.
 
 | Result         | Meaning                                                                |
 | -------------- | ---------------------------------------------------------------------- |
-| `auto_resume`  | One target matches a request to continue; resume through `nextCommand` |
-| `ask_user`     | Several candidates or unclear ownership require one short choice       |
-| `out_of_scope` | The request should not enter a resumable workflow                      |
+| `auto_resume`  | One unique target and a request that does intend to continue; resume through `nextCommand` |
+| `ask_user`     | Several candidates or unclear ownership; one short choice is required  |
+| `out_of_scope` | The request does not intend to enter a resumable workflow              |
 | `none`         | No change can be resumed                                               |
 
-Damaged configuration or workflow state makes the probe stop with a reason instead of scanning another directory and guessing. `ambient_resume: false` disables automatic probing for ordinary requests; an explicit `/comet` call still works.
+When configuration or state is damaged, the probe stops and states the reason rather than scanning another directory to guess. `ambient_resume: false` turns off automatic probing for ordinary requests; an explicit `/comet` call is unaffected.
 
 ## Dashboard responsibility
 
-Dashboard reads the Runtime projection to display phase, evidence freshness, continuation, structured findings, conflict summaries, and archive readiness. It neither re-derives facts nor offers write actions for progression, repair, or Archive. CLI and Runtime remain the only writers.
+Dashboard is read-only display: phase, whether evidence is valid, the current continuation, structured findings, conflict summary, and archive-readiness. It does not re-derive facts, nor does it offer write buttons for progression, repair, or Archive — every write goes through the CLI/Runtime.
 
-For parallel requirements, see [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts). For interruptions, cross-device discovery, or transaction problems, see [Recovery and troubleshooting](/en/native/recovery-playbook). For individual commands and exit semantics, see [Native CLI](/en/cli/native).
+## Where the related topics live
+
+- Stale verification evidence and the full rules for repair ceilings → [Verification evidence and autonomous repair](/en/native/verification-and-repair)
+- Concurrent specification conflicts, spec rebase → [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts)
+- Transactions, locks, incomplete transitions, and concrete steps for interruption recovery → [Recovery and troubleshooting](/en/native/recovery-playbook)
