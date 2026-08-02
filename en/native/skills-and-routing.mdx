@@ -1,13 +1,13 @@
 ---
 title: 'Single Skill and entry routing'
-description: 'Understand how /comet enters Native from project configuration and how /comet-native advances through one self-contained Skill.'
+description: 'Understand how /comet enters Native from project configuration and how /comet-native keeps advancing through one self-contained Skill.'
 ---
 
-Native does not split Shape, Build, Verify, and Archive into four Skills, and it does not load OpenSpec, Superpowers, or another external method Skill. One `/comet-native` Skill reads state from disk and carries the change through investigation, clarification, implementation, verification, and archive.
+One entry, one Skill, and across sessions it picks up from disk. Native does not split the workflow into multiple Skills, nor does it pass context that can be lost between phases — a single `/comet-native` reads disk state and continues from the current phase. It also does not depend on external Skills like OpenSpec or Superpowers.
 
 ## User entry point
 
-Invoke `/comet` when you explicitly choose it, or when you ask to use Comet without choosing Native or Classic. The entry reads `.comet/config.yaml` and deterministically forwards according to `default_workflow`:
+The most common entry is `/comet`. It only reads `.comet/config.yaml` and forwards to the matching workflow per `default_workflow`:
 
 ```yaml
 schema: comet.project.v1
@@ -17,37 +17,40 @@ workflows:
   - classic
 ```
 
-`/comet-native` is the explicit target for routing diagnostics or an intentional Native entry. It is a host Skill invocation, not a shell command. Runtime commands use `comet native ...`.
+To bypass routing and enter Native directly, or to diagnose "why did it not enter Native", use `/comet-native`. It is invoked by the host Skill, not a shell command; the underlying commands are uniformly `comet native ...`.
 
 <Note>
-  Comet does not infer the mode from task size, prompt wording, or model name. Change the project configuration to change the default. Selecting another entry does not migrate existing changes.
+  Comet does not guess which mode to use from task size, prompt wording, or model name. To change the
+  default, change the configuration; selecting another entry does not migrate existing changes.
 </Note>
 
-## How one Skill covers four phases
+## Why one Skill is enough
 
-On every entry, the Skill rereads configuration, selection, `comet-state.yaml`, the brief, target specifications, and repository facts, then continues from the current phase:
+Native's four phases (Shape → Build → Verify → Archive) share the same `/comet-native`, and unlike Classic do not need to hand off between multiple phase Skills. On every entry, the Skill rereads the configuration, selection, `comet-state.yaml`, brief, target spec, and current repository state, then continues from the current phase.
 
-| Phase | Skill responsibility |
-| --- | --- |
-| Shape | Investigate facts, resolve user decisions, and establish the brief and complete target specifications |
-| Build | Let the model choose implementation methods and submit real project artifacts as the implementation scope |
-| Verify | Run checks based on acceptance and risk, then record itemized evidence |
-| Archive | Run a two-step preflight, update canonical specs, and archive the change |
+The direct benefits:
 
-Transitions return a structured `continuation`. Only `continue` proceeds in the current invocation. `await-user` waits for a decision, `blocked` enters a recovery branch, `manual` stops autonomous repair, and only `done` finishes the work. After resolving the finding returned by `blocked`, the Skill follows the new continuation instead of ending because it was blocked.
+- **No context-handoff loss**. Between phases there is no need to generate design context, compression projections, or handoff documents to carry state — every fact is written in files, and the Skill just rereads them.
+- **Progress survives across sessions**. After an interruption, re-entering the Skill restores from disk continuation to the exact position before the break, with no dependence on chat memory.
+- **Phase transitions are controlled by the Runtime**. Phases are linked by a structured `continuation`: pass and continue, hit something that needs your decision and it waits for you, hit a blocker and it follows the recovery flow.
+
+For each of the four phases' responsibilities and required outcomes, see [Native workflow](/en/concepts/native-workflow#four-phase-workflow).
 
 <p align="center">
-  <img src="/assets/native-illustrations/02-single-skill-routing.png" alt="Xiaoyu turns to the bookmarked current page of a notebook beside a /comet entry sign, showing one Skill continuing from state" />
+  <img
+    src="/assets/native-illustrations/02-single-skill-routing.png"
+    alt="Xiaoyu turns to the current bookmarked page of a notebook beside a /comet entry sign, showing one Skill continuing from state"
+  />
 </p>
 
 ## Write ownership
 
-`.comet/current-change.json` records which workflow and change owns the next write. A project installs one shared Hook Router, and one atomic write is routed to at most one Guard. If that selection points to a missing or archived change, Comet checks active changes again: no candidate leaves the current work unbound, one candidate is available only for read-only recovery, and multiple candidates require an explicit selection:
+Comet records which change is currently being written in `.comet/current-change.json`, ensuring one write lands on exactly one requirement and reducing wrong-requirement writes and repeated blocking. `status` and `show` are read-only and never silently change this pointer — so inspecting state will not accidentally bind subsequent writes to another requirement.
+
+If the selected change has already been deleted or archived, Comet lets you re-select one from the currently active changes:
 
 ```bash
 comet native select <change-name>
 ```
-
-Read-only `status` and `show` never change selection as a side effect.
 
 Continue with [User decisions and clarification protocol](/en/native/decision-ownership) and [Continuation and checkpoints](/en/native/continuation-and-checkpoints).

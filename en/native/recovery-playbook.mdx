@@ -1,9 +1,9 @@
 ---
 title: 'Recovery and troubleshooting'
-description: 'Recover Native from disk facts and handle cross-device discovery, interrupted transitions, root moves, Archive, locks, and evidence problems.'
+description: 'Recover Native from disk facts, and handle cross-device discovery, unfinished transitions, root moves, Archive, locks, and evidence problems.'
 ---
 
-Native recovers from project configuration, formal artifacts, and Runtime state, not conversation history. After an interruption or error, start with read-only diagnostics, then run the specific recovery action returned by Runtime. Do not bypass checks by editing phases, hashes, journals, or selection manually.
+On an interruption or error, run read-only diagnostics first, then recover with the specific action the Runtime returns. Native's recovery basis is project configuration, formal artifacts, and Runtime state — all disk facts, not chat history. Hard rule: do not hand-edit phase, hash, journal, or selection to bypass a check.
 
 ## Standard diagnostic sequence
 
@@ -15,79 +15,79 @@ comet native status <change-name> --details
 comet native doctor <change-name>
 ```
 
-Check in this order:
+Work through them in this order:
 
-1. Confirm the enabled workflows, `native.artifact_root`, and `native.clarification_mode` in `.comet/config.yaml`.
-2. Check whether `comet native status` can see the target change.
-3. Confirm `.comet/current-change.json` selects the correct workflow and change.
-4. Read the phase, findings, checkpoint, acceptance page, and continuation from `status --details`.
-5. Check whether doctor reports an interrupted transaction, stale lock, workspace identity problem, or evidence-retention issue.
+1. Whether the enabled workflow, `native.artifact_root`, and `native.clarification_mode` in `.comet/config.yaml` are correct;
+2. Whether `comet native status` can see the target change;
+3. Whether `.comet/current-change.json` has selected the correct workflow/change;
+4. The phase, findings, checkpoint, acceptance page, and continuation returned by `status --details`;
+5. Whether doctor reports an unfinished transaction, a stale lock, a workspace identity problem, or an evidence cleanup issue.
 
-When findings are truncated, handle the returned items and then read details again. When `acceptancePage.nextCursor` is non-null, retrieve every page with `--acceptance-cursor`; do not assume acceptance items outside the current page do not exist.
+When findings are truncated, handle the returned items first, then read the details again. When `acceptancePage.nextCursor` is non-null, page through them with `--acceptance-cursor`; do not treat acceptance items outside the current page as nonexistent.
 
-## A change is missing on another device
+## A change is not found on another device
 
-Native discovers changes only under the configured artifact root. If you synced `docs/comet/changes/...` but the other device lacks `.comet/config.yaml`, still points to `.`, or enables another default workflow, `resume-probe` correctly returns that there is no resumable change. A change's `comet-state.yaml` does not select the project root in reverse.
+Native discovers changes only under the configured artifact root. If you synced `docs/comet/changes/...` but the other device's `.comet/config.yaml` is missing, still points to `.`, or enables another default workflow, `resume-probe` correctly returns "no resumable change." A change's own `comet-state.yaml` does not select the project root in reverse.
 
 To recover:
 
-1. Confirm the actual synced directory, such as `docs/comet/changes/<name>`.
-2. On the target device, run `comet init --workflow native --root docs` to restore matching project configuration and managed assets, or restore a trusted `.comet/config.yaml`.
-3. Run `comet native status` and `show`.
-4. Once the target is unambiguous, run `comet native select <change-name>`.
+1. Confirm the actual synced directory, such as `docs/comet/changes/<name>`;
+2. On the target device, restore the matching project configuration and managed assets via `comet init --workflow native --root docs`, or restore a trusted `.comet/config.yaml`;
+3. Run `comet native status` and `show`;
+4. Once the target is unambiguous, run `comet native select <change-name>`;
 5. Continue from `/comet` or `/comet-native`.
 
-Do not create a second change for the same requirement or copy artifacts into another root to create two writable states.
+Do not create a second change for the same requirement, and do not copy artifacts into another root to manufacture two writable states.
 
-## Interrupted transition
+## Unfinished transition
 
-An ordinary phase transition writes `runtime/transition.json` before updating Run state, `comet-state.yaml`, trajectory, and checkpoint. After interruption, status and doctor report that recovery is required.
+An ordinary phase transition first writes `runtime/transition.json`, then updates Run state, `comet-state.yaml`, trajectory, and checkpoint. After an interruption, status and doctor report recovery required.
 
-Ordinary transitions support continuation only:
+An ordinary transition supports continuation only:
 
 ```bash
 comet native doctor <change-name> --repair --strategy continue
 ```
 
-If the journal is malformed or Runtime cannot prove the two sides of state are consistent, it preserves the files and stops. Back up the state and inspect the error instead of assembling state manually.
+When the journal is malformed or the two ends of state cannot be proven consistent, the Runtime preserves the files and stops. Back up the scene and inspect the error first; do not stitch state together by hand.
 
 ## Interrupted Archive or root move
 
-Archive and artifact root moves are multi-step transactions. Doctor reports whether the current journal stage supports `continue` or `rollback`:
+Archive and artifact root move are multi-step transactions. Doctor reports whether the current journal stage supports `continue` or `rollback`:
 
 ```bash
 comet native doctor <change-name> --repair --strategy continue
 comet native doctor <change-name> --repair --strategy rollback
 ```
 
-After Archive writes its final completion marker, it has crossed the irreversible boundary and can only continue to completion. A root move continues or rolls back only when Runtime can prove the identities and hashes of the source, staging, destination, and quarantine. When two trees differ, it does not delete either one arbitrarily.
+After Archive writes its final completion marker, it has crossed the irreversible boundary and can only continue to wrap up. A root move continues or rolls back only when the identities and hashes of the source, staging, destination, and quarantine can all be proven; when the two trees differ, neither side is deleted arbitrarily.
 
-If `.comet/config.yaml` contains `native.pending_root_move`, run doctor first. Do not delete the field or move the directories manually.
+If `native.pending_root_move` appears in `.comet/config.yaml`, run doctor first. Do not delete the field or move directories directly.
 
 ## Baseline or verification evidence problems
 
-| Symptom | Correct response |
-| --- | --- |
-| `baseline-snapshot-missing` / `incomplete` | Restore the creation-time baseline from a trusted backup, or preserve requirements and implementation facts before creating a new change; do not reconstruct history from current files |
-| Implementation scope is stale | Follow the controlled `next` returned by status to retreat to Build, generate a new scope, and verify again |
-| Verification, report, or receipt is stale | Do not reuse the old pass; return to Build or Verify and produce evidence bound to the current contract and scope |
-| Canonical specification hash conflict | Read the latest specification, run `spec rebase`, then repeat Build and Verify |
-| Repair hard stop | Preserve the failure state and let the user decide whether to change scope, constraints, or stop; do not weaken checks |
+| Symptom                                       | Correct response                                                                                                                              |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseline-snapshot-missing` / `incomplete`    | Restore the creation-time baseline from a trusted backup, or create a new change after preserving requirements and implementation facts; do not rebuild history from current files |
+| implementation scope stale                    | Follow the controlled `next` returned by status to retreat to Build, generate a new scope, and verify again                                    |
+| verification/report/receipt stale             | Do not reuse the old pass; fall back to Build or Verify and form new evidence bound to the current contract/scope                              |
+| canonical spec hash conflict                  | Reread the latest spec, run `spec rebase`, then repeat Build and Verify                                                                       |
+| repair hard stop                              | Preserve the failure scene and let the user decide scope, constraints, or whether to stop; do not weaken checks                               |
 
 ## Locks and evidence retention
 
-Ordinary `new`, `next`, `archive`, and `root move` commands do not take over a lock merely because it appears old. Only explicit `doctor --repair` may take it over after proving that the local owner no longer exists, lock identity is unchanged, and no conflicting transaction is active. Active locks and locks with an unprovable owner remain untouched.
+Ordinary `new`, `next`, `archive`, and `root move` do not automatically take over a lock that merely looks timed out. Only an explicit `doctor --repair` takes one over when the local owner no longer exists, the lock identity is unchanged, and there is no conflicting transaction. Active locks and locks whose source cannot be proven stay untouched.
 
-Evidence retention reports candidates by default. Explicit repair removes only derived evidence from active changes that is at least 30 days old, lies outside the latest 32 files of each evidence kind, and is proven unreferenced through the dependency closure. Archived evidence, current references, unknown files, and in-progress recovery transactions remain untouched.
+Evidence retention only reports candidates by default. An explicit repair cleans up only derived evidence in active changes that is at least 30 days old, lies outside the latest 32 files of each evidence kind, and is proven unreferenced through the dependency closure; archived evidence, current references, unknown files, and transactions under recovery are not cleaned up.
 
 ## Save a snapshot before state changes
 
-If an audit or handoff requires the Runtime response from before a transition, use machine-readable mode on the first call before state changes and redirect stdout directly to the destination:
+If an audit or handoff requires keeping the Runtime's response from before a transition, use machine-readable mode on the very first call before the state changes, and save stdout directly to the destination file:
 
 ```bash
 comet native status <change-name> --details --json > native-before-transition.json
 ```
 
-After confirming that the file is complete, do not reconstruct or overwrite it after the transition. The snapshot proves only what Runtime returned when it was generated; it does not represent later state.
+After confirming the file is complete, do not reconstruct or overwrite it after the transition. The snapshot only proves the state Runtime actually returned when it was generated; it does not represent later state.
 
-Continue with [Continuation and checkpoints](/en/native/continuation-and-checkpoints), [Native safety and recovery](/en/native/safety-and-recovery), and [Native CLI](/en/cli/native).
+Continue with [Continuation and checkpoints](/en/native/continuation-and-checkpoints) and [Native safety and recovery](/en/native/safety-and-recovery).

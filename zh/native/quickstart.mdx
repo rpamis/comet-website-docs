@@ -3,7 +3,24 @@ title: 'Native 快速开始'
 description: '为 Fable 5、GPT-5.6 等强模型初始化 Native，并完成一次可恢复的需求变更。'
 ---
 
-Native 是 Comet 为 Fable 5、GPT-5.6 这一档强编码模型设计的 Skill。它保留需求澄清、target spec、状态、验证证据和归档，但把实现计划、测试粒度、调试与审查方法交给模型按仓库事实和风险选择。
+强模型不需要被手把手教方法。Comet Native 把计划、实现、测试与审查方法全部交给模型自己判断，只用一份可哈希的需求契约、内容寻址的验证证据和可恢复的归档锁住结果。
+
+一次 Agent 轮次、一次 checkpoint、或 Agent 自述"完成"都不算终点——完成判定权在 Runtime，不在模型。所以强模型可以放手去干，结果跑不偏。
+
+## Native 的四阶段
+
+```mermaid
+flowchart LR
+  S["Shape：需求与决策"] --> B["Build：自主实现"]
+  B --> V["Verify：证据与验收"]
+  V -->|通过| A["Archive：更新规格并归档"]
+  V -->|失败| B
+```
+
+- **Shape** — 把模糊需求变成一份可哈希的契约：调查事实，只问真正影响产品行为的决定，写清目标和验收。
+- **Build** — 模型自主选择实现方法，不需要按框架规定的 TDD、计划或 review 流程走。
+- **Verify** — 用真实验证证据对照验收，没跑过的检查不能写成通过；失败回到 Build 继续。
+- **Archive** — 验证通过后更新规格并归档，中途断了也能从磁盘恢复。
 
 ## 1. 初始化项目
 
@@ -22,7 +39,7 @@ comet init --workflow native --root .
 comet init --workflow both
 ```
 
-`--workflow both` 会安装两套独立工作流，但 `/comet` 默认仍进入 Native。Native 默认把产物放在 `docs/comet/`；只有明确需要项目根目录下的 `comet/` 时才传入 `--root .`。该选项不会改变 Classic 目录。
+`--workflow both` 会安装两套独立工作流，但 `/comet` 默认仍进入 Native。Native 默认把产物放在 `docs/comet/`；只有明确需要项目根目录下的 `comet/` 时才传入 `--root .`。
 
 初始化后，项目级共享配置位于 `.comet/config.yaml`：
 
@@ -45,9 +62,7 @@ native:
     max_duration_ms: 60000
 ```
 
-Native 不依赖 OpenSpec、Superpowers、CodeGraph 或其他外部 Skill。项目初始化仍会安装 Comet 自有的统一工作流 Rule；支持 Hook 的平台还会安装一个 Hook Router，用于把一次写入只交给当前 change 所属工作流的 Guard。
-
-`snapshot` 定义新 change 的可审计项目范围和读取预算。普通项目先保留默认完整范围；Monorepo 或大型仓库应在理解依赖边界后再配置 include/exclude。详见 [Native 配置](/zh/native/configuration#内容快照范围与预算)。
+普通项目先保留默认的完整快照范围即可，不用动 `snapshot`。Monorepo 或大型仓库的 `include`/`exclude` 配置见 [Native 配置](/zh/native/configuration#内容快照范围与预算)。
 
 ## 2. 从统一入口开始
 
@@ -57,27 +72,25 @@ Native 不依赖 OpenSpec、Superpowers、CodeGraph 或其他外部 Skill。项�
 /comet 为用户资料页增加头像上传能力
 ```
 
-`/comet` 按 `.comet/config.yaml` 的 `default_workflow` 确定性转发到 `/comet-native`。它不会根据任务大小临时猜测模式，也不会把 Native change 转成 Classic change。
+`/comet` 按 `.comet/config.yaml` 的 `default_workflow` 转发到 `/comet-native`。它只读配置、确定性转发，不会根据任务大小临时猜模式。
 
-若需要绕过默认入口，可以直接调用 `/comet-native`。它是 Skill 入口，不是 shell 命令。
+想跳过路由直接进 Native，或者排查"为什么没进 Native"这类问题，就用 `/comet-native`。它是 Skill 入口，不是 shell 命令。
 
 ## 3. 回答真正影响产品行为的问题
 
-Native 会先调查仓库事实。只有仍会改变范围、输出、默认行为、兼容性、风险或不可逆结果的决定才交给用户。默认的 `sequential` 模式每轮只问一个最上游问题；`batch` 模式会一次提出当前前置条件都已确定的问题。两种模式都会给出推荐和选项影响。
+Native 会先调查仓库事实。只有仍会改变范围、输出、默认行为、兼容性、风险或不可逆结果的决定才交给用户；实现方式由模型自己定。
 
-模型不会把“合理默认值”、相邻实现或行业惯例当作用户决定。澄清完成后，结论进入 brief 与 target spec，再继续 Build。
+默认的 `sequential` 模式每轮只问一个最上游问题；`batch` 模式会一次提出当前前置条件都已确定的问题。两种模式都会给出推荐和各选项的影响，并在进入 Build 前要求你确认完整的共享理解。
 
 ## 4. 让工作流持续推进
 
-```mermaid
-flowchart LR
-  S["Shape：需求与决策"] --> B["Build：自主实现"]
-  B --> V["Verify：证据与验收"]
-  V -->|通过| A["Archive：更新规格并归档"]
-  V -->|失败| B
-```
+阶段通过后，Native 在同一个 Skill 中继续下一阶段，不需要手动切换。`next: auto` 表示 Runtime 已允许继续——它不是后台守护进程，而是确认"当前状态可以往下走"。
 
-阶段通过后，Native 在同一个 Skill 中继续下一阶段。`next: auto` 表示 Runtime 已允许继续，不表示后台服务会自行调用模型。遇到用户决定、损坏状态、冲突或重复无进展失败时，工作流会停下并返回具体原因。
+遇到以下情况，工作流会停下并返回具体原因，而不是硬撑：
+
+- 还有需要你决定的产品行为；
+- 状态损坏、配置无法解释或出现并发冲突；
+- 同一个验证失败反复出现却没有实质进展。
 
 ## 5. 查看与恢复
 
@@ -87,7 +100,7 @@ comet native status <change-name> --details
 comet native doctor <change-name>
 ```
 
-会话中断后再次输入 `/comet 继续`。环境感知恢复会先读取磁盘状态，只在目标明确时自动进入对应 change；多个候选或语义不明确时会询问，不会跨工作流猜测。
+会话中断后再次输入 `/comet 继续`。环境感知恢复会先读磁盘状态，只在目标明确时自动进入对应 change；多个候选或语义不明确时会询问，不会跨工作流猜测。
 
 如不希望普通请求触发只读恢复探针，可在 `.comet/config.yaml` 设置：
 
@@ -95,4 +108,4 @@ comet native doctor <change-name>
 ambient_resume: false
 ```
 
-下一步可阅读 [Native 工作流](/zh/concepts/native-workflow)、[Native 配置](/zh/native/configuration)、[Native 常见问题](/zh/native/faq)、[澄清模式与共享理解](/zh/native/clarification-modes) 和 [产物与状态](/zh/native/artifacts-and-state)。所有确定性命令集中在 [Native CLI](/zh/cli/native)。
+下一步可阅读 [Native 工作流](/zh/concepts/native-workflow)、[Native 配置](/zh/native/configuration)、[Native 常见问题](/zh/native/faq)、[澄清模式与共享理解](/zh/native/clarification-modes) 和 [产物与状态](/zh/native/artifacts-and-state)。

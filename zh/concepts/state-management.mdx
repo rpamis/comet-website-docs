@@ -12,7 +12,7 @@ Comet 的恢复能力来自文件化状态。理解用户可读状态、机器�
 | 目标                             | 看哪里                                                | 建议                                          |
 | -------------------------------- | ----------------------------------------------------- | --------------------------------------------- |
 | 设置 `/comet` 默认进入哪套工作流 | `.comet/config.yaml` 的 `default_workflow`            | 必须同时出现在 `workflows` 中                 |
-| 控制自然语言续接是否自动探测     | `.comet/config.yaml` 的 `ambient_resume`              | 默认 `true`；不影响显式 `/comet`              |
+| 控制是否自动探测当前用户问题需要进入现有comet流程     | `.comet/config.yaml` 的 `ambient_resume`              | 默认 `true`；不影响显式 `/comet`              |
 | 设置 Native 产物语言             | `.comet/config.yaml` 的 `native.language`             | 只支持 `en` 或 `zh-CN`，影响新 Native change  |
 | 设置 Native 澄清模式             | `.comet/config.yaml` 的 `native.clarification_mode`   | `sequential` 或 `batch`                       |
 | 设置 Classic 产物语言            | `.comet/config.yaml` 的 `classic.language`            | 只支持 `en` 或 `zh-CN`，影响新 Classic change |
@@ -86,12 +86,6 @@ flowchart LR
 
 `.comet/config.yaml` 是 Native 与 Classic 共用的项目级配置，全局一份。共享入口字段位于顶层；Native 和 Classic 默认值分别放在 `native:` 与 `classic:` 块中。
 
-<Warning>
-  Comet 不再读取仓库根目录的 <code>.comet.yaml</code> 或 <code>comet.yaml</code>。根目录只使用{' '}
-  <code>.comet/config.yaml</code> 作为项目默认配置；每个 change 的状态只在{' '}
-  <code>&lt;classic-root&gt;/changes/&lt;name&gt;/.comet.yaml</code>。
-</Warning>
-
 ### 当前结构
 
 同时启用两套工作流并选择中文时，项目级安装会生成类似配置：
@@ -145,16 +139,10 @@ classic:
   直接修改 <code>classic.artifact_layout</code> 只会改变 Comet
   读取的目录，不会移动已有产物。已有项目切换布局时，应使用{' '}
   <code>comet classic root move docs --dry-run</code> 检查当前状态、冲突和阻塞项，再用{' '}
-  <code>comet classic root move docs --apply</code> 执行迁移。Dry-run 不生成 plan ID。
+  <code>comet classic root move docs --apply</code> 执行迁移。
 </Warning>
 
-`native.artifact_root`、`native.language` 和 `native.clarification_mode` 的含义、迁移方式及完整示例见 [Native 配置](/zh/native/configuration)。Native 不读取 Classic 的 `context_compression`、`review_mode` 或 `auto_transition`。
-
-<Info>
-  旧的纯 Classic 扁平配置仍可让 <code>/comet</code> 通过 legacy fallback 进入 Classic，但 Classic
-  Runtime 只从 <code>classic:</code> 块读取项目默认值。运行 <code>comet init</code> 或{' '}
-  <code>comet update</code> 会把旧值迁入新块，并补齐缺失的 Native 与 Classic 托管字段。
-</Info>
+`native.artifact_root`、`native.language` 和 `native.clarification_mode` 的含义及完整示例见 [Native 配置](/zh/native/configuration)。Native 不读取 Classic 的 `context_compression`、`review_mode` 或 `auto_transition`。
 
 ### 产物语言和 Skill 语言的区别
 
@@ -167,21 +155,10 @@ classic:
 
 之后新建 Classic change 时，Comet 会把项目级 `classic.language` 快照到 `<classic-root>/changes/<name>/.comet.yaml`。OpenSpec proposal、design、tasks、Superpowers 设计/计划、验证报告和 archive 说明都会按这个配置输出，而不是按某次触发请求的语言临时判断。
 
-如果你在中英文混合会话里继续同一个 change，Comet 会读取该 change 的 `language`，保持产物语言稳定。要切换已有 change 的产物语言，用状态命令改 change 级字段：
-
-```bash
-comet state set <change-name> language en
-comet state set <change-name> language zh-CN
-```
-
-全局 `comet init` 和 `comet update` 会把选择的产物语言保存到 `~/.comet/config.yaml`。新建 Classic change 优先使用项目 `.comet/config.yaml` 的 `classic.language`；未配置时才回退到全局默认。Native 使用独立的 `native.language`，不读取这个 Classic 全局回退。
-
 <Warning>
   项目级和 change 级语言值只接受 <code>en</code> 或 <code>zh-CN</code>。<code>zh</code> 只用于{' '}
   <code>comet init --language zh</code> 的 CLI 选择，不是 <code>.comet/config.yaml</code> 的合法值。
 </Warning>
-
-Comet guard 会检查关键工作流产物的主语言。如果配置是 `zh-CN`，但 `proposal.md`、`tasks.md`、`design.md` 等明显以英文为主，guard 会阻止阶段推进；配置是 `en` 时也会阻止明显中文为主的产物。代码块会被排除在判断之外，所以命令、路径、hash 或日志不会误导语言检查。
 
 ## 配置优先级
 
@@ -267,16 +244,6 @@ export COMET_AUTO_TRANSITION=true
 | `base_ref`        | git SHA 字符串    | change 创建时的 commit SHA，用于变更规模评估          |
 | `direct_override` | `true` \| `false` | full workflow 用 `build_mode: direct` 时必须为 `true` |
 
-<Warning>
-  <code>build_command</code> 和 <code>verify_command</code> 已移除，不再是合法字段。build guard
-  会自动探测项目构建命令（例如 <code>npm run build</code>、Maven 或
-  Cargo）；没有探测到时，先真实运行项目命令，再用{' '}
-  <code>
-    comet state record-check &lt;change&gt; &lt;build|verify&gt; --command "..." --exit-code 0
-  </code>{' '}
-  记录可审计结果。该命令不能替代真实执行。
-</Warning>
-
 ### 时间与归档
 
 | 字段                   | 类型 / 允许值                      | 含义                                                                            |
@@ -350,12 +317,6 @@ Classic 状态转换共用同一套语义。成功的 `comet state transition`�
 | `from` / `to`   | 转换前后的 Classic 状态投影                                 |
 | `effects`       | 实际变更的字段列表，例如 `phase: build -> verify`           |
 
-<Tip>
-  排查"为什么 phase 变了"时，先看 <code>.comet.yaml</code> 的当前状态，再看{' '}
-  <code>.comet/state-events.jsonl</code> 的最后几行。它能告诉你是 guard、手工 transition 还是
-  archive 流程写入了这次变化。
-</Tip>
-
 ## 环境变量
 
 | 环境变量                    | 用途                                            | 适用场景                             |
@@ -407,23 +368,6 @@ export COMET_AUTO_TRANSITION=false
 ```
 
 影响当前会话，不改文件。
-
-### 修改单个 change 的字段
-
-通过 `comet state` 命令（不要直接编辑文件）：
-
-```bash
-comet state set <change-name> verify_mode full
-comet state set <change-name> review_mode thorough
-```
-
-`bound_branch` 由设置 `isolation` 时自动记录。若入口检查报告当前分支与绑定分支不一致，优先切回原分支；只有你确认当前分支应接管该 change 后才运行：
-
-```bash
-comet state rebind <change-name>
-```
-
-换绑会写入状态审计日志；未建立首次绑定或 detached HEAD 下会被拒绝。machine-owned 字段（包括 `bound_branch`、`classic_profile`、`classic_migration`、`run_id`）不能用 `set` 修改。
 
 ## 状态和 Run state 的边界
 
