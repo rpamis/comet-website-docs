@@ -1,66 +1,42 @@
 ---
-title: 'Verification evidence and autonomous repair'
-description: 'Understand how Native forms an implementation scope, acceptance evidence, stale evidence, and bounded repair.'
+title: 'Verification and repair'
+description: 'Understand how Native runs necessary checks, dispatches an independent Verifier, and repairs failures through a bounded Loop.'
 ---
 
-Native does not prescribe a fixed TDD or review method, but it does have one hard rule: the verification conclusion must correspond to the current requirements and the real implementation, and a check that has not actually been run cannot be written as passed. **The Agent finds and repairs gaps; the Runtime judges whether it is done.**
+Native does not require a fixed TDD or review method, but it does not accept “I am done” as an acceptance result. **The Builder implements, the Runtime executes checks, a fresh read-only Verifier reviews each item, and the Runtime decides whether the change is complete.**
 
-## Implementation scope
+## What Verify actually does
 
-At the end of Build, the model submits the files it actually changed. Based on those artifacts and the current project state, the Runtime confirms exactly which scope this implementation covered (the implementation scope).
+1. The Builder submits a handoff describing the implementation, the relevant brief/Specs, and the candidate to review.
+2. Runtime resolves the complete acceptance list and required-check plan, then records the attempt in a short state update.
+3. Runtime executes the required checks. A matching completed check for the same candidate is reused instead of run again. Command output streams to local logs, while the report keeps a safe summary.
+4. Runtime dispatches a fresh read-only Verifier. The Verifier must return exactly one result for every A1…An item; missing, duplicate, unknown, or Builder-self-reported results are rejected.
+5. Runtime moves to `pass`, returns to Build, or waits for a user resolution. The normal Archive path does not run the checks again.
 
-This scope is fixed when the change is created — it is the scope circumscribed by `snapshot.include`/`exclude` in the configuration. Changing the configuration during implementation can only affect future new changes; it cannot make the current change's differences disappear into thin air. If you find that an excluded path is in fact an implementation dependency, the correct move is to update the requirement and create a new change with a complete scope, rather than reusing the old scope.
+The Verifier cannot use the Builder's context as its own endorsement. Hosts that can provide an independent subagent dispatch a new execution; when only Skill coordination is available, Runtime clearly marks semantic verification as unavailable and requires one user confirmation before Archive.
 
-If the scope contains changes that cannot be accounted for, the Runtime stops at Build and tells you what is missing. Fill it in first; if it genuinely cannot be filled in, you must explicitly accept the residual risk before you can continue. But there is a bottom line: an incomplete scope cannot be bypassed by hand-editing the evidence.
+## Checks and the report
 
-## Verification report
+Runtime resolves required checks from the project's formal content; an Agent's prose saying “passed” is not a substitute. Each result records command status, exit code, duration, and a readable summary. Full stdout/stderr stays in local logs; long output is preview-truncated and does not by itself invalidate a valid result.
 
-A verification report records at least:
+When an additional check is genuinely needed, the Verifier requests it through `request-checks` in the current attempt. Runtime deduplicates equivalent plans, limits request rounds, and returns the results to the Verifier. The Agent must not fabricate a result or paste a third-party command's output into a pass field.
 
-- the commands actually run and their results;
-- which checks were skipped, and why;
-- known limitations and the overall conclusion;
-- the evidence for each acceptance item; anything that could not be run is marked honestly, never written as passed.
+`verification.md` is a user report generated from `comet-state.yaml`. It contains checks, per-item acceptance results, limitations, and the conclusion. It can be rebuilt; a missing report is never a reason to bypass Verify.
 
-Use these two commands to record evidence:
+## How failures return to Build
 
-- `comet native receipt manual` — records reviewable manual steps and observations;
-- `comet native receipt automated` — runs one explicit check command and stores the result as reviewable evidence.
+Any failed acceptance item, failed check, incomplete Verifier response, or invalid coverage writes a concrete gap into the next continuation and returns the change to Build. The next round repairs those gaps first, then submits a new Builder handoff and a new Verifier attempt. A stale attempt cannot be turned into a pass by resubmitting the same text.
 
-A failed acceptance may also cite a non-passing receipt; the Runtime derives what is still missing from it, so you do not need to submit a separate failure classification.
+The Loop counts substantive convergence as progress: unresolved acceptance items strictly shrink, a failed check becomes passing, or missing information is supplied. Rewriting explanations, rerunning the same command, or alternating between failure sets does not extend the Loop indefinitely.
 
-In addition, when you submit a passing conclusion the Runtime automatically runs one built-in `comet native check` — a read-only text hygiene scan that does not call Git, a shell, or test scripts, does not replace project tests, and is simply a required check bound to a passing conclusion.
+## Stagnation and error budgets
 
-## Evidence goes stale
+`comet-state.yaml` stores `iteration`, `attempt`, `no_progress_count`, `failed_iteration_count`, `execution_failure_count`, and bounded history. An unchanged or regressing unresolved set increases the stagnation count; repeated Runtime execution errors increase the execution count. Once a limit is reached, the state becomes `await-user` or `blocked` with a concrete `resolution_action` instead of consuming more time.
 
-A verification conclusion is not once-and-for-all. It binds to the requirements, the implementation scope, and the project state at that moment — change any of those and the old evidence is void.
+The user may return to Shape when the requirement changed, or explicitly retry a Verifier when the implementation is unchanged and an external blocker has been resolved. An ordinary “try again” does not clear the history or carry an old pass into a new candidate.
 
-There are two sources of change:
+## Reliability boundary
 
-- **The requirements or spec changed**: you must be asked to confirm again, because the requirement itself changed.
-- **Only the project files changed** (the requirements did not move): keep the existing confirmation. The Runtime retreats to Build, rebuilds the scope, and re-verifies, without bothering you further.
+Runtime can ensure that the command actually ran, a non-zero exit cannot be treated as a pass, the acceptance list is covered, and matching checks are not needlessly repeated. It cannot decide whether a test is meaningful, nor observe background or IDE writes that the host does not expose. When an independent Verifier is unavailable, the Dashboard and report show the degraded status explicitly instead of presenting it as independent semantic verification.
 
-So never submit a conclusion against the old scope. After entering Archive, if the report or evidence changes again, the same applies: start over, do not reuse the old pass.
-
-<p align="center">
-  <img
-    src="/assets/native-illustrations/07-verification-evidence.png"
-    alt="Xiaoyu removes a faded verification receipt from a photo board and prepares a fresh check at the workbench, showing that changed inputs stale old evidence"
-  />
-</p>
-
-## Bounds on repair
-
-A Verify failure returns to Build. The Runtime hands the unpassed acceptance items to the next round so you close those gaps first, rather than retrying directly.
-
-But repair cannot loop forever. The bar for "progress" is substantive: fewer gaps, a check turning green, or missing evidence restored count as progress; merely changing files or rewriting explanations while the failure set stays unchanged does not. The rules are roughly:
-
-- the second occurrence of the same issue warns;
-- the third occurrence without progress gives one last chance and requires you to propose a new repair hypothesis;
-- the same contract accepts at most five Verify failures by default, adjustable in the configuration with `native.max_verify_failures`.
-
-When the count is spent, the Runtime stops and hands it to you, laying out the current evidence and three directions: raise the limit, change the confirmed requirement, or stop. Only a requirement change you have confirmed resets the count; ordinary implementation changes do not.
-
-A strong model may repair for several rounds in a row, but the basis for judging completion is whether the gaps are shrinking, not how much code changed.
-
-Continue with [Native workflow](/en/concepts/native-workflow#four-phase-workflow), [Native FAQ](/en/native/faq), [Safety and recovery](/en/native/safety-and-recovery), and [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts).
+Continue with [Native Loop](/en/native/native-loop), [Continuation](/en/native/continuation-and-checkpoints), and [Recovery and troubleshooting](/en/native/recovery-playbook).

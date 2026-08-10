@@ -1,53 +1,46 @@
 ---
 title: 'Native 安全与恢复'
-description: '了解 Native 的两层安全模型、写入归属、不可变 baseline、修复停止与环境感知恢复。'
+description: '了解 Native 的写入归属、portable 状态、本机 Runtime、失败停止与环境感知恢复。'
 ---
 
-Skill 让模型遵守需求和阶段约定，Runtime 用可验证的状态、证据和事务检查兜底。前者是"该怎么做"，后者是"必须怎么做"——光有文案规则不能算硬约束，Runtime 才是不可绕过的状态机。
+Skill 负责引导模型，Runtime 负责把关键边界落到可检查的状态和文件。两者职责不同：文案不能代替 Runtime 的检查，Runtime 也不会替模型判断一个测试是否有意义。
 
 ## 一次写入只属于一个 change
 
-Comet 在你写的文件背后做了一道归属检查：一次写入最多落在一个 change 上，减少写错需求和重复阻塞。
+Comet 会把可观察的写入归属到当前选择的 workflow/change，一次写入最多交给一个 Guard。`.comet/current-change.json` 只记录当前请求归属，不限制 active change 的数量。没有可信项目上下文的遗留全局 Hook 保持中性，不会把另一个项目的 change 当成当前目标。
 
-具体怎么分流，取决于当前选中哪个 change 以及配置里启用了哪套工作流。读状态、查进度这类只读操作不会触发写入检查，所以你可以放心用 `status`、`show`，不会意外把后续写入绑到别的需求上。
+这套保护只覆盖宿主能观察到的写入。shell、IDE、后台进程或平台没有暴露给 Hook 的写入可能无法即时归属；下一次 Runtime 状态检查仍会拒绝不一致的结果，并要求回 Build、Shape 或用户处理。
 
-需要注意的是，这套保护覆盖的是 Comet 能感知到的写入。对于 shell、外部进程或平台没暴露给 Hook 的写入，最终以 Runtime 的状态和证据检查为准。
+## Portable 状态与本机 Runtime
 
-## 不可变的 baseline
+跨设备稳定边界是 `comet-state.yaml`、brief、Specs 和可重建的 `verification.md`。它保存阶段、Loop、验收、handoff、必要检查、Verifier 结论、阻塞和下一步。
 
-每个新 change 在创建时都要拿到一份完整的 baseline（项目初始状态的快照）。这是不可变事实——Runtime 不靠猜补全，比如不会把缺失的路径当成删除。
+`.comet/runtime/native/` 只保存本机 `state.json`、日志、短时锁和事务。设备切换、文件缺失或 overlay 版本不匹配时，Runtime 从 YAML 重建；不会把旧机器的执行状态当作当前完成证明。
 
-对于已经在用的 change，baseline 缺失或损坏不是 `doctor` 能自动修的问题，因为用当前文件重建会抹掉从创建以来的历史差异。这时只能从可信备份恢复原 baseline，或者保留需求文档和实现事实后新建 change。
+## Build 与 Verify 的安全边界
 
-唯一的例外是从旧版 schema 升级：`doctor --repair` 会在任何状态写入前先抓一份完整的迁移时点 baseline，抓不全就保持原状不动。迁移后的证据只覆盖升级之后的变化，不能继承升级前的 scope 或 pass。
-
-## 证据与修复的边界
-
-这两个主题在 [验证证据与自主修复](/zh/native/verification-and-repair) 有完整说明，这里只点出安全相关的结论：
-
-- **验证证据会失效**：结论绑定 brief、spec、实现范围和 revision，任一变化旧证据作废。
-- **修复有上限**：同一语义缺口第三次出现且无进展就停下，同一契约默认最多 5 次 Verify 失败。用完预算，Runtime 把决定权交还用户。
-- **fail-closed**：任何完整性失败都不能靠手改 evidence 绕过。
+- Builder 只能提交 handoff，不能直接写入通过结论；
+- Runtime 亲自执行必要检查，非零退出或超时不能当成通过；
+- 新 Verifier 必须覆盖完整 A1…An，漏项、重复项和未知项都会被拒绝；
+- Verify 失败回 Build，新的实现必须由新的 Verifier 重新验收；
+- 正常 Archive 不重新运行 Verify，只应用 Spec、生成报告并移动 change；
+- 没有独立 Verifier execution 时，报告和 Dashboard 显示降级状态，归档前需要用户确认。
 
 ## 环境感知恢复
 
-`comet resume-probe` 是个只读探针：会话中断后，它读配置里的默认工作流，只查那一侧有没有可恢复的 change。
+`comet resume-probe` 是只读探针，只查看配置默认的工作流：
 
-| 结果           | 含义                                                |
-| -------------- | --------------------------------------------------- |
-| `auto_resume`  | 目标唯一且请求确实要继续工作，按 `nextCommand` 恢复 |
-| `ask_user`     | 多个候选或请求归属不明确，需要一个简短选择          |
-| `out_of_scope` | 当前请求不是要进入可恢复工作流                      |
-| `none`         | 没有可恢复 change                                   |
+| 结果           | 含义                           |
+| -------------- | ------------------------------ |
+| `auto_resume`  | 目标唯一且请求明确要继续       |
+| `ask_user`     | 有多个候选或归属不明确         |
+| `out_of_scope` | 当前请求不表示要进入恢复工作流 |
+| `none`         | 没有可恢复的 change            |
 
-配置或状态损坏时，探针会停下并给出原因，不会扫另一套目录去猜。`ambient_resume: false` 可以关掉对普通请求的自动探测；显式调 `/comet` 不受影响。
+配置损坏、代码未同步、branch/worktree 不匹配或 active/archive 布局矛盾时，探针停下并给出原因，不会扫描另一套工作流或猜测目录。`ambient_resume: false` 只关闭普通请求的自动探测；显式 `/comet` 不受影响。
 
 ## Dashboard 的职责
 
-Dashboard 只读展示：阶段、证据是否有效、当前 continuation、结构化 finding、冲突摘要和归档就绪状态。它不重新推导事实，也不提供推进、修复或归档的写入按钮——所有写入都只能通过 CLI/Runtime 完成。
+Dashboard 只读展示 portable YAML 的阶段、Loop、验收、检查、阻塞、历史和用户文档，并在匹配时补充本机 overlay。它不推进、修复或归档，也不读取原始日志和执行身份；所有状态变更都通过 Native CLI/Runtime 完成。
 
-## 相关主题的去向
-
-- 验证证据失效、修复上限的完整规则 → [验证证据与自主修复](/zh/native/verification-and-repair)
-- 并发规格冲突、spec rebase → [多 Change 与规格冲突](/zh/native/multi-change-and-conflicts)
-- 事务、锁、未完成 transition、中断恢复的具体操作 → [恢复与故障处理](/zh/native/recovery-playbook)
+继续阅读：[验证与修复](/zh/native/verification-and-repair)、[产物与状态](/zh/native/artifacts-and-state) 和 [恢复手册](/zh/native/recovery-playbook)。

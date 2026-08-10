@@ -1,9 +1,9 @@
 ---
 title: 'Native artifacts and state'
-description: 'Understand the roles of .comet/config.yaml, the brief, target spec, comet-state.yaml, evidence, and the archive directory.'
+description: 'Understand Native user documents, portable recovery state, and the responsibilities of local Runtime files.'
 ---
 
-Close the session and reopen it — your work is not lost. Native writes every fact that must survive across sessions to files, and recovery relies on disk facts, not chat memory. You usually only need to read the brief, spec, and verification report; state, hashes, locks, and transactions are maintained by the Runtime and are not yours to manage.
+Native keeps documents users need to read and sync in the change directory, while execution details live in the project Runtime. You normally only read the brief, Specs, `comet-state.yaml`, and `verification.md`; do not create or edit Runtime files by hand.
 
 ## Project layout
 
@@ -14,6 +14,11 @@ The default layout is:
   .comet/
     config.yaml
     current-change.json
+    runtime/native/
+      changes/<change-name>/state.json
+      logs/
+      locks/
+      transactions/
   docs/comet/
     specs/
     changes/
@@ -22,96 +27,50 @@ The default layout is:
         comet-state.yaml
         specs/<capability>/spec.md
         verification.md
-        runtime/
-          baseline-manifest.json
-          run-state.json
-          trajectory.jsonl
-          checkpoints/
-          evidence/
-            snapshots/
-            scopes/
-            allowances/
-            verifications/
-            check-receipts/
     archive/
       YYYY-MM-DD-<change-name>/
-    runtime/
 ```
 
-`native.artifact_root` can place `comet/` under another project-relative directory. For example, `artifact_root: docs` maps to `docs/comet/`. Shared configuration and the current selection still live under `.comet/`.
+`native.artifact_root` may point to another project-relative directory such as `artifacts/comet/`. `.comet/config.yaml` and `.comet/current-change.json` remain project-level boundaries. `.comet/runtime/native/` is Runtime-owned and normally ignored; it should not be copied into a change or presented as user documentation.
 
-## `.comet/config.yaml`
-
-This is the project configuration location shared by Native and Classic. See [Native configuration](/en/native/configuration) for the complete schema, examples, and how to modify it; the fields directly relevant to Native artifacts are listed here:
-
-| Field                       | Purpose                                                                |
-| --------------------------- | ---------------------------------------------------------------------- |
-| `schema`                    | Configuration format, currently `comet.project.v1`                     |
-| `default_workflow`          | Whether `/comet` enters `native` or `classic` by default               |
-| `workflows`                 | Whether the project enables Native, Classic, or both                   |
-| `ambient_resume`            | Whether ordinary requests may trigger the read-only Ambient Resume probe |
-| `native.artifact_root`      | Root for Native's `comet/` artifacts                                   |
-| `native.language`           | Default document language for new Native changes                       |
-| `native.clarification_mode` | Ask one question per round, or every currently answerable question in the round |
-| `native.snapshot`           | Content-snapshot scope policy and execution budgets for new changes    |
-
-Classic's own settings can stay in the same file without changing the Native state machine. To change the artifact root, use `comet native root move` so the Runtime migrates it transactionally; do not just edit the YAML and move directories by hand.
-
-<p align="center">
-  <img
-    src="/assets/native-illustrations/04-artifacts-and-state.png"
-    alt="Xiaoyu files readable documents on an upper shelf and keeps state records and hash indexes in a locked box below, showing recoverable responsibility layering"
-  />
-</p>
-
-## User-readable artifacts
+## The user-readable files
 
 ### `brief.md`
 
-The brief defines the target and boundaries of this change, including Outcome, Scope, Non-goals, Acceptance examples, constraints, confirmed decisions, open questions, and verification expectations. `[blocking]` marks behavior that still requires a user decision.
+The brief records the goal, scope, non-goals, confirmed user decisions, open questions, acceptance examples, and verification expectations. It is the Shape working document that users can read and edit as requirements evolve.
 
-### target spec
+### `specs/<capability>/spec.md`
 
-`changes/<change>/specs/<capability>/spec.md` describes the complete behavior of the capability after archiving. It is not a delta patch that can only be read alongside an older document.
-
-The Runtime derives the operation from whether a canonical spec exists:
-
-- `create`: create a new canonical spec at archive time;
-- `replace`: replace the old version with the target spec, provided the old version's hash is unchanged;
-- `remove`: explicitly remove the capability through the CLI.
-
-When concurrent changes shift the baseline, use `spec rebase` to rebind to the latest canonical spec; old verification becomes stale.
-
-### `verification.md`
-
-The verification report records the actual commands, results, skip reasons, known limitations, the overall conclusion, and per-item Acceptance evidence. The Runtime stores an immutable report snapshot and binds it to the contract, scope, and revision at that time.
-
-## Runtime-managed state
+Each Spec describes the complete behavior of a capability after Archive. Archive applies a declared `create`, `modify`, or `remove`: create a new Spec, replace its full contents, or delete it only through the controlled capability path. If parallel changes target the same capability, Runtime stops for an archive-order decision instead of overwriting automatically.
 
 ### `comet-state.yaml`
 
-Every active or archived Native change has its own `comet-state.yaml`. It records machine state such as phase, revision, approval, `approved_contract_hash`, verification, and spec operation. In the normal flow, the change enters Build only after `approval: confirmed`; `implicit` is only for compatibility with older changes and does not prove the user confirmed it, so it must be upgraded to explicit confirmation before leaving Build. `approved_contract_hash` binds the approval to the brief/spec contract at that moment, and later contract drift also requires fresh user confirmation. Do not edit these fields by hand, and do not confuse this file with a Classic change's `.comet.yaml`.
+This is the stable, portable recovery state. It records the current phase and status, Loop iteration/attempt, every acceptance item and result, the Builder handoff, required-check summaries, the Verifier verdict, blockers, bounded history, and the next action. A new Agent reads it first and follows the continuation without relying on the previous chat session.
 
-### Run, trajectory, and checkpoint
+### `verification.md`
 
-- Run state stores the current continuation and repair state;
-- trajectory stores bounded phase summaries, timestamps, and evidence references, not hidden reasoning;
-- checkpoint stores an in-phase summary, the next action, and a content-addressed artifact manifest for a new session to recover from.
+Runtime generates this user report from state. It contains the actual checks, per-item acceptance results, risks, limitations, and conclusion. It is a rebuildable presentation file, not an authoritative transition input; if it is missing or stale, Runtime can rebuild it from `comet-state.yaml`.
 
-A checkpoint does not replace the brief, spec, or verification report, and it does not advance the phase.
+## Local Runtime
 
-### Selection
+`.comet/runtime/native/` stores the local execution overlay, logs, short-lived locks, and recoverable transactions. It may be absent after moving to another device or cleaning local files; Runtime rebuilds it from the synced YAML and never treats a copied `state.json` as portable truth. Logs are useful for command diagnostics but do not replace `verification.md`.
 
-`.comet/current-change.json` records which workflow/change the current writes belong to. It lets the shared Hook Router hand writes to a single Guard even when one project enables multiple workflows or multiple changes. Read-only `status` does not change the selection as a side effect; to select a change use `comet native select <change-name>`.
+`.comet/current-change.json` only selects which workflow/change owns the next write; it does not limit a project to one active change. Status is read-only. When ownership must be explicit, use `comet native select <change-name>`.
 
-## Bounded reads and content addressing
+## Cross-device recovery
 
-Native uses hashes to bind verification conclusions, archive preflights, checkpoints, and the rest to the file content at that time. So when judging whether evidence still holds, it looks at the actual content of the current files — not a textual statement that something "has been verified." Once a file changes, the corresponding old conclusion is automatically invalidated.
+Sync the project code, `.comet/config.yaml`, the brief, Specs, and `comet-state.yaml`. If a report already exists, sync `verification.md` too, but a missing report must not prevent Shape or Build recovery. On the target device, verify the artifact root and the branch/worktree, then run:
 
-The scope (`include`/`exclude`) is fixed at change creation and written into `baseline-manifest.json`. Even if someone edits `.comet/config.yaml` during implementation, they cannot make a change that was already in scope disappear. But the resource budgets (`max_files`, `max_total_bytes`, `max_duration_ms`) are read from current configuration — when the repository grows, just raise the budgets; you do not need to touch the scope.
+```bash
+comet status
+comet native status <change-name> --details --json
+comet native doctor <change-name>
+```
 
-If the scope or a budget is exceeded, the Runtime stops, tells you the actual affected paths and how to adjust, and does not throw a generic error. There is a hard line here: when the scope is incomplete, the Runtime does not fill gaps by guessing (for example, it does not treat a missing file as a deletion), and it cannot be bypassed by hand-editing evidence.
+An in-flight local check is treated as interrupted. A previous Verify or `archive-ready` result is reconfirmed according to Runtime recovery rules; copying an old `state.json` never makes Archive safe by itself. Unsynced code, a mismatched branch, or a mixed active/archive layout stops with an explicit user action.
 
-For how to write patterns, three copy-ready scope configurations, and how to decide between raising a budget and excluding a file, see [Native configuration](/en/native/configuration#content-snapshot-scope-and-budget) and [Native FAQ](/en/native/faq#content-snapshot-and-implementation-scope).
+## After Archive
 
-Continue with [Safety and recovery](/en/native/safety-and-recovery).
+A successfully archived change keeps only user-readable brief, Specs, `comet-state.yaml`, and `verification.md` artifacts. Its per-change local execution directory under `.comet/runtime/native/` is cleaned up. Machine files left by an older version are handled only by migration or the read-only legacy adapter and are not inputs to a new Native flow.
+
+Continue with [Verification and repair](/en/native/verification-and-repair), [Continuation](/en/native/continuation-and-checkpoints), and [Recovery and troubleshooting](/en/native/recovery-playbook).

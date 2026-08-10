@@ -1,66 +1,42 @@
 ---
-title: '验证证据与自主修复'
-description: '理解 Native 如何形成 implementation scope、验收证据、证据失效与有界修复。'
+title: '验证与修复'
+description: '理解 Native 如何由 Runtime 执行必要检查、分派独立 Verifier，并在失败时通过有界 Loop 修复。'
 ---
 
-Native 不规定固定的 TDD 或审查方法，但有一条硬规则：验证结论必须对应当前的需求和真实实现，没真跑的检查不能写成通过。**Agent 负责发现和修复缺口，Runtime 负责判断是否完成。**
+Native 不要求固定的 TDD 或审查方法，但不接受“我做完了”作为验收结果。**Builder 负责实现，Runtime 负责执行检查，新的只读 Verifier 负责逐项判断，Runtime 负责决定是否完成。**
 
-## 实现范围
+## Verify 的实际顺序
 
-Build 结束时，模型提交它实际改动的文件。Runtime 根据这些产物和当前项目状态，确认这次实现到底覆盖了哪些范围（implementation scope）。
+1. Builder 提交 handoff：说明已完成的实现、相关 brief/Spec 和准备交给验收的候选。
+2. Runtime 解析当前完整验收列表，解析必要检查计划，并在短状态更新中登记本次 attempt。
+3. Runtime 执行必要检查；同一候选下已完成且匹配的检查直接复用，不重复跑。命令输出流入本机日志，报告只保留安全的摘要。
+4. Runtime 分派新的只读 Verifier。Verifier 必须对每个 A1…An 恰好给出一次结果；漏项、重复项、未知 ID 或把 Builder 自己的自报结果当成验收都会被拒绝。
+5. Runtime 根据结果进入 `pass`、回 Build，或等待用户处理的状态。Archive 正常路径不会再次运行这些检查。
 
-这个范围在 change 创建时就定死了——就是配置里 `snapshot.include`/`exclude` 圈定的范围。实现过程中改配置，只能影响之后的新 change，没法让当前 change 的改动凭空消失。如果你发现某个被排除的路径其实也是实现依赖，正确的做法是更新需求、新建一个范围完整的 change，而不是接着用旧范围。
+Verifier 不能使用 Builder 的上下文替自己背书。能提供独立 subagent 的宿主会分派新的 execution；只有 Skill 协调、没有可信独立 execution 时，Runtime 会明确标记“语义验收不可用”，并在归档前要求用户确认降级结果。
 
-如果范围里有没法归类的改动，Runtime 会停在 Build，告诉你缺什么。优先补全；实在补不全，需要你明确接受残留风险才能继续。但有个底线：范围不完整不能靠手改 evidence 绕过。
+## 检查和报告
 
-## verification report
+必要检查由 Runtime 根据项目和 change 的正式内容解析，不由 Agent 通过一段“已通过”的文字替代。检查结果至少包含命令状态、退出码、耗时和可读摘要；完整 stdout/stderr 留在本机日志，长输出会截断预览而不会单独使有效结果失败。
 
-verification report 至少记录：
+如果确实需要额外检查，Verifier 在当前 attempt 通过 `request-checks` 请求 Runtime 执行。Runtime 会去重相同计划、限制请求轮数，并把新的结果返回给 Verifier；Agent 不应自己伪造检查结果或把第三方命令的输出直接写成通过。
 
-- 实际跑的命令和结果；
-- 哪些检查跳过了、为什么；
-- 已知限制和总体结论；
-- 每条验收对应的证据；跑不了的如实标出来，不能写成通过。
+`verification.md` 是 Runtime 从 `comet-state.yaml` 生成的用户报告，包含检查、逐项验收、限制和结论。它可以重建；缺失报告不是绕过 Verify 的理由。
 
-记证据用这两个命令：
+## 失败如何回到 Build
 
-- `comet native receipt manual` —— 记录可复核的手动步骤和观察；
-- `comet native receipt automated` —— 跑一条明确的检查命令，把结果存成可复核的证据。
+只要有验收项失败、检查失败、Verifier 漏项或结果不完整，Runtime 就把明确的缺口写入下一轮 continuation，并把 change 返回 Build。下一轮优先修复失败项，再由新的 Builder handoff 和新的 Verifier 重新验收；不能在原 attempt 上反复提交一个“通过”。
 
-失败的验收也可以引用不通过的 receipt，Runtime 会据此推导出还差什么，你不必另外提交失败分类。
+Loop 只把真实收敛算作进展：未解决验收项严格减少、失败检查变为通过，或已明确补齐缺失信息。只是改写说明、重复同一命令或在不同失败集合之间来回切换，都不会无限延长循环。
 
-另外，提交通过结论时 Runtime 会自动跑一次内置的 `comet native check`——这是个只读的文本卫生扫描，不调 Git、shell 或测试脚本，也不替代项目测试，只是绑在通过结论上的一道必需检查。
+## 停滞和错误预算
 
-## 证据会失效
+`comet-state.yaml` 会保存 `iteration`、`attempt`、`no_progress_count`、`failed_iteration_count`、`execution_failure_count` 以及有限的 history。相同或退化的未解决集合会增加停滞计数；连续的 Runtime 执行错误也会增加错误计数。达到上限时，状态会变为 `await-user` 或 `blocked`，并给出具体的 `resolution_action`，而不是继续消耗时间。
 
-验证结论不是一劳永逸的。它绑定了当时的需求、实现范围和项目状态——这里头任何一个变了，旧证据就作废。
+用户可以在需求确实改变时回到 Shape，或者在实现没有变化且外部阻塞已经解决时确认重试 Verifier。普通的“再试一次”不会清除历史，也不会把旧的通过结果直接带到新候选。
 
-变动来源分两种：
+## 可靠性边界
 
-- **需求或 spec 变了**：得重新找你确认，因为需求本身改了。
-- **只是项目文件变了**（需求没动）：保留原来的确认，Runtime 退回 Build，重新建范围、重新验证，不额外打扰你。
+Runtime 能保证命令确实执行、非零退出不能当作通过、验收列表不能漏项，以及同一候选的检查不会无意义地重复。它不能替模型判断测试是否足够有意义，也不能观察没有被宿主暴露的后台进程或 IDE 写入。无法提供独立 Verifier 时，Dashboard 和报告会明确显示降级状态，不会伪装成独立语义验收。
 
-所以别在旧范围上提交结论。进了 Archive 之后如果报告或证据又变了，同样要重来，不能复用旧的通过结论。
-
-<p align="center">
-  <img
-    src="/assets/native-illustrations/07-verification-evidence.png"
-    alt="小鱼从照片板取下已经褪色的验证凭据，准备在工作台上重新验证，表示输入变化后旧证据失效"
-  />
-</p>
-
-## 修复的上限
-
-Verify 失败会回到 Build。Runtime 会把没通过的验收项交给下一轮，让你先补缺口，而不是直接重试。
-
-但修复不能无限循环。判断"进展"的标准是实质性的：缺口在减少、检查在转绿、缺失的证据补上了，才算；光改文件、重写说明，但失败集合没变，不算。规则大致是：
-
-- 同一个问题第二次出现会告警；
-- 第三次还没进展，给最后一次机会，要求你提出新的修复思路；
-- 默认同一份需求最多允许 5 次 Verify 失败，可在配置里用 `native.max_verify_failures` 调。
-
-次数用完，Runtime 就停下交给你，说清当前证据和三个方向：放宽上限、改已确认的需求，还是停下。只有你确认后的需求变更才会重置计数；普通的实现改动不会。
-
-强模型可以连续修复多轮，而判断完成的依据是缺口是否在减少，不是改了多少代码。
-
-继续阅读：[Native 工作流](/zh/concepts/native-workflow#四阶段工作流)、[Native 常见问题](/zh/native/faq)、[安全与恢复](/zh/native/safety-and-recovery) 和 [多 Change 与规格冲突](/zh/native/multi-change-and-conflicts)。
+继续阅读：[Native Loop](/zh/native/native-loop)、[连续推进](/zh/native/continuation-and-checkpoints) 和 [恢复手册](/zh/native/recovery-playbook)。

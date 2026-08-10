@@ -1,89 +1,49 @@
 ---
 title: 'Multiple changes and specification conflicts'
-description: 'Manage several Native changes in parallel, and understand current selection, conflict findings, canonical-spec baselines, and safe rebasing.'
+description: 'Run several Native changes in parallel, understand ownership and workspace choices, and archive them safely.'
 ---
 
-Several requirements can proceed in parallel; the Runtime uses canonical specs at archive time to prevent mutual overwrites. A Native project can keep multiple active changes at once. `.comet/current-change.json` records only which change the next write belongs to — it is not a concurrency limit. This single selection routes one write to one change, preventing two changes from simultaneously claiming the same set of modifications.
+A project can carry several active Native changes at once. `.comet/current-change.json` selects which workflow/change owns the next write; it does not limit active changes. Runtime serializes Archive by capability so one change cannot silently overwrite another.
 
 ## Parallel changes and working directories
 
-The parallel unit is a change: separate changes can progress in separate working directories, while one change writes only from its bound directory. Before creating a new change, Native checks the current directory and discovered worktrees and, when isolation matters, presents one choice among `current`, `branch`, and `worktree`. When another active change already owns the current directory, `worktree` is the safe option. You do not need to say “parallel”; the Agent continues in the new worktree and binds it to the branch that was current when it was created.
+When creating a change, Native checks the current directory and registered worktrees. When isolation matters, it shows the applicable `current`, `branch`, and `worktree` choices with a recommendation. If another active change already uses the current directory, `worktree` is usually the safe choice. Each change keeps its branch/worktree binding, and recovery stops in the wrong directory.
 
-Existing changes are not migrated or given new worktrees automatically. Resume them from their existing working directory.
+Existing changes are not moved to a new worktree automatically. Before continuing on another device, sync the code and formal Native files, then verify the artifact root and branch/worktree.
 
-## Inspect and select a change
-
-Start with read-only commands to inspect candidates:
+## Inspect and select
 
 ```bash
 comet native status
-comet native show <change-name>
-comet native status <change-name> --details
-```
-
-After confirming the target, select it explicitly:
-
-```bash
+comet native status <change-name> --details --json
 comet native select <change-name>
 ```
 
-`new` and `select` update the shared selection; `show` and `status` do not switch the current change as a side effect. `status` without a change name provides a paginated list of active changes. When several active changes exist and the selection is missing, invalid, or points to another workflow, writes stop and require an explicit selection.
-
-<Info>
-  Native has no separate <code>resume</code> command. Recovery consists of read-only state
-  inspection, target confirmation, and <code>select</code>{' '}
-  ; in the Agent you still enter through <code>/comet</code> or <code>/comet-native</code>.
-</Info>
+`status` and `show` are read-only and do not switch the current change as a side effect. Several candidates, missing selection, or a selection for another workflow returns `await-user` for an explicit choice.
 
 ## What can proceed in parallel
 
-Changes that affect different capabilities, different project artifacts, and share no behavioral constraints can proceed in parallel. Before parallel work, it is worth confirming:
+Changes that affect different capabilities and share no behavioral constraints can proceed together. Before starting, check:
 
-- whether the target spec modifies the same capability;
-- whether two changes claim the same project artifacts;
-- whether one change's acceptance depends on behavior another change has not yet archived;
-- whether the current workspace contains modifications not attributed to another change.
+- whether both changes modify the same capability Spec;
+- whether both claim the same user document or configuration;
+- whether one acceptance plan depends on behavior the other has not archived;
+- whether the current workspace contains another change's modifications.
 
-The Runtime reports provable capability conflicts and possible overlap inside the current Native root, but it is not a distributed lock across machines or remote branches. Unintegrated worktrees, other devices, and remote commits that have not been fetched still require the team to coordinate on its own.
+Runtime can detect capability overlap in registered worktrees, but it is not a distributed lock across remote branches or devices. Unsynced code and worktrees still require team coordination.
 
-## canonical spec conflicts
+## Archive order for one capability
 
-Shape freezes the current canonical spec's `base_hash` for each target capability. Before Archive, the Runtime reads the current canonical spec again:
-
-- The hash is unchanged: the two-step Archive can continue;
-- The hash changed: another change updated the same capability first, so the current change cannot overwrite it directly;
-- A provable scope conflict exists in the current root: the archive preflight stops and returns a finding.
-
-The conflict is not resolved by "the later archiver overwrites the earlier one," because the old target spec may no longer represent the latest product behavior.
-
-## Use spec rebase
-
-Follow this sequence:
-
-1. Read the latest canonical spec, the current brief, and the proposed target spec;
-2. Rewrite the target spec against the latest baseline, resolving any new user decisions that arise;
-3. Run the rebase:
+When two changes target the same capability, Archive returns a serial-order blocker. Choose the first change, then let the other read the updated canonical Spec and, when needed, run:
 
 ```bash
 comet native spec rebase <change-name> --summary <adjustment-summary>
 ```
 
-4. Return to Build, update the implementation, and form a new implementation scope;
-5. Run Verify again, then perform the two-step Archive.
+Rebase aligns the target Spec with the latest behavior and requires a new Build and Verify. Do not overwrite the first change with the later files or reuse a pass from before the conflict.
 
-`spec rebase` refreshes the operation and the base hash, and invalidates the old verification conclusion. Do not hand-edit the hash in `comet-state.yaml`, and do not reuse the pre-conflict pass.
+## Cross-device collaboration
 
-<p align="center">
-  <img
-    src="/assets/native-illustrations/08-spec-rebase.png"
-    alt="Xiaoyu rewrites her page against the newest spec marked with a blue bookmark, then prepares to re-verify, showing that concurrent changes need a safe rebase"
-  />
-</p>
+Sync project code, `.comet/config.yaml`, the brief, Specs, `comet-state.yaml`, and an existing `verification.md`. The local `.comet/runtime/native/` may be absent and will be rebuilt. If artifact roots or branch/worktree bindings differ between devices, recovery waits for an explicit correction.
 
-## Plan archive order
-
-When several changes modify the same capability, it is usually easier to review and archive the base behavior first, then rebase later changes onto the new canonical spec, than to push them all to Archive at once. Independent capabilities can be verified and archived separately, but each Archive still rechecks the current root, the evidence, and the selection.
-
-For cross-device collaboration, sync both the formal Native artifacts and the project code, and ensure `.comet/config.yaml` on each device points to the same artifact root. Copying only the `changes/` directory while keeping different local root configuration makes the recovery probe unable to see the existing change.
-
-Continue with [Native artifacts and state](/en/native/artifacts-and-state), [Verification evidence and autonomous repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+Continue with [Artifacts and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).

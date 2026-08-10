@@ -1,47 +1,42 @@
 ---
 title: 'Native 快速开始'
-description: '为 Fable 5、GPT-5.6 等强模型初始化 Native，并完成一次可恢复的需求变更。'
+description: '为强模型初始化 Native，并完成一次可恢复的需求变更。'
 ---
 
-强模型不需要被手把手教方法。Comet Native 把计划、实现、测试与审查方法全部交给模型自己判断，只用一份可哈希的需求契约、内容寻址的验证证据和可恢复的归档锁住结果。
-
-一次 Agent 轮次、一次 checkpoint、或 Agent 自述"完成"都不算终点——完成判定权在 Runtime，不在模型。所以强模型可以放手去干，结果跑不偏。
+Native 把计划和实现方法交给模型，把完成判定交给 Runtime。Builder 不能靠一句“完成”结束工作：Runtime 会运行必要检查，再分派新的只读 Verifier 覆盖全部验收项。
 
 ## Native 的四阶段
 
 ```mermaid
 flowchart LR
-  S["Shape：需求与决策"] --> B["Build：自主实现"]
-  B --> V["Verify：证据与验收"]
-  V -->|通过| A["Archive：更新规格并归档"]
+  S["Shape：需求与决定"] --> B["Build：实现与交接"]
+  B --> C["Runtime checks：必要检查"]
+  C --> V["Verify：新 Verifier"]
+  V -->|通过| A["Archive：更新 Spec 并归档"]
   V -->|失败| B
 ```
 
-- **Shape** — 把模糊需求变成一份可哈希的契约：调查事实，只问真正影响产品行为的决定，写清目标和验收。
-- **Build** — 模型自主选择实现方法，不需要按框架规定的 TDD、计划或 review 流程走。
-- **Verify** — 用真实验证证据对照验收，没跑过的检查不能写成通过；失败回到 Build 继续。
-- **Archive** — 验证通过后更新规格并归档，中途断了也能从磁盘恢复。
+- **Shape**：调查仓库事实，澄清真正影响产品行为的决定，写 brief 和完整目标 Spec。
+- **Build**：模型自主选择实现、测试和修复方式，完成后提交 Builder handoff。
+- **Verify**：Runtime 执行并复用必要检查，新的只读 Verifier 逐项检查 A1…An；失败就带着明确缺口回 Build。
+- **Archive**：通过后应用 Spec、写入最终报告并归档；正常路径不重复运行 Verify。
 
 ## 1. 初始化项目
 
-Comet 需要 Node.js 22 或更高版本。安装 CLI 后，在项目根运行：
+Comet 需要 Node.js 22 或更高版本。安装 CLI 后在项目根目录运行：
 
 ```bash
 npm install -g @rpamis/comet
-comet init
+comet init --workflow native
 ```
 
-交互式初始化会说明 Native、Classic 与同时启用两者的区别。新项目在非交互模式下默认使用 Native；也可以显式选择：
+新项目的 Native 产物默认放在 `docs/comet/`，机器 Runtime 固定在 `.comet/runtime/native/`。也可以显式选择两套工作流：
 
 ```bash
-comet init --workflow native
-comet init --workflow native --root .
 comet init --workflow both
 ```
 
-`--workflow both` 会安装两套独立工作流，但 `/comet` 默认仍进入 Native。Native 默认把产物放在 `docs/comet/`；只有明确需要项目根目录下的 `comet/` 时才传入 `--root .`。
-
-初始化后，项目级共享配置位于 `.comet/config.yaml`：
+共享配置位于 `.comet/config.yaml`：
 
 ```yaml
 schema: comet.project.v1
@@ -52,17 +47,10 @@ ambient_resume: true
 native:
   artifact_root: docs
   language: zh-CN
-  clarification_mode: sequential
-  snapshot:
-    include:
-      - '**/*'
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
+  clarification_mode: batch
+  archive_confirmation: automatic
+  max_verify_failures: 5
 ```
-
-普通项目先保留默认的完整快照范围即可，不用动 `snapshot`。Monorepo 或大型仓库的 `include`/`exclude` 配置见 [Native 配置](/zh/native/configuration#内容快照范围与预算)。
 
 ## 2. 从统一入口开始
 
@@ -72,40 +60,28 @@ native:
 /comet 为用户资料页增加头像上传能力
 ```
 
-`/comet` 按 `.comet/config.yaml` 的 `default_workflow` 转发到 `/comet-native`。它只读配置、确定性转发，不会根据任务大小临时猜模式。
+`/comet` 按 `default_workflow` 确定性进入 `/comet-native`。如果要直接进入 Native，可以使用 `/comet-native`；它是 Skill 入口，不是 shell 命令。
 
-想跳过路由直接进 Native，或者排查"为什么没进 Native"这类问题，就用 `/comet-native`。它是 Skill 入口，不是 shell 命令。
+## 3. 澄清真正的产品决定
 
-## 3. 回答真正影响产品行为的问题
+Native 先调查可查事实，只把仍会改变范围、输出、默认行为、兼容性、风险或不可逆结果的问题交给用户。新项目默认 Batch，一轮询问当前前置条件已经确定的问题；Sequential 则每轮只问一个最上游问题。两种模式都要在进入 Build 前确认共享理解。
 
-Native 会先调查仓库事实。只有仍会改变范围、输出、默认行为、兼容性、风险或不可逆结果的决定才交给用户；实现方式由模型自己定。
+## 4. 让 Loop 按 Runtime 继续
 
-默认的 `sequential` 模式每轮只问一个最上游问题；`batch` 模式会一次提出当前前置条件都已确定的问题。两种模式都会给出推荐和各选项的影响，并在进入 Build 前要求你确认完整的共享理解。
+阶段完成后，Skill 读取 Runtime 返回的 `continuation` 并继续，不要自己猜下一条命令。Verify 失败会回 Build，iteration 增加；相同缺口反复出现、执行错误达到上限或出现冲突时，Runtime 会返回 `await-user` 或 `blocked`。
 
-## 4. 让工作流持续推进
-
-阶段通过后，Native 在同一个 Skill 中继续下一阶段，不需要手动切换。`next: auto` 表示 Runtime 已允许继续——它不是后台守护进程，而是确认"当前状态可以往下走"。
-
-遇到以下情况，工作流会停下并返回具体原因，而不是硬撑：
-
-- 还有需要你决定的产品行为；
-- 状态损坏、配置无法解释或出现并发冲突；
-- 同一个验证失败反复出现却没有实质进展。
+如果需要额外检查，当前 Verifier 通过 `request-checks` 请求 Runtime 执行；不要自行写入“通过”的结果。能提供独立 subagent 的宿主会启动新的 Verifier execution；没有独立 execution 时，Runtime 会明确标记降级并在 Archive 前等待一次用户确认。
 
 ## 5. 查看与恢复
 
 ```bash
 comet status
-comet native status <change-name> --details
+comet native status <change-name> --details --json
 comet native doctor <change-name>
 ```
 
-会话中断后再次输入 `/comet 继续`。环境感知恢复会先读磁盘状态，只在目标明确时自动进入对应 change；多个候选或语义不明确时会询问，不会跨工作流猜测。
+跨设备恢复需要同步代码、`.comet/config.yaml`、brief、Specs 和 `comet-state.yaml`；`verification.md` 缺失时可以重建。本机 `.comet/runtime/native/` 缺失会由 Runtime 重建。代码、分支或 worktree 不匹配时，恢复会停下来让你处理，不会偷偷使用另一个目录。
 
-如不希望普通请求触发只读恢复探针，可在 `.comet/config.yaml` 设置：
+完成后，用户可读产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；本机 state、日志、锁和事务不属于 change 文档。
 
-```yaml
-ambient_resume: false
-```
-
-下一步可阅读 [Native 工作流](/zh/concepts/native-workflow)、[Native 配置](/zh/native/configuration)、[Native 常见问题](/zh/native/faq)、[澄清模式与共享理解](/zh/native/clarification-modes) 和 [产物与状态](/zh/native/artifacts-and-state)。
+继续阅读：[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair)、[澄清模式](/zh/native/clarification-modes) 和 [恢复手册](/zh/native/recovery-playbook)。

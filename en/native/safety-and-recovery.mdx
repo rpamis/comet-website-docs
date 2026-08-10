@@ -1,53 +1,46 @@
 ---
 title: 'Native safety and recovery'
-description: 'Understand Native two-layer safety model, write attribution, immutable baseline, repair stops, and ambient recovery.'
+description: 'Understand write ownership, portable state, local Runtime, failure stops, and context-aware recovery in Native.'
 ---
 
-The Skill makes the model follow the requirement and phase contracts; the Runtime backstops it with verifiable state, evidence, and transaction checks. The first is "how it should be done"; the second is "what it must do" — a prose rule alone is not an unbypassable invariant. The Runtime is the state machine you cannot route around.
+The Skill guides the model, while Runtime puts important boundaries into state and files that can be checked. The responsibilities are separate: prose cannot replace a Runtime check, and Runtime cannot decide whether a test is meaningful.
 
 ## One write belongs to one change
 
-Comet runs an attribution check behind every write you make: one write lands on at most one change, reducing wrong-requirement writes and double blocking.
+Comet attributes observable writes to the selected workflow/change, giving each write to at most one Guard. `.comet/current-change.json` selects ownership for the current request but does not limit the number of active changes. A legacy global Hook without trusted project context stays neutral instead of applying another project's change.
 
-How exactly writes are routed depends on which change is currently selected and which workflow your configuration has enabled. Read-only operations such as reading state or checking progress never trigger the write check, so you can use `status` and `show` freely without accidentally binding later writes to another requirement.
+This protects only writes the host exposes. A shell, IDE, background process, or platform without Hook visibility may not be attributed immediately; the next Runtime state check still rejects an inconsistent result and returns to Build, Shape, or the user.
 
-Note that this protection covers only the writes Comet can observe. For writes from a shell, an external process, or anything a platform does not expose to a Hook, the Runtime's state and evidence checks remain the final authority.
+## Portable state versus local Runtime
 
-## The immutable baseline
+The cross-device boundary is `comet-state.yaml`, the brief, Specs, and the rebuildable `verification.md`. Together they record the phase, Loop, acceptance, handoff, required checks, Verifier verdict, blockers, and next action.
 
-Every new change must obtain a complete baseline — a snapshot of the project's initial state — when it is created. This is an immutable fact. The Runtime does not fill gaps by guessing; it never treats a missing path as a deletion.
+`.comet/runtime/native/` stores only local `state.json`, logs, short-lived locks, and transactions. When moving devices, when files are missing, or when an overlay version does not match, Runtime rebuilds from YAML; an old machine's execution state is never completion proof.
 
-For a change already in use, a missing or corrupted baseline is not a problem `doctor` can repair automatically, because rebuilding from current files would erase the historical differences since creation. The only recourse is to restore the original baseline from a trusted backup, or preserve the requirement documents and implementation facts and create a new change.
+## Build and Verify boundaries
 
-The sole exception is an upgrade from an older schema: before any state write, `doctor --repair` captures a complete baseline at the migration timepoint, and if the capture is incomplete it leaves the old state untouched. Post-migration evidence covers only changes after the upgrade and cannot inherit a pre-upgrade scope or pass.
+- A Builder submits a handoff and cannot write a passing verdict directly;
+- Runtime executes required checks, and a non-zero exit or timeout cannot pass;
+- a fresh Verifier must cover every A1…An item; missing, duplicate, and unknown items are rejected;
+- Verify failure returns to Build, and the new implementation gets a new Verifier attempt;
+- normal Archive does not rerun Verify; it applies Specs, writes the report, and moves the change;
+- without an independent Verifier execution, the report and Dashboard show degraded assurance and Archive requires user confirmation.
 
-## The boundary of evidence and repair
+## Context-aware recovery
 
-These two topics are covered in full at [Verification evidence and autonomous repair](/en/native/verification-and-repair). Here we state only the safety-relevant conclusions:
+`comet resume-probe` is read-only and inspects only the workflow selected by project defaults:
 
-- **Verification evidence goes stale**: a conclusion is bound to the brief, spec, implementation scope, and revision. If any of them changes, the old evidence is void.
-- **Repair has a ceiling**: when the same semantic gap recurs for the third time with no progress, repair stops; by default the same contract tolerates at most five Verify failures. When the budget is exhausted, the Runtime hands the decision back to the user.
-- **Fail-closed**: no integrity failure can be bypassed by hand-editing evidence.
+| Result         | Meaning                                                       |
+| -------------- | ------------------------------------------------------------- |
+| `auto_resume`  | One target is unambiguous and the request intends to continue |
+| `ask_user`     | Several candidates exist or ownership is unclear              |
+| `out_of_scope` | The request does not intend to enter a resumable workflow     |
+| `none`         | No resumable change exists                                    |
 
-## Ambient recovery
-
-`comet resume-probe` is a read-only probe. After a session is interrupted, it reads the default workflow from your configuration and inspects only that side for a resumable change.
-
-| Result         | Meaning                                                                |
-| -------------- | ---------------------------------------------------------------------- |
-| `auto_resume`  | One unique target and a request that does intend to continue; resume through `nextCommand` |
-| `ask_user`     | Several candidates or unclear ownership; one short choice is required  |
-| `out_of_scope` | The request does not intend to enter a resumable workflow              |
-| `none`         | No change can be resumed                                               |
-
-When configuration or state is damaged, the probe stops and states the reason rather than scanning another directory to guess. `ambient_resume: false` turns off automatic probing for ordinary requests; an explicit `/comet` call is unaffected.
+When configuration is damaged, code is unsynced, the branch/worktree mismatches, or active/archive layout conflicts, the probe stops with a reason instead of scanning another workflow or guessing a directory. `ambient_resume: false` disables automatic probing for ordinary requests; explicit `/comet` is unaffected.
 
 ## Dashboard responsibility
 
-Dashboard is read-only display: phase, whether evidence is valid, the current continuation, structured findings, conflict summary, and archive-readiness. It does not re-derive facts, nor does it offer write buttons for progression, repair, or Archive — every write goes through the CLI/Runtime.
+Dashboard is read-only. It shows portable YAML phase, Loop, acceptance, checks, blockers, history, and user documents, adding a matching local overlay when available. It does not progress, repair, or Archive, and it does not expose raw logs or execution identity; all writes go through Native CLI/Runtime.
 
-## Where the related topics live
-
-- Stale verification evidence and the full rules for repair ceilings → [Verification evidence and autonomous repair](/en/native/verification-and-repair)
-- Concurrent specification conflicts, spec rebase → [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts)
-- Transactions, locks, incomplete transitions, and concrete steps for interruption recovery → [Recovery and troubleshooting](/en/native/recovery-playbook)
+Continue with [Verification and repair](/en/native/verification-and-repair), [Artifacts and state](/en/native/artifacts-and-state), and [Recovery and troubleshooting](/en/native/recovery-playbook).

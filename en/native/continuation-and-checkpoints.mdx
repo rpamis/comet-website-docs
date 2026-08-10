@@ -1,55 +1,53 @@
 ---
-title: 'Continuation and checkpoints'
-description: 'Understand Native''s continuation contract, automatic stop conditions, and how cross-session recovery relies on files rather than chat memory.'
+title: 'Continuation and recovery'
+description: 'Understand how Native uses Runtime continuations to move through Build, Verify, and Archive, and how it recovers from stable files.'
 ---
 
-When a phase passes, it advances to the next phase automatically; you do not need to switch Skills manually. Native hands progression control to the Runtime: every transition returns a structured continuation, and the Skill proceeds only when the state permits; when it genuinely hits something that needs your decision or damaged state, it stops and gives a concrete reason.
+Native does not require the Agent to remember the previous chat or the user to switch phases manually. Each Runtime operation returns the next action; the Skill follows only that continuation and stops when a user decision or an exceptional condition needs attention.
 
 ## Continuation outcomes
 
-| disposition  | Meaning | Next action |
-| ------------ | ------- | ---------- |
-| `continue`   | The transition completed and the next action is unambiguous | Reread the new phase and required artifacts, then proceed |
-| `await-user` | A user decision remains | Ask one upstream question and end the turn |
-| `blocked`    | State, evidence, conflict, or recovery conditions are not satisfied | Enter the recovery branch, handle the finding, then follow the new continuation |
-| `done`       | Archive completed | End the workflow |
+| `status` / `stage` | Meaning                                                            | Skill action                                                                    |
+| ------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `continue`         | The current action completed and the next step is clear            | Read `continuation` and run its command or handoff                              |
+| `await-user`       | A user decision, confirmation, or external resolution is required  | Show the reason and choices; do not guess                                       |
+| `blocked`          | State damage, a concurrency conflict, or an exhausted error budget | Follow the recovery action, run doctor when requested, or return to Shape/Build |
+| `done`             | Archive completed                                                  | End the change                                                                  |
 
-`blocked` pauses the normal Build → Verify loop, but it is not a task endpoint. After resolving the returned finding, reread the current phase and continuation, then resume from the point the Runtime returns.
+The normal Native Loop is:
 
-`next: auto` only means the Runtime allows continuation; it does not mean a background daemon has started — it confirms that "the current state can move forward". If you explicitly ask to stop after a given transition, the Skill makes no further tool call after that transition; the next session resumes from disk.
-
-## What a checkpoint stores
-
-When a long task is interrupted within one phase, you can save the current progress:
-
-```bash
-comet native checkpoint <change-name> \
-  --summary <completed-facts> \
-  --next-action <next-action> \
-  --artifact <project-relative-path> \
-  --expect-revision <n>
+```text
+Shape → Build → Runtime checks → fresh Verifier →
+  pass → Archive
+  fail → Build (iteration + 1)
 ```
 
-A checkpoint contains a short factual summary, the next action, and a content-addressed artifact manifest. It stores in-phase progress; it does not advance the phase, nor does it replace the brief, the target spec, or `verification.md`.
+During Verify, extra checks are requested through `request-checks` in the current attempt. Equivalent completed checks are reused; the normal Archive path does not run acceptance again.
 
-On recovery, the Runtime checks the checkpoint's phase, revision, and manifest. A change to any one of them marks the checkpoint stale; the old summary still works as a historical hint but cannot override the current state.
+## The stable boundary
 
-## Handoff documents
+The files that must travel across sessions and devices are:
 
-Classic needs to hand off between multiple phase Skills and external methods, so it has design context, plans, and compression projections. Native is always one Skill that rereads the formal artifacts; every fact lives in files:
+- `.comet/config.yaml`;
+- the change's `brief.md`, complete Specs, and `comet-state.yaml`;
+- `verification.md` when it exists (a missing or stale report can be rebuilt from YAML).
 
-- the brief and target spec retain the requirements;
-- state and continuation retain the phase;
-- the checkpoint retains in-phase progress;
-- verification and receipts retain the evidence.
+`.comet/runtime/native/` contains the local `state.json` overlay, logs, locks, and transactions. If it is missing, stale, or belongs to another change, Runtime discards and rebuilds it; it is never portable truth. An in-flight check is treated as interrupted, and an old Verify pass is reconfirmed on a new device.
 
-So Native has no `context_compression` mode, nor does it generate handoff documents that exist only to pass context between phase Skills. The information you need is bound through the formal artifacts and hashes, with no risk of summary drift — a direct benefit of the single-Skill architecture.
+## How the Skill continues
 
-<p align="center">
-  <img
-    src="/assets/native-illustrations/06-continuation-checkpoints.png"
-    alt="Xiaoyu places a next-action bookmark into a transparent record box of formal artifacts while another Xiaoyu receives it to continue work"
-  />
-</p>
+Start with:
 
-Continue with [Artifacts and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+```bash
+comet native status <change-name> --details --json
+```
+
+Then use only `continuation.commandArgs` or `inputOptions.template` from that response. If the command is rejected, the Verifier is unavailable, execution fails, a semantic result is blocked, or migration/recovery is needed, read [comet status](/en/cli/status) and the [recovery playbook](/en/native/recovery-playbook); do not build internal JSON by hand.
+
+`await-user` is neither a failure nor a skippable hint. After confirmation, Runtime creates a new state version. If the implementation changed, it must return to Build and start again with a new Builder and a new Verifier.
+
+## Cross-device recovery
+
+After moving devices, verify that the code, artifact root, and branch/worktree match, then run `status`. If the target is ambiguous, code is unsynced, active/archive directories conflict, or parallel changes target the same capability, Runtime returns `await-user` or `blocked` instead of changing directories automatically. Shape and Build can recover without `verification.md`; Verify and `archive-ready` first rebuild the necessary local execution state and reconfirm the result.
+
+Continue with [Verification and repair](/en/native/verification-and-repair), [Artifacts and state](/en/native/artifacts-and-state), and [Recovery and troubleshooting](/en/native/recovery-playbook).

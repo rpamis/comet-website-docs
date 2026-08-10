@@ -1,15 +1,11 @@
 ---
 title: 'Native configuration'
-description: 'Configure the /comet default route, enabled workflows, automatic recovery, and Native artifact root, document language, clarification mode, and content snapshots.'
+description: 'Configure the /comet default route, enabled workflows, recovery probing, and Native artifact root, language, clarification mode, and archive confirmation.'
 ---
 
-Native and Classic share one project-level `.comet/config.yaml`. This file manages three things: which workflow `/comet` enters, which workflows are enabled, and each workflow's own settings. Native settings live under the `native:` namespace.
-
-This page is the configuration reference — the two tables below cover every field, and the ready-made recipes at the end cover common scenarios.
+Native and Classic share one project-level `.comet/config.yaml`. It selects the workflow for `/comet`, records enabled workflows, and holds each workflow's defaults. New Native changes do not need a project-wide scan scope.
 
 ## Complete example
-
-With both workflows enabled, the configuration looks roughly like this:
 
 ```yaml
 schema: comet.project.v1
@@ -22,22 +18,9 @@ ambient_resume: true
 native:
   artifact_root: docs
   language: en
-  clarification_mode: sequential
+  clarification_mode: batch
   archive_confirmation: automatic
   max_verify_failures: 5
-  # Which files the content snapshot includes and excludes, plus the processing limits.
-  snapshot:
-    # Included project-relative paths; supports *, **, and ?.
-    include:
-      - '**/*'
-    # Exclude data or generated output that is outside the implementation scope.
-    exclude: []
-    # Maximum files captured by one snapshot.
-    max_files: 10000
-    # Maximum total content bytes processed by one snapshot.
-    max_total_bytes: 268435456
-    # Maximum duration for one snapshot (milliseconds).
-    max_duration_ms: 60000
 
 classic:
   language: en
@@ -46,159 +29,62 @@ classic:
   auto_transition: true
 ```
 
-Shared fields govern entry and recovery. `native.*` affects only Native, and `classic.*` affects only new Classic changes. The two workflows keep separate state machines and directories; sharing one configuration file does not merge them.
+Shared fields govern entry and recovery. `native.*` affects only Native and `classic.*` affects only new Classic changes. The two workflows keep separate directories and state.
 
 ## Shared entry fields
 
-| Field              | Values / default             | Purpose                                                                       |
-| ------------------ | ---------------------------- | ----------------------------------------------------------------------------- |
-| `schema`           | `comet.project.v1`           | Configuration version; managed by Comet                                       |
-| `default_workflow` | `native` \| `classic`        | Which workflow `/comet` enters                                                |
-| `workflows`        | `native`, `classic`, or both | Workflows enabled and installed for this project; must include the default    |
-| `ambient_resume`   | `true` (default) \| `false`  | Whether to automatically run the read-only recovery probe for natural-language continuation requests |
+| Field              | Values / default             | Purpose                                |
+| ------------------ | ---------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| `schema`           | `comet.project.v1`           | Configuration version managed by Comet |
+| `default_workflow` | `native`                     | `classic`                              | Default `/comet` entry                                                          |
+| `workflows`        | `native`, `classic`, or both | Workflows enabled for this project     |
+| `ambient_resume`   | `true` (default)             | `false`                                | Whether natural-language continuation requests run the read-only recovery probe |
 
-`default_workflow` controls entry only; it does not migrate existing changes. `workflows` is not an installer either: adding a `native` line to the YAML does not install the corresponding Skill. Install with:
+`default_workflow` controls entry only; it does not migrate existing changes. Adding `native` to YAML does not install the Skill. Install or refresh it with:
 
 ```bash
-comet init . --workflow native|classic|both
+comet init --workflow native|classic|both
+comet update
 ```
 
 ## Native fields
 
-| Field                             | Values / default                               | Purpose                                                       |
-| --------------------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
-| `native.artifact_root`            | Project-relative path; default `docs`          | Artifacts land under `<artifact-root>/comet/`                 |
-| `native.language`                 | `en` \| `zh-CN`; default `en`                  | Language for the brief, spec, and report of new Native changes |
-| `native.clarification_mode`       | `sequential` \| `batch`; default `sequential`  | Ask one most-upstream decision per round, or ask every question in the round at once |
-| `native.archive_confirmation`     | `automatic` \| `required`; default `automatic` | Whether you must confirm once before archiving                |
-| `native.max_verify_failures`      | Positive integer; default `5`                  | Total Verify failures allowed for one contract                |
-| `native.snapshot.include`         | Project-relative globs; default `["**/*"]`     | Paths the snapshot includes                                   |
-| `native.snapshot.exclude`         | Project-relative globs; default `[]`           | Paths the snapshot excludes                                   |
-| `native.snapshot.max_files`       | Positive integer; default `10000`              | Maximum files captured by one snapshot                        |
-| `native.snapshot.max_total_bytes` | Positive integer; default `268435456`          | Maximum total content bytes processed by one snapshot         |
-| `native.snapshot.max_duration_ms` | Positive integer; default `60000`              | Maximum execution time allowed for one snapshot               |
+| Field                         | Values / default                      | Purpose                                                       |
+| ----------------------------- | ------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `native.artifact_root`        | Project-relative path; default `docs` | User documents under `<artifact-root>/comet/`                 |
+| `native.language`             | `en`                                  | `zh-CN`; default `en`                                         | Language for new change briefs, Specs, and reports                                    |
+| `native.clarification_mode`   | `batch`                               | `sequential`; new projects default to `batch`                 | Ask all currently answerable questions in a round, or one upstream question per round |
+| `native.archive_confirmation` | `automatic`                           | `required`; default `automatic`                               | Whether to wait for one explicit confirmation after Verify                            |
+| `native.max_verify_failures`  | Positive integer; default `5`         | Maximum implementation-failure iterations for one requirement |
 
-**Change the artifact root**: `artifact_root: .` maps to `<project>/comet/`, and `docs` maps to `<project>/docs/comet/`. For an existing project, do not just edit the field and move directories by hand — use the transactional command:
+### Change the artifact root
+
+`artifact_root: .` maps to `<project>/comet/`, and `docs` maps to `<project>/docs/comet/`. For an existing project, do not edit YAML and move directories by hand:
 
 ```bash
 comet native root show
 comet native root move docs
 ```
 
-**Change the default language**: This affects only changes created afterward; existing changes keep the language written when they were created.
+### Change language and clarification mode
 
-```bash
-comet native init --language en
-```
-
-**Clarification mode**: `sequential` asks one most-upstream decision per round, suited to thinking things through step by step; `batch` asks every currently answerable question in the round at once. Both modes require final confirmation before entering Build. Switching modes does not clear `[blocking]` questions already saved in the brief — finish handling the current question first, then continue under the new mode.
-
-**Archive confirmation**: Can only trigger after the final Verify pass. `automatic` archives directly; `required` stops and waits for you to confirm once. Repair rounds after a Verify failure never trigger it.
-
-**Failure cap**: `max_verify_failures` is the total budget for one contract. As long as the gap is shrinking and checks are going green, you can continue; but if the same problem recurs without progress, it stops earlier. Only a contract change that you have confirmed resets this budget.
-
-### Content snapshot scope and budget
-
-Native computes a content hash for every file in scope, builds a baseline, and uses it afterward to tell which files changed. The `include` and `exclude` rules are written into each change's `baseline-manifest.json`, so changing configuration mid-implementation cannot hide a change.
-
-The point of `include` and `exclude` is to bound the scope that implementation and verification actually care about. The budgets (`max_files` / `max_total_bytes` / `max_duration_ms`) are performance ceilings that backstop that scope. When the repository grows, raise the budgets — you do not need to touch the scope.
-
-#### Pattern rules
-
-Patterns are all relative to the project root and use `/` as a separator:
-
-- `*` matches characters within a single directory level;
-- `**` crosses multiple directory levels;
-- `?` matches one character;
-- absolute paths, backslashes, empty patterns, and `..` are not supported, nor is `!pattern` — to exclude something, put it under `exclude`.
-
-A file is included only when it matches `include` and matches no `exclude`, so `exclude` takes precedence.
-
-`exclude` and `.gitignore` are not the same thing: `.gitignore` decides at the Git layer which files enter the candidate set, while `exclude` records the scope that a change promises to observe. For large generated output and data directories, an explicit `exclude` is more reliable than relying on `.gitignore`, and the intent is clearer.
-
-#### How to choose the scope
-
-Work out the delivery scope first, then consider performance:
-
-- If a file belongs to implementation or verification scope: keep it in `include`, and raise the budgets if needed so the snapshot covers it completely.
-- If large data or generated output is outside the implementation scope: exclude it explicitly and leave the record with the baseline.
-- If you are unsure whether a file is relevant: keep it included, and decide after seeing the actual affected paths Runtime reports.
-
-For an ordinary project, just use the default complete scope:
+Language affects only changes created afterward; existing changes keep the language recorded at creation. Batch is the default for new projects, but you can choose explicitly:
 
 ```yaml
 native:
-  snapshot:
-    include:
-      - '**/*'
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
+  language: en
+  clarification_mode: sequential
 ```
 
-A monorepo should include the target application, relevant shared packages, tests, and root-level build files, and exclude build output:
+Both modes investigate discoverable facts and require confirmation of the complete shared understanding before Build. Switching modes does not remove `[blocking]` questions already in the brief.
 
-```yaml
-native:
-  snapshot:
-    include:
-      - 'apps/web/**'
-      - 'packages/ui/**'
-      - 'packages/config/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-    exclude:
-      - 'apps/web/dist/**'
-      - 'apps/web/coverage/**'
-    max_files: 20000
-    max_total_bytes: 536870912
-    max_duration_ms: 90000
-```
+### Archive confirmation and failure cap
 
-A large repository can keep `include` broad and exclude only heavy content that is unrelated to the delivery:
+`automatic` continues to Archive after Verify passes; `required` waits for one explicit confirmation. `max_verify_failures` limits implementation-failure iterations. Runtime execution errors and semantic blockers return `await-user` or `blocked` instead of being bypassed by editing counters.
 
-```yaml
-native:
-  snapshot:
-    include:
-      - '**/*'
-    exclude:
-      - 'data/generated/**'
-      - 'artifacts/benchmarks/**'
-      - 'dist/**'
-      - 'coverage/**'
-      - '.cache/**'
-    max_files: 50000
-    max_total_bytes: 1073741824
-    max_duration_ms: 120000
-```
+## Upgrading an older project
 
-Two things to note. First, do not include only the source directory you intend to edit — if build, test, or runtime depend on shared packages, root configuration, or lockfiles, those must also be in `include`. Second, do not exclude source or tests just to make the snapshot pass; that disconnects the implementation scope from the real risk.
-
-If the scope or a budget is exceeded, `comet native new` fails and removes the incomplete change, and tells you the actual limits, the affected paths, and how to adjust — instead of just throwing a "no" at you.
-
-For more scenarios and troubleshooting answers, see [Native FAQ](/en/native/faq#content-snapshot-and-implementation-scope).
-
-<Warning>
-  <code>native.pending_root_move</code> is an internal field used to recover an interrupted root
-  move, not a configuration option. When you see it, run <code>comet native doctor</code>
-  — do not edit or delete it by hand.
-</Warning>
-
-## Classic fields
-
-Classic Runtime reads these defaults from the `classic:` block and writes them into the new change's `.comet.yaml` at creation:
-
-| Field                 | Values                            | Default    |
-| --------------------- | --------------------------------- | ---------- |
-| `language`            | `en` \| `zh-CN`                   | `en`       |
-| `context_compression` | `off` \| `beta`                   | `off`      |
-| `review_mode`         | `off` \| `standard` \| `thorough` | `standard` |
-| `auto_transition`     | `true` \| `false`                 | `true`     |
-
-These fields govern Classic only; Native is unaffected.
+Older versions may leave `native.snapshot`, change-local Runtime files, old receipts, or evidence documents. They are not configuration fields or acceptance inputs for a beta17 change. `comet update` and `comet doctor` handle the migration; do not add these fields to make a new Verify pass and do not copy old Runtime files by hand.
 
 ## Common configurations
 
@@ -213,39 +99,9 @@ ambient_resume: true
 native:
   artifact_root: docs
   language: en
-  clarification_mode: sequential
-  snapshot:
-    include: ['**/*']
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
-```
-
-### Both workflows enabled, with Classic as the default
-
-```yaml
-schema: comet.project.v1
-default_workflow: classic
-workflows:
-  - native
-  - classic
-ambient_resume: true
-native:
-  artifact_root: docs
-  language: en
   clarification_mode: batch
-  snapshot:
-    include: ['**/*']
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
-classic:
-  language: en
-  context_compression: off
-  review_mode: standard
-  auto_transition: true
+  archive_confirmation: automatic
+  max_verify_failures: 5
 ```
 
 ### Disable the automatic recovery probe for ordinary requests
@@ -254,6 +110,6 @@ classic:
 ambient_resume: false
 ```
 
-This disables the automatic probe for natural-language continuation requests only; an explicit `/comet` still follows `default_workflow`.
+This disables the read-only probe for natural-language continuation only; an explicit `/comet` still follows `default_workflow`.
 
-Continue with [Single Skill and entry routing](/en/native/skills-and-routing), [Artifacts and state](/en/native/artifacts-and-state), and [Classic state and configuration](/en/concepts/state-management).
+Continue with [Single Skill and entry routing](/en/native/skills-and-routing), [Artifacts and state](/en/native/artifacts-and-state), and [Recovery and troubleshooting](/en/native/recovery-playbook).

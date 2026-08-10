@@ -1,88 +1,49 @@
 ---
 title: '多 Change 与规格冲突'
-description: '并行管理多个 Native change，理解 current selection、冲突提示、canonical spec 基线与安全 rebase。'
+description: '并行管理多个 Native change，理解当前归属、工作区选择和安全的归档顺序。'
 ---
 
-多个需求可以并行推进，Runtime 在归档时按 canonical spec 防止互相覆盖。一个 Native 项目能同时保留多个 active change；`.comet/current-change.json` 只记录下一次写入归属于哪个 change，不是并发数量限制。这个单一选择让一次写入只交给一个 change，避免两个 change 同时声称拥有同一批修改。
+一个项目可以同时推进多个 Native change。`.comet/current-change.json` 只选择下一次写入归属哪个 workflow/change，不限制 active change 数量。Runtime 在归档时按 capability 串行处理，避免一个 change 悄悄覆盖另一个 change。
 
 ## 并行 change 与工作目录
 
-并行单位是 change：不同 change 可以在不同工作目录中同时推进，同一个 change 只在它绑定的工作目录中写入。创建新 change 前，Native 会检查当前目录和已发现的 worktree；必要时在 `current`、`branch` 和 `worktree` 之间给出一次选择。当前目录已经被另一个 active change 占用时，`worktree` 是安全选项。用户不需要额外说明“并行”，Agent 会在新 worktree 中继续，并把它绑定到创建时的起始分支。
+创建新 change 时，Native 会检查当前目录和已注册的 worktree；适用时一次展示 `current`、`branch`、`worktree` 选项和推荐。当前目录已被其他 active change 使用时，通常推荐 `worktree`。每个 change 会记住自己的 branch/worktree 绑定，错误目录恢复会停下来。
 
-已有 change 不会被自动迁移或生成新的 worktree；恢复时仍进入它原来所属的工作目录。
+已有 change 不会被自动搬到新 worktree。跨设备继续前，先同步代码和正式 Native 文件，再确认 artifact root、branch/worktree 一致。
 
-## 查看并选择 change
-
-先用只读命令查看候选：
+## 查看并选择
 
 ```bash
 comet native status
-comet native show <change-name>
-comet native status <change-name> --details
-```
-
-确认目标后显式选择：
-
-```bash
+comet native status <change-name> --details --json
 comet native select <change-name>
 ```
 
-`new` 和 `select` 会更新共享 selection；`show` 和 `status` 不会靠副作用切换当前 change。不带 change 名称的 `status` 提供 active change 的分页列表。多个 active change 存在且 selection 缺失、失效或指向另一套 workflow 时，写入会停止并要求明确选择。
+`status` 和 `show` 是只读的，不会偷偷切换当前 change。多个候选、selection 缺失或指向另一套 workflow 时，写入和恢复会返回 `await-user`，不会猜测。
 
-<Info>
-  Native 没有单独的 <code>resume</code> 命令。恢复由只读状态检查、目标确认和 <code>select</code>{' '}
-  组成；在 Agent 中仍从 <code>/comet</code> 或 <code>/comet-native</code> 进入。
-</Info>
+## 哪些工作适合并行
 
-## 哪些工作可以并行
+不同 capability、没有共享行为约束的 change 可以并行。开始前确认：
 
-不同 capability、不同项目产物且没有共享行为约束的 change 可以并行推进。并行前建议确认：
-
-- target spec 是否修改同一个 capability；
-- 两个 change 是否声明相同项目产物；
+- 是否修改同一个 capability 的 Spec；
+- 是否都需要修改同一用户文档或配置；
 - 一个 change 的验收是否依赖另一个尚未归档的行为；
-- 当前工作区是否包含另一个 change 未归属的修改。
+- 当前工作目录是否混入了其他 change 的修改。
 
-Runtime 会在当前 Native root 内报告可证明的 capability 冲突和可能重叠，但它不是跨机器或跨远端分支的分布式锁。未集成 worktree、其他设备和未获取的远端提交仍需要团队自行协调。
+Runtime 能发现当前已注册 worktree 中的 capability 重叠，但它不是跨远端分支或跨设备的团队锁。没有同步的代码和 worktree 仍需要团队自己协调。
 
-## canonical spec 冲突
+## 同一 capability 的归档顺序
 
-Shape 会为每个目标 capability 冻结当前 canonical spec 的 `base_hash`。Archive 前，Runtime 再读取当前 canonical spec：
-
-- hash 未变化：可以继续两步 Archive；
-- hash 已变化：说明另一个 change 已先更新同一 capability，当前 change 不能直接覆盖；
-- 当前 root 中存在可证明的范围冲突：归档预检会停止并返回 finding。
-
-冲突不会通过“后归档者覆盖先归档者”自动解决，因为旧 target spec 可能已经不再代表最新产品行为。
-
-## 使用 spec rebase
-
-处理顺序如下：
-
-1. 阅读最新 canonical spec、当前 brief 和拟议 target spec；
-2. 按最新基线重写 target spec，必要时解决新出现的用户决定；
-3. 运行 rebase：
+如果两个 change 都要修改同一 capability，Archive 会返回一个需要串行顺序的 blocker。先选定哪个 change 归档，再让另一个 change 读取归档后的 canonical Spec，必要时执行：
 
 ```bash
 comet native spec rebase <change-name> --summary <调整摘要>
 ```
 
-4. 重新进入 Build，更新实现并形成新的 implementation scope；
-5. 重新 Verify，再执行两步 Archive。
+rebase 会让目标 Spec 对齐最新行为，并要求重新 Build 和 Verify。不要直接把后归档的文件覆盖到前一个 change，也不要复用冲突前的通过结论。
 
-`spec rebase` 会刷新 operation 和 base hash，并使旧验证结论失效。不要手工修改 `comet-state.yaml` 中的 hash，也不要复用冲突前的 pass。
+## 跨设备协作
 
-<p align="center">
-  <img
-    src="/assets/native-illustrations/08-spec-rebase.png"
-    alt="小鱼对照带蓝色书签的最新规格书重写自己的页面，再准备重新验证，表示并发 change 需要安全 rebase"
-  />
-</p>
+同步项目代码、`.comet/config.yaml`、brief、Specs、`comet-state.yaml` 和已有的 `verification.md`。本机 `.comet/runtime/native/` 可以缺失，Runtime 会重建；如果两个设备的 artifact root、branch/worktree 不一致，恢复会等待用户修正。
 
-## 规划归档顺序
-
-当多个 change 修改同一 capability 时，先归档基础行为，再让后续 change rebase 到新 canonical spec，通常比同时推进到 Archive 更容易审查。完全独立的 capability 可以分别验证和归档，但每次归档仍会重新检查当前 root、证据和 selection。
-
-若需要跨设备协作，应同时同步正式 Native 产物和项目代码，并确保每台设备的 `.comet/config.yaml` 指向同一个 artifact root。仅复制 `changes/` 目录而保留不同的本地根目录配置，会让恢复探针看不到已有 change。
-
-继续阅读：[Native 产物与状态](/zh/native/artifacts-and-state)、[验证证据与自主修复](/zh/native/verification-and-repair) 和 [恢复与故障处理](/zh/native/recovery-playbook)。
+继续阅读：[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复手册](/zh/native/recovery-playbook)。

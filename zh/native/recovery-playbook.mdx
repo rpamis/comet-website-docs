@@ -1,93 +1,74 @@
 ---
 title: '恢复与故障处理'
-description: '按磁盘事实恢复 Native，处理跨设备发现、未完成 transition、root move、Archive、锁与证据问题。'
+description: '按 portable 状态恢复 Native，处理跨设备、执行中断、分支不匹配、事务和归档冲突。'
 ---
 
-遇到中断或错误，先只读诊断，再按 Runtime 返回的具体动作恢复。Native 的恢复依据是项目配置、正式产物和 Runtime 状态——都是磁盘事实，不是聊天记录。硬规则：不要手工改 phase、hash、journal 或 selection 来绕过检查。
+遇到中断或错误，先读取 Runtime 返回的状态，再执行它给出的动作。Native 的恢复依据是 `.comet/config.yaml`、brief、Specs、`comet-state.yaml` 和必要的本机 Runtime；不是聊天记录，也不是 Agent 自述。
 
 ## 标准诊断顺序
 
 ```bash
 comet status
-comet native status
-comet native show <change-name>
-comet native status <change-name> --details
+comet native status <change-name> --details --json
 comet native doctor <change-name>
 ```
 
-建议按以下顺序判断：
+按以下顺序判断：
 
-1. `.comet/config.yaml` 中启用的 workflow、`native.artifact_root` 和 `native.clarification_mode` 是否正确；
-2. `comet native status` 是否能看到目标 change；
-3. `.comet/current-change.json` 是否选择了正确 workflow/change；
-4. `status --details` 返回的 phase、findings、checkpoint、acceptance page 和 continuation；
-5. doctor 是否报告未完成事务、陈旧锁、workspace 身份或证据清理问题。
+1. artifact root、启用的 workflow 和澄清模式是否正确；
+2. `status` 是否找到目标 change；
+3. 当前 branch/worktree 是否与 change 绑定一致；
+4. `status --details` 返回的 `status`、`phase`、Loop、acceptance、blockers 和 continuation；
+5. doctor 是否报告迁移残留、未完成事务、锁或 active/archive 冲突。
 
-findings 被截断时，先处理已返回项，再重新读取 details。`acceptancePage.nextCursor` 非空时，使用 `--acceptance-cursor` 逐页获取；不要把当前页面之外的验收项当作不存在。
+不要手工编辑 YAML、selection 或 `.comet/runtime/native/`。当输出有分页时，按 continuation 或 cursor 继续读取，不要把未读的验收项当成不存在。
 
 ## 跨设备找不到 change
 
-Native 只从配置的 artifact root 发现 change。同步了 `docs/comet/changes/...`，但另一台设备的 `.comet/config.yaml` 缺失、仍指向 `.` 或启用了另一套默认 workflow 时，`resume-probe` 会正确返回“没有可恢复 change”。change 自己的 `comet-state.yaml` 不会反向选择项目根目录。
-
-处理步骤：
-
-1. 确认已同步的真实目录，例如 `docs/comet/changes/<name>`；
-2. 在目标设备通过 `comet init --workflow native --root docs` 恢复匹配的项目配置和托管资产，或恢复可信的 `.comet/config.yaml`；
-3. 运行 `comet native status` 和 `show`；
-4. 目标无歧义后运行 `comet native select <change-name>`；
-5. 再从 `/comet` 或 `/comet-native` 继续。
-
-不要为同一需求新建第二个 change，也不要把产物复制到另一个根目录制造两份可写状态。
-
-## 未完成 transition
-
-普通 phase 推进会先写 `runtime/transition.json`，再更新 Run state、`comet-state.yaml`、trajectory 和 checkpoint。中断后，status 与 doctor 会报告 recovery required。
-
-普通 transition 只支持继续：
+同步项目代码、`.comet/config.yaml`、brief、Specs 和 `comet-state.yaml`。如果 `verification.md` 已存在也同步它；缺失报告可以重建。目标设备运行：
 
 ```bash
-comet native doctor <change-name> --repair --strategy continue
+comet status
+comet native status <change-name> --details --json
 ```
 
-journal 畸形或状态两端无法证明一致时，Runtime 会保留文件并停止。此时先备份现场并检查错误，不要手工拼接状态。
+如果 artifact root、branch/worktree 不匹配，先修复项目上下文或明确选择目标，不要新建第二个 change，也不要把同一份文档复制到两个 root。
 
-## Archive 与 root move 中断
+## 执行中断和本机 Runtime 缺失
 
-Archive 和 artifact root move 是多步骤事务。doctor 会根据 journal 所处阶段说明能否 `continue` 或 `rollback`：
+`.comet/runtime/native/changes/<name>/state.json`、日志和锁属于本机 overlay。进程被终止、设备切换或 overlay 缺失时：
+
+1. 运行 `comet native status <name> --details --json`；
+2. 让 Runtime 按 YAML 标记 running 为 interrupted，并重建匹配的 overlay；
+3. 若处于 Shape/Build，继续当前阶段；
+4. 若处于 Verify，按 continuation 重新执行必要的中断检查，再分派新的 Verifier；
+5. 若处于 `archive-ready`，先重新确认 Verify，再运行 Archive；正常 Archive 不会另外重跑已完成检查。
+
+## 迁移和 doctor
+
+升级中的旧 active change 可能有 change-local Runtime、旧状态或旧报告。首次 `comet update` 后，必要时运行：
 
 ```bash
-comet native doctor <change-name> --repair --strategy continue
-comet native doctor <change-name> --repair --strategy rollback
+comet native doctor <change-name> --repair
 ```
 
-Archive 写入最终完成标记后已经越过不可回滚边界，只能继续收口。Root move 只有在源、staging、目标与 quarantine 的身份和 hash 能够证明时才会继续或回滚；两棵树不一致时不会删除任意一侧。
+迁移只继承能够从旧 brief、Spec 和状态证明的事实；旧的通过结论不会直接变成新 v4 pass。无法确定的旧进度会保守回到 Build 或等待用户。普通新 change 不应运行 legacy-only 修复策略。
 
-如果 `.comet/config.yaml` 中出现 `native.pending_root_move`，先运行 doctor。不要手工删除该字段或直接移动目录。
+## Archive 中断和并行冲突
 
-## Baseline 或验证证据异常
+Archive 可能经历写入 Spec、更新最终 YAML、生成报告、移动目录和清理本机 Runtime。中断后再次运行同一个 Archive 命令会按事务继续；不要删除事务目录或手工把状态改成 done。若 active 和 archive 同时存在、事务丢失但目录已经部分移动，doctor 会停下要求人工处理。
 
-| 现象                                       | 正确处理                                                                                 |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `baseline-snapshot-missing` / `incomplete` | 从可信备份恢复创建时 baseline，或保留需求与实现事实后新建 change；不能用当前文件重建历史 |
-| implementation scope stale                 | 按 status 返回的 `next` 受控退回 Build，生成新 scope 后重新验证                          |
-| verification/report/receipt stale          | 不复用旧 pass；回退 Build 或 Verify，重新形成与当前 contract/scope 绑定的证据            |
-| canonical spec hash 冲突                   | 重读最新 spec，执行 `spec rebase`，重新 Build 与 Verify                                  |
-| repair hard stop                           | 保留失败现场，让用户决定范围、约束或是否停止；不弱化检查                                 |
+两个 change 要修改同一 capability 时，Archive 会返回需要串行顺序的 blocker。先选择哪个 change 归档，再按新的 continuation 继续；不会自动覆盖另一个 change 的 Spec。
 
-## 锁与 evidence retention
+## 常见状态与处理
 
-普通 `new`、`next`、`archive` 和 `root move` 不会自动接管看似超时的锁。只有显式 `doctor --repair` 会在本机所有者已不存在、锁身份未变化且没有冲突事务时接管。活动锁或无法证明来源的锁保持不动。
+| 现象                             | 正确处理                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| `await-user`                     | 阅读 blocker 和 `resolution_action`，向用户展示选项；确认后按 continuation 继续 |
+| `blocked`                        | 先处理损坏、执行错误、冲突或停滞原因；不要直接增加计数或伪造结果                |
+| branch/worktree mismatch         | 回到正确 checkout，或由用户明确选择新的工作区；不要在错误目录写入               |
+| Verify 失败                      | 按失败 acceptance 和检查修复，提交新的 Builder handoff，再让新的 Verifier 验收  |
+| 报告缺失/过期                    | 让 Runtime 从 YAML 重建；不要手工复制一份“通过”报告                             |
+| 旧 Runtime/receipt/evidence 残留 | 运行 update/doctor 迁移或只读检查；不要把它们加入新 change                      |
 
-Evidence retention 默认只报告候选。显式 repair 仅清理 active change 中至少 30 天、每种 evidence kind 最新 32 份之外且依赖闭包证明未引用的派生证据；归档证据、当前引用、未知文件和恢复中的事务不会被清理。
-
-## 保存状态变化前的快照
-
-如果审计或交接要求保留某次 transition 前的 Runtime 返回，应在状态变化前第一次调用时就使用机器可读模式，并把 stdout 直接保存到目标文件：
-
-```bash
-comet native status <change-name> --details --json > native-before-transition.json
-```
-
-确认文件完整后不要在 transition 之后重建或覆盖。该快照只证明生成时 Runtime 实际返回的状态，不代表后续状态。
-
-继续阅读：[连续推进与 Checkpoint](/zh/native/continuation-and-checkpoints) 和 [Native 安全与恢复](/zh/native/safety-and-recovery)。
+继续阅读：[连续推进与恢复](/zh/native/continuation-and-checkpoints)、[Native 安全与恢复](/zh/native/safety-and-recovery) 和 [产物与状态](/zh/native/artifacts-and-state)。

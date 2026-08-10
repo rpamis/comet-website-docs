@@ -1,55 +1,53 @@
 ---
-title: '连续推进与 Checkpoint'
-description: '理解 Native 的 continuation 契约、自动停止条件，以及跨会话恢复如何依赖文件而不是聊天记忆。'
+title: '连续推进与恢复'
+description: '理解 Native 如何用 Runtime continuation 推进 Build、Verify、Archive，并从稳定文件状态恢复。'
 ---
 
-阶段通过就自动接下一阶段，不用你手动切换 Skill。Native 把推进控制权交给 Runtime：每次 transition 返回结构化的 continuation，Skill 只在状态允许时继续；真遇到需要你决定或状态损坏时，会停下并给出具体原因。
+Native 不要求 Agent 记住上一轮对话，也不要求用户手动切换阶段。每次 Runtime 操作都会返回下一步；Skill 只执行当前 continuation 允许的动作，遇到用户决定或异常就停下来。
 
 ## Continuation 结果
 
-| disposition  | 含义                             | 后续动作                          |
-| ------------ | -------------------------------- | --------------------------------- |
-| `continue`   | transition 已完成且下一动作明确  | 重新读取新 phase 与必要产物后继续 |
-| `await-user` | 仍有用户决定                     | 提出一个最上游问题并结束本轮      |
-| `blocked`    | 状态、证据、冲突或恢复条件不满足 | 进入恢复分支，处理 finding 后按新的 continuation 继续 |
-| `done`       | 归档已完成                       | 结束工作流                        |
+| `status` / `stage` | 含义                               | Skill 的动作                                       |
+| ------------------ | ---------------------------------- | -------------------------------------------------- |
+| `continue`         | 当前动作完成，下一步明确           | 读取 `continuation`，执行给出的命令或 handoff      |
+| `await-user`       | 需要用户决定、确认或解决外部阻塞   | 展示原因和选项，等待用户，不猜测                   |
+| `blocked`          | 状态损坏、并发冲突或错误预算已用尽 | 读取恢复动作，必要时运行 doctor 或回到 Shape/Build |
+| `done`             | 已完成归档                         | 结束当前 change                                    |
 
-`blocked` 会暂停正常的 Build → Verify 循环，但不是任务终点。处理返回的 finding 后，重新读取当前阶段和 continuation，再从 Runtime 指定的位置恢复。
+正常的 Native Loop 是：
 
-`next: auto` 只表示 Runtime 允许继续，不代表后台守护进程已启动——它确认的是"当前状态可以往下走"。如果你明确要求在某个 transition 后停下，Skill 完成该 transition 后不会再调用工具；下一会话从磁盘恢复。
-
-## Checkpoint 保存什么
-
-长任务在同一 phase 内中断时，可以保存当前进度：
-
-```bash
-comet native checkpoint <change-name> \
-  --summary <已完成事实> \
-  --next-action <下一动作> \
-  --artifact <项目相对路径> \
-  --expect-revision <n>
+```text
+Shape → Build → Runtime checks → 新 Verifier →
+  通过 → Archive
+  失败 → Build（iteration + 1）
 ```
 
-Checkpoint 包含简短事实摘要、下一动作和内容寻址的 artifact manifest。它保存的是阶段内进度，不推进 phase，也不替代 brief、target spec 或 `verification.md`。
+Verify 期间的额外检查通过当前 attempt 的 `request-checks` 请求。相同且已完成的检查会复用；Archive 正常路径不重复执行验收。
 
-恢复时 Runtime 会检查 checkpoint 对应的 phase、revision 和 manifest。任何一项变化都会把 checkpoint 标为 stale；旧摘要仍可作为历史提示，但不能覆盖当前状态。
+## 稳定边界是什么
 
-## handoff 文档
+跨会话、跨设备真正需要同步的是：
 
-Classic 需要在多个阶段 Skill 与外部方法之间交接，因此有 design context、计划和压缩投影。Native 始终由一个 Skill 重新读取正式产物，所有事实都在文件里：
+- `.comet/config.yaml`；
+- change 的 `brief.md`、完整 Specs 和 `comet-state.yaml`；
+- 已生成的 `verification.md`（缺失或落后时可由 YAML 重建）。
 
-- brief 和 target spec 保存需求；
-- state 和 continuation 保存阶段；
-- checkpoint 保存阶段内进度；
-- verification 与 receipt 保存证据。
+`.comet/runtime/native/` 的 `state.json`、日志、锁和事务是本机 overlay。它缺失、版本落后或属于另一个 change 时，Runtime 会丢弃并重建，不会把它当成 portable 事实。正在执行的检查按中断处理；旧 Verify pass 在新设备上按恢复策略重新确认。
 
-所以 Native 没有 `context_compression` 模式，也不生成只为阶段 Skill 传递上下文的 handoff 文档。需要的信息通过正式产物和 hash 绑定，没有摘要漂移的风险——这是单 Skill 架构的一个直接好处。
+## Skill 如何继续
 
-<p align="center">
-  <img
-    src="/assets/native-illustrations/06-continuation-checkpoints.png"
-    alt="小鱼把下一动作书签放入装有正式产物的透明记录盒，另一侧的小鱼准备接住它继续工作"
-  />
-</p>
+先运行：
 
-继续阅读：[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复与故障处理](/zh/native/recovery-playbook)。
+```bash
+comet native status <change-name> --details --json
+```
+
+然后只使用输出中的 `continuation.commandArgs` 或 `inputOptions.template`。如果命令被拒绝、Verifier 不可用、执行错误、语义结果被阻塞或发生迁移/损坏，先查看 [Native status 命令](/zh/cli/status) 和 [恢复手册](/zh/native/recovery-playbook)，不要自行拼接内部 JSON。
+
+`await-user` 不是失败，也不是可以跳过的提示。用户确认后，Runtime 会创建新的状态版本；如果实现已改变，则必须回 Build，由新的 Builder 和新的 Verifier 重新开始。
+
+## 跨设备恢复
+
+换设备后先确认代码、artifact root 和 branch/worktree 一致，再运行 `status`。如果目标不明确、代码未同步、active/archive 同名或 capability 有并行归档冲突，Runtime 会返回 `await-user`/`blocked`，而不是自动修改目录。没有 `verification.md` 的 Shape/Build 仍可恢复；Verify 和 `archive-ready` 会先重建必要的本机执行状态并重新确认。
+
+继续阅读：[验证与修复](/zh/native/verification-and-repair)、[产物与状态](/zh/native/artifacts-and-state) 和 [恢复手册](/zh/native/recovery-playbook)。
