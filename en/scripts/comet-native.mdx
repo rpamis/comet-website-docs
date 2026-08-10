@@ -1,157 +1,69 @@
 ---
 title: 'Native command overview'
-description: 'The command list for the Native workflow: create changes, view status, save progress, advance phases, verify, and archive.'
+description: 'The public Native commands for creating, inspecting, selecting, progressing, recovering, and archiving a change.'
 ---
 
-`comet native` is the command entry point for the Native workflow. The Native workflow splits a requirement into four phases — Shape, Build, Verify, Archive — and these commands create and manage each change, advance phases, save progress, and archive.
-
-Most users never need to type these directly — when you enter `/comet` in your Agent platform, the Skill calls them automatically. This page helps you understand what each command does, and how to use them for troubleshooting or automation.
+`comet native` is the Native Runtime command entry point. Most users only enter `/comet` or `/comet-native` in their Agent; the Skill follows the continuation returned by Runtime.
 
 ## Command overview
 
-| Command | What it does |
-| --- | --- |
-| `comet native new` | Create a new change |
-| `comet native status` | See which step a change is on |
-| `comet native show` | Read the brief and target specs of a change |
-| `comet native select` | When multiple changes coexist, pick which one to work on now |
-| `comet native checkpoint` | Save progress mid-phase |
-| `comet native check` | Run Comet's built-in read-only check |
-| `comet native receipt` | Record the result of a verification step |
-| `comet native next` | Advance to the next phase |
-| `comet native archive` | Archive a completed change |
-| `comet native doctor` | Diagnose and repair state issues |
-| `comet native init` / `root` | Configure Native's artifact directory |
+| Command                       | What it does                                                    |
+| ----------------------------- | --------------------------------------------------------------- |
+| `comet native init`           | Initialize or normalize Native project configuration            |
+| `comet native root show/move` | Inspect or transactionally move the artifact root               |
+| `comet native new`            | Create a change and prepare `current`, `branch`, or `worktree`  |
+| `comet native show`           | Read the brief, Specs, and portable state                       |
+| `comet native status`         | View the change, Loop, acceptance, checks, and next action      |
+| `comet native select`         | Select ownership when several changes coexist                   |
+| `comet native spec remove`    | Record a capability-removal intent                              |
+| `comet native next`           | Confirm or recover a boundary and submit handoff/Verifier input |
+| `comet native archive`        | Preview or execute Archive and workspace finish                 |
+| `comet native doctor`         | Diagnose, migrate, and rebuild local Runtime                    |
 
-All commands support `--json` to output structured results for scripts and CI.
+The new Native flow does not expose `checkpoint`, `check`, `evidence`, or `receipt` commands. Runtime executes checks during Verify and stores their summaries in portable state and the user report.
 
-## Create and view changes
-
-When starting a new requirement, create a change. `new` sets up the change directory, captures a snapshot of the project's current files, and selects it as the current change:
+## Create and inspect
 
 ```bash
-comet native new add-user-avatar
-```
-
-To see where things stand:
-
-```bash
-comet native status                  # list of all active changes
-comet native status add-user-avatar  # current phase and next step of a change
-```
-
-`status` without a change name lists all active changes; with a change name it shows the phase, verification status, and recovery hints. Add `--details` for more detailed checks and acceptance progress.
-
-`show` reads the brief and target specs written for a change:
-
-```bash
+comet native new add-user-avatar --isolation current
+comet native status --json
+comet native status add-user-avatar --details --json
 comet native show add-user-avatar
 ```
 
-## Save progress
+`new` creates the brief, Specs, and `comet-state.yaml`; local execution lives under `.comet/runtime/native/`. `status` and `show` are read-only and do not switch selection as a side effect.
 
-A change may take several rounds to complete. `checkpoint` saves what you've done so far and what's next, along with any files produced, without advancing the phase:
+## Progress and Verify
 
-```bash
-comet native checkpoint add-user-avatar \
-  --summary "Finished the avatar upload API" \
-  --next-action "Handle frontend cropping and compression"
-```
-
-After a session is interrupted, resume from the progress returned by `status` rather than relying on chat history.
-
-## Check and verify
-
-`check` runs Comet's built-in read-only check to see whether the code satisfies the target specs of this change. It does not run your test commands or modify any files; it only produces a check report during the Verify phase:
+`next` does not accept a self-reported pass. It confirms Shape, returns to Build, retries an allowed Verifier, or accepts the Runtime-defined handoff, check-plan, and Verifier response through `--runner-input`:
 
 ```bash
-comet native check add-user-avatar
+comet native next add-user-avatar --summary "Shape confirmed" --confirmed
+comet native next add-user-avatar --summary "Implementation changed" --return-to-build
+comet native next add-user-avatar --runner-input <temporary-json-file>
 ```
 
-`receipt` records a concrete verification action. There are two kinds: `manual` records steps and observations you performed by hand; `automated` records a real command and its exit result:
-
-```bash
-# Record a manual verification
-comet native receipt manual add-user-avatar \
-  --acceptance upload-returns-url \
-  --step "Upload a 2MB image" \
-  --observation "Returned a CDN URL"
-
-# Record an automated verification (runs a real command and captures the result)
-comet native receipt automated add-user-avatar \
-  --acceptance upload-returns-url \
-  -- npm test
-```
-
-## Advance phases
-
-`next` advances a change to the next phase. It verifies that the current phase has all required evidence before allowing the advance:
-
-```bash
-comet native next add-user-avatar --summary "Requirement clarified, target specs complete"
-```
-
-The four Native phases advance like this:
-
-| Current phase | Required to advance | Result |
-| --- | --- | --- |
-| Shape | Clear requirement, complete target specs | Enter Build |
-| Build | Real code produced, or a reason given for no code changes | Enter Verify |
-| Verify | Verification report passes | Enter Archive |
-| Verify not passed | — | Return to Build to fix |
-
-A verification failure automatically returns to Build and tells you which checks didn't pass; fix them and verify again.
+Use `continuation.inputOptions.template` from `comet native status <name> --details --json` as the current input schema. Only the current Verifier can request checks through `request-checks`; a Builder self-report cannot enter Archive.
 
 ## Archive
 
-When a change is done, archive it with `archive`. Archiving is a two-step process — first a dry run to confirm there are no conflicts, then the actual commit:
+Read the archive-ready continuation, then preview or execute as needed:
 
 ```bash
-# Step 1: dry run to get a hash
 comet native archive add-user-avatar --dry-run
-
-# Step 2: commit with that hash
-comet native archive add-user-avatar --expect-preflight <hash-from-step-1>
+comet native archive add-user-avatar --confirmed
 ```
 
-Archiving merges this change's target specs into the project and files the change artifacts into the archive directory. The two-step design ensures nothing changed between the dry run and the actual commit.
+Archive applies complete target Specs, writes `verification.md`, moves the change, and cleans local Runtime; the normal path does not rerun Verify. For a capability conflict, follow the continuation to choose the serial order first.
 
-## Diagnose and repair
-
-When the state looks off, start with `doctor`. Without arguments it only checks and modifies no files:
+## Diagnose, migrate, and recover
 
 ```bash
-comet native doctor                  # check the whole project
-comet native doctor add-user-avatar  # check a single change
-```
-
-When you're ready to repair, add `--repair`. It only handles items it can prove are safe, such as clearing stale locks or recovering interrupted transactions — it never rewrites your brief, specs, or code:
-
-```bash
+comet native doctor
+comet native doctor add-user-avatar
 comet native doctor add-user-avatar --repair
 ```
 
-## Configure the artifact directory
+`doctor --repair` only performs deterministic migration, transaction finalization, and local overlay rebuild. It does not rewrite requirements, Specs, or code. A missing `verification.md` does not block Shape/Build recovery; a wrong branch/worktree or mixed active/archive layout waits for the user.
 
-`init` configures where Native stores its artifacts (change directories, state, evidence) — by default under `docs/comet/` in the project. Usually the default config is generated automatically when you first create a change, so you don't need to run it manually:
-
-```bash
-comet native init                 # default directory docs/comet/
-comet native init --root .        # place under <project>/comet/
-comet native init --language zh-CN # set the default language for future new changes
-```
-
-To switch directories in a project that's already configured, use `root move` for a transactional migration — don't edit the config file directly:
-
-```bash
-comet native root show            # show the current directory
-comet native root move artifacts  # migrate to <project>/artifacts/comet/
-```
-
-## When the comet command isn't available
-
-If your environment doesn't have the `comet` CLI installed (only the Skill files), you can call the bundled Runtime directly. It takes the same arguments and exit codes as `comet native`:
-
-```bash
-node <comet-native-skill-root>/scripts/comet-native-runtime.mjs <command> [options]
-```
+The user-readable artifacts are the brief, Specs, `comet-state.yaml`, and `verification.md`. `.comet/runtime/native/` contains only local state, logs, locks, and transactions.

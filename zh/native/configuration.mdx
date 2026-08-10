@@ -1,15 +1,11 @@
 ---
 title: 'Native 配置'
-description: '配置 /comet 的默认路由、启用的工作流、自动恢复，以及 Native 的产物根目录、文档语言、澄清模式和内容快照。'
+description: '配置 /comet 的默认路由、启用的工作流、自动恢复，以及 Native 的产物根目录、文档语言、澄清模式和归档确认。'
 ---
 
-Native 和 Classic 共用项目根目录的 `.comet/config.yaml`。这份文件管三件事：`/comet` 进哪个工作流、启用了哪些工作流、以及各工作流自己的设置。Native 的设置放在 `native:` 命名空间下。
-
-本页是配置参考——完整字段含义见下方两张表，常见场景的现成 recipe 见文末。
+Native 和 Classic 共用项目根目录的 `.comet/config.yaml`。它决定 `/comet` 进入哪套工作流、项目启用了哪些工作流，以及 Native/Classic 各自的默认值。新 Native change 不需要配置项目级扫描范围。
 
 ## 完整示例
-
-同时启用两套工作流时，配置大致长这样：
 
 ```yaml
 schema: comet.project.v1
@@ -22,22 +18,9 @@ ambient_resume: true
 native:
   artifact_root: docs
   language: zh-CN
-  clarification_mode: sequential
+  clarification_mode: batch
   archive_confirmation: automatic
   max_verify_failures: 5
-  # 内容快照纳入哪些文件、排除哪些文件，以及处理上限。
-  snapshot:
-    # 纳入的项目相对路径；支持 *、** 和 ?。
-    include:
-      - '**/*'
-    # 排除不属于实现范围的数据或生成物。
-    exclude: []
-    # 单次快照最多捕获的文件数。
-    max_files: 10000
-    # 单次快照最多处理的内容总字节数。
-    max_total_bytes: 268435456
-    # 单次快照的最长执行时间（毫秒）。
-    max_duration_ms: 60000
 
 classic:
   language: zh-CN
@@ -46,159 +29,62 @@ classic:
   auto_transition: true
 ```
 
-共享字段管入口和恢复；`native.*` 只影响 Native，`classic.*` 只影响新建的 Classic change。两套工作流各有各的状态机和目录，不会因为共用一个配置文件就混在一起。
+共享字段管入口和恢复；`native.*` 只影响 Native，`classic.*` 只影响新建的 Classic change。两套工作流的目录和状态彼此独立。
 
 ## 共享入口字段
 
-| 字段               | 允许值 / 默认值            | 作用                                              |
-| ------------------ | -------------------------- | ------------------------------------------------- |
-| `schema`           | `comet.project.v1`         | 配置版本，由 Comet 管理                           |
-| `default_workflow` | `native` \| `classic`      | 调用 `/comet` 时进入哪个工作流                    |
-| `workflows`        | `native`、`classic` 或两者 | 此项目已启用并安装的工作流；必须包含默认工作流    |
-| `ambient_resume`   | `true`（默认）\| `false`   | 是否对自然语言续接请求自动运行只读恢复探测        |
+| 字段               | 允许值 / 默认值            | 作用                    |
+| ------------------ | -------------------------- | ----------------------- | -------------------------------------- |
+| `schema`           | `comet.project.v1`         | 配置版本，由 Comet 管理 |
+| `default_workflow` | `native`                   | `classic`               | `/comet` 的默认入口                    |
+| `workflows`        | `native`、`classic` 或两者 | 本项目已启用的工作流    |
+| `ambient_resume`   | `true`（默认）             | `false`                 | 是否对自然语言续接请求运行只读恢复探测 |
 
-`default_workflow` 只管入口，不迁移已有 change。`workflows` 也不是安装命令：只往 YAML 里加一行 `native` 不会装好对应 Skill。安装请用：
+`default_workflow` 只管入口，不会迁移已有 change。YAML 里增加 `native` 也不会安装 Skill；安装或更新请使用：
 
 ```bash
-comet init . --workflow native|classic|both
+comet init --workflow native|classic|both
+comet update
 ```
 
 ## Native 字段
 
-| 字段                              | 允许值 / 默认值                             | 作用                                              |
-| --------------------------------- | ------------------------------------------- | ------------------------------------------------- |
-| `native.artifact_root`            | 项目内相对路径；默认 `docs`                 | 产物落在 `<artifact-root>/comet/` 下              |
-| `native.language`                 | `en` \| `zh-CN`；默认 `en`                  | 新建 Native change 的 brief、spec 和 report 语言  |
-| `native.clarification_mode`       | `sequential` \| `batch`；默认 `sequential`  | 每轮问一个最上游决定，或一次问完本轮所有问题      |
-| `native.archive_confirmation`     | `automatic` \| `required`；默认 `automatic` | 归档前是否要求你确认一次                          |
-| `native.max_verify_failures`      | 正整数；默认 `5`                            | 同一 contract 允许的 Verify 失败总次数            |
-| `native.snapshot.include`         | 项目相对 glob；默认 `["**/*"]`              | 快照纳入哪些路径                                  |
-| `native.snapshot.exclude`         | 项目相对 glob；默认 `[]`                    | 快照排除哪些路径                                  |
-| `native.snapshot.max_files`       | 正整数；默认 `10000`                        | 单次快照最多捕获的文件数                          |
-| `native.snapshot.max_total_bytes` | 正整数；默认 `268435456`                    | 单次快照最多处理的内容总字节数                    |
-| `native.snapshot.max_duration_ms` | 正整数；默认 `60000`                        | 单次快照允许的最长执行时间                        |
+| 字段                          | 允许值 / 默认值             | 作用                                  |
+| ----------------------------- | --------------------------- | ------------------------------------- | ------------------------------------------------------ |
+| `native.artifact_root`        | 项目内相对路径；默认 `docs` | 用户文档放在 `<artifact-root>/comet/` |
+| `native.language`             | `en`                        | `zh-CN`；默认 `en`                    | 新 change 的 brief、Spec、报告语言                     |
+| `native.clarification_mode`   | `batch`                     | `sequential`；新项目默认 `batch`      | 一轮询问所有已具备前提的问题，或每轮询问一个最上游问题 |
+| `native.archive_confirmation` | `automatic`                 | `required`；默认 `automatic`          | 通过 Verify 后是否等待一次用户确认                     |
+| `native.max_verify_failures`  | 正整数；默认 `5`            | 同一实现需求允许的失败轮次上限        |
 
-**改产物根目录**：`artifact_root: .` 对应 `<project>/comet/`，`docs` 对应 `<project>/docs/comet/`。已有项目别只改字段再手动挪目录，用事务化命令：
+### 修改产物根目录
+
+`artifact_root: .` 对应 `<project>/comet/`，`docs` 对应 `<project>/docs/comet/`。已有项目不要只改 YAML 再手动移动目录：
 
 ```bash
 comet native root show
 comet native root move docs
 ```
 
-**改默认语言**：只影响之后新建的 change，已存在的 change 还是用创建时写入的语言。
+### 修改语言和澄清模式
 
-```bash
-comet native init --language zh-CN
-```
-
-**澄清模式**：`sequential` 每轮只问一个最上游决定，适合一步步想清楚；`batch` 一次问完本轮所有能回答的问题。两种模式都要在进 Build 前完成最终确认。切换模式不会清掉 brief 里已有的 `[blocking]` 问题——先把当前问题处理完，再用新模式继续。
-
-**归档确认**：只在最终 Verify 通过后才可能触发。`automatic` 直接归档，`required` 会停下等你点一次头。Verify 失败后的修复轮次不会触发它。
-
-**失败上限**：`max_verify_failures` 是同一 contract 的总预算。只要缺口在减少、检查在转绿，就能继续；但如果同一个问题反复出现又没进展，会更早停下来。只有你确认后的 contract 变化才会重置这个预算。
-
-### 内容快照范围与预算
-
-Native 会给纳入范围的文件算内容哈希，建一份 baseline，之后用它来判断哪些文件变了。`include` 和 `exclude` 的规则会写进每个 change 的 `baseline-manifest.json`，实现过程中不能临时改配置来藏改动。
-
-`include` 和 `exclude` 的重点是圈定实现与验证真正关心的范围，预算（`max_files` / `max_total_bytes` / `max_duration_ms`）是给这个范围兜底的性能上限。仓库变大了，提高预算就行，不必动范围。
-
-#### Pattern 规则
-
-pattern 都相对项目根目录，用 `/` 分隔：
-
-- `*` 匹配单层目录内的字符；
-- `**` 跨多层目录；
-- `?` 匹配一个字符；
-- 不支持绝对路径、反斜杠、空 pattern、`..`，也不支持 `!pattern`，要排除就写进 `exclude`。
-
-一个文件要被纳入，得先匹配 `include` 且不匹配任何 `exclude`，所以 `exclude` 优先级最高。
-
-`exclude` 和 `.gitignore` 不是一回事：`.gitignore` 是 Git 层面决定哪些文件进候选集，`exclude` 是 Native 记录"这个 change 承诺观察哪些范围"。对于大型生成物和数据目录，写明确的 `exclude` 比依赖 `.gitignore` 更可靠，意图也更清楚。
-
-#### 怎么定范围
-
-先把交付范围想清楚，再考虑性能：
-
-- 文件属于实现或验证范围：留进 `include`，必要时调高预算让快照完整覆盖。
-- 大型数据或生成物不属于实现范围：用明确的 `exclude` 排掉，并随 baseline 留下记录。
-- 不确定某文件是否相关：先留着，等看到 Runtime 报出的实际受影响路径再决定。
-
-普通项目直接用默认的完整范围就行：
+语言只影响之后新建的 change；已有 change 保留创建时的语言。Batch 是新项目默认值，也可以显式切换：
 
 ```yaml
 native:
-  snapshot:
-    include:
-      - '**/*'
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
+  language: zh-CN
+  clarification_mode: sequential
 ```
 
-Monorepo 要把目标应用、相关共享包、测试和根级构建文件都纳入，并排掉构建产物：
+两种模式都会先调查可查事实，并在进入 Build 前要求用户确认完整的共享理解。切换模式不会自动删除 brief 里的 `[blocking]` 问题。
 
-```yaml
-native:
-  snapshot:
-    include:
-      - 'apps/web/**'
-      - 'packages/ui/**'
-      - 'packages/config/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-    exclude:
-      - 'apps/web/dist/**'
-      - 'apps/web/coverage/**'
-    max_files: 20000
-    max_total_bytes: 536870912
-    max_duration_ms: 90000
-```
+### 归档确认和失败上限
 
-大仓库可以保持 `include` 宽泛，只把和交付无关的重型内容排掉：
+`automatic` 在 Verify 通过后继续归档，`required` 会停下等待一次明确确认。`max_verify_failures` 只限制实现失败轮次；Runtime 执行错误和语义阻塞会以 `await-user`/`blocked` 返回，不会通过手改计数继续循环。
 
-```yaml
-native:
-  snapshot:
-    include:
-      - '**/*'
-    exclude:
-      - 'data/generated/**'
-      - 'artifacts/benchmarks/**'
-      - 'dist/**'
-      - 'coverage/**'
-      - '.cache/**'
-    max_files: 50000
-    max_total_bytes: 1073741824
-    max_duration_ms: 120000
-```
+## 旧项目升级说明
 
-注意两点：一是别只纳入"我打算改的源码目录"——构建、测试或运行时如果依赖共享包、根配置、锁文件，这些也得进 `include`；二是别为了让快照通过就去排掉源码或测试，那样会让实现范围和真实风险脱节。
-
-如果范围或预算超了，`comet native new` 会失败并删掉未完成的 change，同时告诉你实际限制、受影响的路径和该怎么调，而不是只甩一句"不行"。
-
-更多场景和排障答案见 [Native 常见问题](/zh/native/faq#内容快照与-implementation-scope)。
-
-<Warning>
-  <code>native.pending_root_move</code> 是 root move
-  中断恢复用的内部字段，不是配置项。看到它就跑 <code>comet native doctor</code>
-  ，别手工删改。
-</Warning>
-
-## Classic 字段
-
-Classic Runtime 从 `classic:` 块读这些默认值，新建 change 时写进该 change 的 `.comet.yaml`：
-
-| 字段                  | 允许值                            | 默认值     |
-| --------------------- | --------------------------------- | ---------- |
-| `language`            | `en` \| `zh-CN`                   | `en`       |
-| `context_compression` | `off` \| `beta`                   | `off`      |
-| `review_mode`         | `off` \| `standard` \| `thorough` | `standard` |
-| `auto_transition`     | `true` \| `false`                 | `true`     |
-
-这些字段只管 Classic，Native 不受影响。
+旧版本可能留下 `native.snapshot`、change-local Runtime、旧 receipt 或 evidence 文件。它们不是 beta17 新 change 的配置项或验收输入。升级时由 `comet update`/`comet doctor` 处理迁移；不要为了让新 Verify 通过而继续添加这些字段，也不要手工复制旧 Runtime。
 
 ## 常见配置
 
@@ -213,47 +99,17 @@ ambient_resume: true
 native:
   artifact_root: docs
   language: zh-CN
-  clarification_mode: sequential
-  snapshot:
-    include: ['**/*']
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
-```
-
-### 两套工作流都启用，但默认进 Classic
-
-```yaml
-schema: comet.project.v1
-default_workflow: classic
-workflows:
-  - native
-  - classic
-ambient_resume: true
-native:
-  artifact_root: docs
-  language: zh-CN
   clarification_mode: batch
-  snapshot:
-    include: ['**/*']
-    exclude: []
-    max_files: 10000
-    max_total_bytes: 268435456
-    max_duration_ms: 60000
-classic:
-  language: zh-CN
-  context_compression: off
-  review_mode: standard
-  auto_transition: true
+  archive_confirmation: automatic
+  max_verify_failures: 5
 ```
 
-### 关掉普通请求的自动恢复探测
+### 关闭普通请求的自动恢复探测
 
 ```yaml
 ambient_resume: false
 ```
 
-这只关掉对自然语言续接请求的自动探测；显式 `/comet` 照常按 `default_workflow` 工作。
+这只关闭自然语言续接时的只读探测；显式 `/comet` 仍按 `default_workflow` 工作。
 
-继续阅读：[单 Skill 与入口路由](/zh/native/skills-and-routing)、[产物与状态](/zh/native/artifacts-and-state) 和 [Classic 状态与配置](/zh/concepts/state-management)。
+继续阅读：[单 Skill 与入口路由](/zh/native/skills-and-routing)、[产物与状态](/zh/native/artifacts-and-state) 和 [恢复手册](/zh/native/recovery-playbook)。

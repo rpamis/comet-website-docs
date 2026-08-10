@@ -1,122 +1,74 @@
 ---
-title: 'comet status — View Active Changes and Next Command'
+title: 'comet status — View Native and Classic changes'
 sidebarTitle: 'comet status'
-description: 'comet status displays active OpenSpec changes, task progress, and the recommended next workflow command. Use --json for machine-readable output.'
+description: 'View active Native and Classic changes, their stages, Loop state, and recovery actions.'
 ---
 
-`comet status` gives you a read-only snapshot of active Comet-managed and plain OpenSpec changes, task progress, runtime evidence, and the appropriate next command.
+`comet status` is the read-only daily recovery entry point. It lists Native, Classic, and unmanaged OpenSpec changes from the configured project, without changing selection or running checks as a side effect.
 
 ## Usage
 
 ```bash
 comet status
-```
-
-`path` defaults to `.` (the current directory) when omitted. The command reads change state from the Classic OpenSpec root selected by `classic.artifact_layout`: `docs/openspec/changes/` for new projects or `openspec/changes/` for retained legacy layouts.
-
-## Example Output
-
-```
-Active Changes:
-
-  1. my-feature [Comet] [phase: build [3/7 tasks]]
-     workflow: full | build_mode: subagent-driven-development
-     plan:   docs/superpowers/plans/2024-06-01-my-feature.md
-     next: /comet-build
-
-  2. quick-fix [Comet] [phase: verify [5/5 tasks]]
-     workflow: full | build_mode: direct
-     verify_result: pending
-     next: /comet-verify
-
-  3. docs-only [OpenSpec] [plain change [2/2 tasks]]
-     recommended archive: openspec archive docs-only -y
-```
-
-Each entry shows:
-
-| Field           | Description                                                                          |
-| --------------- | ------------------------------------------------------------------------------------ |
-| `phase`         | Current workflow phase (`open`, `design`, `build`, `verify`, `archive`).             |
-| `tasks`         | Completed / total task count from `tasks.md`, e.g. `[3/7 tasks]`.                    |
-| `workflow`      | Workflow preset (`full`, `hotfix`, `tweak`).                                         |
-| `build_mode`    | Build execution mode (e.g. `subagent-driven-development`, `direct`).                 |
-| `design`        | Path to the Superpowers Design Doc, if generated.                                    |
-| `plan`          | Path to the implementation plan, if generated.                                       |
-| `verify_result` | Verification outcome (`pending`, `pass`, `fail`) — shown only in the `verify` phase. |
-| `next`          | The Comet skill command to run next.                                                 |
-
-## Mixed Comet and OpenSpec changes
-
-One project may contain both Comet-managed changes and plain OpenSpec changes. Status labels them separately instead of forcing plain OpenSpec work into the Classic five-phase lifecycle.
-
-| Change type    | State source                               | Archive command when ready          |
-| -------------- | ------------------------------------------ | ----------------------------------- |
-| Comet-managed  | `.comet.yaml` and Classic runtime evidence | `comet archive <change-name>`       |
-| Plain OpenSpec | OpenSpec artifacts and task completion     | `openspec archive <change-name> -y` |
-
-Only archive-ready entries show a recommendation. Invalid state, incomplete tasks, or failed verification continue to show recovery guidance.
-
-## Multiple active Comet changes
-
-With one active Comet change, source work can be attributed automatically. With multiple active changes, select the intended target first:
-
-```bash
-comet state select <change-name>
-comet state current
-```
-
-Selection is tied to the current branch/worktree. Switches and stale selections require a new `select`; the source-write guard does not guess.
-
-Only non-archived changes appear. A directory without `.comet.yaml` appears as a plain OpenSpec change rather than being silently excluded.
-
-## Flags
-
-<ParamField query="--json" type="boolean">
-  Output active changes as structured JSON, including a `nextCommand` field for each change. Useful
-  for scripting and automation.
-</ParamField>
-
-## JSON Output
-
-```bash
 comet status --json
 ```
 
+For Native details, use:
+
+```bash
+comet native status <change-name> --details --json
+```
+
+## What Native status contains
+
+Native v4 status comes from `comet-state.yaml` and includes:
+
+- `schema`, `state_version`, `status`, `phase`, and `loop.stage`;
+- `loop.iteration`, `loop.attempt`, stagnation/failure/execution-error counters, and bounded history;
+- every acceptance item with its `passed`, `failed`, `blocked`, or `pending` reason;
+- Builder handoff, Runtime checks, Verifier verdict, risks, and blockers;
+- the next `continuation` action, plus whether the local overlay is running, interrupted, or absent.
+
+Normal Native details do not require project scans, old receipts, or change-local Runtime files. `verification.md` is a user report generated from YAML and can be rebuilt when missing.
+
+## Native JSON fragment
+
 ```json
 {
-  "changes": [
-    {
-      "name": "my-feature",
-      "workflow": "full",
-      "phase": "build",
-      "buildMode": "subagent-driven-development",
-      "isolation": "branch",
-      "verifyMode": null,
-      "verifyResult": "pending",
-      "designDoc": null,
-      "plan": "docs/superpowers/plans/2024-06-01-my-feature.md",
-      "tasksCompleted": 3,
-      "tasksTotal": 7,
-      "nextCommand": "/comet-build"
-    }
-  ]
+  "schema": "comet.native.v4",
+  "name": "avatar-upload",
+  "status": "verify",
+  "phase": "verify",
+  "loop": { "stage": "verify", "iteration": 1, "attempt": 2 },
+  "acceptance": { "passed": 3, "failed": 0, "blocked": 0, "pending": 0 },
+  "continuation": { "action": "dispatch-verifier" }
 }
 ```
 
-The `nextCommand` field maps each phase to its corresponding Comet entry point:
+Follow `continuation.commandArgs` and `inputOptions.template` from the current response. Do not add internal execution identity or result fields by hand.
 
-| Phase     | Next command     |
-| --------- | ---------------- |
-| `open`    | `/comet-open`    |
-| `design`  | `/comet-design`  |
-| `build`   | `/comet-build`   |
-| `verify`  | `/comet-verify`  |
-| `archive` | `/comet-archive` |
+## Select the current change
 
-## Use Cases
+A project may have multiple active Native changes. `.comet/current-change.json` only selects which workflow/change owns the next write; it is not a one-change lock. Make ownership explicit with:
 
-- **Quick workflow check** — Glance at all in-flight changes and where each one stands.
-- **Know what to run next** — The `next` field tells you exactly which Comet command to invoke to continue.
-- **Scripting and automation** — Pipe `--json` output into CI scripts or shell tooling to conditionally trigger workflow commands based on phase or task completion.
-- **Resume after interruption** — After closing an AI coding session, run `comet status` to orient yourself before typing `/comet` in your AI platform.
+```bash
+comet native select <change-name>
+```
+
+A branch/worktree mismatch, ambiguous target, unsynced code, or mixed active/archive layout returns `await-user` or `blocked` instead of guessing another change.
+
+## Classic and OpenSpec
+
+Classic changes keep their five phases, task progress, and Classic Runtime. Plain OpenSpec changes are not forced into a Comet state machine:
+
+| Type           | State source                                            | Archive command when ready                       |
+| -------------- | ------------------------------------------------------- | ------------------------------------------------ |
+| Native         | portable `comet-state.yaml` plus optional local overlay | `comet native archive <change-name> --confirmed` |
+| Classic        | `.comet.yaml` plus Classic Runtime                      | `comet archive <change-name>`                    |
+| Plain OpenSpec | OpenSpec artifacts                                      | `openspec archive <change-name> -y`              |
+
+When status reports a problem, follow its `continuation` first, then run:
+
+```bash
+comet native doctor <change-name>
+```

@@ -1,87 +1,35 @@
 ---
 title: 'How to choose between Native and Classic'
-description: 'A deep comparison of Native and Classic on completion verdict, execution overhead, and phase trade-offs, plus which workflow to use when.'
+description: 'Compare Native and Classic on completion verdicts, execution overhead, phase trade-offs, and use cases.'
 ---
 
-Native and Classic are not light and heavy tiers, nor two versions of one workflow — they target different model capability curves and stand independently. Native is for strong models that can plan and verify on their own; Classic is for models that need finer step-by-step guidance. This page lays out the fundamental differences so you can judge which to use.
+Native and Classic are not light and heavy tiers, nor two versions of one workflow. Native targets strong models that can plan, implement, and repair autonomously; Classic targets tasks that benefit from finer phases and explicit methods.
 
 ## The one-line distinction
 
-- **Native**: a strong model does not need to be taught methods by hand. Native hands the choice of planning, implementation, testing, and review methods entirely to the model, and locks only the outcome with a hashable requirement contract, content-addressed verification evidence, and a recoverable archive.
-- **Classic**: a model needs explicit process constraints. Classic provides five-phase governance (open -> design -> build -> verify -> archive) through OpenSpec and Superpowers, explicitly organizing design, planning, TDD, debugging, and review.
+- **Native**: the model chooses planning, implementation, testing, and review methods; Runtime enforces Shape, necessary checks, a fresh Verifier, the bounded Loop, and safe Archive. Portable state and user documents can recover across devices.
+- **Classic**: OpenSpec and Superpowers provide open → design → build → verify → archive governance, explicitly organizing design, plans, TDD, debugging, and review.
 
-## The most fundamental difference: who owns the completion verdict
+## Who owns the completion verdict
 
-This is the core dividing line between the two workflows.
+Native does not trust a Builder's “done” claim. Build submits a handoff; Runtime runs necessary checks and dispatches a fresh read-only Verifier over every acceptance item. Failure returns to Build, and limits return control to the user. Classic advances through its phase Guards and formal task/report artifacts.
 
-**Classic** relies on guard scripts to check task/state fields — if the process was walked end to end and the fields are filled in, it passes. Its reliability rests on "completing all five phases by the method."
+## Execution overhead
 
-**Native** takes the completion verdict back from the model into the Runtime. It does not trust self-reported completion: one Agent turn, one checkpoint, or the Agent saying "complete" is never the finish line. The Runtime uses a machine-verifiable evidence system to judge whether completion is real — an acceptance matrix, typed receipts, and freshness fences. The reliability bottleneck of a strong model is precisely "whether it can be trusted to have actually finished," not "whether it can write code," so Native spends all its engineering effort on verification and evidence.
+Native does not scan or fingerprint the whole project during Verify, and the normal Archive path does not rerun checks. Completed matching checks are reused for the same candidate, while long command output streams to local logs. Classic's advantage is stronger method guidance, at the cost of more phase context and process artifacts.
 
-The cost: Native's Runtime is heavier than Classic's. This evidence system — content hashes, failure signatures, stall detection — is the foundation that makes Native "light process yet trustworthy."
+## Artifacts and recovery
 
-## Execution overhead: tokens, turns, duration
+A Native change's user-facing artifacts are the brief, complete Specs, `comet-state.yaml`, and `verification.md`. Local execution state, logs, locks, and transactions live under `.comet/runtime/native/`. On another device, Runtime recovers from portable YAML and rebuilds a missing local overlay.
 
-Binding a strong model to a methodology is the biggest waste there is. Native presets no TDD/review/subagent pattern and has zero external Skill dependencies (Classic depends on OpenSpec + Superpowers), so its execution overhead is markedly lower.
+Classic continues to use its `.comet.yaml`, OpenSpec directories, Superpowers plans, and Classic Runtime. The workflows do not share changes, Guards, or directories.
 
-The alignment experiment between Native and 0.4.0 Classic (16 tasks, 3 runs per task, taking the 41 paired samples where both passed):
+## Recommendation
 
-| Metric | Native vs Classic |
-| --- | --- |
-| Total tokens | **down 76.8%** |
-| Agent turns | **down 57.4%** |
-| Duration | **down 47.4%** |
-| `pass@3` | **100%** for both |
-| `pass^3` | Native 87.5% (+12.5pp) |
+| Scenario                                                                | Recommended workflow                                                          |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| A strong model can investigate, implement, and judge proportional tests | Native                                                                        |
+| The task needs step-by-step guidance, TDD, plans, and review            | Classic                                                                       |
+| One project has both types of work                                      | `comet init --workflow both`, then choose the default in `.comet/config.yaml` |
 
-This shows that both workflows cover the tasks and finish at comparable quality, while Native ran lighter in this experiment. Note: the experiment supports this conclusion, but on its own it cannot prove that Native holds a causal advantage across all models, repositories, and tasks. See [Comet Native vs. 0.4.0 Classic evaluation](/en/eval/comet-native-vs-040-experiment).
-
-## Phase trade-offs: why 4, not 5
-
-Classic uses five phases, each a distinct cognitive step:
-
-| Classic phase | Responsibility | Native equivalent |
-| --- | --- | --- |
-| open | Start the requirement | Merged into Shape |
-| design | Explicit design, decision-point protocol | Merged into Shape |
-| build | Implementation | Build |
-| verify | Verification | Verify |
-| archive | Archive | Archive |
-
-Native merges open and design into Shape — a strong model can do clarification and design decisions on its own, with no need to split them into two forced phases. Native's four phases map to four non-mergeable cognitive boundaries: Shape makes the goal clear (contract), Build makes the thing (implementation), Verify proves it was made right (evidence), Archive fixes the result into the baseline (transaction).
-
-One fewer phase does not mean you can skip requirements or verification. Native's Runtime likewise checks the brief, target spec, user confirmation, implementation scope, and verification evidence — it just does not force you to walk a fixed method into place.
-
-## When to choose Native
-
-Prefer Native if any of the following holds:
-
-- your primary model is Fable 5, GPT-5.6, or a strong model in the same tier;
-- the task needs the model to choose its implementation method on its own, and you do not want it bound to a TDD/plan/review process;
-- you want lower token and turn overhead;
-- the team trusts the model's execution and cares more about "whether the result is truly complete."
-
-## When to choose Classic
-
-Prefer Classic if any of the following holds:
-
-- your model's capability tier is below Fable 5 / GPT-5.6 and needs finer step-by-step guidance to reduce omissions;
-- the task carries strong compliance requirements and needs explicit five-phase records and a decision-point protocol;
-- the team prefers explicit methodological constraints (enforced TDD, review depth, isolation mode);
-- the repository is complex or unfamiliar to the team, and you want process as a backstop rather than model autonomy.
-
-## The two can coexist
-
-A project can enable both workflows at once. `/comet` enters the default side named by `default_workflow`; the two do not migrate or replace each other:
-
-```yaml
-schema: comet.project.v1
-default_workflow: native
-workflows:
-  - native
-  - classic
-```
-
-Native and Classic keep their own phase, schema, change, spec, and archive directories. Different requirements in one project can take different workflows — what a strong model can handle goes to Native, what needs a process backstop goes to Classic.
-
-Continue with [Native workflow](/en/concepts/native-workflow), [Native quickstart](/en/native/quickstart), [Native Loop engineering principles](/en/native/native-loop), and [State and configuration](/en/concepts/state-management).
+Continue with [Native quickstart](/en/native/quickstart), [Native Loop](/en/native/native-loop), and [Classic workflow](/en/concepts/workflow).

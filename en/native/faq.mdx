@@ -1,169 +1,76 @@
 ---
 title: 'Native FAQ'
-description: 'Answers to common questions about Native mode selection, requirement clarification, state recovery, content snapshots, verification, and conflicts.'
+description: 'Answers to common questions about Native mode selection, clarification, portable state, verification loops, recovery, and parallel changes.'
 ---
 
-Frequently asked questions about Native's use cases, four-phase workflow, recoverable state, content snapshots, and verification scope.
+Frequently asked questions about Native's use cases, four-stage workflow, portable state, verification, recovery, and conflicts.
 
 ## Basic concepts
 
 <AccordionGroup>
   <Accordion title="How should I choose between Native and Classic">
-    If your primary model is in the Fable 5 or GPT-5.6 tier, default to Native: binding a strong model to a methodology is the biggest waste there is. Native hands the method decision back to the model and locks only the outcome and the evidence.
-
-    Classic targets models in a lower capability tier that need more explicit process constraints, providing a five-phase open, design, build, verify, archive governance through OpenSpec and Superpowers. The workflow choice is fixed by project configuration; Comet does not guess it from task size in the moment. See [Native workflow](/en/concepts/native-workflow).
-
+    Native targets strong models that can plan and implement autonomously. Classic targets tasks that benefit from OpenSpec, Superpowers, and finer phase constraints. The choice lives in `.comet/config.yaml`; Comet does not guess from task size.
   </Accordion>
 
-  <Accordion title="Does Native depend on OpenSpec, Superpowers, or another external Skill">
-    No. Native's requirement artifacts, state machine, Guard, recovery, and verification protocol are all provided by Comet itself, with zero external Skills. Day to day you still invoke
-    `/comet`; it reads `default_workflow` from `.comet/config.yaml` and enters the permanent entry point the project selected.
+<Accordion title="Does Native depend on OpenSpec, Superpowers, or another external Skill">
+  No. Native ships its own Shape, Build, Verify, Archive, and Runtime flow. OpenSpec, Superpowers,
+  and their references are installed and used only by Classic.
 </Accordion>
 
-  <Accordion title="Why does Native have only four phases">
-    Four phases map to four non-mergeable cognitive boundaries in software engineering: Shape makes the goal clear (contract), Build makes the thing (implementation), Verify proves it was made right (evidence), Archive fixes the result into the baseline (transaction).
-
-    Fewer phases do not mean you can skip requirements or verification. The Runtime still checks the brief, target spec, user confirmation, implementation scope, and verification evidence.
-
-  </Accordion>
-</AccordionGroup>
-
-## Shape and clarification
-
-<AccordionGroup>
-  <Accordion title="What is the difference between Sequential and Batch clarification">
-    `sequential` asks only one most-upstream decision per round. Use it when one answer may change the questions that follow. `batch` asks, in one pass, every question whose prerequisites are already settled. Use it when the decisions are relatively independent and you want to reduce round trips.
-
-    Both modes require confirmation of the complete shared understanding before entering Build. For the mode mechanics and selection guidance, see [Clarification modes and shared understanding](/en/native/clarification-modes).
-
-  </Accordion>
-
-  <Accordion title="Why confirm shared understanding after every question is answered">
-    A correct individual answer does not guarantee the combined scope, non-goals, default behavior, and acceptance criteria are free of contradiction. Final confirmation binds user approval to the brief and target spec at that moment. If the contract changes afterward, the old confirmation becomes stale and Native asks again.
+<Accordion title="Why can a Builder's completion claim not archive a change">
+  A Builder submits an implementation handoff. Runtime runs necessary checks and dispatches a fresh
+  read-only Verifier over every A1…An item. When Skill coordination has no independent Verifier
+  execution, Archive also requires one explicit user confirmation and the report marks the degraded
+  assurance.
 </Accordion>
 
-  <Accordion title="What if requirements change during implementation">
-    Tell the Agent which behaviors need to change, then invoke `/comet` again. Native decides from the current phase, contract, and project snapshot whether to return to Build or to Shape. Do not hand-edit the phase, approval, or hashes in `comet-state.yaml`.
+<Accordion title="Why does Verify return to Build">
+  A failed acceptance item, failed check, incomplete Verifier response, or invalid coverage becomes
+  a concrete continuation and returns the change to Build. The next round repairs those gaps and
+  starts again with a new Builder and Verifier.
+</Accordion>
+
+<Accordion title="Can I recover without verification.md">
+  Yes. Shape and Build need the synced brief, Specs, and `comet-state.yaml`; `verification.md` is a
+  rebuildable report. On another device, Verify and `archive-ready` rebuild local execution state
+  and reconfirm the result instead of reusing an old local result directly.
+</Accordion>
+
+<Accordion title="What is portable state versus local Runtime">
+  `comet-state.yaml` is the cross-device boundary for phase, Loop, acceptance, handoff, check
+  summaries, Verifier verdict, blockers, and next action. `.comet/runtime/native/` stores only local
+  `state.json`, logs, locks, and transactions; missing or mismatched overlays are rebuilt.
+</Accordion>
+
+<Accordion title="Why is Batch the default for new projects">
+  Batch resolves question dependencies first and asks every currently answerable question in a
+  round, reducing repeated turns. Sequential remains available and asks one upstream question per
+  round; both require shared-understanding confirmation before Build.
+</Accordion>
+
+<Accordion title="What if I need an extra check">
+  The current Verifier requests it through `request-checks`. Runtime deduplicates equivalent plans,
+  limits request rounds, and returns the result. Do not create a manual receipt or fill a pass field
+  yourself.
+</Accordion>
+
+  <Accordion title="Can several Native changes run in parallel">
+    Yes. When appropriate, change creation presents `current`, `branch`, and `worktree` choices. `.comet/current-change.json` selects ownership for the next write but does not limit the number of active changes. If two changes target the same capability, Archive asks for an explicit order.
   </Accordion>
 </AccordionGroup>
 
-## State and recovery
+## Recovery and troubleshooting
 
-<AccordionGroup>
-  <Accordion title="How do I continue after a session is interrupted">
-    Enter `/comet continue` again. Native resumes from the change files, Runtime state, and current repository facts; it does not depend on the original chat history. You can also run first:
+Start with:
 
-    ```bash
-    comet status
-    comet native status <change-name> --details
-    ```
+```bash
+comet status
+comet native status <change-name> --details --json
+comet native doctor <change-name>
+```
 
-    When several active changes exist at once, the Runtime asks for the target instead of guessing writes onto another change.
+Do not edit `comet-state.yaml`, `.comet/current-change.json`, or `.comet/runtime/native/` by hand. If code, artifact root, branch/worktree, or active/archive layout does not match, Runtime returns a concrete `await-user` or `blocked` action.
 
-  </Accordion>
+Change-local Runtime files, old receipts/evidence, and `native.snapshot` settings left by an older version are migration and read-only compatibility inputs only. New beta17 changes do not create them. Run `comet update`, then `comet native doctor <change-name> --repair` when migration needs an explicit repair.
 
-  <Accordion title="When should I use status, status --details, or doctor">
-    `comet status` is for seeing which active changes the project has. `comet native status <change> --details` expands the phase, blocking reason, next action, and bounded details. `comet native doctor <change>` checks for damaged state, transaction residue, and repairable problems. Add `--repair` only when the diagnosis clearly calls for it.
-  </Accordion>
-
-  <Accordion title="Which files may I edit manually">
-    The brief, target spec, and verification report are user-readable artifacts, but you should let `/comet` coordinate edits in the corresponding phase. `comet-state.yaml`, `run-state.json`, trajectory, locks, hashes, snapshot evidence, and `.comet/current-change.json` are all Runtime-managed machine state. Do not hand-edit them.
-  </Accordion>
-</AccordionGroup>
-
-## Content snapshots and implementation scope
-
-<AccordionGroup>
-  <Accordion title="What are the baseline snapshot and current snapshot">
-    When a change is created, Native streams a hash over the real file content within scope to produce `baseline-manifest.json`. It answers "what state was the project in when implementation began?"
-
-    Build, Verify, and check create current snapshots that answer "what state is the same scope in now?" The Runtime compares the two, combines the result with the project-relative paths the model submitted to form the implementation scope, and judges whether the verification evidence still corresponds to the current implementation.
-
-  </Accordion>
-
-  <Accordion title="What do include and exclude do">
-    `native.snapshot.include` defines the project paths this change can observe. `exclude` removes content that is clearly outside the implementation or verification scope from the already-included paths.
-
-    A file must match at least one `include` and must not match any `exclude`, so `exclude` wins in the end. They are written into the baseline as an auditable scope policy — they are not a hidden switch for casually reducing scan volume.
-
-  </Accordion>
-
-  <Accordion title="How do I write the glob patterns">
-    Patterns must be project-relative and use `/`:
-
-    - `*` matches any characters within a single directory level;
-    - `**` can cross multiple directory levels;
-    - `?` matches a single non-`/` character;
-    - absolute paths, backslashes, empty patterns, and `..` are rejected;
-    - `!pattern` exclusion is not supported; put exclusions under `exclude`.
-
-    For example, `packages/*/src/**` includes `src` under each direct child package, but does not automatically include its tests, root lockfiles, or shared configuration.
-
-  </Accordion>
-
-  <Accordion title="What is the difference between .gitignore and snapshot exclude">
-    In a Git project, the Git provider enumerates tracked and non-ignored untracked files; `.gitignore` affects which untracked files enter the candidate set. `exclude`, by contrast, is an explicit scope policy for a Native change, fixed into the baseline together with its policy hash.
-
-    The two serve different purposes: `.gitignore` is a repository-wide version-control convention, while `exclude` is the audit boundary for one change. Even when a directory is normally Git-ignored, writing an explicit exclude for large generated output or data still communicates your scope intent to non-Git providers and to future maintainers.
-
-  </Accordion>
-
-  <Accordion title="How do I configure a typical project, a monorepo, or a large repo">
-    A typical project should prefer the default complete scope — it is least likely to miss shared configuration, tests, or lockfiles. A monorepo needs to include the target application, shared packages, tests, and root build files at the same time. A large repo can keep `include` broad and exclude only the heavy content that has nothing to do with delivery.
-
-    For the three ready-made YAML recipes and detailed notes, see [Native configuration](/en/native/configuration#content-snapshot-scope-and-budgets).
-
-  </Accordion>
-
-  <Accordion title="Why did changing configuration not change an existing change's scope">
-    When a new change is created, the Runtime normalizes include/exclude and writes the policy and policy hash into `baseline-manifest.json`. Subsequent current snapshots always reuse that baseline policy.
-
-    This prevents hiding changes already in scope by editing configuration mid-implementation. A new project policy affects only changes created afterward; the current snapshot can still read an adjusted resource budget so the original scope can be captured as the repository grows.
-
-  </Accordion>
-
-  <Accordion title="Should I raise a snapshot budget or exclude files when over budget">
-    First ask whether the file belongs to the implementation or verification scope:
-
-    - in scope: raise `max_files`, `max_total_bytes`, or `max_duration_ms`;
-    - out of scope: add an explicit exclude and build an auditable baseline for a new change;
-    - uncertain: keep it included and first inspect the actual limits and affected paths the Runtime reports.
-
-    When the baseline is incomplete, `comet native new` fails closed and removes the unfinished change — it never leaves behind a usable-looking but untrustworthy baseline.
-
-  </Accordion>
-
-  <Accordion title="What if an excluded file later becomes an implementation dependency">
-    Do not just edit the configuration and continue under the current change, because its baseline policy is already fixed. Have the Agent make the new implementation boundary explicit, then create a new baseline that covers the complete dependency scope. If the requirement itself also changed, return to Shape to update the brief and specifications.
-  </Accordion>
-</AccordionGroup>
-
-## Build, Verify, and troubleshooting
-
-<AccordionGroup>
-  <Accordion title="Why does Native not enforce TDD, a fixed plan, or a fixed review method">
-    Native targets strong models that can choose methods from repository risk, so it constrains the outcome and the evidence rather than prescribing one process. The model must still run tests proportional to the change risk, record real commands and results, and provide evidence or an honest skip reason for every Acceptance ID.
-  </Accordion>
-
-  <Accordion title="What happens when the project changes again during Verify">
-    Old verification becomes stale. Native retreats to Build in a controlled way and seals a new implementation scope under the same baseline policy. It asks for confirmation again only when the brief or target spec also changed; an implementation-only change creates no extra confirmation. See [Verification evidence and autonomous repair](/en/native/verification-and-repair).
-  </Accordion>
-
-  <Accordion title="What if several changes modify the same file">
-    Each Native change has its own baseline, target spec, and state. If concurrent edits cause a canonical spec or implementation baseline conflict, the Runtime stops and asks for a rebase, a new verification, or a user scope decision — it never silently overwrites the other work. See [Multiple changes and specification conflicts](/en/native/multi-change-and-conflicts).
-  </Accordion>
-
-  <Accordion title="How do I troubleshoot a snapshot or state anomaly">
-    Run first:
-
-    ```bash
-    comet native status <change-name> --details
-    comet native doctor <change-name>
-    ```
-
-    Follow the diagnosis to handle an exhausted budget, a project tree that keeps changing, an unstable Git index, or a transaction residue. Do not delete the baseline manifest, hand-edit omission/evidence, or write an incomplete snapshot as passed. See [Verification evidence and autonomous repair](/en/native/verification-and-repair) and [Recovery and troubleshooting](/en/native/recovery-playbook).
-
-  </Accordion>
-</AccordionGroup>
-
-Continue with [Native configuration](/en/native/configuration), [Native artifacts and state](/en/native/artifacts-and-state), and [Verification evidence and autonomous repair](/en/native/verification-and-repair).
+Continue with [Native configuration](/en/native/configuration), [Artifacts and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).

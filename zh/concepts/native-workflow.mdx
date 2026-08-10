@@ -1,151 +1,53 @@
 ---
 title: 'Native 工作流'
-description: '面向 Fable 5、GPT-5.6 等强模型的自包含需求工作流：详细约束、轻量执行、可恢复证据。'
+description: '面向强模型的自包含需求工作流：需求具体、方法轻量、验收可恢复。'
 ---
 
-强模型的能力瓶颈不在"会不会写代码"，而在"能不能被信任地完成"。Comet Native 就是为此而生：**需求与验收要具体，执行方法保持轻量。**
+Native 假设模型能够自主调查、实现和选择合适的测试方式，因此不强制固定的设计、计划、TDD 或 review 方法；但完成判定不交给模型自报。Runtime 运行必要检查、分派新的只读 Verifier，并保存可跨设备恢复的用户状态。
 
-它假设模型能够自主调查代码、形成实现方案并按风险选择测试，因此不再强制固定的设计、计划、TDD、调试或审查方法；同时用 Comet 自有 Runtime 管理需求、target spec、阶段、证据、冲突与归档，把完成判定权从模型手里收回 Runtime。这样强模型才能放手去干，结果又跑不偏。
-
-## Native Loop：把完成判定权收归 Runtime
-
-普通 agent loop 是模型主导的——模型自己判断"做完了没"，框架只提供工具。这给了模型自欺欺人的空间：说一句"完成"，实际没测、没改、甚至没碰代码。
-
-Native 借鉴了 Claude Code 团队提出的 [Loop Engineering](https://claude.com/blog/getting-started-with-loops)：loop 是 Agent 重复执行工作周期、直到满足停止条件的受控反馈系统，设计重点包括触发方式、完成标准、验证方式和次数边界。Native 把这套思想做成了 Runtime 主导的收敛机器——**模型负责想和干，Runtime 负责判断是否完成。**
-
-Native 把 loop 限定在 Build 与 Verify 之间：一次实现、一次提交或单次 Agent 执行轮次都只是迭代；只有当前契约下的全部验收条件得到当前有效证据支持，工作才算完成。
+## Native Loop
 
 ```mermaid
 flowchart LR
-  S["Shape<br/>目标、spec 与验收"] --> B
-
-  subgraph L["Native Loop：仅发生在 Build ↔ Verify"]
-    B["Build<br/>调查、实现、修复"] --> V["Verify<br/>检查与逐项证据"]
-    V -->|"failed / missing acceptance"| G["Runtime 派生验收缺口"]
-    G --> B
-  end
-
-  V -->|"全部验收通过"| P["Archive preview"]
-  V -->|"停滞或失败预算耗尽"| U["停止并交还用户"]
-  P --> C{"archive_confirmation"}
-  C -->|"automatic"| A["Archive 完成"]
-  C -->|"required"| U
+  S["Shape：目标、决定、Specs"] --> B["Build：实现与 handoff"]
+  B --> C["Runtime checks"] --> V["Verify：新 Verifier"]
+  V -->|失败| B
+  V -->|通过| A["Archive：应用 Specs 并归档"]
 ```
 
-每轮迭代遵循同一条反馈路径：读取当前验收条件，完成一批相关实现，运行真实验证，再由 Runtime 判断缺口是否减少。Verify 失败时，未满足的验收项和失败检查会作为结构化输入回到 Build，而不是留在对话里由模型自行回忆。只有最终 Verify 通过后才会离开 loop 进入 Archive。
+每轮都覆盖完整 A1…An。Builder 的“完成”只是交接信息；漏项、重复项、未知项或检查失败都会返回 Build。相同候选下已完成的检查会复用，Archive 正常路径不再重复验收。
 
-四个机制让这个 loop 可信收敛，而不是无限打转：
-
-- **以验收缺口驱动工作**：优先处理尚未满足的结果。Runtime 从已校验的验收矩阵派生缺口，强制下一轮先补这些缺口。
-- **以语义变化判断进展**：缺口减少、检查转绿或证据恢复有效才算进展。反复改写代码但失败集合不变，不会重置停滞计数。
-- **自主修复有上限**：同一语义缺口第三次出现且没有进展时停下；同一契约默认最多 5 次 Verify 失败。用完预算，Runtime 把决定权交还用户。
-- **恢复依赖仓库状态**：验收条件、checkpoint、验证报告都持久化在 change 中。会话中断后从同一事实继续，不依赖聊天记忆。
-
-执行者负责调查、实现和修复，Runtime 负责完成判定、证据有效性与停止边界。一次 Agent 轮次、一次 checkpoint、或 Agent 自述"完成"都不是终态——这是 Native 最硬的一条规则。
-
-<p align="center">
-  <img
-    src="/assets/native-illustrations/01-light-execution.png"
-    alt="小鱼展开写有目标与验证的笔记，同时将厚重流程手册收进抽屉，表示结果具体而方法轻量"
-  />
-</p>
-
-## Native 与 Classic 如何选择
-
-| 维度           | Native                                            | Classic Spec 模式                                        |
-| -------------- | ------------------------------------------------- | -------------------------------------------------------- |
-| 主要适用模型   | Fable 5、GPT-5.6 及同档强模型                     | 低于这一能力档、需要更细步骤指导的模型                   |
-| 工作流         | Shape → Build → Verify → Archive                  | open → design → build → verify → archive                 |
-| 需求与状态     | Comet 自有 brief、target spec、`comet-state.yaml` | OpenSpec change/delta spec、`.comet.yaml`                |
-| 实现过程       | 模型按仓库事实与风险自主选择                      | 显式组织设计、计划、TDD、调试与审查协议                  |
-| 依赖           | Comet Native Skill 与 Runtime（零外部 Skill）     | Comet Classic、OpenSpec 与 Superpowers                   |
-| 适合的约束强度 | 强结果约束，较少方法约束                          | 更细阶段指导与过程约束                                   |
-
-如果你用的主力模型是 Fable 5、GPT-5.6 这一档，Native 是默认推荐：强模型被方法论束缚是最大的浪费，Native 把方法选择权还给它，只锁住结果与证据。
-
-对于能力档更低的模型，更细的 Spec 与执行阶段能减少遗漏和流程漂移；Comet 现有真实基线评估已经验证，Classic 的强约束能在这类任务中保持良好的任务覆盖与完成效果。Classic 并不是旧版 Native，也不是失败后的降级路径——两套工作流针对不同的能力曲线，互不升级、互不替换。
-
-现有 Native 与 0.4.0 Classic 的对齐实验包含 16 个任务、每个任务 3 次运行；两种模式的任务级 `pass@3` 都是 100%。该实验支持"两种工作流都能覆盖任务、Native 在该实验中执行更轻"的结论，但不能单独证明所有模型、仓库和任务上的因果优势。详见 [Native 与 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
-
-<Info>
-  模型名称是便于选择的能力档参考，不是 Runtime 的硬编码检测条件。Comet
-  不读取模型名称自动切换工作流；最终选择由项目配置决定。
-</Info>
-
-## 统一入口，独立生命周期
-
-`/comet` 读取 `.comet/config.yaml`，再确定性转发到 `/comet-native` 或 `/comet-classic`。配置可以只启用一种工作流，也可以同时启用两种：
-
-```yaml
-schema: comet.project.v1
-default_workflow: native
-workflows:
-  - native
-  - classic
-ambient_resume: true
-native:
-  artifact_root: docs
-  language: zh-CN
-  clarification_mode: sequential
-classic:
-  artifact_layout: docs
-  language: zh-CN
-  context_compression: off
-  review_mode: standard
-  auto_transition: true
-```
-
-`default_workflow` 只决定 `/comet` 进入哪一侧；不会迁移、删除或合并 change。Native 与 Classic 保持各自的 phase、schema、change、spec 和归档目录，即使同一项目同时启用也不会互相转换。
-
-## 四阶段工作流
-
-```mermaid
-flowchart LR
-  S["Shape"] --> B["Build"]
-  B --> V["Verify"]
-  V -->|pass| A["Archive"]
-  V -->|fail| B
-```
+## 四阶段
 
 ### Shape：固定目标与用户决定
 
-Shape 先调查仓库事实，再把 Outcome、Scope、Non-goals、Acceptance examples、Constraints and invariants、Decisions、Open questions 与 Verification expectations 写入 `brief.md`。
-
-模型区分两类选择：
-
-- 会改变用户可见结果、默认行为、兼容性、范围、风险或不可逆结果的，是用户决定；
-- 只改变实现方式而不改变可观察结果的，是模型自主选择。
-
-存在用户决定时，Sequential 模式每轮询问一个最上游问题；Batch 模式会一次提出本轮所有可回答问题。两种模式都提供推荐和选项影响，并在进入 Build 前要求用户确认最终的共享理解；`[blocking]` 问题或确认未解决前不能进入 Build。改变长期行为时，Shape 还会为每个 capability 写 target spec，而不是只记录增量 patch。
+Shape 调查仓库事实，写 `brief.md`、完整 target Specs 和用户可确认的共享理解。改变用户可见结果、默认行为、兼容性、范围、风险或不可逆结果的问题交给用户；实现结构和库选择由模型自主决定。新项目默认 Batch，Sequential 仍可配置。
 
 ### Build：让强模型自主实现
 
-Build 以 brief、target spec 和仓库规则为边界。模型自行决定是否需要落盘计划、采用何种测试粒度、如何调试与审查；Native 不要求为了流程制造额外文档，也不强制 TDD。
+Build 以 brief、Specs 和仓库规则为边界。模型自行选择实现、测试和修复方式；完成后提交 Builder handoff，不直接写通过结论。出现新的产品决定时，回 Shape；实现缺口则在下一轮 Build 修复。
 
-若实现中出现新的产品决定，工作流返回澄清。推进 Verify 前，Runtime 会把真实项目产物固化为 implementation scope；无法证明范围完整时会停下，只有用户明确接受与 scope hash 绑定的风险后才能按 partial scope 推进。
+### Verify：Runtime 检查 + 新 Verifier
 
-### Verify：把结论绑定到当前事实
+Runtime 解析必要检查并执行，stdout/stderr 流入本机日志，状态保留摘要。新的只读 Verifier 必须逐项给出 A1…An 结果；需要额外检查时，在当前 attempt 通过 `request-checks` 请求 Runtime。没有独立 Verifier execution 时，Runtime 明确标记降级，并在 Archive 前等待用户确认。
 
-Verify 对照 Acceptance examples、target spec 和实现风险运行实际检查。`verification.md` 记录命令、结果、跳过理由、已知限制和逐项 Acceptance evidence。
+### Archive：只应用最终结果
 
-Runtime 将验证结论绑定到当前 brief、target spec、implementation scope 和 revision。任一输入变化后，旧报告、旧 receipt 和旧 pass 都会变为 stale，不能用于归档。失败会返回 Build，并把未满足的验收与失败检查作为下一轮输入。详情见 [验证证据与自主修复](/zh/native/verification-and-repair)。
+Verify 通过后，Runtime 写入 `verification.md`，按 Spec 更新 canonical 文档并移动 change。正常 Archive 不重复运行检查。归档后的用户产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；本机 `.comet/runtime/native/` 执行目录会清理。
 
-### Archive：提交前两步检查
+## 状态和恢复
 
-Archive 先生成内容绑定的 `preflightHash`，再在提交时重新检查证据、路径与 canonical spec hash。并行 change 已改变同一 capability 时，归档会停止而不是覆盖；模型需要读取最新 canonical spec，使用 `spec rebase` 刷新基线，再重新实现和验证。
+`comet-state.yaml` 保存阶段、Loop、验收、handoff、检查摘要、Verifier 结论、阻塞、有限 history 和下一步；本机 `state.json`、日志、锁和事务位于 `.comet/runtime/native/`。换设备或缺少 overlay 时，从 YAML 重建；代码、artifact root 或 branch/worktree 不匹配则等待用户。
 
-归档成功后，target spec 成为 canonical spec，active change 移入带日期的 archive 目录。trajectory 只保存阶段摘要与证据引用，不记录隐藏推理过程。
+## Native 与 Classic
 
-## 自动推进的边界
+| 维度      | Native                                 | Classic                                          |
+| --------- | -------------------------------------- | ------------------------------------------------ |
+| 工作流    | Shape → Build → Verify → Archive       | open → design → build → verify → archive         |
+| 状态/产物 | Comet brief、完整 Specs、portable YAML | OpenSpec change、`.comet.yaml`、Superpowers 产物 |
+| 方法      | 模型按仓库事实和风险自主选择           | 显式设计、计划、TDD、调试和 review               |
+| 依赖      | Comet Native Runtime，不依赖外部 Skill | OpenSpec 与 Superpowers                          |
 
-阶段条件满足时，Runtime 返回结构化 continuation，让同一个 `/comet-native` Skill 继续执行。以下情况会停下：
+`/comet` 只按 `.comet/config.yaml` 确定性转发；两套工作流的 change、Guard、状态和目录互不转换。
 
-- 仍有未解决的用户决定；
-- 配置、状态、锁或事务无法安全解释；
-- 验证证据失效或 implementation scope 不完整；
-- canonical spec 存在并发冲突；
-- 相同失败在没有进展的情况下重复出现。
-
-因此，Native 的"自动"是有状态的连续推进，不是后台守护进程，也不是跳过用户决策或安全检查。
-
-继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native 配置](/zh/native/configuration)、[产物与状态](/zh/native/artifacts-and-state)、[安全与恢复](/zh/native/safety-and-recovery)。
+继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native Loop](/zh/native/native-loop)、[产物与状态](/zh/native/artifacts-and-state) 和 [安全与恢复](/zh/native/safety-and-recovery)。

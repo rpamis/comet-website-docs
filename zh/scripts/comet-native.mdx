@@ -1,157 +1,69 @@
 ---
 title: 'Native 命令概览'
-description: 'Native 工作流的命令清单：创建变更、查看状态、保存进度、推进阶段、验证和归档。'
+description: 'Native 工作流的公开命令：创建、查看、选择、推进、恢复和归档。'
 ---
 
-`comet native` 是 Native 工作流的命令入口。Native 工作流把一次需求拆成 Shape、Build、Verify、Archive 四个阶段，这些命令负责创建和管理每次变更、推进阶段、保存进度和归档。
-
-大多数用户不需要直接敲这些命令——在 Agent 平台里输入 `/comet` 时，Skill 会自动调用它们。这一页帮你了解每条命令在做什么，以及排障或自动化时怎么用。
+`comet native` 是 Native Runtime 的命令入口。大多数用户只需在 Agent 中输入 `/comet` 或 `/comet-native`，Skill 会根据 Runtime 返回的 continuation 调用命令。
 
 ## 命令一览
 
-| 命令 | 做什么 |
-| --- | --- |
-| `comet native new` | 创建一次新的变更 |
-| `comet native status` | 看当前变更走到哪一步 |
-| `comet native show` | 看某次变更的需求和规格 |
-| `comet native select` | 多个变更并存时，指定当前要处理哪个 |
-| `comet native checkpoint` | 在阶段中途保存进度 |
-| `comet native check` | 跑 Comet 内置的只读检查 |
-| `comet native receipt` | 记录一次验证步骤的结果 |
-| `comet native next` | 推进到下一个阶段 |
-| `comet native archive` | 把完成的变更归档 |
-| `comet native doctor` | 诊断和修复状态问题 |
-| `comet native init` / `root` | 配置 Native 的产物目录 |
+| 命令                          | 做什么                                                     |
+| ----------------------------- | ---------------------------------------------------------- |
+| `comet native init`           | 初始化或整理 Native 项目配置                               |
+| `comet native root show/move` | 查看或事务化移动产物根目录                                 |
+| `comet native new`            | 创建 change 并准备 `current`、`branch` 或 `worktree`       |
+| `comet native show`           | 查看 brief、Specs 和 portable 状态                         |
+| `comet native status`         | 查看 change、Loop、验收、检查和下一步                      |
+| `comet native select`         | 多个 change 并存时选择写入归属                             |
+| `comet native spec remove`    | 记录 capability 删除意图                                   |
+| `comet native next`           | 按 continuation 确认或恢复边界、提交 handoff/Verifier 输入 |
+| `comet native archive`        | 预览或执行归档和工作区收口                                 |
+| `comet native doctor`         | 诊断、迁移和重建本机 Runtime                               |
 
-所有命令都支持 `--json`，输出结构化结果，方便脚本和 CI 解析。
+新的 Native 流程不再公开 `checkpoint`、`check`、`evidence` 或 `receipt` 命令；检查由 Runtime 在 Verify 中执行，结果进入 portable 状态和用户报告。
 
-## 创建和查看变更
-
-开始一次新需求时创建变更。`new` 会建立变更目录、捕获项目当前文件快照，并把它选为当前变更：
+## 创建和查看
 
 ```bash
-comet native new add-user-avatar
-```
-
-想看现在进展到哪了：
-
-```bash
-comet native status                  # 所有活跃变更的列表
-comet native status add-user-avatar  # 某个变更的当前阶段和下一步
-```
-
-`status` 不带变更名时列出全部活跃变更；带上变更名时显示它的阶段、验证状态和恢复建议。加 `--details` 可以看更详细的检查项和验收进度。
-
-`show` 用来读某次变更里写下的需求和目标规格：
-
-```bash
+comet native new add-user-avatar --isolation current
+comet native status --json
+comet native status add-user-avatar --details --json
 comet native show add-user-avatar
 ```
 
-## 保存进度
+`new` 创建 brief、Specs 和 `comet-state.yaml`，本机执行目录放在 `.comet/runtime/native/`。`status`/`show` 是只读的，不会偷偷改变 selection。
 
-一次变更可能要分多轮才能做完。`checkpoint` 在不推进阶段的前提下，保存你目前做了什么、下一步该做什么，以及产生了哪些文件：
+## 推进和 Verify
 
-```bash
-comet native checkpoint add-user-avatar \
-  --summary "完成了头像上传接口" \
-  --next-action "处理前端裁剪和压缩"
-```
-
-会话中断后，从 `status` 返回的进度继续，而不是依赖聊天记录。
-
-## 检查和验证
-
-`check` 跑 Comet 内置的只读检查，看代码是否满足这次变更的目标规格。它不调用你的测试命令、不改任何文件，只在 Verify 阶段给出一份检查报告：
+`next` 不接受 Agent 自填通过结果。它只确认 Shape、返回 Build、重试允许的 Verifier，或通过 `--runner-input` 提交 Runtime 定义的 handoff、检查计划和 Verifier 响应：
 
 ```bash
-comet native check add-user-avatar
+comet native next add-user-avatar --summary "Shape confirmed" --confirmed
+comet native next add-user-avatar --summary "Implementation changed" --return-to-build
+comet native next add-user-avatar --runner-input <temporary-json-file>
 ```
 
-`receipt` 用来记录一次具体的验证动作。分两种：`manual` 记录你手工执行的步骤和观察；`automated` 记录一条真实命令及其退出结果：
-
-```bash
-# 记录手动验证
-comet native receipt manual add-user-avatar \
-  --acceptance upload-returns-url \
-  --step "上传 2MB 图片" \
-  --observation "返回了 CDN 地址"
-
-# 记录自动验证（运行真实命令并捕获结果）
-comet native receipt automated add-user-avatar \
-  --acceptance upload-returns-url \
-  -- npm test
-```
-
-## 推进阶段
-
-`next` 把变更推进到下一个阶段。它会校验当前阶段的证据是否齐全，齐全才放行：
-
-```bash
-comet native next add-user-avatar --summary "需求已澄清，目标规格完整"
-```
-
-Native 的四个阶段这样推进：
-
-| 当前阶段 | 推进需要 | 推进结果 |
-| --- | --- | --- |
-| Shape | 需求清晰、目标规格完整 | 进入 Build |
-| Build | 产出了真实代码，或说明了不需要改代码的原因 | 进入 Verify |
-| Verify | 验证报告通过 | 进入 Archive |
-| Verify 未通过 | — | 退回 Build 修复 |
-
-验证失败会自动退回 Build，并把没通过的检查项告诉你，修完再重新验证。
+正常输入模板和字段以 `comet native status <name> --details --json` 返回的 `continuation.inputOptions.template` 为准。`request-checks` 只能由当前 Verifier 请求 Runtime 执行；Builder 自报通过不会直接进入 Archive。
 
 ## 归档
 
-变更完成后用 `archive` 归档。归档分两步，先预演确认没有冲突，再正式提交：
+先查看 Runtime 返回的 archive-ready continuation，再按需预览或执行：
 
 ```bash
-# 第一步：预演，拿到一个 hash
 comet native archive add-user-avatar --dry-run
-
-# 第二步：用这个 hash 正式归档
-comet native archive add-user-avatar --expect-preflight <上一步的hash>
+comet native archive add-user-avatar --confirmed
 ```
 
-归档会把这次变更的目标规格合并进项目，并把变更产物收进归档目录。两步设计是为了保证预演和正式提交之间事实没发生变化。
+Archive 应用完整 target Specs、生成 `verification.md`、移动 change 并清理本机 Runtime；正常路径不重新执行 Verify。并行 capability 冲突时，根据 `continuation` 先选择串行顺序。
 
-## 诊断和修复
-
-状态异常时先用 `doctor` 诊断。不带参数只检查、不改文件：
+## 诊断、迁移和恢复
 
 ```bash
-comet native doctor                  # 检查整个项目
-comet native doctor add-user-avatar  # 检查某个变更
-```
-
-确认要修复时加 `--repair`，它只处理能证明安全的事项，比如清理过期锁、恢复中断的事务，不会改写你的需求、规格或代码：
-
-```bash
+comet native doctor
+comet native doctor add-user-avatar
 comet native doctor add-user-avatar --repair
 ```
 
-## 配置产物目录
+`doctor --repair` 只做可确定的迁移、事务收口和本机 overlay 重建，不替用户改需求、Spec 或代码。跨设备恢复缺少 `verification.md` 不会阻止 Shape/Build；错误 branch/worktree 或混合 active/archive 布局会等待用户。
 
-`init` 配置 Native 把产物（变更目录、状态、证据）放在哪，默认是项目下的 `docs/comet/`。通常首次创建变更时会自动生成默认配置，不需要手动跑：
-
-```bash
-comet native init                 # 用默认目录 docs/comet/
-comet native init --root .        # 改放到 <项目>/comet/
-comet native init --language zh-CN # 设置后续新建变更的默认语言
-```
-
-已经配置过的项目想换目录，用 `root move` 事务化迁移，不要直接改配置文件：
-
-```bash
-comet native root show            # 看当前目录
-comet native root move artifacts  # 迁移到 <项目>/artifacts/comet/
-```
-
-## 没有 comet 命令时
-
-如果环境里没装 `comet` CLI（只有 Skill 文件），可以直接调随包发布的 Runtime，参数和退出码跟 `comet native` 完全一致：
-
-```bash
-node <comet-native-skill-root>/scripts/comet-native-runtime.mjs <command> [options]
-```
+用户可读产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；`.comet/runtime/native/` 只放本机 state、日志、锁和事务。

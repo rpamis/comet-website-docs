@@ -1,9 +1,9 @@
 ---
 title: 'Native 产物与状态'
-description: '理解 .comet/config.yaml、brief、target spec、comet-state.yaml、证据与归档目录的职责。'
+description: '理解 Native 的用户文档、可跨设备恢复的状态，以及本机 Runtime 文件各自负责什么。'
 ---
 
-会话关掉再打开，工作不丢。Native 把需要跨会话保留的事实全部写成文件，恢复靠磁盘事实，不靠聊天记忆。你通常只需要阅读 brief、spec 和 verification report；状态、hash、锁与事务由 Runtime 维护，不用你管。
+Native 把用户需要阅读和同步的内容放在 change 目录，把执行过程放在项目级 Runtime。你通常只需要看 brief、Spec、`comet-state.yaml` 和 `verification.md`；不要手工创建或修改 Runtime 文件。
 
 ## 项目布局
 
@@ -14,6 +14,11 @@ description: '理解 .comet/config.yaml、brief、target spec、comet-state.yaml
   .comet/
     config.yaml
     current-change.json
+    runtime/native/
+      changes/<change-name>/state.json
+      logs/
+      locks/
+      transactions/
   docs/comet/
     specs/
     changes/
@@ -22,96 +27,50 @@ description: '理解 .comet/config.yaml、brief、target spec、comet-state.yaml
         comet-state.yaml
         specs/<capability>/spec.md
         verification.md
-        runtime/
-          baseline-manifest.json
-          run-state.json
-          trajectory.jsonl
-          checkpoints/
-          evidence/
-            snapshots/
-            scopes/
-            allowances/
-            verifications/
-            check-receipts/
     archive/
       YYYY-MM-DD-<change-name>/
-    runtime/
 ```
 
-`native.artifact_root` 可以把 `comet/` 放到项目内的其他相对目录。例如 `artifact_root: docs` 对应 `docs/comet/`。共享配置和当前选择仍位于 `.comet/`。
+`native.artifact_root` 可以改成项目内其他相对目录，例如 `artifacts/comet/`。`.comet/config.yaml` 和 `.comet/current-change.json` 仍属于项目级边界；`.comet/runtime/native/` 由 Runtime 管理并默认忽略，不应复制到 change 目录或提交为用户文档。
 
-## `.comet/config.yaml`
-
-这是 Native 与 Classic 共用的项目配置位置。完整 schema、示例和修改方式见 [Native 配置](/zh/native/configuration)；这里列出与 Native 产物直接相关的字段：
-
-| 字段                        | 作用                                    |
-| --------------------------- | --------------------------------------- |
-| `schema`                    | 配置格式，当前为 `comet.project.v1`     |
-| `default_workflow`          | `/comet` 默认进入 `native` 或 `classic` |
-| `workflows`                 | 项目启用 Native、Classic 或两者         |
-| `ambient_resume`            | 是否允许普通请求触发只读环境感知恢复    |
-| `native.artifact_root`      | Native 的 `comet/` 产物根目录           |
-| `native.language`           | 新建 Native change 的默认文档语言       |
-| `native.clarification_mode` | 每轮询问一个问题或本轮全部可回答问题    |
-| `native.snapshot`           | 新 change 的内容快照范围策略与执行预算  |
-
-Classic 自有设置可以保留在同一个文件中，但不会改变 Native 状态机。修改 artifact root 应使用 `comet native root move`，让 Runtime 事务化迁移；不要只改 YAML 后手动移动目录。
-
-<p align="center">
-  <img
-    src="/assets/native-illustrations/04-artifacts-and-state.png"
-    alt="小鱼把用户可读文档放进文件柜上层，将状态记录和哈希索引收进带锁盒子，表示可恢复的职责分层"
-  />
-</p>
-
-## 用户可读产物
+## 三类用户可读文件
 
 ### `brief.md`
 
-brief 定义这次 change 的目标和边界，包括 Outcome、Scope、Non-goals、Acceptance examples、约束、已确认决定、未解决问题和验证期望。`[blocking]` 表示仍存在必须由用户决定的行为。
+brief 说明目标、范围、非目标、已确认的用户决定、未解决问题、验收示例和验证期望。它是 Shape 阶段的工作说明，用户能直接阅读和修改需求。
 
-### target spec
+### `specs/<capability>/spec.md`
 
-`changes/<change>/specs/<capability>/spec.md` 描述归档后该 capability 的完整行为。它不是只能与旧文档合并阅读的 delta patch。
-
-Runtime 根据 canonical spec 是否存在推导操作：
-
-- `create`：归档时创建新的 canonical spec；
-- `replace`：用 target spec 替换旧版本，但要求旧版本 hash 未变化；
-- `remove`：通过 CLI 明确删除 capability。
-
-并发变更导致基线变化时，使用 `spec rebase` 重新绑定最新 canonical spec；旧验证会失效。
-
-### `verification.md`
-
-verification report 记录实际命令、结果、跳过理由、已知限制、总体结论和逐项 Acceptance evidence。Runtime 会保存不可变 report snapshot，并把它与当时的 contract、scope 和 revision 绑定。
-
-## Runtime 管理的状态
+每个 Spec 描述归档后 capability 的完整行为。归档时 Runtime 会按声明执行 `create`、`modify` 或 `remove`：创建、完整替换，或在受控路径内删除。并行 change 如果都要改同一 capability，会先停下来要求确定归档顺序，不会自动覆盖。
 
 ### `comet-state.yaml`
 
-每个 active 或 archived Native change 都有独立的 `comet-state.yaml`。它记录 phase、revision、approval、`approved_contract_hash`、verification 与 spec operation 等机器状态。正常流程只有在 `approval: confirmed` 后进入 Build；`implicit` 只用于兼容旧 change，不能证明用户已经确认，离开 Build 前必须升级为明确确认。`approved_contract_hash` 把 approval 绑定到当时的 brief/spec contract；后续 contract 漂移也必须取得用户重新确认。不要手改这些字段，也不要把它与 Classic change 的 `.comet.yaml` 混为一谈。
+这是跨设备恢复的稳定状态。它记录当前阶段和状态、Loop 的 iteration/attempt、完整验收项及结果、Builder handoff、必要检查摘要、Verifier 结论、阻塞原因、有限历史和下一步动作。新 Agent 先读它，再按 continuation 执行，不依赖上一轮聊天内容。
 
-### Run、trajectory 与 checkpoint
+### `verification.md`
 
-- Run state 保存当前 continuation 与修复状态；
-- trajectory 保存有界的阶段摘要、时间点和证据引用，不保存隐藏推理；
-- checkpoint 保存当前阶段内的摘要、下一动作和内容寻址 artifact manifest，供新会话恢复。
+这是 Runtime 根据状态生成的用户报告，包含实际检查、逐项验收、风险、限制和结论。它是可重建的展示文件，不是推进阶段的输入；缺失或落后时，Runtime 可以从 `comet-state.yaml` 重建。
 
-Checkpoint 不替代 brief、spec 或 verification report，也不推进 phase。
+## 本机 Runtime
 
-### Selection
+`.comet/runtime/native/` 只保存本机执行 overlay、日志、短时锁和可恢复事务。它可能因换设备或清理而缺失；Runtime 会依据同步的 YAML 重建，而不会把本机 overlay 当成跨设备事实。日志适合排查命令输出，不能替代 `verification.md`。
 
-`.comet/current-change.json` 记录当前写入属于哪个 workflow/change。它让共享 Hook Router 在一个项目启用多套工作流或多个 change 时仍能把写入交给唯一 Guard。只读 `status` 不会靠副作用改变 selection；选择 change 使用 `comet native select <change-name>`。
+`.comet/current-change.json` 只表示下一次写入归属哪个 workflow/change，不限制项目只能有一个 active change。状态查看是只读的；需要明确归属时使用 `comet native select <change-name>`。
 
-## 有界读取与内容寻址
+## 跨设备恢复
 
-Native 用 hash 把验证结论、归档预检、checkpoint 等都和当时的文件内容绑在一起。这样判断"证据是否还作数"时，看的是当前文件的实际内容，而不是一句"已经验证过"的文字声明。文件一变，对应的旧结论自动失效。
+同步项目代码、`.comet/config.yaml`、`brief.md`、Specs 和 `comet-state.yaml`。如果已经生成报告，也一并同步 `verification.md`，但缺失报告不应阻止 Shape 或 Build 恢复。目标设备先确认 artifact root、分支或 worktree 匹配，再运行：
 
-范围（`include`/`exclude`）在 change 创建时就定死，写进了 `baseline-manifest.json`。实现过程中就算有人去改 `.comet/config.yaml`，也没法让已纳入范围的改动消失。但资源预算（`max_files`、`max_total_bytes`、`max_duration_ms`）是从当前配置读的——仓库变大了，直接调高预算就行，不必动范围。
+```bash
+comet status
+comet native status <change-name> --details --json
+comet native doctor <change-name>
+```
 
-如果范围或预算超了，Runtime 会停下来，告诉你实际受影响的路径和该怎么调，而不是笼统报错。这里有个底线：范围不完整时 Runtime 不会靠猜补全（比如不会把缺失文件当成删除），也不能靠手改 evidence 绕过。
+正在执行的本机检查会被视为中断；Verify 或 `archive-ready` 的旧结果会按 Runtime 的恢复策略重新确认，不会因为复制了一个旧 `state.json` 就直接归档。代码未同步、分支不匹配或 active/archive 目录冲突时，Runtime 会停下并给出明确的用户动作。
 
-Pattern 怎么写、三套可复制的范围配置，以及"该提高预算还是排除文件"怎么判断，见 [Native 配置](/zh/native/configuration#内容快照范围与预算) 和 [Native 常见问题](/zh/native/faq#内容快照与-implementation-scope)。
+## 归档后
 
-下一步阅读 [安全与恢复](/zh/native/safety-and-recovery)。
+成功归档的 change 只保留 brief、Specs、`comet-state.yaml` 和 `verification.md` 等用户可读内容。`.comet/runtime/native/` 中该 change 的本机执行目录会清理；旧版本遗留的机器文件只通过迁移或只读适配器处理，不会成为新 Native 流程的输入。
+
+继续阅读：[验证与修复](/zh/native/verification-and-repair)、[连续推进](/zh/native/continuation-and-checkpoints) 和 [恢复手册](/zh/native/recovery-playbook)。

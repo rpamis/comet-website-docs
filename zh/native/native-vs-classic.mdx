@@ -1,87 +1,35 @@
 ---
 title: 'Native 与 Classic 如何选择'
-description: '深度对比 Native 与 Classic 的完成判定、执行开销、阶段取舍，以及什么场景该用哪套工作流。'
+description: '对比 Native 与 Classic 的完成判定、执行开销、阶段取舍和适用场景。'
 ---
 
-Native 和 Classic 不是轻重档位，也不是同一个工作流的两个版本——它们针对不同的模型能力曲线，各自独立。Native 面向能自主规划和验证的强模型，Classic 面向需要更细步骤指导的模型。这篇展开讲两者的根本差异，帮你判断该用哪套。
+Native 和 Classic 不是轻重档位，也不是同一个工作流的两个版本。Native 面向能自主规划、实现和修复的强模型；Classic 面向需要更细阶段和方法约束的任务。
 
 ## 一句话区分
 
-- **Native**：强模型不需要被手把手教方法。Native 把计划、实现、测试、审查方法全部交给模型自己判断，只用可哈希的需求契约、内容寻址的验证证据和可恢复的归档锁住结果。
-- **Classic**：模型需要明确的过程约束。Classic 用 OpenSpec 和 Superpowers 提供五阶段治理（open → design → build → verify → archive），显式组织设计、计划、TDD、调试与审查。
+- **Native**：模型自主选择计划、实现、测试和审查方法；Runtime 只强制 Shape、必要检查、新 Verifier、Loop 和安全归档。portable 状态和用户文档可跨设备恢复。
+- **Classic**：通过 OpenSpec 与 Superpowers 提供 open → design → build → verify → archive 五阶段治理，明确组织设计、计划、TDD、调试和 review。
 
-## 最根本的差异：完成判定权归谁
+## 谁负责完成判定
 
-这是两套工作流最核心的分水岭。
+Native 不信任 Builder 的“完成”声明。Build 只提交 handoff，Runtime 运行必要检查，再分派新的只读 Verifier 覆盖全部验收项；失败回 Build，达到上限就等待用户。Classic 则用各阶段 Guard 和正式任务/报告推动流程。
 
-**Classic** 依赖 guard 脚本检查 task/state 字段——流程走到位、字段填齐，就算通过。它的可靠性建立在"按方法走完五阶段"上。
+## 执行开销
 
-**Native** 把完成判定权从模型手里收回 Runtime。它不信任"自述完成"：一次 Agent 轮次、一次 checkpoint、或 Agent 说"complete"都不算终点。Runtime 用一套机器可校验的证据系统判断是否完成——acceptance matrix、类型化 receipt、新鲜度围栏。强模型的可靠性瓶颈恰恰在"能不能被信任地完成"，而不在"会不会写代码"，所以 Native 把工程精力全押在验证和证据上。
+Native 不在 Verify 阶段扫描或指纹化整个项目，也不在 Archive 正常路径重复检查。相同候选下已完成的检查会复用，长命令输出流入本机日志。Classic 的优势是方法更明确，代价是需要更多阶段上下文和过程产物。
 
-代价是：Native 的 Runtime 比 Classic 重。这套证据系统（内容哈希、失败签名、停滞检测）是 Native 之所以"轻流程但可信"的根基。
+## 产物和恢复
 
-## 执行开销：Token、轮次、耗时
+Native change 的主要用户产物是 brief、完整 Specs、`comet-state.yaml` 和 `verification.md`；本机执行状态、日志、锁和事务放在 `.comet/runtime/native/`。换设备时从 portable YAML 恢复，缺失的本机 overlay 会重建。
 
-强模型被方法论束缚是最大的浪费。Native 不预设 TDD/review/subagent 模式、零外部 Skill 依赖（Classic 依赖 OpenSpec + Superpowers），因此执行开销显著更低。
+Classic 继续使用自己的 `.comet.yaml`、OpenSpec 目录、Superpowers 计划和 Classic Runtime。两边的 change、Guard 和目录不会混用。
 
-Native 与 0.4.0 Classic 的对齐实验（16 个任务、每个任务 3 次运行，取双方均通过的 41 组配对样本）：
+## 选择建议
 
-| 指标 | Native vs Classic |
-| --- | --- |
-| 总 Token | **锐减 76.8%** |
-| Agent 轮次 | **降 57.4%** |
-| 耗时 | **缩 47.4%** |
-| `pass@3` | 双方均为 **100%** |
-| `pass^3` | Native 87.5%（+12.5pp） |
+| 场景                               | 建议                                                               |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| 强模型能自主调查、实现并判断测试   | Native                                                             |
+| 需要逐阶段指导、TDD、计划和 review | Classic                                                            |
+| 同一项目两种任务都有               | `comet init --workflow both`，由 `.comet/config.yaml` 选择默认入口 |
 
-这说明两套工作流都能覆盖任务、完成质量相当，但 Native 在该实验中执行更轻。注意：该实验支持这个结论，但不能单独证明在所有模型、仓库和任务上 Native 都有因果优势。详见 [Native 与 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
-
-## 阶段取舍：为什么 4 个，不是 5 个
-
-Classic 用五个阶段，每个阶段是独立的认知步骤：
-
-| Classic 阶段 | 职责 | Native 对应 |
-| --- | --- | --- |
-| open | 启动需求 | 合并进 Shape |
-| design | 显式设计、决策点协议 | 合并进 Shape |
-| build | 实现 | Build |
-| verify | 验证 | Verify |
-| archive | 归档 | Archive |
-
-Native 把 open 和 design 合并进 Shape——强模型能自主做澄清和设计决策，不需要被拆成两个强制阶段。Native 的四个阶段对应四个不可合并的认知边界：Shape 把目标说清楚（契约），Build 把东西做出来（实现），Verify 证明做对了（证据），Archive 把成果固化进基线（事务）。
-
-少一个阶段不代表能跳过需求或验证。Native 的 Runtime 同样会检查 brief、target spec、用户确认、implementation scope 和验证证据——只是它不强制你按固定的方法走到位。
-
-## 什么时候选 Native
-
-满足以下任一条件，优先 Native：
-
-- 主力模型是 Fable 5、GPT-5.6 及同档强模型；
-- 任务需要模型自主选择实现方法，不想被 TDD/计划/review 流程束缚；
-- 想要更低的 Token 和轮次开销；
-- 团队信任模型的执行能力，更关心"结果是否真的完成"。
-
-## 什么时候选 Classic
-
-满足以下任一条件，优先 Classic：
-
-- 模型能力档低于 Fable 5、GPT-5.6，需要更细的步骤指导来减少遗漏；
-- 任务有强合规要求，需要显式的五阶段记录和决策点协议；
-- 团队偏好明确的方法论约束（强制 TDD、review 深度、isolation 模式）；
-- 仓库复杂或团队不熟悉，需要流程兜底而非模型自主。
-
-## 两套可以共存
-
-一个项目可以同时启用两套工作流，`/comet` 按 `default_workflow` 进入默认那一侧，互不迁移、互不替换：
-
-```yaml
-schema: comet.project.v1
-default_workflow: native
-workflows:
-  - native
-  - classic
-```
-
-Native 与 Classic 保持各自的 phase、schema、change、spec 和归档目录。一个项目的不同需求可以走不同工作流——强模型能搞定的用 Native，需要流程兜底的用 Classic。
-
-继续阅读：[Native 工作流](/zh/concepts/native-workflow)、[Native 快速开始](/zh/native/quickstart)、[Native Loop 工程原理](/zh/native/native-loop) 和 [Classic 状态与配置](/zh/concepts/state-management)。
+继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native Loop](/zh/native/native-loop) 和 [Classic 工作流](/zh/concepts/workflow)。
