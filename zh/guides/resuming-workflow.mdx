@@ -3,7 +3,7 @@ title: '恢复中断的工作'
 description: '会话中断、上下文压缩或换设备后，用 /comet 按项目配置恢复 Native 或 Classic。'
 ---
 
-会话断了、上下文被压缩了、或者换了台设备——**正常情况下你只需要重新输入 `/comet`**。Comet 先读取项目根配置，进入 `/comet-native` 或 `/comet-classic`，再由对应工作流从自己的磁盘状态继续。两边不会扫描、猜测或转换另一侧的 change。
+会话中断、上下文被压缩或换设备后，重新输入 `/comet` 即可恢复。Comet 先读取项目根配置，进入 `/comet-native` 或 `/comet-classic`，再由对应工作流从自己的磁盘状态继续。两边不会扫描、猜测或转换另一侧的 change。
 
 ## 最短路径
 
@@ -13,7 +13,7 @@ description: '会话中断、上下文压缩或换设备后，用 /comet 按项�
 /comet 继续
 ```
 
-就这样。Comet 不依赖对话历史：Native 重读 `.comet/config.yaml`、change 的 `brief.md`、Specs、`comet-state.yaml` 和实现；Classic 重读同一项目配置、OpenSpec、`.comet.yaml` 与运行证据。
+Comet 不依赖对话历史：Native 重读 `.comet/config.yaml`、change 的 `brief.md`、Specs、`comet-state.yaml` 和实现；Classic 重读同一项目配置、OpenSpec、`.comet.yaml` 与运行证据。
 
 <Tip>
   <strong>
@@ -57,7 +57,7 @@ Native 的所有阶段都从永久入口 `/comet-native` 恢复。入口先运�
   Comet 自动完成。
 </Note>
 
-`/comet-classic` 的恢复能力来自三个机制：
+`/comet-classic` 的恢复能力依赖几点机制：
 
 | 机制                         | 说明                                                                                                                                      |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -93,7 +93,7 @@ Native 的所有阶段都从永久入口 `/comet-native` 恢复。入口先运�
 
 ### 跨设备 0 上下文断点恢复现场
 
-下图展示了跨设备、0 上下文的断点恢复现场——不管在哪台设备、哪个平台，只要仓库一致，`/comet` 就能从文件状态重建断点继续，无需任何额外操作或上下文传递：
+下图展示跨设备的断点恢复：只要仓库一致，不管在哪台设备、哪个平台，`/comet` 都能从文件状态重建断点继续，无需额外操作或上下文传递。
 
 <img src="/img/comet-zero-resume.png" alt="跨设备 0 上下文断点恢复现场" />
 
@@ -111,7 +111,7 @@ Classic 正常恢复使用 `/comet`。阶段和预设入口只用于手动控制
 comet state check <change-name> <phase> --recover
 ```
 
-- 如果检查发现实际的 phase、workflow 或证据属于**另一个** Skill，按脚本输出和 `/comet-classic` 路由规则切换——**不要在错误的阶段里继续写状态**。
+- 如果检查发现实际的 phase、workflow 或证据属于**另一个** Skill，按脚本输出和 `/comet-classic` 路由规则切换，**不要在错误的阶段里继续写状态**。
 - 如果工作树有未提交改动，先用 `comet/reference/dirty-worktree.md` 的规则归因。
 
 ```mermaid
@@ -126,7 +126,7 @@ flowchart TD
 
 <Tip>
   这条规则让你在 <strong>已知自己在哪个阶段</strong> 时跳过统一入口和 Classic 内部路由，
-  的路由开销直接干活，同时保证即使记错了阶段也不会把状态写坏——入口检查会拦住不匹配的进入。
+  直接进入对应阶段，同时保证即使记错了阶段也不会破坏状态：入口检查会拦截不匹配的进入。
 </Tip>
 
 ## build 阶段恢复的特殊情况
@@ -141,7 +141,7 @@ build 阶段的恢复最复杂，但大多数情况 `/comet-classic` 也能自�
 | `isolation`/`build_mode`/`tdd_mode` 未设                                 | 回 `/comet-build` 对应步骤**让你补选**                              |
 | 都已设，有未完成任务                                                     | 读 tasks.md 下一个未勾选任务继续执行                                |
 
-subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会话**不会**直接执行任务——它会回到后台子代理调度规则，由主会话只做协调。
+subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会话**不会**直接执行任务，它会回到后台子代理调度规则，由主会话只做协调。
 
 ## 有未提交改动时
 
@@ -155,21 +155,20 @@ subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会
 
 <Warning>
   dirty worktree 只代表代码事实，<strong>不会自动推进</strong> <code>.comet.yaml</code> 的{' '}
-  <code>phase</code> 或勾选 <code>tasks.md</code>——只有完成归因、验证、过阶段 guard 后才推进状态。
+  <code>phase</code> 或勾选 <code>tasks.md</code>，只有完成归因、验证、过阶段 guard 后才推进状态。
 </Warning>
 
 ## 真正需要你介入的情况
 
 `/comet-classic` 能自动推进无歧义的衔接，但**决策点**必须等你明确选择。恢复时常见的需要你介入的情况：
 
-- **验证失败**（`verify_result: fail`）——你要决定修复还是接受偏差
-- **真正的 plan-ready 暂停**——你要选隔离和执行方式
-- **build 决策缺失**——你要补选 `isolation`/`build_mode`/`tdd_mode`
-- **无法归因的未提交改动**——你要说明改动归属
-- **多个活跃 change**——你要选恢复哪个
-- 其余是各阶段固有的停顿点（见[五阶段停顿点](/zh/concepts/decision-points)）
+- **验证失败**（`verify_result: fail`）：需要你决定修复还是接受偏差
+- **真正的 plan-ready 暂停**：需要你选择隔离和执行方式
+- **build 决策缺失**：需要你补选 `isolation`/`build_mode`/`tdd_mode`
+- **无法归因的未提交改动**：需要你说明改动归属
+- **多个活跃 change**：需要你选择恢复哪个
 
-这些之外，`/comet-classic` 都会自己往前走。
+其余是各阶段固有的停顿点（见[五阶段停顿点](/zh/concepts/decision-points)）。这些之外，`/comet-classic` 都会自动推进。
 
 ## 什么时候才用 comet status / comet doctor
 
@@ -177,15 +176,15 @@ subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会
 
 | 命令           | 什么时候用                                                                          |
 | -------------- | ----------------------------------------------------------------------------------- |
-| `comet status` | 想看"我在哪个阶段、声明的产物是否都还在"——`/comet-classic` 路由不对、或证据对不上时 |
-| `comet doctor` | 环境或安装出问题——CLI/Skill 缺失、`.comet.yaml` 格式坏掉、`/comet-classic` 起不来时 |
+| `comet status` | 想看"我在哪个阶段、声明的产物是否都还在"：`/comet-classic` 路由不对、或证据对不上时 |
+| `comet doctor` | 环境或安装出问题：CLI/Skill 缺失、`.comet.yaml` 格式坏掉、`/comet-classic` 起不来时 |
 
 ```bash
 comet status        # 看活跃 change 的 phase/任务/runtime_eval
 comet doctor        # 诊断安装、环境、Skill 完整性
 ```
 
-`runtime_eval` 会告诉你声明的步骤证据是否真在磁盘上——失败时会提示 `run <命令> or restore missing evidence`。
+`runtime_eval` 会告诉你声明的步骤证据是否真在磁盘上，失败时会提示 `run <命令> or restore missing evidence`。
 
 ## 下一步
 
