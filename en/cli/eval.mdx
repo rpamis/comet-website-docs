@@ -1,212 +1,149 @@
 ---
 title: "comet eval"
-description: "Evaluate a local Skill or comet/eval.yaml through the shared eval harness and generate a report."
+description: "Evaluate a local Skill or comet/eval.yaml directly and produce a reviewable report."
 ---
 
-`comet eval` is the general-purpose Skill evaluation entry point. It wraps the eval harness so you don't have to manually `cd` into `eval/` or assemble pytest arguments.
+`comet eval` is Comet's standalone Skill evaluation entry point. You can evaluate a local Skill you already have without running `/comet-any` first or creating `comet/eval.yaml` in advance.
 
-It provides pre-release evidence for Skills: it can evaluate artifacts produced by `/comet-any`, and it can also do early smoke testing on a local Skill directory.
-
-## Evaluate generated Bundles directly
-
-A Skill Factory `comet/eval.yaml` may contain `metadata.draftHash: <current-bundle-hash>`. This placeholder means “bind to the current Bundle draft at runtime”; you do not replace it by hand.
-
-Before collect or run, `comet eval` locates the enclosing `bundle.yaml`, calculates the current draft hash, writes a temporary bound manifest, runs the evaluation, and removes the temporary file. The source manifest, Bundle, and Skill files are not modified. If the manifest is outside its Bundle or the draft cannot be loaded and hashed, the error identifies the manifest and failing context.
-
-## Command shape
-
-`comet eval` is a single-entry command. You pass a Skill directory, `SKILL.md`, or `comet/eval.yaml` as the target, then choose with options whether to collect or run the real evaluation.
-
-| Command | Purpose | Runs model tasks |
-| --- | --- | --- |
-| `comet eval ./generated-skill/comet/eval.yaml --collect` | Only discovery and pre-checks, no model or Docker tasks | No |
-| `comet eval ./generated-skill/comet/eval.yaml --html` | Runs the local eval and can produce an HTML report | Yes |
-| `comet eval ./generated-skill/comet/eval.yaml --suite langsmith --html` | Reuses the same tasks with LangSmith tracing enabled | Yes |
-
-<Note>
-  There is also a similarly named <code>comet skill check</code>, which is a <strong>completely different command</strong> — it inspects the runtime checks of a single Skill run, not a general Skill evaluation. See <a href="/en/eval/runtime">Runtime check</a>.
-</Note>
-
-## Prerequisites
-
-These dependencies are not part of the core Comet runtime. The eval harness only needs them when you run `comet eval` to start real model tasks:
-
-- **uv** (`comet eval` uses it internally to drive pytest)
-- **Python 3.11+**
-- **Docker** (builds task images, runs in isolation)
-- **`claude` CLI** on PATH
-- **`ANTHROPIC_API_KEY`** or **`ANTHROPIC_AUTH_TOKEN`**
-
-Confirm the environment first. When Docker, the `claude` CLI, or model credentials are missing, the suite usually **skips** instead of erroring. For the full setup steps, see [Evaluation quickstart · What you need to prepare before running](/en/eval/quickstart#what-you-need-to-prepare-before-running).
-
-<Note>
-  <strong>Using proxy-style credentials</strong> (BigModel / OpenRouter, etc.): when <code>ANTHROPIC_API_KEY</code> is not set, configure <code>ANTHROPIC_AUTH_TOKEN</code> + <code>ANTHROPIC_BASE_URL</code> and related variables in <code>eval/.env</code>. The harness will make <code>claude</code> inside Docker use proxy authentication. For the full variable list, see <a href="/en/eval/harness#environment-variable-reference">Eval harness · Environment variable reference</a>.
-</Note>
-
-## Recommended path
-
-When you have a `comet/eval.yaml` (full pre-release evaluation):
+## Shortest path
 
 ```bash
-comet eval ./generated-skill/comet/eval.yaml --collect
-comet eval ./generated-skill/comet/eval.yaml --html
+# Check the Skill, manifest, and task discovery only
+comet eval ./my-skill --collect
+
+# Run a low-cost smoke evaluation
+comet eval ./my-skill --quick --html
+
+# Run the full local evaluation
+comet eval ./my-skill --html
 ```
 
-To send the same evaluation trajectory to LangSmith:
+The `target` can be a Skill directory, a direct `SKILL.md`, or `comet/eval.yaml`. When you pass a directory, Comet discovers its manifest automatically. Without a manifest, a normal run generates 2–4 bounded tasks from a Skill snapshot without rewriting the Skill source.
+
+- `--collect` performs static discovery and configuration checks without starting an Agent, Docker, plugins, credentials, or network requests.
+- `--quick` uses the fixed `generic-skill-smoke` task for early smoke testing.
+- `--html` produces both Markdown and HTML reports.
+- Reports and run state are written under `.comet/eval/runs/` in the Skill or the project passed with `--project`.
+
+If the Skill is outside the repository that contains the eval harness, specify that project explicitly:
 
 ```bash
-comet eval ./generated-skill/comet/eval.yaml --suite langsmith --html
+comet eval ./my-skill --project ./my-project --html
 ```
 
-When you only have a local Skill directory (early smoke test):
+## Task selection
 
-```bash
-comet eval ./my-skill --skill-name my-skill --quick
+Tasks are selected in this order: explicit `--task`, `--quick`, `evaluation.tasks` in the manifest, `recommendedTasks`, and finally generated tasks. Generated tasks are cached by the Skill snapshot, Agent, and evaluation configuration so later runs can reuse them.
+
+For stable acceptance conditions, define an inline task in `comet/eval.yaml`:
+
+```yaml
+evaluation:
+  tasks:
+    - name: writes-summary
+      prompt: Create summary.md.
+      expect:
+        files:
+          - summary.md
+        contains:
+          summary.md:
+            - "# Summary"
 ```
 
-<Tip>
-  Run <code>--collect</code> first for a low-cost discovery pre-check, then use <code>--html</code> to run the real evaluation. <code>--collect</code> does not consume any model calls.
-</Tip>
+You can also use `source` to reference a task package containing `task.toml` and `instruction.md` inside the Skill package. Inline tasks support file, text, JSON, and command checks. The task workspace and expected artifacts must remain inside the allowed Skill package or evaluation workspace.
 
-## Command options
+## Choose an evaluation Agent
+
+The default Agent is `claude-code`. You can also select `codex`, `qoder`, or `codebuddy`:
 
 ```bash
+comet eval ./my-skill --agent codex --model subject-model
+```
+
+Configure the subject Agent and the LLM-as-Judge independently:
+
+```yaml
+execution:
+  agent: codex
+  model: subject-model
+  baseUrl: https://subject.example/v1
+
+judge:
+  agent: claude-code
+  model: judge-model
+  baseUrl: https://judge.example/v1
+```
+
+CLI options take precedence over the manifest. When a Judge is enabled, provide a separate Judge model and credentials; it does not inherit the subject Agent's credentials.
+
+Custom Agents must be registered explicitly. Comet does not discover an adapter merely because its executable is on PATH. Place the adapter at:
+
+```text
+~/.comet/eval/adapters/<agent-id>/adapter.yaml
+```
+
+Then select it with the same option:
+
+```bash
+comet eval ./my-skill --agent my-agent
+```
+
+## Choose an evaluation suite
+
+`local` is the default and is suitable for local development and HTML reports. For team tracing, use the existing LangSmith suite:
+
+```bash
+comet eval ./my-skill --suite langsmith --html
+```
+
+To send task traces, scores, and experiment summaries to Langfuse, use the Langfuse suite added in beta18:
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... \
+  comet eval ./my-skill --suite langfuse --html
+```
+
+The Langfuse suite still produces the local report. `--collect --suite langfuse` does not initialize the SDK, make network requests, or download plugins.
+
+## Common options
+
+```text
 comet eval [target] [options]
 ```
 
-| Option | Description | Default |
-| --- | --- | --- |
-| `[target]` | Local Skill directory, `SKILL.md`, or `comet/eval.yaml` | None |
-| `--project <dir>` | Repository root containing `eval/` | `.` (current directory) |
-| `--suite <suite>` | Select the `local` or `langsmith` eval suite | `local` |
-| `--manifest <path>` | Path to `comet/eval.yaml` | None |
-| `--skill-path <path>` | Local Skill directory or `SKILL.md` | None |
-| `--skill-name <name>` | Skill name for `--skill-path` | None |
-| `--profile <name>` | Override the eval profile | `generic` |
-| `--task <task>` | Specify the eval task | See table below |
-| `--report-config <path>` | Custom report config path | Auto-generated temp file when `--html` is used |
-| `--html` | Generate an HTML report (also produces markdown) | Off |
-| `--quick` | Use the default quick smoke task | Off |
-| `--collect` | Only discovery and pre-checks, no model or Docker tasks | Off |
+| Option                   | Purpose                                      |
+| ------------------------ | -------------------------------------------- |
+| `--project <dir>`        | Select the project root containing `eval/`   |
+| `--manifest <path>`      | Pass `comet/eval.yaml` directly              |
+| `--skill-path <path>`    | Pass a local Skill directory or `SKILL.md`   |
+| `--skill-name <name>`    | Set the Skill name                           |
+| `--agent <agent>`        | Select the subject evaluation Agent          |
+| `--model <model>`        | Override the subject model                   |
+| `--base-url <url>`       | Override the subject API base URL            |
+| `--judge-agent <agent>`  | Select the independent Judge Agent           |
+| `--judge-model <model>`  | Select the independent Judge model           |
+| `--judge-base-url <url>` | Override the Judge API base URL              |
+| `--profile <name>`       | Select an evaluation profile                 |
+| `--report-config <path>` | Pass a report configuration file             |
+| `--suite <suite>`        | Select `local`, `langsmith`, or `langfuse`   |
+| `--task <task>`          | Run only the selected task                   |
+| `--collect`              | Perform static discovery and pre-checks only |
+| `--quick`                | Use the fixed smoke task                     |
+| `--html`                 | Generate an HTML report                      |
 
-### `--manifest` and `--skill-path` are mutually exclusive
+## Reading the result
 
-A single evaluation can only choose one entry point:
+Before running, the CLI prints the target, suite, task, experiment, and report path. The report attributes failures to `harness`, `workflow`, `task`, or `model`:
 
-- Only `--manifest`: evaluates `comet/eval.yaml`.
-- Only `--skill-path`: evaluates a local Skill directory.
-- A `[target]`: the CLI decides based on the path whether it is a manifest or a local Skill.
-- Both or neither passed: error.
+- `harness`: dependency, Docker, path, or environment problem;
+- `workflow`: the Skill flow did not meet its intended behavior;
+- `task`: the task definition or acceptance condition is incorrect;
+- `model`: model behavior or invocation instability.
 
-### Select the Local or LangSmith suite
-
-`local` is the default and keeps task logs and reports locally. `langsmith` reuses the same tasks, treatments, validators, and report logic, while enabling the tracing-aware runner and Claude Code tracing plugin. It also keeps local diagnostic logs under `eval/langsmith/logs/`.
-
-LangSmith mode requires at least `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `TRACE_TO_LANGSMITH=true`. It does not change the evaluation target or scoring criteria, so you can compare Local and LangSmith results for the same task.
-
-### Default task and profile
-
-| Mode | Default profile | Default task |
-| --- | --- | --- |
-| `--manifest` | From the manifest (usually `authoring-skill`) | `recommended` (reads the manifest's `recommendedTasks`) |
-| `--skill-path --quick` | `generic` | `generic-skill-smoke` |
-| `--skill-path` (no `--quick`) | `generic` | `recommended` |
-
-You can override the defaults with `--task` and `--profile`.
-
-## Execution info
-
-Before running, `comet eval` prints a set of execution info to help you locate the report:
-
-- `Eval root`: the actual `eval/` root it launched from
-- `Suite`: whether this run uses `local` or `langsmith`
-- `Mode`: `collect` or `run`
-- `Target`: whether the current evaluation targets a manifest or a local Skill directory
-- `Experiment`: the experiment id for this run
-- `Profile`: the profile used in this evaluation
-- `Task`: the evaluation task for this run
-- `Report path`: report location
-- `Report config`: the temporary report config used when `--html` is enabled
-
-In `run` mode it also notes that failure attribution will be recorded into the generated eval summary.
-
-## Report location
-
-`--html` requires the report to produce both markdown and HTML. Reports are typically located at:
-
-```text
-eval/<suite>/logs/experiments/<experiment-id>/summary.html
-```
-
-The experiment id format is `<task>_<YYYYMMDD_HHMMSS>`. See [Reading evaluation reports](/en/eval/reports).
-
-## Choosing between manifest path and skill-path
-
-| Scenario | Recommended entry |
-| --- | --- |
-| You have a `comet/eval.yaml` | `--manifest` |
-| Only a local directory, still in early debugging | `--skill-path --quick` |
-| It's a `/comet-any` artifact | `--manifest` |
-| You want to reach release readiness | `--manifest` |
-
-<Warning>
-  For release readiness, prefer the manifest path. <code>--skill-path --quick</code> is only suitable for early smoke testing — do not treat it as the final release evaluation.
-</Warning>
-
-## How to decide the next step on failure
-
-### collect failure
-
-Check first:
-
-- Whether the manifest path is correct
-- Whether `comet/eval.yaml` exists
-- Whether the recommended task in the manifest exists
-- Whether you are in the Comet repository root or passed the correct `--project`
-
-### run failure
-
-Look at the failure attribution in the report first:
-
-| Attribution | Meaning | Next step |
-| --- | --- | --- |
-| `harness` | eval harness, dependencies, Docker, path, or environment issues | Check dependencies, Docker, network, or local environment |
-| `workflow` | The Skill execution flow did not meet expectations | Go back to `/comet-any` to refine the Skill |
-| `task` | Task definition, validation conditions, or fixture issues | Check the eval task definition and fixtures |
-| `model` | Model behavior, tool usage, or unstable output | Re-run or reduce reliance on non-deterministic behavior |
-
-`Eval harness is missing at ...` means the bundled harness is incomplete or `--project` points at an invalid repository. Reinstall `@rpamis/comet` or fix `--project`. `uv is not installed or not in PATH` means the harness was found and only the local `uv` tool is missing.
-
-### HTML report not found
-
-Check the `Experiment` and `Report path` in the CLI output first. If the path contains placeholders, look in the `eval/local/logs/experiments/` directory using the actual experiment id.
-
-## comet eval vs comet skill check
-
-These two commands have similar names but different purposes:
-
-- `comet eval`: the user entry point to the shared eval harness, evaluating a Skill package or `comet/eval.yaml`.
-- `comet skill check`: a completeness check for a single Skill run, determining whether a run / change satisfies the runtime checks in `comet/checks.yaml`.
-
-If your question is "can this Skill pass evaluation as a product capability", use `comet eval`. If your question is "does this Skill run have missing artifacts or state", use `comet skill check`. See [Runtime check](/en/eval/runtime).
-
-## What users need to remember at minimum
-
-1. `/comet-any` artifacts should use `comet/eval.yaml` first
-2. Run `--collect` first, then `--html`
-3. The eval result is evidence for `/comet-any` release readiness, not the release action itself
-
-Recommended commands:
-
-```bash
-comet eval ./generated-skill/comet/eval.yaml --collect
-comet eval ./generated-skill/comet/eval.yaml --html
-comet creator next <name> --json
-```
+`comet eval` evaluates a Skill as a product capability. `comet skill check` checks whether one Skill Run satisfies its runtime checks; they serve different purposes.
 
 ## Next steps
 
-- [Evaluation system overview](/en/eval/overview) — where eval fits in the workflow and the eval.yaml format
-- [Reading evaluation reports](/en/eval/reports) — understanding report signals
-- [comet publish](/en/cli/publish) — how eval evidence drives publishing
-- [comet skill](/en/cli/skill) — `comet skill check` (runtime check) reference
+- [Evaluation system overview](/en/eval/overview) — evaluation configuration and scoring
+- [Reading evaluation reports](/en/eval/reports) — pass rates and failure attribution
+- [comet publish](/en/cli/publish) — use evaluation evidence for publishing decisions
