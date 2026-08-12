@@ -1,37 +1,114 @@
 ---
-title: 'comet status — View Native and Classic changes'
-sidebarTitle: 'comet status'
-description: 'View active Native and Classic changes, their stages, Loop state, and recovery actions.'
+title: "comet status — View the current change and next step"
+sidebarTitle: "comet status"
+description: "View the current state of Native, Classic, and plain OpenSpec changes, including the next command to run."
 ---
 
-`comet status` is the read-only daily recovery entry point. It lists Native, Classic, and unmanaged OpenSpec changes from the configured project, without changing selection or running checks as a side effect.
+Run `comet status` when you take over a project or do not know what to run next. It shows the configured Comet entry, the changes currently in progress, and the next action for each change.
 
-## Usage
+`comet status` is read-only. Viewing the status does not select a change, modify files, or run Build/Verify checks.
+
+## Start with the text output
 
 ```bash
 comet status
-comet status --json
 ```
 
-For Native details, use:
+A project with no active changes prints:
+
+```text
+Default Entry: native -> /comet-native [project-config]
+
+Native Changes:
+
+  No active changes.
+
+Classic Changes:
+
+  No active changes.
+
+Unmanaged OpenSpec Changes:
+
+  No active changes.
+```
+
+Read the output in this order:
+
+- `Default Entry`: The workflow used by default for `/comet`. In this example, the default is Native, the entry is `/comet-native`, and the value comes from the project configuration.
+- `Native Changes`: Native changes in the project.
+- `Classic Changes`: Changes managed by Comet through the Classic workflow.
+- `Unmanaged OpenSpec Changes`: Plain OpenSpec changes. They are not managed by the Comet state machine and use OpenSpec commands.
+- `No active changes.`: No change is currently in progress in that category. It does not mean that Comet is missing or that the project is broken.
+
+## Output for an active change
+
+For a Classic change, the output puts the phase, task progress, and next command together:
+
+```text
+Classic Changes:
+
+  1. next-build [Comet] [phase: build [1/2 tasks]]
+     workflow: classic | build_mode: executing-plans
+     isolation: branch
+     run_step: full.build.plan
+     next: /comet-build
+```
+
+This means that `next-build` is in the Classic `build` phase, with 1 of 2 tasks complete. It uses branch isolation, and the next command for the current phase is `/comet-build`.
+
+When a Runtime check is missing required evidence, the output names the missing files and the recovery action:
+
+```text
+runtime_check: fail (full.open; missing: openspec.proposal, openspec.tasks)
+next: run /comet-open or restore missing evidence (openspec.proposal, openspec.tasks), then rerun comet doctor
+```
+
+Return to `/comet-open`, or restore the listed files, before continuing to Build. Then run `comet doctor` again.
+
+Native changes appear under `Native Changes`:
+
+```text
+Native Changes:
+
+  1. native-text [Native] [phase: shape]
+```
+
+`phase` is the current phase, not a historical phase. Use the following command for the complete state of one Native change:
 
 ```bash
 comet native status <change-name> --details --json
 ```
 
-## What Native status contains
+## JSON output
 
-Native v4 status comes from `comet-state.yaml` and includes:
+Use JSON when a script or Dashboard needs to consume the status:
 
-- `schema`, `state_version`, `status`, `phase`, and `loop.stage`;
-- `loop.iteration`, `loop.attempt`, stagnation/failure/execution-error counters, and bounded history;
-- every acceptance item with its `passed`, `failed`, `blocked`, or `pending` reason;
-- Builder handoff, Runtime checks, Verifier verdict, risks, and blockers;
-- the next `continuation` action, plus whether the local overlay is running, interrupted, or absent.
+```bash
+comet status --json
+```
 
-Normal Native details do not require project scans, old receipts, or change-local Runtime files. `verification.md` is a user report generated from YAML and can be rebuilt when missing.
+The root status groups changes by workflow and uses a shared schema:
 
-## Native JSON fragment
+```json
+{
+  "schema": "comet.status.v2",
+  "defaultEntry": {
+    "workflow": "native",
+    "skill": "comet-native",
+    "source": "project-config"
+  },
+  "workflows": {
+    "native": { "changes": [] },
+    "classic": { "changes": [] }
+  },
+  "unmanagedOpenSpec": [],
+  "changes": []
+}
+```
+
+`changes` is the combined list of Classic and plain OpenSpec changes for scripts that need one list. Native changes remain under `workflows.native.changes`.
+
+The JSON from the Native detail command also includes the loop, acceptance, Runtime checks, and `continuation` fields:
 
 ```json
 {
@@ -45,30 +122,37 @@ Normal Native details do not require project scans, old receipts, or change-loca
 }
 ```
 
-Follow `continuation.commandArgs` and `inputOptions.template` from the current response. Do not add internal execution identity or result fields by hand.
+When continuing a Native change, follow `continuation.commandArgs` and `inputOptions.template` from the current response. Do not construct internal arguments by hand.
 
-## Select the current change
+## Multiple changes
 
-A project may have multiple active Native changes. `.comet/current-change.json` only selects which workflow/change owns the next write; it is not a one-change lock. Make ownership explicit with:
+A project can have multiple active Native changes. `.comet/current-change.json` identifies the workflow/change that owns the next write; it is not a lock that limits the project to one change.
+
+Select the Native change that should own the next write with:
 
 ```bash
 comet native select <change-name>
 ```
 
-A branch/worktree mismatch, ambiguous target, unsynced code, or mixed active/archive layout returns `await-user` or `blocked` instead of guessing another change.
+Branch or worktree mismatches, ambiguous targets, unsynced code, and active/archive layout conflicts return `await-user` or `blocked` instead of guessing another change.
 
-## Classic and OpenSpec
+## Archive commands
 
-Classic changes keep their five phases, task progress, and Classic Runtime. Plain OpenSpec changes are not forced into a Comet state machine:
+When a change is ready to archive, `status` prints the recommended command:
 
-| Type           | State source                                            | Archive command when ready                       |
-| -------------- | ------------------------------------------------------- | ------------------------------------------------ |
-| Native         | portable `comet-state.yaml` plus optional local overlay | `comet native archive <change-name> --confirmed` |
-| Classic        | `.comet.yaml` plus Classic Runtime                      | `comet archive <change-name>`                    |
-| Plain OpenSpec | OpenSpec artifacts                                      | `openspec archive <change-name> -y`              |
+```text
+recommended archive: comet archive comet-ready
+recommended archive: comet classic openspec -- archive open-ready -y
+```
 
-When status reports a problem, follow its `continuation` first, then run:
+- The first command is for a Comet-managed Classic change.
+- The second command is for a plain OpenSpec change.
+- If `recommended archive` is not shown, the change has not met the archive conditions. Do not force an archive based only on the `status` output.
+
+Use the following command for a Native change:
 
 ```bash
-comet native doctor <change-name>
+comet native archive <change-name> --confirmed
 ```
+
+When status reports a problem, follow the printed `next` action or the Native JSON `continuation`, then run `comet doctor` to check project health.
