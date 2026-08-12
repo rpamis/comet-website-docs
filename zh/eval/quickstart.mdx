@@ -192,14 +192,114 @@ evaluation:
             - "# Summary"
 ```
 
-也可以用 `source` 引用 Skill 包内带有 `task.toml` 和 `instruction.md` 的任务包。任务可以检查文件、文本、JSON 或命令结果；任务工作区和期望产物必须留在允许的 Skill 包或评估工作区内。
+### 引用 Skill 包内的任务包
 
-配置任务后，先确认任务能被发现，再运行真实评估：
+如果任务需要独立的 `task.toml`、`instruction.md`、Docker 环境或验证脚本，可以把任务包放在 Skill 目录内，再通过 `source` 引用。推荐的目录结构如下：
+
+```text
+my-skill/
+├── SKILL.md
+├── comet/
+│   └── eval.yaml
+└── eval-tasks/
+    └── writes-summary/
+        ├── task.toml
+        ├── instruction.md
+        ├── environment/
+        │   └── Dockerfile
+        └── validation/
+            └── test_summary.py
+```
+
+在 Skill 根目录的 `comet/eval.yaml` 中，用 `evaluation.tasks[].source` 指向任务包。这里的 `source` 相对于 Skill 包根目录（包含 `SKILL.md` 的目录），不是相对于 `comet/` 目录：
+
+```yaml
+# my-skill/comet/eval.yaml
+skill:
+  name: my-skill
+  source: ..
+
+evaluation:
+  tasks:
+    - name: writes-summary
+      source: eval-tasks/writes-summary
+```
+
+下面是这个任务包中几个文件的最小示例内容。完整的 `task.toml` 字段、验证脚本、profile 和 Docker 配置说明，见[配置评估与自定义 Task](/zh/eval/configuration)。
+
+`task.toml` 声明任务元数据、Docker 环境、需要检查的产物和验证脚本：
+
+```toml
+[metadata]
+name = "writes-summary"
+description = "Create summary.md"
+
+[environment]
+dockerfile = "environment/Dockerfile"
+
+[validation]
+test_scripts = ["test_summary.py"]
+target_artifacts = ["summary.md"]
+```
+
+`instruction.md` 是发给 Agent 的任务指令：
+
+```markdown
+Create `summary.md` in the current workspace.
+
+Requirements:
+
+- Include the heading `# Summary`
+- Summarize the result in at least three bullet points
+```
+
+`environment/Dockerfile` 提供任务运行和校验所需的基础环境：
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /workspace
+```
+
+`validation/test_summary.py` 在任务容器内检查 Agent 是否产出了符合要求的文件：
+
+```python
+from pathlib import Path
+
+from scaffold.python.validation.core import write_test_results
+
+
+passed = []
+failed = []
+summary = Path("summary.md")
+
+if not summary.exists():
+    failed.append("summary.md is missing")
+else:
+    text = summary.read_text(encoding="utf-8")
+    if "# Summary" in text:
+        passed.append("summary heading is present")
+    else:
+        failed.append("summary heading is missing")
+
+write_test_results({"passed": passed, "failed": failed})
+```
+
+`eval-tasks/writes-summary/task.toml` 描述任务的环境和校验方式，`instruction.md` 是发给 Agent 的任务指令；如果需要 Docker 或确定性校验脚本，就分别放在同一个任务包的 `environment/` 和 `validation/` 下。`source` 任务不能同时写 inline task 的 `prompt` 或 `expect` 字段，且 Comet 会检查任务包中确实存在 `task.toml` 和 `instruction.md`。
+
+配置后可以直接传 Skill 目录，Comet 会自动发现 `comet/eval.yaml`；也可以直接传 manifest：
 
 ```bash
+# 自动发现 my-skill/comet/eval.yaml
 comet eval ./my-skill --collect
 comet eval ./my-skill --task writes-summary --html
+
+# 直接传 manifest
+comet eval ./my-skill/comet/eval.yaml --collect
+comet eval ./my-skill/comet/eval.yaml --task writes-summary --html
 ```
+
+任务可以检查文件、文本、JSON 或命令结果；任务工作区和期望产物必须留在允许的 Skill 包或评估工作区内。
 
 只有需要自定义 Docker 环境、验证脚本、profile 或 treatment 时，才需要继续阅读[配置评估与自定义 Task](/zh/eval/configuration)。
 
@@ -214,13 +314,6 @@ comet eval ./my-skill --task writes-summary --html
 6. comet eval ./my-skill --html
 7. 阅读 .comet/eval/runs/<experiment-id>/summary.md 或 summary.html
 ```
-
-## `comet eval` 和 `comet skill check` 的区别
-
-- `comet eval` 评估 Skill 作为产品能力能否完成真实任务，并产生可复查报告。
-- `comet skill check` 只检查某次 Skill Run 是否缺少运行时产物或状态，不会重新运行模型任务。
-
-如果你要判断一个 Skill 是否能完成目标任务，使用 `comet eval`；如果你只是在排查一次已经发生的 Skill Run，使用 `comet skill check`。
 
 ## 进一步阅读
 

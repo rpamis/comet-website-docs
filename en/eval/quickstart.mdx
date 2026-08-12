@@ -192,14 +192,114 @@ evaluation:
             - "# Summary"
 ```
 
-You can also use `source` to reference a task package inside the Skill package that contains `task.toml` and `instruction.md`. Tasks can check files, text, JSON, or command results; the task workspace and expected artifacts must remain inside the allowed Skill package or evaluation workspace.
+### Reference a Task Package Inside the Skill
 
-After configuring a task, confirm that it can be discovered before running the real evaluation:
+If a task needs its own `task.toml`, `instruction.md`, Docker environment, or validation script, keep the task package inside the Skill directory and reference it with `source`. A recommended layout is:
+
+```text
+my-skill/
+├── SKILL.md
+├── comet/
+│   └── eval.yaml
+└── eval-tasks/
+    └── writes-summary/
+        ├── task.toml
+        ├── instruction.md
+        ├── environment/
+        │   └── Dockerfile
+        └── validation/
+            └── test_summary.py
+```
+
+In `comet/eval.yaml` at the Skill root, use `evaluation.tasks[].source` to point to the task package. The `source` path is relative to the Skill package root (the directory containing `SKILL.md`), not to the `comet/` directory:
+
+```yaml
+# my-skill/comet/eval.yaml
+skill:
+  name: my-skill
+  source: ..
+
+evaluation:
+  tasks:
+    - name: writes-summary
+      source: eval-tasks/writes-summary
+```
+
+Here is minimal example content for the files in this task package. For the complete `task.toml` fields, validation scripts, profiles, and Docker configuration, see [Configuring Evaluations and Custom Tasks](/en/eval/configuration).
+
+`task.toml` declares the task metadata, Docker environment, expected artifact, and validation script:
+
+```toml
+[metadata]
+name = "writes-summary"
+description = "Create summary.md"
+
+[environment]
+dockerfile = "environment/Dockerfile"
+
+[validation]
+test_scripts = ["test_summary.py"]
+target_artifacts = ["summary.md"]
+```
+
+`instruction.md` contains the task instruction sent to the Agent:
+
+```markdown
+Create `summary.md` in the current workspace.
+
+Requirements:
+
+- Include the heading `# Summary`
+- Summarize the result in at least three bullet points
+```
+
+`environment/Dockerfile` provides the base environment for the task and its validation:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /workspace
+```
+
+`validation/test_summary.py` runs inside the task container and checks whether the Agent produced the expected file:
+
+```python
+from pathlib import Path
+
+from scaffold.python.validation.core import write_test_results
+
+
+passed = []
+failed = []
+summary = Path("summary.md")
+
+if not summary.exists():
+    failed.append("summary.md is missing")
+else:
+    text = summary.read_text(encoding="utf-8")
+    if "# Summary" in text:
+        passed.append("summary heading is present")
+    else:
+        failed.append("summary heading is missing")
+
+write_test_results({"passed": passed, "failed": failed})
+```
+
+`eval-tasks/writes-summary/task.toml` describes the task environment and validation, while `instruction.md` contains the task instruction sent to the Agent. Put any Dockerfile or deterministic validation script in the task package's `environment/` and `validation/` directories. A `source` task cannot also define the inline task fields `prompt` or `expect`, and Comet checks that the package contains both `task.toml` and `instruction.md`.
+
+You can pass the Skill directory and let Comet discover `comet/eval.yaml`, or pass the manifest directly:
 
 ```bash
+# Automatically discovers my-skill/comet/eval.yaml
 comet eval ./my-skill --collect
 comet eval ./my-skill --task writes-summary --html
+
+# Pass the manifest directly
+comet eval ./my-skill/comet/eval.yaml --collect
+comet eval ./my-skill/comet/eval.yaml --task writes-summary --html
 ```
+
+Tasks can check files, text, JSON, or command results; the task workspace and expected artifacts must remain inside the allowed Skill package or evaluation workspace.
 
 Only continue to [Configuring Evaluations and Custom Tasks](/en/eval/configuration) when you need a custom Docker environment, validation scripts, a profile, or a treatment.
 
@@ -214,13 +314,6 @@ Only continue to [Configuring Evaluations and Custom Tasks](/en/eval/configurati
 6. comet eval ./my-skill --html
 7. Read .comet/eval/runs/<experiment-id>/summary.md or summary.html
 ```
-
-## `comet eval` vs. `comet skill check`
-
-- `comet eval` evaluates whether a Skill can complete a real task as a product capability and produces a reviewable report.
-- `comet skill check` only checks whether a particular Skill run is missing runtime artifacts or state; it does not rerun model tasks.
-
-Use `comet eval` when you want to know whether a Skill can achieve its goal. Use `comet skill check` when you are troubleshooting a Skill Run that has already happened.
 
 ## Further Reading
 
