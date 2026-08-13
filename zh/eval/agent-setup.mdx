@@ -1,0 +1,207 @@
+---
+title: 'Eval Agent 启动配置'
+description: '在运行 comet eval 前，分别准备 Claude Code、Codex 或 Qoder 的 CLI、认证信息和模型配置。'
+---
+
+`comet eval` 会在隔离的 Docker 容器中启动你选择的 Agent。不同 Agent 的登录方式和模型协议并不通用：Claude Code 可以使用 Anthropic 兼容接口，Codex 需要 OpenAI Responses API，Qoder 需要 Qoder 自己的登录态或 Personal Access Token。
+
+本页只说明 Agent 启动前需要准备什么。Eval 的主任务（Bench）和 LLM-as-judge 仍然分别使用 `BENCH_*` 和 `BENCH_JUDGE_*` 配置；完整变量表见 [Eval harness](/zh/eval/harness#环境变量参考)。
+
+<Warning>
+  不要把真实密钥写进 Skill、manifest、公开仓库、Dockerfile 或报告。建议使用当前 shell
+  环境变量，或使用用户级 <code>%USERPROFILE%\\.comet\\eval\\.env</code> /{' '}
+  <code>~/.comet/eval/.env</code>；发布包不会包含这些文件。
+</Warning>
+
+## 先选择一个 Agent
+
+```bash
+# Claude Code（默认）
+comet eval ./my-skill --agent claude-code --quick --html
+
+# OpenAI Codex
+comet eval ./my-skill --agent codex --quick --html
+
+# Qoder
+comet eval ./my-skill --agent qoder --quick --html
+```
+
+每个 Agent 都先在宿主机上单独验证启动，再运行 Eval。这样可以把“Agent 没有登录”与“Skill 评估失败”区分开。
+
+## Claude Code
+
+### 启动前需要什么
+
+- PATH 中可执行的 `claude` CLI；
+- 任选一种认证方式：首次交互式登录，或 `ANTHROPIC_API_KEY`；
+- 如果使用 Anthropic 兼容代理，还需要 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL` 和模型名。
+
+Claude Code 官方快速开始说明，首次运行 `claude` 会进入登录流程；设置 `ANTHROPIC_API_KEY` 后可以跳过登录提示并改为确认该 key。使用其他 LLM gateway 时，官方支持通过 `ANTHROPIC_AUTH_TOKEN` 和 `ANTHROPIC_BASE_URL` 配置代理。
+
+官方参考：[Claude Code overview](https://code.claude.com/docs/en/overview)、[LLM gateway](https://code.claude.com/docs/en/llm-gateway)。
+
+### 宿主机快速验证
+
+```bash
+claude --version
+claude -p "Reply with exactly OK" --output-format json
+```
+
+### 使用 Anthropic 兼容代理
+
+```dotenv
+BENCH_EVAL_AGENT=claude-code
+BENCH_MODEL=your-anthropic-compatible-model
+BENCH_BASE_URL=https://your-anthropic-gateway.example/v1
+BENCH_API_KEY=your-subject-key
+
+# 或直接使用 Claude Code 原生变量
+ANTHROPIC_AUTH_TOKEN=your-subject-key
+ANTHROPIC_BASE_URL=https://your-anthropic-gateway.example/v1
+ANTHROPIC_MODEL=your-anthropic-compatible-model
+```
+
+Eval 会把通用配置映射到 Claude Code 的原生变量。显式设置的 `ANTHROPIC_*` 优先于通用 `BENCH_*` fallback。
+
+## Codex
+
+### 启动前需要什么
+
+- PATH 中可执行的 `codex` CLI；
+- 一个能访问 OpenAI Responses API 的 API key 或登录态；
+- 一个与该 key 对应的模型名；
+- 如果使用自定义 provider，需要在用户级 `~/.codex/config.toml` 中声明 `model_provider`、`base_url`、`env_key` 和 `wire_api = "responses"`。
+
+Codex 的自定义 provider 配置位于用户级 `config.toml`。官方配置参考说明：`base_url` 是 provider API 地址，`env_key` 指定从哪个环境变量读取 key，当前 `wire_api` 使用 `responses`。不要把 Anthropic Messages 地址填给 Codex；它必须提供 Responses 接口，通常是 `<base-url>/responses`。
+
+官方参考：[Codex configuration reference](https://developers.openai.com/codex/config-reference/)。
+
+### 宿主机快速验证
+
+```bash
+codex --version
+codex exec --json --yolo "Reply with exactly OK"
+```
+
+### 自定义 Responses provider
+
+在启动 Codex 前设置 key：
+
+```bash
+# macOS / Linux
+export OPENAI_API_KEY=your-subject-key
+
+# Windows PowerShell
+$env:OPENAI_API_KEY = "your-subject-key"
+```
+
+用户级 `~/.codex/config.toml` 示例：
+
+```toml
+model = "your-responses-model"
+model_provider = "comet-eval"
+
+[model_providers.comet-eval]
+name = "Comet Eval provider"
+base_url = "https://your-openai-compatible-gateway.example/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
+在 Comet Eval 的用户级 `.env` 中，对应配置为：
+
+```dotenv
+BENCH_EVAL_AGENT=codex
+OPENAI_API_KEY=your-subject-key
+OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1
+OPENAI_MODEL=your-responses-model
+
+# 也可以使用通用主任务配置；Codex 会映射到 OPENAI_*。
+# BENCH_API_KEY=your-subject-key
+# BENCH_BASE_URL=https://your-openai-compatible-gateway.example/v1
+# BENCH_MODEL=your-responses-model
+```
+
+Eval 运行时会在容器内生成临时 `config.toml`，其中只保存 `env_key = "OPENAI_API_KEY"`，不会保存真实 key。你仍然必须确认 provider 实际支持 Responses API；仅支持 `/chat/completions` 或 Anthropic `/messages` 的地址不能直接用于 Codex。
+
+## Qoder
+
+### 启动前需要什么
+
+- PATH 中可执行的 `qodercli` CLI；
+- Qoder 登录态，或 Qoder Personal Access Token（PAT）；
+- 自动化和 Eval 推荐使用 `QODER_PERSONAL_ACCESS_TOKEN`。
+
+Qoder 官方文档支持两种 CLI 登录方式：运行 `qodercli` 后输入 `/login` 进行浏览器登录或粘贴 Qoder PAT；非交互式启动可以设置 `QODER_PERSONAL_ACCESS_TOKEN`。PAT 在 [Qoder Account → Integrations](https://qoder.com/account/integrations) 创建。
+
+官方参考：[Qoder CLI quick start](https://docs.qoder.com/en/cli/quick-start)、[Qoder CLI authentication](https://docs.qoder.com/en/cli/sdk/authentication)。
+
+### 宿主机快速验证
+
+```bash
+qodercli --version
+qodercli
+# 在 Qoder 提示符中输入：
+/login
+```
+
+非交互式验证可以使用：
+
+```bash
+# macOS / Linux
+QODER_PERSONAL_ACCESS_TOKEN=your-qoder-pat \
+  qodercli -p "Reply with exactly OK" --output-format stream-json --yolo
+
+# Windows PowerShell
+$env:QODER_PERSONAL_ACCESS_TOKEN = "your-qoder-pat"
+qodercli -p "Reply with exactly OK" --output-format stream-json --yolo
+```
+
+### Comet Eval 配置
+
+```dotenv
+BENCH_EVAL_AGENT=qoder
+QODER_PERSONAL_ACCESS_TOKEN=your-qoder-pat
+QODER_MODEL=your-qoder-model
+
+# 或使用通用模型配置
+# BENCH_MODEL=your-qoder-model
+```
+
+Qoder 的 PAT 是 Qoder 自己的登录凭据，不是 Anthropic/OpenAI API key。不要把 Claude Code 使用的 `ANTHROPIC_AUTH_TOKEN` 或其他模型网关 key 填到 `QODER_PERSONAL_ACCESS_TOKEN`；这会在 Qoder 启动时认证失败。当前 Eval 不要求为 Qoder 填写 Claude Code 的 `ANTHROPIC_BASE_URL`。
+
+Eval 会把 `QODER_PERSONAL_ACCESS_TOKEN` 仅注入本次容器进程，并为 Qoder 使用隔离的临时配置根；不会读取或挂载宿主机的 Qoder 登录文件。
+
+## Bench 和 Judge 要分开
+
+如果启用了 LLM-as-judge，Judge 需要自己的模型名和凭据：
+
+```dotenv
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+BENCH_JUDGE_API_KEY=your-judge-key
+BENCH_JUDGE_BASE_URL=https://your-judge-gateway.example/v1
+```
+
+不要因为主 Agent 能调用，就省略 `BENCH_JUDGE_MODEL` 或让 Judge 复用主任务配置。主任务和 Judge 可以选择不同的 Agent，但各自的认证必须匹配所选 Agent。
+
+## 常见不匹配
+
+| 现象                               | 通常原因                                                                    | 处理方式                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Claude Code 返回 401               | 没有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`，或 Base URL 与模型不匹配 | 先运行 `claude -p` 验证，再检查 `ANTHROPIC_*`                       |
+| Codex 请求返回 404                 | 网关只实现了 Anthropic Messages 或 Chat Completions                         | 换成支持 Responses API 的 provider，并设置 `wire_api = "responses"` |
+| Qoder `auth.exchangeJobToken` 失败 | 把其他厂商 API key 当成 Qoder PAT                                           | 在 Qoder Integrations 创建并使用 Qoder PAT                          |
+| Eval 瞬间跳过                      | Agent 凭据没有进入 Eval 进程                                                | 检查用户级 `.env` 或当前 shell；不要只检查 GUI 客户端的配置         |
+
+<Info>
+  Beta.18 暂不把 CodeBuddy 的启动方式写成保证可用的教程。它的 CLI 配置和当前 Eval
+  适配器仍在单独验证，避免让用户把未经确认的 Claude Code 配置误用于 CodeBuddy。
+</Info>
+
+## 下一步
+
+- [评估快速上手](/zh/eval/quickstart) — 从 Skill 目录开始第一次评估
+- [Eval harness](/zh/eval/harness) — 环境变量、Docker 和任务运行机制
+- [comet eval 命令](/zh/cli/eval) — CLI 选项和报告路径
