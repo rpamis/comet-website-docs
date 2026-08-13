@@ -248,6 +248,101 @@ CODEBUDDY_MODEL=your-model-id
 
 Eval 运行时只把凭据注入本次容器进程；临时 `settings.json` 使用 `apiKeyHelper` 读取环境变量，运行结束后随容器配置目录销毁，不会把真实 key 写入报告、manifest 或 Skill 工作区。
 
+## 扩展自定义 Agent
+
+非预定义的 Agent 通过用户目录下显式注册的 `adapter.yaml` 接入。仅仅把可执行文件放到 `PATH`
+上不会自动启用它，也不需要 clone Comet 源码：
+
+```text
+# macOS/Linux
+~/.comet/eval/adapters/<agent-id>/adapter.yaml
+
+# Windows
+%USERPROFILE%\\.comet\\eval\\adapters\\<agent-id>\\adapter.yaml
+```
+
+也可以在用户级 `%USERPROFILE%\\.comet\\eval\\.env` / `~/.comet/eval/.env` 中设置
+`COMET_EVAL_ADAPTERS_DIR`，覆盖默认的适配器注册目录。`<agent-id>` 必须是小写字母开头、只包含
+小写字母/数字/连字符、长度 2–32 的标识符。
+
+### `adapter.yaml` 最小完整示例
+
+```yaml
+apiVersion: comet.eval.agent/v1alpha1
+kind: EvalAgentAdapter
+metadata:
+  id: my-agent
+  version: 1.0.0
+runtime:
+  executable: my-agent
+  install:
+    kind: npm
+    package: my-agent
+    version: latest
+credentials:
+  - MY_AGENT_API_KEY
+  - MY_AGENT_AUTH_TOKEN
+modelEnv: MY_AGENT_MODEL
+baseUrlEnv: MY_AGENT_BASE_URL
+capabilities:
+  singleTurn: true
+  resume: true
+  structuredEvents: true
+  telemetry: false
+  skillInvocationEvidence: true
+```
+
+字段规则：
+
+- `runtime.executable` 是容器内启动的命令；npm/pip 包必须暴露这个可执行入口。
+  `runtime.install.kind` 支持 `npm`、`pip`、`none`；`none` 表示该命令已经存在于基础镜像中。
+- `credentials` 只能声明最多两个环境变量名，不能写密钥值。主 Agent 只会把这些变量转发进容器；
+  如果用于 Judge，`BENCH_JUDGE_API_KEY` 映射到第一个名称，`BENCH_JUDGE_AUTH_TOKEN` 映射到第二个名称。
+- `modelEnv`、`baseUrlEnv` 是可选的自定义变量名。自定义 Agent 不会自动继承 `BENCH_API_KEY`、
+  `BENCH_MODEL` 或 `BENCH_BASE_URL`；请使用声明的变量、CLI 参数或 manifest 配置。
+- `resume` 支持 `auto_user` 多轮交互；`structuredEvents` 要求输出 JSONL；
+  `skillInvocationEvidence` 要求输出明确的 Skill 调用事件；`telemetry: false` 时 token/cost 可以是
+  `N/A`。真实评估至少需要 `singleTurn`、`resume`、`structuredEvents` 和
+  `skillInvocationEvidence` 为 `true`。
+
+自定义 CLI 必须兼容 Eval 的调用约定：
+
+```text
+<executable> -p "<prompt>" --output-format stream-json --model <model> [--resume <session-id>]
+```
+
+每条结构化事件写到 stdout。若要让评分器确认 Skill 被调用，输出中还要包含类似下面的 JSONL：
+
+```json
+{"type":"skill_invocation","skill":"my-skill"}
+```
+
+在自动生成的用户级 `.env` 中补上 `adapter.yaml` 声明的变量：
+
+```dotenv
+BENCH_EVAL_AGENT=my-agent
+MY_AGENT_API_KEY=your-subject-key
+MY_AGENT_MODEL=your-model
+MY_AGENT_BASE_URL=https://your-provider.example/v1
+
+# 作为独立 Judge 时使用独立凭据：
+# BENCH_LLM_JUDGE=1
+# BENCH_JUDGE_AGENT=my-agent
+# BENCH_JUDGE_API_KEY=your-judge-key
+# BENCH_JUDGE_MODEL=your-judge-model
+# BENCH_JUDGE_BASE_URL=https://your-judge-provider.example/v1
+```
+
+然后先静态检查，再执行真实评估：
+
+```bash
+comet eval ./my-skill --collect --agent my-agent
+comet eval ./my-skill --quick --agent my-agent --model your-model
+```
+
+适配器可以通过 npm/pip 包或 wrapper CLI 分发，但 `adapter.yaml` 目前不支持自定义参数模板、
+宿主机配置目录挂载或任意 Docker 指令。真实凭据只能放在每个用户自己的 `.env` 或当前 shell 中。
+
 ## Bench 和 Judge 要分开
 
 如果启用了 LLM-as-judge，Judge 需要自己的模型名和凭据：

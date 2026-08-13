@@ -250,6 +250,107 @@ Official references: [CodeBuddy models](https://www.codebuddy.cn/docs/cli/models
 
 At runtime, Eval injects credentials only into the current container process. The temporary `settings.json` uses `apiKeyHelper` to read the environment, and the container-local config directory is destroyed after the run; real keys do not enter reports, manifests, or the Skill workspace.
 
+## Extend Eval with a custom Agent
+
+An Agent that is not one of the built-ins is registered explicitly with an `adapter.yaml` in the user
+directory. Putting an executable on `PATH` is not enough, and the adapter does not require a Comet source
+checkout:
+
+```text
+# macOS/Linux
+~/.comet/eval/adapters/<agent-id>/adapter.yaml
+
+# Windows
+%USERPROFILE%\\.comet\\eval\\adapters\\<agent-id>\\adapter.yaml
+```
+
+You can set `COMET_EVAL_ADAPTERS_DIR` in the user-level `%USERPROFILE%\\.comet\\eval\\.env` /
+`~/.comet/eval/.env` to override the registry directory. `<agent-id>` must start with a lowercase letter,
+contain only lowercase letters, digits, and hyphens, and be 2–32 characters long.
+
+### Minimal complete `adapter.yaml`
+
+```yaml
+apiVersion: comet.eval.agent/v1alpha1
+kind: EvalAgentAdapter
+metadata:
+  id: my-agent
+  version: 1.0.0
+runtime:
+  executable: my-agent
+  install:
+    kind: npm
+    package: my-agent
+    version: latest
+credentials:
+  - MY_AGENT_API_KEY
+  - MY_AGENT_AUTH_TOKEN
+modelEnv: MY_AGENT_MODEL
+baseUrlEnv: MY_AGENT_BASE_URL
+capabilities:
+  singleTurn: true
+  resume: true
+  structuredEvents: true
+  telemetry: false
+  skillInvocationEvidence: true
+```
+
+Field rules:
+
+- `runtime.executable` is the command started inside the container; an npm/pip package must expose
+  this executable. `runtime.install.kind` supports `npm`, `pip`, and `none`; `none` means the command
+  is already available in the base image.
+- `credentials` may declare at most two environment-variable names, never credential values. For a
+  subject Agent, only these names are forwarded into the container. For a Judge,
+  `BENCH_JUDGE_API_KEY` maps to the first name and `BENCH_JUDGE_AUTH_TOKEN` maps to the second name.
+- `modelEnv` and `baseUrlEnv` are optional custom environment-variable names. A custom Agent does not
+  automatically inherit `BENCH_API_KEY`, `BENCH_MODEL`, or `BENCH_BASE_URL`; use the declared names,
+  CLI options, or manifest configuration.
+- `resume` enables `auto_user` multi-turn interaction; `structuredEvents` requires JSONL output;
+  `skillInvocationEvidence` requires explicit Skill-invocation events; and `telemetry: false` allows
+  token/cost fields to be `N/A`. A real evaluation requires `singleTurn`, `resume`, `structuredEvents`,
+  and `skillInvocationEvidence` to be `true`.
+
+The custom CLI must accept Eval's invocation contract:
+
+```text
+<executable> -p "<prompt>" --output-format stream-json --model <model> [--resume <session-id>]
+```
+
+Write one structured event per JSONL line to stdout. To let the rubric confirm that a Skill was invoked,
+the output must also contain an event such as:
+
+```json
+{"type":"skill_invocation","skill":"my-skill"}
+```
+
+Add the variables declared by `adapter.yaml` to the generated user-level `.env`:
+
+```dotenv
+BENCH_EVAL_AGENT=my-agent
+MY_AGENT_API_KEY=your-subject-key
+MY_AGENT_MODEL=your-model
+MY_AGENT_BASE_URL=https://your-provider.example/v1
+
+# Use separate credentials when it is also the independent Judge:
+# BENCH_LLM_JUDGE=1
+# BENCH_JUDGE_AGENT=my-agent
+# BENCH_JUDGE_API_KEY=your-judge-key
+# BENCH_JUDGE_MODEL=your-judge-model
+# BENCH_JUDGE_BASE_URL=https://your-judge-provider.example/v1
+```
+
+Run a static check first, then a real evaluation:
+
+```bash
+comet eval ./my-skill --collect --agent my-agent
+comet eval ./my-skill --quick --agent my-agent --model your-model
+```
+
+An adapter can be distributed as an npm/pip package or wrapper CLI, but `adapter.yaml` currently does not
+support custom argument templates, host configuration-directory mounts, or arbitrary Docker commands.
+Real credentials must remain in each user's own `.env` or current shell.
+
 ## Keep Bench and Judge separate
 
 When LLM-as-judge is enabled, the Judge needs its own model and credentials:
