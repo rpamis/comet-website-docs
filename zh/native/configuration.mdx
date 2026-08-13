@@ -27,6 +27,10 @@ classic:
   context_compression: off
   review_mode: standard
   auto_transition: true
+
+# hook:
+#   allow_paths:
+#     - src
 ```
 
 共享字段管入口和恢复；`native.*` 只影响 Native，`classic.*` 只影响新建的 Classic change。两套工作流的目录和状态彼此独立。
@@ -46,6 +50,25 @@ classic:
 comet init --workflow native|classic|both
 comet update
 ```
+
+## Hook 写入放行
+
+`hook.allow_paths` 列出在受保护阶段允许 Agent 写入的项目相对目录。它是 Native 和 Classic 共享的写入策略，默认为空。
+
+不配置时，项目内（产物区之外）的写入按各工作流的阶段规则处理：Native 只在 Build 阶段允许实现写入，Classic 按自身阶段与守卫规则判定。把某个目录加入 `hook.allow_paths` 后，该目录及其子目录的写入会直接放行，不再受阶段检查约束——典型用途是让实现代码目录（如 `src/`、`apps/web/`）在任意阶段都能修改，避免在非 Build 阶段触发回退或拦截。
+
+```yaml
+hook:
+  allow_paths:
+    - src
+    - apps/web
+```
+
+要点：
+
+- 路径必须是项目相对路径，用 `/` 分隔，每项一个目录；按前缀匹配，`src` 会覆盖 `src/` 下所有文件。
+- 以下区域永远受保护，无法通过本配置放行：`.comet`（Runtime 状态）、Native 产物根（如 `docs`）、Classic 的 openspec 与 superpowers 根。它们始终走专属写入规则。
+- 路径越界或格式错误会在 `comet doctor` 检查时报错。
 
 ## Native 字段
 
