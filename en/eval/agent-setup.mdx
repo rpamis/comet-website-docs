@@ -1,9 +1,9 @@
 ---
 title: 'Eval Agent Startup Configuration'
-description: 'Prepare the CLI, authentication, endpoint, and model settings for Claude Code, Codex, or Qoder before running comet eval.'
+description: 'Prepare the CLI, authentication, endpoint, and model settings for Claude Code, Codex, Qoder, or CodeBuddy before running comet eval.'
 ---
 
-`comet eval` starts the selected Agent inside an isolated Docker container. Agent login and model protocols are not interchangeable: Claude Code can use an Anthropic-compatible gateway, Codex requires an OpenAI Responses API provider, and Qoder requires its own login session or Personal Access Token.
+`comet eval` starts the selected Agent inside an isolated Docker container. Agent login and model protocols are not interchangeable: Claude Code can use an Anthropic-compatible gateway, Codex requires an OpenAI Responses API provider, Qoder requires its own login session or Personal Access Token, and CodeBuddy uses its own API configuration for custom models.
 
 This page covers the Agent prerequisites only. The subject (Bench) and LLM-as-judge still use separate `BENCH_*` and `BENCH_JUDGE_*` settings; see [Eval harness](/en/eval/harness#environment-variable-reference) for the complete variable reference.
 
@@ -24,6 +24,9 @@ comet eval ./my-skill --agent codex --quick --html
 
 # Qoder
 comet eval ./my-skill --agent qoder --quick --html
+
+# CodeBuddy
+comet eval ./my-skill --agent codebuddy --quick --html
 ```
 
 Verify each Agent directly on the host before running Eval. This separates “the Agent is not logged in” from “the Skill evaluation failed.”
@@ -173,6 +176,65 @@ The Qoder PAT is Qoder's own login credential, not an Anthropic or OpenAI API ke
 
 Eval injects `QODER_PERSONAL_ACCESS_TOKEN` only into the current container process and uses an isolated temporary Qoder config root; it does not read or mount the host's Qoder login files.
 
+## CodeBuddy
+
+### What to prepare
+
+- The `codebuddy` CLI available on PATH;
+- `CODEBUDDY_AUTH_TOKEN` when using CodeBuddy platform authentication;
+- `CODEBUDDY_API_KEY`, `CODEBUDDY_BASE_URL`, and a provider-supported model name when using a third-party or OpenAI-compatible model.
+
+Select a CodeBuddy custom model with `--model <model-id>`. `CODEBUDDY_MODEL` sets the default model and `CODEBUDDY_BASE_URL` overrides the request endpoint. Do not reuse Claude Code's `ANTHROPIC_BASE_URL` directly for CodeBuddy, especially an `/anthropic` or `/messages` endpoint; the model ID must also be one accepted by CodeBuddy/the provider rather than a Claude-specific model suffix.
+
+CodeBuddy's host-side custom model registry is `~/.codebuddy/models.json` or the workspace-level `.codebuddy/models.json`. Its `url` should be the complete OpenAI-compatible `/chat/completions` URL, and `apiKey` can reference `${CODEBUDDY_API_KEY}`. Never put the real key in a published file. For example:
+
+```json
+{
+  "models": [
+    {
+      "id": "your-model-id",
+      "name": "Your Model",
+      "vendor": "custom",
+      "apiKey": "${CODEBUDDY_API_KEY}",
+      "url": "https://your-openai-compatible-gateway.example/v1/chat/completions"
+    }
+  ],
+  "availableModels": ["your-model-id"]
+}
+```
+
+Eval does not mount the host's `models.json` or CodeBuddy login directory. It creates a temporary `settings.json` inside the container and passes the native environment variables together with `--model`. Verify the provider directly first:
+
+```bash
+CODEBUDDY_API_KEY=your-subject-key \
+CODEBUDDY_BASE_URL=https://your-openai-compatible-gateway.example/v1 \
+CODEBUDDY_MODEL=your-model-id \
+  codebuddy -p "Reply with exactly OK" --model your-model-id --output-format json -y
+```
+
+Then put the same values in the user-level Eval `.env`:
+
+```dotenv
+BENCH_EVAL_AGENT=codebuddy
+CODEBUDDY_API_KEY=your-subject-key
+CODEBUDDY_BASE_URL=https://your-openai-compatible-gateway.example/v1
+CODEBUDDY_MODEL=your-model-id
+
+# You can also use the common subject settings; Eval maps them to CODEBUDDY_*.
+# BENCH_API_KEY=your-subject-key
+# BENCH_BASE_URL=https://your-openai-compatible-gateway.example/v1
+# BENCH_MODEL=your-model-id
+
+# Optional: override CodeBuddy's model roles.
+# CODEBUDDY_SMALL_FAST_MODEL=your-fast-model-id
+# CODEBUDDY_BIG_SLOW_MODEL=your-reasoning-model-id
+# CODEBUDDY_CODE_SUBAGENT_MODEL=your-subagent-model-id
+```
+
+Official references: [CodeBuddy models](https://www.codebuddy.cn/docs/cli/models), [environment variables](https://www.codebuddy.cn/docs/cli/env-vars), and [CLI reference](https://www.codebuddy.cn/docs/cli/cli-reference).
+
+At runtime, Eval injects credentials only into the current container process. The temporary `settings.json` uses `apiKeyHelper` to read the environment, and the container-local config directory is destroyed after the run; real keys do not enter reports, manifests, or the Skill workspace.
+
 ## Keep Bench and Judge separate
 
 When LLM-as-judge is enabled, the Judge needs its own model and credentials:
@@ -188,17 +250,17 @@ Do not omit `BENCH_JUDGE_MODEL` just because the subject Agent can run, and do n
 
 ## Common mismatches
 
-| Symptom                             | Usual cause                                                                             | Action                                                                                  |
-| ----------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Claude Code returns 401             | No `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, or the endpoint and model do not match | Run `claude -p` first, then check `ANTHROPIC_*`                                         |
-| Codex returns 404                   | The gateway only implements Anthropic Messages or Chat Completions                      | Use a provider that supports Responses API and set `wire_api = "responses"`             |
-| Qoder `auth.exchangeJobToken` fails | Another vendor's API key was used as a Qoder PAT                                        | Create and use a Qoder PAT from Qoder Integrations                                      |
-| Eval skips immediately              | Agent credentials never reached the Eval process                                        | Check the user-level `.env` or current shell; a GUI client's config alone is not enough |
+| Symptom                             | Usual cause                                                                             | Action                                                                                               |
+| ----------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Claude Code returns 401             | No `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, or the endpoint and model do not match | Run `claude -p` first, then check `ANTHROPIC_*`                                                      |
+| Codex returns 404                   | The gateway only implements Anthropic Messages or Chat Completions                      | Use a provider that supports Responses API and set `wire_api = "responses"`                          |
+| Qoder `auth.exchangeJobToken` fails | Another vendor's API key was used as a Qoder PAT                                        | Create and use a Qoder PAT from Qoder Integrations                                                   |
+| CodeBuddy returns 401/404           | A Claude Code Anthropic endpoint was used, or the provider rejected the model ID        | Use `CODEBUDDY_BASE_URL`, `CODEBUDDY_API_KEY`, and the provider's model ID; run `codebuddy -p` first |
+| Eval skips immediately              | Agent credentials never reached the Eval process                                        | Check the user-level `.env` or current shell; a GUI client's config alone is not enough              |
 
 <Info>
-  Beta18 does not yet document CodeBuddy as a guaranteed working startup path. Its CLI configuration
-  and current Eval adapter are still being validated, so do not assume Claude Code settings will
-  work for CodeBuddy.
+  CodeBuddy custom models use CodeBuddy's OpenAI-compatible configuration; Claude Code's
+  `ANTHROPIC_*` settings do not automatically become CodeBuddy settings.
 </Info>
 
 ## Next steps
