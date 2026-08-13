@@ -1,14 +1,15 @@
 ---
-title: 'build 阶段'
-description: 'build 阶段写实施计划，让你一次性选定四种工作模式，然后把设计变成代码——逐任务执行、审查、提交。'
+title: "build 阶段"
+description: "build 阶段写实施计划，让你选择执行、TDD 和审查方式，然后把设计变成代码——逐任务执行、审查、提交。"
 ---
 
-build 阶段把设计变成代码。它会先写实施计划，让你在停顿点做决策（plan-ready 暂停 + 四种工作模式一次性选定 + 分支名确认），然后逐任务执行、审查、提交。从你的角度看，这是**动手实现**的阶段——但 Comet 会把执行方式的选择权交给你，并在过程中处理 spec 增量更新和异常调试。
+build 阶段把设计变成代码。Classic 会在 Open 阶段先准备并绑定工作区；进入 build 后，它先写实施计划，再让你在停顿点选择执行、TDD 和审查方式，然后逐任务执行、审查、提交。从你的角度看，这是**动手实现**的阶段——但 Comet 会把执行方式的选择权交给你，并在过程中处理 spec 增量更新和异常调试。
 
 <Tip>
-  正常情况下你只需要 <code>/comet</code>。
-  配置选择 Classic 后，内部 <code>/comet-classic</code> 会读取状态，并在 design 完成后自动调用{' '}
-  <code>/comet-build</code>。本文描述的是内部阶段 Skill；只有想<strong>手动控制</strong>
+  正常情况下你只需要 <code>/comet</code>。 配置选择 Classic 后，内部{" "}
+  <code>/comet-classic</code> 会读取状态，并在 design 完成后自动调用{" "}
+  <code>/comet-build</code>。本文描述的是内部阶段 Skill；只有想
+  <strong>手动控制</strong>
   时才需要直接输入。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
 </Tip>
 
@@ -38,7 +39,7 @@ build 阶段有 4 个停顿点（全局编号 6-9，整个五阶段工作流共 
 flowchart TD
     Entry["入口状态验证"] --> S1["子代理写实施计划<br/>（失败回退主会话）"]
     S1 --> Stop2["停顿点 6：plan-ready 暂停<br/>继续 / 暂停切换模型"]
-    Stop2 -->|继续| Stop3["停顿点 7：一次性选定<br/>隔离 + 执行 + TDD + 审查"]
+    Stop2 -->|继续| Stop3["停顿点 7：一次性选定<br/>执行 + TDD + 审查"]
     Stop2 -->|暂停切换模型| PauseDone["本次停止，稍后恢复"]
     Stop3 --> StopBranch["停顿点 8：确认分支名<br/>（isolation=branch 时）"]
     StopBranch --> Exec["按 build_mode 逐任务执行"]
@@ -62,7 +63,9 @@ flowchart TD
   />
 </p>
 
-<p align="center">build 阶段把计划拆成任务卡片，逐张执行、排错、勾选并留下提交证据</p>
+<p align="center">
+  build 阶段把计划拆成任务卡片，逐张执行、排错、勾选并留下提交证据
+</p>
 
 ### Step 0：入口状态验证
 
@@ -90,30 +93,34 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 
 | 选项               | 行为                                                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| **A 继续执行**     | 保持在当前模型，进入 Step 3 选择工作模式                                                                            |
+| **A 继续执行**     | 保持在当前模型，进入 Step 3 选择执行、TDD 和审查模式                                                                |
 | **B 暂停切换模型** | 记录 `build_pause: plan-ready`，本次 `/comet-build` 停止；换模型后正常用 `/comet` 恢复，也可手动调用 `/comet-build` |
 
 <Tip>
-  选项 B 的用途是<strong>换模型</strong>——比如用一个模型写计划、换一个更强的编码模型执行。恢复时
-  Comet 会检测到 <code>build_pause: plan-ready</code> 且 plan 存在，告诉你停在
-  plan-ready，你确认继续后清除暂停标志，<strong>不会重新生成 plan</strong>，直接进入工作模式选择。
+  选项 B 的用途是<strong>换模型</strong>
+  ——比如用一个模型写计划、换一个更强的编码模型执行。恢复时 Comet 会检测到{" "}
+  <code>build_pause: plan-ready</code> 且 plan 存在，告诉你停在
+  plan-ready，你确认继续后清除暂停标志，<strong>不会重新生成 plan</strong>
+  ，直接进入工作模式选择。
 </Tip>
 
-### 停顿点 7：一次性选定四种工作模式
+### 停顿点 7：一次性选定三种执行模式
 
-确认继续后，Comet **一次性问你四个选择**（不是分四次问）：
+确认继续后，Comet **一次性问你三个执行选择**（不是分三次问）：下面先说明已在 Open 阶段确定的工作区绑定，再列出这三个执行选择。
 
-#### 1. 隔离方式（isolation）
+#### 工作区绑定（isolation）
 
-| 选项                 | 说明                                   | 推荐                           |
-| -------------------- | -------------------------------------- | ------------------------------ |
-| **A 当前分支直接工作** | 不创建新分支，如实绑定当前 Git 分支    | 当前分支就是 change 的目标分支 |
-| **B 创建分支**       | 当前仓库创建分支，简单快速             | 变更 ≤ 3 个文件                |
-| **C 创建 worktree**  | 独立工作区，可并行开发                 | 并行开发或当前分支有未提交改动 |
+Classic 的新 change 已在 Open 阶段选择并准备工作区。下面的值用于说明 change 的工作区绑定；恢复或检查时，Comet 会验证当前目录和分支是否匹配，不会在 build 阶段静默换目录。
 
-选择 branch 时，Comet 在同一联合决策里让你确认或覆盖分支名，命名规则：`feature/YYYYMMDD/<name>`（full）、`hotfix/...`（hotfix）、`tweak/...`（tweak）。三种隔离方式都适用于 full、hotfix 和 tweak；选择结果会写入 `isolation`，并把实际执行目录的当前分支记录为 `bound_branch`，后续入口检查会阻止意外切换分支。
+| 选项                   | 说明                                | 推荐                           |
+| ---------------------- | ----------------------------------- | ------------------------------ |
+| **A 当前分支直接工作** | 不创建新分支，如实绑定当前 Git 分支 | 当前分支就是 change 的目标分支 |
+| **B 创建分支**         | 当前仓库创建分支，简单快速          | 变更 ≤ 3 个文件                |
+| **C 创建 worktree**    | 独立工作区，可并行开发              | 并行开发或当前分支有未提交改动 |
 
-#### 2. 执行方式（build_mode）
+创建时选择 `branch`，Comet 会在 Open 阶段让你确认或覆盖分支名，命名规则：`feature/YYYYMMDD/<name>`（full）、`hotfix/...`（hotfix）、`tweak/...`（tweak）。三种隔离方式都适用于 full、hotfix 和 tweak；选择结果会写入 `isolation`，并把实际执行目录的当前分支记录为 `bound_branch`，后续入口检查会阻止意外切换分支。
+
+#### 1. 执行方式（build_mode）
 
 | 选项                                | 说明                                                                                        | 推荐                                                      |
 | ----------------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
@@ -122,19 +129,19 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 | `direct`                            | 直接实现                                                                                    | 仅 hotfix/tweak 默认；full 需显式 `direct_override: true` |
 
 <Warning>
-  选 <code>subagent-driven-development</code> 需要平台有真实后台调度能力——否则 Comet 会暂停让你改选{' '}
-  <code>executing-plans</code>。full workflow 默认不能用 <code>direct</code>，除非你显式设{' '}
-  <code>direct_override: true</code>。
+  选 <code>subagent-driven-development</code> 需要平台有真实后台调度能力——否则
+  Comet 会暂停让你改选 <code>executing-plans</code>。full workflow 默认不能用{" "}
+  <code>direct</code>，除非你显式设 <code>direct_override: true</code>。
 </Warning>
 
-#### 3. TDD 模式（tdd_mode）
+#### 2. TDD 模式（tdd_mode）
 
 | 选项      | 说明                                                                          |
 | --------- | ----------------------------------------------------------------------------- |
 | **`tdd`** | 每个任务先写失败测试，Red-Green-Refactor（**推荐**，涉及业务逻辑/新功能/API） |
 | `direct`  | 直接实现，不强制 TDD（hotfix/tweak 默认）                                     |
 
-#### 4. 审查模式（review_mode）
+#### 3. 审查模式（review_mode）
 
 | 选项           | 说明                                                                             | 推荐                           |
 | -------------- | -------------------------------------------------------------------------------- | ------------------------------ |
@@ -159,14 +166,16 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 <Tip>
   <code>subagent-driven-development</code> 下，每个 task 通过验收并被勾选后会
   <strong>立即派发下一个 task</strong>
-  ，不会停下来总结或问你。只有四种情况会停：审查修复轮数耗尽（BLOCKED）、遇到真实歧义、平台无后台调度、你明确要停。审查强度由{' '}
-  <code>review_mode</code> 决定（thorough=每任务审查；standard=仅风险任务审查）。
+  ，不会停下来总结或问你。只有四种情况会停：审查修复轮数耗尽（BLOCKED）、遇到真实歧义、平台无后台调度、你明确要停。审查强度由{" "}
+  <code>review_mode</code>{" "}
+  决定（thorough=每任务审查；standard=仅风险任务审查）。
 </Tip>
 
 <Note>
   子代理（implementer）<strong>不能自己勾选任务</strong>
-  ——只有主会话在双阶段验收通过后才勾选。审查者拿到的是完整任务 + 实现 commit/diff + RED/GREEN
-  证据（TDD 时），<strong>不能只看实现者摘要就下结论</strong>。
+  ——只有主会话在双阶段验收通过后才勾选。审查者拿到的是完整任务 + 实现
+  commit/diff + RED/GREEN 证据（TDD 时），
+  <strong>不能只看实现者摘要就下结论</strong>。
 </Note>
 
 ### Step 3b：异常调试协议（强制）
@@ -197,8 +206,10 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 <Warning>
   <strong>并行只用于排查，不用于修复。</strong>修复始终串行，避免多个 agent
   同时改同一批文件冲突——这与 <code>subagent-driven-development</code>
-  "不要并行派发多个实现子代理"的红线一致。即使 <code>review_mode: off</code>，异常调试协议也
-  <strong>不跳过</strong>——<code>off</code> 只跳过代码审查，不跳过真实问题的调试。
+  "不要并行派发多个实现子代理"的红线一致。即使 <code>review_mode: off</code>
+  ，异常调试协议也
+  <strong>不跳过</strong>——<code>off</code>{" "}
+  只跳过代码审查，不跳过真实问题的调试。
 </Warning>
 
 ### Step 4：spec 增量更新
@@ -268,13 +279,13 @@ guard 会自动探测项目构建入口（例如 `npm run build`、Maven 或 Car
 
 ## 恢复
 
-build 阶段幂等。恢复时 `grep -n '\- \[ \]' tasks.md | head -1` 找第一个未完成任务继续。`build_pause: plan-ready` 的恢复见[停顿点 6](#停顿点-6-plan-ready-暂停)。上下文压缩后用 `comet-state check <name> build --recover` 拿恢复上下文；subagent 模式重读 `.comet/subagent-progress.md` 恢复当前任务和审查轮数，**不能在主会话直接执行任务**。`full` workflow 如果停在 plan-ready，恢复动作必须补齐或确认四个选择：`isolation`、`build_mode`、`tdd_mode` 和 `review_mode`。不要只补前两个就进入执行。
+build 阶段幂等。恢复时 `grep -n '\- \[ \]' tasks.md | head -1` 找第一个未完成任务继续。`build_pause: plan-ready` 的恢复见[停顿点 6](#停顿点-6-plan-ready-暂停)。上下文压缩后用 `comet-state check <name> build --recover` 拿恢复上下文；subagent 模式重读 `.comet/subagent-progress.md` 恢复当前任务和审查轮数，**不能在主会话直接执行任务**。`full` workflow 如果停在 plan-ready，恢复动作必须先确认已有的工作区绑定，再补齐或确认三个执行选择：`build_mode`、`tdd_mode` 和 `review_mode`。
 
 ## 推荐路径
 
 <Tip>
-  多人协作或高风险改动优先用 worktree + <code>review_mode: thorough</code>。小型明确改动用 branch +{' '}
-  <code>standard</code>。
+  多人协作或高风险改动优先用 worktree + <code>review_mode: thorough</code>
+  。小型明确改动用 branch + <code>standard</code>。
 </Tip>
 
 ## 下一步

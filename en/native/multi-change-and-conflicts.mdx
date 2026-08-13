@@ -1,49 +1,83 @@
 ---
-title: 'Multiple changes and specification conflicts'
-description: 'Run several Native changes in parallel, understand ownership and workspace choices, and archive them safely.'
+title: "Multiple changes and specification conflicts"
+description: "Use Native Supervisor Change mode or independent changes for large requirements, parallel work, and specification conflicts."
 ---
 
-A project can carry several active Native changes at once. `.comet/current-change.json` selects which workflow/change owns the next write; it does not limit active changes. Runtime serializes Archive by capability so one change cannot silently overwrite another.
+Native supports two ways to manage multiple changes: Supervisor Change mode for one large goal, or several independent changes for separate goals. Choose based on whether the outcomes can be implemented and accepted independently.
 
-## Parallel changes and working directories
+## When to use Supervisor Change mode
 
-When creating a change, Native checks the current directory and registered worktrees. When isolation matters, it shows the applicable `current`, `branch`, and `worktree` choices with a recommendation. If another active change already uses the current directory, `worktree` is usually the safe choice. Each change keeps its branch/worktree binding, and recovery stops in the wrong directory.
+Native recommends Supervisor Change mode during Shape when a goal contains at least two independently implementable and verifiable outcomes with real dependency or parallel value. A long request or a large task list alone does not trigger decomposition when the outcomes are tightly coupled.
 
-Existing changes are not moved to a new worktree automatically. Before continuing on another device, sync the code and formal Native files, then verify the artifact root and branch/worktree.
+The Supervisor Change owns the overall goal, dependencies, and final acceptance. Each child remains a complete Native change that can be recovered and verified independently.
 
-## Inspect and select
+## Use Supervisor Change mode
+
+Start from the Agent entry point:
+
+```text
+/comet-native
+```
+
+Describe the full goal, for example:
+
+```text
+Add permission APIs, a permission configuration page, and audit logging to the admin console, and verify each outcome independently.
+```
+
+During Shape, Comet will:
+
+1. Decide whether the goal benefits from decomposition.
+2. Show candidate children, dependencies, and acceptance coverage.
+3. Wait for you to confirm the split, adjust it, or keep one change.
+
+Before confirmation, Comet creates no child, worktree, or Agent execution. After confirmation, Runtime advances the current `readyChildren`: it runs them in parallel when the host supports it and falls back to serial execution otherwise.
+
+Each child uses an independent worktree for Build and Verify. Archive merges children into the Supervisor Change branch in order. After every child is complete, the Supervisor Change runs Verify against the final integrated result to confirm the complete goal.
+
+Inspect the Supervisor Change and its child changes with:
+
+```bash
+comet native status <supervisor-change> --details --json
+```
+
+During normal progression, follow the continuation returned by Runtime. Do not create duplicate children or worktrees by hand. Resuming `/comet-native` reuses the existing state.
+
+If the Supervisor Change's final Verify fails, Comet does not reopen an archived child. Runtime suggests a repair child covering the failed acceptance items; confirm the Supervisor Change Shape and continue.
+
+## Independent changes and working directories
+
+When several goals do not share one overall acceptance list, create independent changes. When creating a change, Native considers the current directory and existing changes and offers `current`, `branch`, and `worktree` choices:
+
+- Use `current` for serial work in a clean directory.
+- Use `branch` for an independent branch without separate simultaneous directories.
+- Use `worktree` for parallel work, multiple sessions, or a directory with uncommitted changes.
+
+Native reuses a registered worktree that matches the change. If its branch still exists but the worktree was removed, recovery recreates it. Each change keeps its branch and working-directory binding; recovery does not silently use the wrong checkout.
+
+## Inspect, select, and recover
 
 ```bash
 comet native status
 comet native status <change-name> --details --json
 comet native select <change-name>
+comet native doctor <change-name>
 ```
 
-`status` and `show` are read-only and do not switch the current change as a side effect. Several candidates, missing selection, or a selection for another workflow returns `await-user` for an explicit choice.
+`status`, `show`, and `doctor` do not switch the change for you. When several candidates exist, a selection is missing, or the working directory does not match, Runtime waits for an explicit decision.
 
-## What can proceed in parallel
+## Resolve specification conflicts
 
-Changes that affect different capabilities and share no behavioral constraints can proceed together. Before starting, check:
+Changes that affect different capabilities and share no behavioral constraint can proceed in parallel. Before starting, check:
 
 - whether both changes modify the same capability Spec;
 - whether both claim the same user document or configuration;
-- whether one acceptance plan depends on behavior the other has not archived;
-- whether the current workspace contains another change's modifications.
+- whether one acceptance plan depends on behavior that the other has not archived.
 
-Runtime can detect capability overlap in registered worktrees, but it is not a distributed lock across remote branches or devices. Unsynced code and worktrees still require team coordination.
+If several changes target the same capability, Archive requires an explicit order. The first archived change becomes the canonical Spec; the later change must reread it. If Runtime returns a rebase action, follow its continuation, then run Build and Verify again. Do not overwrite the earlier change's files or reuse a pass from before the conflict.
 
-## Archive order for one capability
+## Continue on another device
 
-When two changes target the same capability, Archive returns a serial-order blocker. Choose the first change, then let the other read the updated canonical Spec and, when needed, run:
+Sync the project code, `.comet/config.yaml`, brief, Specs, `comet-state.yaml`, and an existing `verification.md`. The local `.comet/runtime/native/` may be absent and will be rebuilt. If the artifact root, branch, or worktree does not match, recovery waits for an explicit correction.
 
-```bash
-comet native spec rebase <change-name> --summary <adjustment-summary>
-```
-
-Rebase aligns the target Spec with the latest behavior and requires a new Build and Verify. Do not overwrite the first change with the later files or reuse a pass from before the conflict.
-
-## Cross-device collaboration
-
-Sync project code, `.comet/config.yaml`, the brief, Specs, `comet-state.yaml`, and an existing `verification.md`. The local `.comet/runtime/native/` may be absent and will be rebuilt. If artifact roots or branch/worktree bindings differ between devices, recovery waits for an explicit correction.
-
-Continue with [Artifacts and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+Continue with [Native quickstart](/en/native/quickstart), [Artifacts and state](/en/native/artifacts-and-state), and [Verification and repair](/en/native/verification-and-repair).

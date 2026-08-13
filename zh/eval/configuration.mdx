@@ -6,30 +6,44 @@ description: "从零定义一个 eval task：task.toml、instruction.md、验证
 `comet eval` 开箱即用就能评测内置任务和任意本地 Skill——评估自己的 Skill 只需要 `comet eval ./your-skill --html` 一条命令（见[快速上手](/zh/eval/quickstart)）。但当你想评测**自己的 Skill 在自己的场景下表现如何**时，就需要自定义 task 了。这篇文章手把手带你走完一遍：从定义一个 task，到配置评估 profile，再到跑出报告。
 
 <Info>
-  本文是进阶自定义内容。如果你只是想评估一个已有的 Skill，不需要读本文——直接用 <code>comet eval ./your-skill --html</code> 即可。本文假设你已经能跑通 <code>comet eval ./your-skill --collect</code>。
+  本文是进阶自定义内容。如果你只是想评估一个已有的 Skill，不需要读本文——直接用{" "}
+  <code>comet eval ./your-skill --html</code> 即可。本文假设你已经能跑通{" "}
+  <code>comet eval ./your-skill --collect</code>。
 </Info>
+
+<Warning>
+  本页的 `eval/local/tasks/`、pytest、Dockerfile 和注册流程属于源码/维护者进阶内容，需要
+  拉取 Comet 源码才能完整复现。普通用户只需要在 Skill 自己的 `comet/eval.yaml` 中写 inline
+  task，或直接运行[快速上手](/zh/eval/quickstart)里的 `comet eval`。
+</Warning>
 
 ## 本页怎么读
 
 自定义 eval 可以分三层理解。大多数场景先完成 Task，再按需要调整 Profile 或 Treatment。
 
-| 层级 | 你要决定什么 | 必读程度 |
-| --- | --- | --- |
-| **Task** | 测什么、给 Agent 什么指令、用什么脚本判定通过 | 必读 |
-| **Profile** | 用 generic、comet-workflow 还是 authoring-skill 评分 | 常用 |
-| **Treatment** | 是否做 A/B 对比、是否加入无 Skill 基线 | 进阶 |
+| 层级          | 你要决定什么                                         | 必读程度 |
+| ------------- | ---------------------------------------------------- | -------- |
+| **Task**      | 测什么、给 Agent 什么指令、用什么脚本判定通过        | 必读     |
+| **Profile**   | 用 generic、comet-workflow 还是 authoring-skill 评分 | 常用     |
+| **Treatment** | 是否做 A/B 对比、是否加入无 Skill 基线               | 进阶     |
 
-最短路径是：写一个 task 目录，注册到 `index.yaml`，先跑 `--collect`，再跑 `--html`。Profile、Treatment 和 `auto_user` 都可以在第一版 task 跑通后再调整。
+如果只想给本地 Skill 增加稳定验收条件，优先在 Skill 包的 `comet/eval.yaml` 中声明 inline task，或用 `source` 引用 Skill 包内的任务；先跑 `--collect`，再跑 `--html`。只有需要扩展 Comet 仓库内置 harness 时，才需要创建 task 目录并注册到 `index.yaml`。Profile、Treatment 和 `auto_user` 都可以在第一版 task 跑通后再调整。
 
 ## eval 配置的全景
 
 一个完整的 eval 由三部分拼起来，理解它们的分工是自定义的基础：
 
 <p align="center">
-  <img src="/assets/eval-configuration-illustrations/01-eval-experiment-bench.png" alt="小鱼把 Task、Treatment 和 Profile 配置卡片放入 run 托盘，并整理 score、report 和失败归因输出" width="800" />
+  <img
+    src="/assets/eval-configuration-illustrations/01-eval-experiment-bench.png"
+    alt="小鱼把 Task、Treatment 和 Profile 配置卡片放入 run 托盘，并整理 score、report 和失败归因输出"
+    width="800"
+  />
 </p>
 
-<p align="center">Task 决定测什么，Treatment 决定注入什么，Profile 和 Rubric 决定怎么打分</p>
+<p align="center">
+  Task 决定测什么，Treatment 决定注入什么，Profile 和 Rubric 决定怎么打分
+</p>
 
 ```mermaid
 flowchart LR
@@ -39,11 +53,11 @@ flowchart LR
     R --> REP["报告<br/>pass@k、维度分、失败归因"]
 ```
 
-| 配置 | 回答的问题 | 位置 |
-| --- | --- | --- |
-| **Task** | 测什么场景？要产出什么？怎么验证对了没？ | `local/tasks/<name>/` |
-| **Treatment** | 这次跑注入哪些 Skill（含无 Skill 基线）？ | `local/treatments/` |
-| **Profile + Rubric** | 按什么维度打分？ | task.toml 的 `[evaluation]` |
+| 配置                 | 回答的问题                                | 位置                        |
+| -------------------- | ----------------------------------------- | --------------------------- |
+| **Task**             | 测什么场景？要产出什么？怎么验证对了没？  | `local/tasks/<name>/`       |
+| **Treatment**        | 这次跑注入哪些 Skill（含无 Skill 基线）？ | `local/treatments/`         |
+| **Profile + Rubric** | 按什么维度打分？                          | task.toml 的 `[evaluation]` |
 
 下面分别讲清楚。
 
@@ -65,7 +79,10 @@ flowchart LR
 </Tree>
 
 <Note>
-  Task 目录约定来自 eval harness（<code>eval/</code>），不是你的业务仓库。自定义 task 放在 Comet 仓库的 <code>eval/local/tasks/</code> 下，注册到 <code>eval/local/tasks/index.yaml</code>。
+  Task 目录约定来自 eval harness（<code>eval/</code>），不是你的业务仓库。扩展
+  Comet 仓库内置 harness 时，自定义 task 放在 <code>eval/local/tasks/</code>{" "}
+  下并注册到 <code>eval/local/tasks/index.yaml</code>；普通 Skill
+  不需要复制这套目录结构，可以使用 inline task 或 package-local task。
 </Note>
 
 ### 1. 编写 `task.toml`
@@ -109,28 +126,31 @@ max_turns = 12                  # auto_user 下 subject/simulator 外层往返�
 
 各块的作用：
 
-| 块 | 作用 |
-| --- | --- |
-| `[metadata]` | task 的身份信息。`category = "comet"` 或名字以 `comet-` 开头会自动推断为 `comet-workflow` profile |
-| `[environment]` | 验证跑在什么 Docker 环境里，超时多久 |
-| `[validation]` | 用哪些脚本验证、预期哪些产物 |
-| `[evaluation]` | 用哪个 profile 打分、必须调用哪些 Skill、自定义评判标准 |
-| `[interaction]` | 单轮还是多轮模拟交互 |
+| 块              | 作用                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| `[metadata]`    | task 的身份信息。`category = "comet"` 或名字以 `comet-` 开头会自动推断为 `comet-workflow` profile |
+| `[environment]` | 验证跑在什么 Docker 环境里，超时多久                                                              |
+| `[validation]`  | 用哪些脚本验证、预期哪些产物                                                                      |
+| `[evaluation]`  | 用哪个 profile 打分、必须调用哪些 Skill、自定义评判标准                                           |
+| `[interaction]` | 单轮还是多轮模拟交互                                                                              |
 
 #### `[evaluation]` 的关键字段
 
 这几个字段直接决定打分结果，值得单独说明：
 
-| 字段 | 作用 |
-| --- | --- |
-| `profile` | 选 rubric：`generic`（7 维）/ `comet-workflow`（9 维）/ `authoring-skill`（11 维）。维度细节见[评分指标与双 Agent 评测](/zh/eval/scoring) |
-| `expected_artifacts` | rubric 的 `artifact_presence` 维度会检查这些产物是否存在（支持 glob） |
-| `required_skills` | 列出必须调用的 Skill；`skill_invocation` 维度据此打分 |
-| `require_skill_invocation` | 设为 `true` 时，必需 Skill 未被调用会产生**硬失败**（直接判这次运行不通过） |
-| `rubric_criteria` | 自定义评判标准，传给 LLM judge 作为额外维度（`custom_0`、`custom_1`……） |
+| 字段                       | 作用                                                                                                                                      |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `profile`                  | 选 rubric：`generic`（7 维）/ `comet-workflow`（9 维）/ `authoring-skill`（11 维）。维度细节见[评分指标与双 Agent 评测](/zh/eval/scoring) |
+| `expected_artifacts`       | rubric 的 `artifact_presence` 维度会检查这些产物是否存在（支持 glob）                                                                     |
+| `required_skills`          | 列出必须调用的 Skill；`skill_invocation` 维度据此打分                                                                                     |
+| `require_skill_invocation` | 设为 `true` 时，必需 Skill 未被调用会产生**硬失败**（直接判这次运行不通过）                                                               |
+| `rubric_criteria`          | 自定义评判标准，传给 LLM judge 作为额外维度（`custom_0`、`custom_1`……）                                                                   |
 
 <Warning>
-  <code>require_skill_invocation: true</code> 很有用但要慎用：它要求 agent <strong>真实调用了</strong>指定 Skill（从 Claude Code 事件里读，不是从产物反推）。如果你的 Skill 名写错了或没注入，每次运行都会硬失败。
+  <code>require_skill_invocation: true</code> 很有用但要慎用：它要求 agent{" "}
+  <strong>真实调用了</strong>指定 Skill（从 Claude Code
+  事件里读，不是从产物反推）。如果你的 Skill
+  名写错了或没注入，每次运行都会硬失败。
 </Warning>
 
 ### 2. 编写 `instruction.md`
@@ -141,6 +161,7 @@ max_turns = 12                  # auto_user 下 subject/simulator 外层往返�
 在当前工作区创建一个文件 `result.md`。
 
 要求：
+
 - 包含标题 `# My Task Result`
 - 描述你的实现思路
 - 包含至少三个要点
@@ -230,14 +251,15 @@ COMET_FULL_040_BETA:
       base: benchmarks
 ```
 
-| Treatment | 含义 |
-| --- | --- |
-| `CONTROL` | **无 Skill 基线**——不注入任何 Skill，测的是 agent 裸跑的能力下限 |
-| `COMET_FULL_040_BETA` | 注入完整 Comet 工作流 Skill 包 |
-| 自定义 | 注入你自己的 Skill，用来对比"有 Skill vs 无 Skill" |
+| Treatment             | 含义                                                             |
+| --------------------- | ---------------------------------------------------------------- |
+| `CONTROL`             | **无 Skill 基线**——不注入任何 Skill，测的是 agent 裸跑的能力下限 |
+| `COMET_FULL_040_BETA` | 注入完整 Comet 工作流 Skill 包                                   |
+| 自定义                | 注入你自己的 Skill，用来对比"有 Skill vs 无 Skill"               |
 
 <Tip>
-  对比实验的标准做法是 <code>CONTROL</code>（无 Skill）vs 你的 Skill treatment。两者的差值就是你的 Skill 带来的增益。
+  对比实验的标准做法是 <code>CONTROL</code>（无 Skill）vs 你的 Skill
+  treatment。两者的差值就是你的 Skill 带来的增益。
 </Tip>
 
 ## 选择 Profile
@@ -252,14 +274,17 @@ flowchart LR
     Q1 -->|"/comet-any 生成的包"| AS["authoring-skill<br/>11 维，多轮"]
 ```
 
-| Profile | 适合 | 维度数 | 交互模式 |
-| --- | --- | --- | --- |
-| `generic` | 任意通用 Skill 冒烟 | 7 | `none`（单轮） |
-| `comet-workflow` | 经典 `/comet` 五阶段 | 9 | `auto_user`（多轮） |
-| `authoring-skill` | `/comet-any` 生成物 | 11 | `auto_user`（多轮） |
+| Profile           | 适合                 | 维度数 | 交互模式            |
+| ----------------- | -------------------- | ------ | ------------------- |
+| `generic`         | 任意通用 Skill 冒烟  | 7      | `none`（单轮）      |
+| `comet-workflow`  | 经典 `/comet` 五阶段 | 9      | `auto_user`（多轮） |
+| `authoring-skill` | `/comet-any` 生成物  | 11     | `auto_user`（多轮） |
 
 <Note>
-  Profile 解析优先级：<code>--profile</code> 覆盖 &gt; manifest 的 <code>skill.profile</code> &gt; task 的 <code>evaluation.profile</code> &gt; <code>generic</code>。Comet 类任务（<code>category = "comet"</code>）会自动推断为 <code>comet-workflow</code>。
+  Profile 解析优先级：<code>--profile</code> 覆盖 &gt; manifest 的{" "}
+  <code>skill.profile</code> &gt; task 的 <code>evaluation.profile</code> &gt;{" "}
+  <code>generic</code>。Comet 类任务（<code>category = "comet"</code>
+  ）会自动推断为 <code>comet-workflow</code>。
 </Note>
 
 三套 rubric 的维度、权重和检查逻辑见[评分指标与双 Agent 评测](/zh/eval/scoring)。
@@ -275,7 +300,10 @@ LLM-as-judge 是可选的质量覆盖层。它不会替代规则型 `[RUBRIC]` �
 - 你要在对比报告里查看规则分和 judge 分之间的差异。
 
 <Info>
-  judge 配置和被测 Agent 配置是隔离的。被测 Agent 可以继续使用 <code>ANTHROPIC_MODEL</code>、<code>ANTHROPIC_BASE_URL</code> 和自己的 token；judge 必须显式配置 <code>BENCH_JUDGE_MODEL</code>，避免同一个配置同时扮演"选手"和"裁判"。
+  judge 配置和被测 Agent 配置是隔离的。被测 Agent 可以继续使用{" "}
+  <code>ANTHROPIC_MODEL</code>、<code>ANTHROPIC_BASE_URL</code> 和自己的
+  token；judge 必须显式配置 <code>BENCH_JUDGE_MODEL</code>
+  ，避免同一个配置同时扮演"选手"和"裁判"。
 </Info>
 
 ### 1. 在 `eval/.env` 启用 judge
@@ -320,25 +348,27 @@ BENCH_JUDGE_API_KEY=your-judge-api-key
 
 优先级是：
 
-| 配置 | 行为 |
-| --- | --- |
+| 配置                                              | 行为                                                          |
+| ------------------------------------------------- | ------------------------------------------------------------- |
 | `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_AUTH_TOKEN` | 优先走 Anthropic Messages HTTP；HTTP header 使用 bearer token |
-| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY` | 优先走 Anthropic Messages HTTP；HTTP header 使用 API key |
-| 只设置 `BENCH_JUDGE_MODEL` | 回退到宿主机 `claude` CLI |
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY`    | 优先走 Anthropic Messages HTTP；HTTP header 使用 API key      |
+| 只设置 `BENCH_JUDGE_MODEL`                        | 回退到宿主机 `claude` CLI                                     |
 
 <Note>
-  如果同时设置 `BENCH_JUDGE_AUTH_TOKEN` 和 `BENCH_JUDGE_API_KEY`，auth token 优先。judge 子进程会清除继承来的主 `ANTHROPIC_*` provider 变量，再映射 `BENCH_JUDGE_*`，所以不要指望它自动复用被测 Agent 的 provider 配置。
+  如果同时设置 `BENCH_JUDGE_AUTH_TOKEN` 和 `BENCH_JUDGE_API_KEY`，auth token
+  优先。judge 子进程会清除继承来的主 `ANTHROPIC_*` provider 变量，再映射
+  `BENCH_JUDGE_*`，所以不要指望它自动复用被测 Agent 的 provider 配置。
 </Note>
 
 ### 3. 给 generic task 添加自定义 judge 标准
 
 通用 Skill（`generic` / `authoring-skill`）默认会让 judge 输出三个维度：
 
-| 维度 | 判断什么 |
-| --- | --- |
-| `task_completion` | 是否满足任务要求、产物是否存在且正确、基础校验是否通过 |
-| `output_quality` | 产物是否完整、有结构、有实质内容 |
-| `instruction_adherence` | 是否遵守指令、约束和工具使用边界 |
+| 维度                    | 判断什么                                               |
+| ----------------------- | ------------------------------------------------------ |
+| `task_completion`       | 是否满足任务要求、产物是否存在且正确、基础校验是否通过 |
+| `output_quality`        | 产物是否完整、有结构、有实质内容                       |
+| `instruction_adherence` | 是否遵守指令、约束和工具使用边界                       |
 
 如果你的 task 还有特定质量标准，把它们写进 `task.toml` 的 `[evaluation]`：
 
@@ -382,11 +412,11 @@ comet eval ./generated-skill/comet/eval.yaml --html
 
 如果只看到 skipped 或 failed，按下面排查：
 
-| 现象 | 常见原因 | 处理 |
-| --- | --- | --- |
-| `BENCH_JUDGE_MODEL is required` | 开了 `BENCH_LLM_JUDGE=1`，但没设 `BENCH_JUDGE_MODEL` | 补上 `BENCH_JUDGE_MODEL` |
-| `(judge error: HTTP ...)` | judge endpoint、token 或模型名不匹配 | 检查 `BENCH_JUDGE_BASE_URL`、token、模型名 |
-| 没有 `[RUBRIC-JUDGE]` 行 | 没有启用 `BENCH_LLM_JUDGE=1`，或这次没有跑到 profile rubric | 确认 `eval/.env` 被加载，并先解决前面的 harness/task 失败 |
+| 现象                            | 常见原因                                                    | 处理                                                      |
+| ------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
+| `BENCH_JUDGE_MODEL is required` | 开了 `BENCH_LLM_JUDGE=1`，但没设 `BENCH_JUDGE_MODEL`        | 补上 `BENCH_JUDGE_MODEL`                                  |
+| `(judge error: HTTP ...)`       | judge endpoint、token 或模型名不匹配                        | 检查 `BENCH_JUDGE_BASE_URL`、token、模型名                |
+| 没有 `[RUBRIC-JUDGE]` 行        | 没有启用 `BENCH_LLM_JUDGE=1`，或这次没有跑到 profile rubric | 确认 `eval/.env` 被加载，并先解决前面的 harness/task 失败 |
 
 ## 多轮交互：`auto_user` 模式
 
@@ -429,7 +459,7 @@ comet eval --task my-task --collect
 comet eval --task my-task --treatment MY_SKILL --html
 
 # 4. 看报告
-# eval/local/logs/experiments/<experiment-id>/summary.html
+# .comet/eval/runs/<experiment-id>/summary.html
 ```
 
 报告里重点看三件事：

@@ -1,36 +1,113 @@
 ---
-title: 'comet status'
-description: '查看 Native 和 Classic 的活跃 change、阶段、Loop 与恢复动作。'
+title: "comet status"
+description: "查看 Native、Classic 和普通 OpenSpec change 当前处于什么状态，以及下一步该运行什么命令。"
 ---
 
-`comet status` 是只读的日常恢复入口。它同时列出项目配置中的 Native、Classic 和未托管 OpenSpec change，但不会因为查看状态而修改 selection 或执行检查。
+如果你刚接手一个项目，或者不知道下一步该运行什么，先运行 `comet status`。它展示项目当前使用的 Comet 入口、正在进行的 change，以及每个 change 的下一步操作。
 
-## 基本用法
+`comet status` 是只读命令。查看状态不会切换当前 change、修改文件或执行 Build/Verify 检查。
+
+## 先看文本输出
 
 ```bash
 comet status
-comet status --json
 ```
 
-Native 详情使用：
+一个没有进行中 change 的项目会输出：
+
+```text
+Default Entry: native -> /comet-native [project-config]
+
+Native Changes:
+
+  No active changes.
+
+Classic Changes:
+
+  No active changes.
+
+Unmanaged OpenSpec Changes:
+
+  No active changes.
+```
+
+按下面的顺序读这段输出：
+
+- `Default Entry`：说明 `/comet` 默认进入哪套 workflow。例子中默认是 Native，入口是 `/comet-native`，来源是项目配置。
+- `Native Changes`：列出 Native change。
+- `Classic Changes`：列出由 Comet 管理、使用 Classic workflow 的 change。
+- `Unmanaged OpenSpec Changes`：列出普通 OpenSpec change。它们没有 Comet 的状态机，需要使用 OpenSpec 命令管理。
+- `No active changes.`：只表示这一类目录下没有进行中的 change，不表示 Comet 没有安装，也不表示项目有问题。
+
+## 有进行中的 change 时会显示什么
+
+Classic change 的输出会把阶段、任务进度和下一步命令放在一起。例如：
+
+```text
+Classic Changes:
+
+  1. next-build [Comet] [phase: build [1/2 tasks]]
+     workflow: classic | build_mode: executing-plans
+     isolation: branch
+     run_step: full.build.plan
+     next: /comet-build
+```
+
+这表示 `next-build` 正在 Classic 的 `build` 阶段，2 个任务完成了 1 个；当前使用 branch 隔离，当前阶段的下一步是 `/comet-build`。
+
+如果 Runtime 检查缺少阶段所需的证据，输出会直接给出缺什么以及如何恢复：
+
+```text
+runtime_check: fail (full.open; missing: openspec.proposal, openspec.tasks)
+next: run /comet-open or restore missing evidence (openspec.proposal, openspec.tasks), then rerun comet doctor
+```
+
+这时不要直接跳到 Build。先回到 `/comet-open`，或者恢复输出中列出的文件，再重新运行 `comet doctor`。
+
+Native change 会单独列在 `Native Changes` 下：
+
+```text
+Native Changes:
+
+  1. native-text [Native] [phase: shape]
+```
+
+`phase` 是当前阶段，不是历史阶段。需要查看某个 Native change 的完整状态时，运行：
 
 ```bash
 comet native status <change-name> --details --json
 ```
 
-## Native 状态包含什么
+## JSON 输出
 
-Native v4 状态来自 `comet-state.yaml`，主要字段包括：
+需要脚本或 Dashboard 消费状态时，使用：
 
-- `schema`、`state_version`、`status`、`phase` 和 `loop.stage`；
-- `loop.iteration`、`loop.attempt`、停滞/失败/执行错误计数和有限 history；
-- 全部 acceptance 项及其 `passed`、`failed`、`blocked`、`pending` 原因；
-- Builder handoff、Runtime checks、Verifier verdict、风险与 blocker；
-- `continuation` 的下一步动作，以及本机 overlay 是 running、interrupted 还是 absent。
+```bash
+comet status --json
+```
 
-正常 Native 详情不会要求你读取项目扫描、旧 receipt 或 change-local Runtime 文件。`verification.md` 是从 YAML 生成的用户报告，缺失时可以重建。
+根状态的 JSON 会按 workflow 分组，并提供统一的 schema：
 
-## 一个 Native JSON 片段
+```json
+{
+  "schema": "comet.status.v2",
+  "defaultEntry": {
+    "workflow": "native",
+    "skill": "comet-native",
+    "source": "project-config"
+  },
+  "workflows": {
+    "native": { "changes": [] },
+    "classic": { "changes": [] }
+  },
+  "unmanagedOpenSpec": [],
+  "changes": []
+}
+```
+
+其中 `changes` 是 Classic 和普通 OpenSpec change 的合并列表，方便脚本统一遍历；Native change 仍位于 `workflows.native.changes`。
+
+Native 详情命令的 JSON 会额外包含 `loop`、acceptance、Runtime 检查和 `continuation` 等字段，例如：
 
 ```json
 {
@@ -44,11 +121,13 @@ Native v4 状态来自 `comet-state.yaml`，主要字段包括：
 }
 ```
 
-具体命令参数以当前输出中的 `continuation.commandArgs` 和 `inputOptions.template` 为准，不要手工补写内部执行身份或结果。
+需要继续执行 Native 时，以当前输出中的 `continuation.commandArgs` 和 `inputOptions.template` 为准，不要手工拼接内部参数。
 
-## 选择当前 change
+## 多个 change 同时存在时
 
-项目可以同时拥有多个 active Native change。`.comet/current-change.json` 只表示下一次写入归属哪个 workflow/change，不是唯一 change 锁。需要明确选择时运行：
+项目可以同时拥有多个 active Native change。`.comet/current-change.json` 只表示下一次写入归属哪个 workflow/change，不是唯一 change 锁。
+
+需要明确下一次写入归属哪个 Native change 时，运行：
 
 ```bash
 comet native select <change-name>
@@ -56,18 +135,23 @@ comet native select <change-name>
 
 切换 branch/worktree、目标不明确、代码未同步或 active/archive 布局冲突时，Runtime 会返回 `await-user` 或 `blocked`，不会猜测另一个 change。
 
-## Classic 和 OpenSpec
+## 归档命令
 
-Classic change 仍显示其五阶段、任务进度和 Classic Runtime；普通 OpenSpec change 不会被套入 Comet 状态机：
+当 change 已经满足归档条件时，`status` 会打印推荐命令：
 
-| 类型          | 状态来源                                       | 就绪时的归档方式                                 |
-| ------------- | ---------------------------------------------- | ------------------------------------------------ |
-| Native        | portable `comet-state.yaml` + 本机可选 overlay | `comet native archive <change-name> --confirmed` |
-| Classic       | `.comet.yaml` + Classic Runtime                | `comet archive <change-name>`                    |
-| 普通 OpenSpec | OpenSpec artifacts                             | `openspec archive <change-name> -y`              |
+```text
+recommended archive: comet archive comet-ready
+recommended archive: comet classic openspec -- archive open-ready -y
+```
 
-遇到异常先看 `continuation`，再按需运行：
+- 第一条是 Comet 管理的 Classic change。
+- 第二条是普通 OpenSpec change。
+- 未显示 `recommended archive` 时，表示它还没有达到归档条件，不能仅凭 `status` 输出强行归档。
+
+Native change 使用：
 
 ```bash
-comet native doctor <change-name>
+comet native archive <change-name> --confirmed
 ```
+
+遇到状态异常时，先按输出中的 `next` 或 Native JSON 的 `continuation` 操作，再运行 `comet doctor` 检查项目健康状态。

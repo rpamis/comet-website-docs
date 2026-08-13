@@ -3,21 +3,39 @@ title: "Configuring Evaluations and Custom Tasks"
 description: "Define an eval task from scratch: task.toml, instruction.md, validation scripts and Dockerfile, configure treatment, profile and interaction modes, and let comet eval evaluate your own Skill."
 ---
 
-`comet eval` works out of the box to evaluate built-in tasks and any local Skill — evaluating your own Skill takes just one command, `comet eval ./your-skill --html` (see [Quickstart](/en/eval/quickstart)). But when you want to evaluate **how your own Skill performs in your own scenario**, you need a custom task. This article walks you through the entire process step by step: from defining a task, to configuring an evaluation profile, to running a report.
+`comet eval` works out of the box to evaluate built-in tasks and any local Skill — evaluating your own Skill takes just one command, `comet eval ./your-skill --html` (see [Quickstart](/en/eval/quickstart)). If you only need stable acceptance conditions for a local Skill, prefer declaring an inline task in that Skill package's `comet/eval.yaml`, or reference a package-local task with `source`. Only create and register a task under `eval/local/tasks/` when you are extending Comet's built-in harness. This article walks you through the complete customization path: defining a task, configuring an evaluation profile, and running a report.
 
 <Info>
-  This article is advanced customization. If you just want to evaluate an existing Skill, you don't need to read it — just use <code>comet eval ./your-skill --html</code>. This article assumes you can already run <code>comet eval ./your-skill --collect</code> successfully.
+  This article is advanced customization. If you just want to evaluate an
+  existing Skill, you don't need to read it — just use{" "}
+  <code>comet eval ./your-skill --html</code>. For a Skill-specific inline task,
+  edit <code>comet/eval.yaml</code> under the Skill root. This article assumes
+  you can already run <code>comet eval ./your-skill --collect</code>{" "}
+  successfully.
 </Info>
+
+<Warning>
+  The `eval/local/tasks/`, pytest, Dockerfile, and registration workflow in this page are advanced
+  source-maintainer content and require a Comet source checkout to reproduce. Ordinary users only
+  need an inline task in the Skill's `comet/eval.yaml`, or the `comet eval` command in [Quickstart](/en/eval/quickstart).
+</Warning>
 
 ## The Big Picture of Eval Configuration
 
 A complete eval is assembled from three parts, and understanding their division of labor is the foundation of customization:
 
 <p align="center">
-  <img src="/assets/eval-configuration-illustrations/01-eval-experiment-bench.png" alt="Little fish placing Task, Treatment and Profile configuration cards into the run tray, and organizing score, report and failure attribution outputs" width="800" />
+  <img
+    src="/assets/eval-configuration-illustrations/01-eval-experiment-bench.png"
+    alt="Little fish placing Task, Treatment and Profile configuration cards into the run tray, and organizing score, report and failure attribution outputs"
+    width="800"
+  />
 </p>
 
-<p align="center">Task decides what to test, Treatment decides what to inject, Profile and Rubric decide how to score</p>
+<p align="center">
+  Task decides what to test, Treatment decides what to inject, Profile and
+  Rubric decide how to score
+</p>
 
 ```mermaid
 flowchart LR
@@ -27,11 +45,11 @@ flowchart LR
     R --> REP["Report<br/>pass@k, dimension scores, failure attribution"]
 ```
 
-| Configuration | Question it answers | Location |
-| --- | --- | --- |
-| **Task** | What scenario to test? What to produce? How to verify correctness? | `local/tasks/<name>/` |
-| **Treatment** | Which Skills to inject in this run (including the no-Skill baseline)? | `local/treatments/` |
-| **Profile + Rubric** | Which dimensions to score by? | `[evaluation]` in task.toml |
+| Configuration        | Question it answers                                                   | Location                    |
+| -------------------- | --------------------------------------------------------------------- | --------------------------- |
+| **Task**             | What scenario to test? What to produce? How to verify correctness?    | `local/tasks/<name>/`       |
+| **Treatment**        | Which Skills to inject in this run (including the no-Skill baseline)? | `local/treatments/`         |
+| **Profile + Rubric** | Which dimensions to score by?                                         | `[evaluation]` in task.toml |
 
 Let's explain each one below.
 
@@ -53,7 +71,13 @@ Each task is a directory under `local/tasks/` containing four files:
 </Tree>
 
 <Note>
-  The task directory convention comes from the eval harness (<code>eval/</code>), not your business repo. Custom tasks live under <code>eval/local/tasks/</code> in the Comet repo and are registered in <code>eval/local/tasks/index.yaml</code>.
+  For an ordinary local Skill, put inline tasks in <code>comet/eval.yaml</code>{" "}
+  under that Skill's root, or use <code>source</code> for a task package stored
+  in the Skill package. The directory convention in this section comes from the
+  eval harness (<code>eval/</code>), not your business repo: tasks under{" "}
+  <code>eval/local/tasks/</code> are for extending the Comet repository's
+  built-in harness and must be registered in{" "}
+  <code>eval/local/tasks/index.yaml</code>.
 </Note>
 
 ### 1. Write `task.toml`
@@ -97,28 +121,31 @@ max_turns = 12                  # Outer round-trip limit between subject/simulat
 
 The role of each section:
 
-| Section | Role |
-| --- | --- |
-| `[metadata]` | Task identity. `category = "comet"` or a name starting with `comet-` will be automatically inferred as the `comet-workflow` profile |
-| `[environment]` | What Docker environment the validation runs in, and the timeout |
-| `[validation]` | Which scripts to validate with, which artifacts are expected |
-| `[evaluation]` | Which profile to score with, which Skills must be invoked, custom judging criteria |
-| `[interaction]` | Single-turn or multi-turn simulated interaction |
+| Section         | Role                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `[metadata]`    | Task identity. `category = "comet"` or a name starting with `comet-` will be automatically inferred as the `comet-workflow` profile |
+| `[environment]` | What Docker environment the validation runs in, and the timeout                                                                     |
+| `[validation]`  | Which scripts to validate with, which artifacts are expected                                                                        |
+| `[evaluation]`  | Which profile to score with, which Skills must be invoked, custom judging criteria                                                  |
+| `[interaction]` | Single-turn or multi-turn simulated interaction                                                                                     |
 
 #### Key fields in `[evaluation]`
 
 These fields directly determine the scoring result and deserve separate explanation:
 
-| Field | Role |
-| --- | --- |
-| `profile` | Select the rubric: `generic` (7 dimensions) / `comet-workflow` (9 dimensions) / `authoring-skill` (11 dimensions). See [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) for dimension details |
-| `expected_artifacts` | The `artifact_presence` dimension of the rubric checks whether these artifacts exist (supports glob) |
-| `required_skills` | Lists Skills that must be invoked; the `skill_invocation` dimension scores based on this |
-| `require_skill_invocation` | When set to `true`, a required Skill not being invoked produces a **hard failure** (the run is directly judged as not passed) |
-| `rubric_criteria` | Custom judging criteria, passed to the LLM judge as additional dimensions (`custom_0`, `custom_1`...) |
+| Field                      | Role                                                                                                                                                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profile`                  | Select the rubric: `generic` (7 dimensions) / `comet-workflow` (9 dimensions) / `authoring-skill` (11 dimensions). See [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) for dimension details |
+| `expected_artifacts`       | The `artifact_presence` dimension of the rubric checks whether these artifacts exist (supports glob)                                                                                                       |
+| `required_skills`          | Lists Skills that must be invoked; the `skill_invocation` dimension scores based on this                                                                                                                   |
+| `require_skill_invocation` | When set to `true`, a required Skill not being invoked produces a **hard failure** (the run is directly judged as not passed)                                                                              |
+| `rubric_criteria`          | Custom judging criteria, passed to the LLM judge as additional dimensions (`custom_0`, `custom_1`...)                                                                                                      |
 
 <Warning>
-  <code>require_skill_invocation: true</code> is useful but use it with caution: it requires the agent to have <strong>actually invoked</strong> the specified Skill (read from Claude Code events, not inferred from artifacts). If your Skill name is misspelled or not injected, every run will hard-fail.
+  <code>require_skill_invocation: true</code> is useful but use it with caution:
+  it requires the agent to have <strong>actually invoked</strong> the specified
+  Skill (read from Claude Code events, not inferred from artifacts). If your
+  Skill name is misspelled or not injected, every run will hard-fail.
 </Warning>
 
 ### 2. Write `instruction.md`
@@ -129,6 +156,7 @@ This is the task instruction for the agent, supporting template variables like `
 Create a file `result.md` in the current workspace.
 
 Requirements:
+
 - Include the heading `# My Task Result`
 - Describe your implementation approach
 - Include at least three key points
@@ -218,14 +246,16 @@ COMET_FULL_040_BETA:
       base: benchmarks
 ```
 
-| Treatment | Meaning |
-| --- | --- |
-| `CONTROL` | **No-Skill baseline** — no Skill injected, tests the agent's bare capability floor |
-| `COMET_FULL_040_BETA` | Injects the full Comet workflow Skill bundle |
-| Custom | Inject your own Skill to compare "with Skill vs without Skill" |
+| Treatment             | Meaning                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `CONTROL`             | **No-Skill baseline** — no Skill injected, tests the agent's bare capability floor |
+| `COMET_FULL_040_BETA` | Injects the full Comet workflow Skill bundle                                       |
+| Custom                | Inject your own Skill to compare "with Skill vs without Skill"                     |
 
 <Tip>
-  The standard approach for a comparative experiment is <code>CONTROL</code> (no Skill) vs your Skill treatment. The difference between the two is the gain your Skill brings.
+  The standard approach for a comparative experiment is <code>CONTROL</code> (no
+  Skill) vs your Skill treatment. The difference between the two is the gain
+  your Skill brings.
 </Tip>
 
 ## Choose a Profile
@@ -240,14 +270,17 @@ flowchart LR
     Q1 -->|"/comet-any generated bundle"| AS["authoring-skill<br/>11 dimensions, multi-turn"]
 ```
 
-| Profile | Suitable for | Dimensions | Interaction mode |
-| --- | --- | --- | --- |
-| `generic` | Smoke-testing any generic Skill | 7 | `none` (single-turn) |
-| `comet-workflow` | Classic `/comet` five-phase | 9 | `auto_user` (multi-turn) |
-| `authoring-skill` | `/comet-any` artifacts | 11 | `auto_user` (multi-turn) |
+| Profile           | Suitable for                    | Dimensions | Interaction mode         |
+| ----------------- | ------------------------------- | ---------- | ------------------------ |
+| `generic`         | Smoke-testing any generic Skill | 7          | `none` (single-turn)     |
+| `comet-workflow`  | Classic `/comet` five-phase     | 9          | `auto_user` (multi-turn) |
+| `authoring-skill` | `/comet-any` artifacts          | 11         | `auto_user` (multi-turn) |
 
 <Note>
-  Profile resolution priority: <code>--profile</code> override &gt; manifest's <code>skill.profile</code> &gt; task's <code>evaluation.profile</code> &gt; <code>generic</code>. Comet-type tasks (<code>category = "comet"</code>) are automatically inferred as <code>comet-workflow</code>.
+  Profile resolution priority: <code>--profile</code> override &gt; manifest's{" "}
+  <code>skill.profile</code> &gt; task's <code>evaluation.profile</code> &gt;{" "}
+  <code>generic</code>. Comet-type tasks (<code>category = "comet"</code>) are
+  automatically inferred as <code>comet-workflow</code>.
 </Note>
 
 For the dimensions, weights and checking logic of the three rubrics, see [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring).
@@ -263,7 +296,11 @@ Use it when:
 - You want comparison reports to show the gap between rule scores and judge scores.
 
 <Info>
-  Judge configuration is isolated from the subject Agent configuration. The subject Agent can keep using <code>ANTHROPIC_MODEL</code>, <code>ANTHROPIC_BASE_URL</code>, and its own token. The judge must explicitly set <code>BENCH_JUDGE_MODEL</code> so the same configuration does not silently act as both contestant and judge.
+  Judge configuration is isolated from the subject Agent configuration. The
+  subject Agent can keep using <code>ANTHROPIC_MODEL</code>,{" "}
+  <code>ANTHROPIC_BASE_URL</code>, and its own token. The judge must explicitly
+  set <code>BENCH_JUDGE_MODEL</code> so the same configuration does not silently
+  act as both contestant and judge.
 </Info>
 
 ### 1. Enable judge in `eval/.env`
@@ -308,25 +345,28 @@ BENCH_JUDGE_API_KEY=your-judge-api-key
 
 Priority:
 
-| Configuration | Behavior |
-| --- | --- |
+| Configuration                                     | Behavior                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------- |
 | `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_AUTH_TOKEN` | Prefer Anthropic Messages HTTP; the HTTP header uses the bearer token |
-| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY` | Prefer Anthropic Messages HTTP; the HTTP header uses the API key |
-| Only `BENCH_JUDGE_MODEL` | Fall back to the host `claude` CLI |
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY`    | Prefer Anthropic Messages HTTP; the HTTP header uses the API key      |
+| Only `BENCH_JUDGE_MODEL`                          | Fall back to the host `claude` CLI                                    |
 
 <Note>
-  If both `BENCH_JUDGE_AUTH_TOKEN` and `BENCH_JUDGE_API_KEY` are set, the auth token wins. The judge subprocess clears inherited main `ANTHROPIC_*` provider variables before mapping `BENCH_JUDGE_*`, so do not expect it to reuse the subject Agent provider configuration automatically.
+  If both `BENCH_JUDGE_AUTH_TOKEN` and `BENCH_JUDGE_API_KEY` are set, the auth
+  token wins. The judge subprocess clears inherited main `ANTHROPIC_*` provider
+  variables before mapping `BENCH_JUDGE_*`, so do not expect it to reuse the
+  subject Agent provider configuration automatically.
 </Note>
 
 ### 3. Add custom judge criteria for generic tasks
 
 Generic Skills (`generic` / `authoring-skill`) make the judge output three default dimensions:
 
-| Dimension | What it judges |
-| --- | --- |
-| `task_completion` | Whether the task requirements are satisfied, artifacts exist and are correct, and basic validation passed |
-| `output_quality` | Whether the artifact is complete, structured, and substantive |
-| `instruction_adherence` | Whether the run followed instructions, constraints, and tool boundaries |
+| Dimension               | What it judges                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `task_completion`       | Whether the task requirements are satisfied, artifacts exist and are correct, and basic validation passed |
+| `output_quality`        | Whether the artifact is complete, structured, and substantive                                             |
+| `instruction_adherence` | Whether the run followed instructions, constraints, and tool boundaries                                   |
 
 If your task has task-specific quality criteria, put them in `[evaluation]` in `task.toml`:
 
@@ -370,11 +410,11 @@ Open the report printed in `Report path` and look for `[RUBRIC-JUDGE]` lines in 
 
 If you only see skipped or failed, use this table:
 
-| Symptom | Common cause | Fix |
-| --- | --- | --- |
-| `BENCH_JUDGE_MODEL is required` | `BENCH_LLM_JUDGE=1` is set, but `BENCH_JUDGE_MODEL` is missing | Add `BENCH_JUDGE_MODEL` |
-| `(judge error: HTTP ...)` | Judge endpoint, token, or model name does not match | Check `BENCH_JUDGE_BASE_URL`, token, and model name |
-| No `[RUBRIC-JUDGE]` lines | `BENCH_LLM_JUDGE=1` is not enabled, or this run did not reach profile rubric scoring | Confirm `eval/.env` is loaded and fix earlier harness/task failures first |
+| Symptom                         | Common cause                                                                         | Fix                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `BENCH_JUDGE_MODEL is required` | `BENCH_LLM_JUDGE=1` is set, but `BENCH_JUDGE_MODEL` is missing                       | Add `BENCH_JUDGE_MODEL`                                                   |
+| `(judge error: HTTP ...)`       | Judge endpoint, token, or model name does not match                                  | Check `BENCH_JUDGE_BASE_URL`, token, and model name                       |
+| No `[RUBRIC-JUDGE]` lines       | `BENCH_LLM_JUDGE=1` is not enabled, or this run did not reach profile rubric scoring | Confirm `eval/.env` is loaded and fix earlier harness/task failures first |
 
 ## Multi-turn interaction: `auto_user` mode
 
@@ -417,7 +457,7 @@ comet eval --task my-task --collect
 comet eval --task my-task --treatment MY_SKILL --html
 
 # 4. View the report
-# eval/local/logs/experiments/<experiment-id>/summary.html
+# .comet/eval/runs/<experiment-id>/summary.html
 ```
 
 In the report, focus on three things:

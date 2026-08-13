@@ -1,45 +1,138 @@
 ---
 title: "comet doctor"
-description: "Diagnose Comet installation health, platform directories, runtime scripts, Skills, hooks, and active change state."
+description: "Check whether Comet, OpenSpec, Skills, Runtime, project directories, and the current change are ready to work."
 ---
 
-`comet doctor` is the health-check entry point. It covers both installation health and workflow state.
+`comet doctor` locates the cause when Comet cannot work normally.
+
+It checks the installation environment, CLI dependencies, project directories, Skills/Rules/Hooks, Runtime, CodeGraph, and the current change. `comet status` shows how far a change has progressed; `comet doctor` shows which part of the environment or project is incomplete.
+
+The default check is read-only. It does not repair or rewrite the project. Repair actions run only when you explicitly pass `--repair`.
 
 ## Basic usage
 
 ```bash
 comet doctor
+comet doctor --scope project
+comet doctor --json
 ```
 
-| Option | Description |
-| --- | --- |
-| `--json` | Output structured diagnostics. |
-| `--scope <scope>` | Diagnose `auto`, `project`, or `global` scope. |
+| Option                  | Description                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `--json`                | Output structured diagnostics.                                                       |
+| `--scope <scope>`       | Diagnose `auto`, `project`, or `global`. The default is `auto`.                      |
+| `--repair`              | Repair Comet-managed Hooks, Rules, and deterministic selection state.                |
+| `--strategy <strategy>` | Recover a Classic root move with `continue` or `rollback`; requires `--repair`.      |
+| `--yes`                 | Authorize supported project repairs such as CodeGraph indexing; requires `--repair`. |
 
-## What it checks
+## Start with the text output
 
-- Project-level and global installation.
-- Target platform Skill directories.
-- Comet Skills, rules, Node runtime scripts, and hooks.
-- The active change `.comet.yaml`.
-- Current step, runtime mode, and missing evidence.
+For example, when the project Skill is not installed, the Classic root is missing, and CodeGraph has pending changes, `comet doctor --scope project` prints:
 
-## Scope diagnostics
+```text
+Comet Doctor (scope: project)
 
-By default, `comet doctor` uses `--scope auto`. Auto scope checks the current project first, then checks the global install when it lives somewhere else.
+  ✓ Environment: node v22.20.0; platform win32/x64; project D:\Project\Comet; global C:\Users\BENYM
+  ✓ Comet CLI: installed (0.4.0-beta.18)
+  ✓ openspec CLI: installed (1.7.0)
+  ✓ Superpowers: detected (Claude Code project, Codex project, Antigravity project, Antigravity 2.0 project; version not recorded by skills installer)
+  ✗ Classic artifact layout: docs: configured docs/openspec/ missing; alternate openspec/ missing — run: comet classic root show, then restore the configured root or use comet classic root move
+  ✓ Classic platform tool assets: no OpenSpec platform tool assets under docs/
+  ✗ Classic OpenSpec root: Configured Classic OpenSpec root is missing: docs/openspec (alternate openspec is missing)
+  ⚠ working directories: partial (missing: docs/openspec/changes, docs/openspec/changes/archive, docs/openspec/specs)
+  ⚠ Comet skills: not installed in project scope — run: comet init --scope project
+  ✓ scripts present: OK (12 scripts)
+  ⚠ CodeGraph: CodeGraph index has 1 pending change(s) — run: codegraph sync
+  ✓ current selection: no active Comet change
+```
 
-When the global Comet install is complete but the current project has no project-local Skill copy, `doctor` reports the global install as available and treats the project-local copy as optional. Run `comet init --scope project` only when this project needs its own checked-in Comet setup.
+Versions, paths, and counts vary by environment, but the output structure is the same. Read the markers as follows:
 
-The diagnostics also include the Node version, platform, project path, and effective global home directory so environment-specific install issues are easier to compare.
+- `✓`: The check passed. No action is required.
+- `⚠`: The check found a warning or an optional component is missing. The output usually includes a suggested action.
+- `✗`: The check failed. Prioritize that line and the command after `run:`.
+
+In this example, the primary issue is the Classic root. The configuration points to `docs/openspec/`, but the directory does not exist. Run `comet classic root show` to inspect the actual configuration, then restore the directory or use `comet classic root move`. `current selection: no active Comet change` is not an error; it means that no Comet change is currently selected.
+
+## What each check covers
+
+Each output line corresponds to one diagnostic area:
+
+| Output item                                         | What it checks                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Environment`                                       | The current Node version, platform, project path, and global directory.               |
+| `Comet CLI` / `openspec CLI`                        | Whether the CLIs are installed and which versions are active.                         |
+| `Superpowers`                                       | Whether external Superpowers integrations are available.                              |
+| `Classic artifact layout` / `Classic OpenSpec root` | Whether the configured Classic root exists and is readable.                           |
+| `working directories`                               | Whether `changes`, the archive directory, and `specs` are complete.                   |
+| `Comet skills` / `scripts present`                  | Whether the current scope has complete Skills and Runtime scripts.                    |
+| `CodeGraph`                                         | Whether CodeGraph is uninitialized, incomplete, or waiting for index synchronization. |
+| `current selection`                                 | Whether a Comet change currently owns the next write.                                 |
+
+## Choose the diagnostic scope
+
+- `--scope auto`: The default. Check the current project first, then check an available global installation when the project installation is incomplete.
+- `--scope project`: Check only the current project. Use it to verify local initialization.
+- `--scope global`: Check only the global installation. Use it to diagnose global Skills, Rules, Hooks, or Runtime files.
+
+When the global Comet installation is complete but the current project has no project-local Skill copy, `--scope auto` reports the global installation as available and treats the project copy as optional. Initialize a project-local copy only when the project needs its own Comet configuration and Skills:
+
+```bash
+comet init --scope project
+```
+
+## Read JSON output
+
+Use JSON for automation:
+
+```bash
+comet doctor --json
+```
+
+The top-level fields provide the overall result first:
+
+```json
+{
+  "scope": "project",
+  "status": "failed",
+  "healthy": false,
+  "repaired": [],
+  "results": [
+    {
+      "check": "Comet CLI",
+      "status": "pass",
+      "message": "installed (0.4.0-beta.18)"
+    },
+    {
+      "check": "Classic OpenSpec root",
+      "status": "fail",
+      "message": "Configured Classic OpenSpec root is missing: docs/openspec"
+    }
+  ]
+}
+```
+
+`healthy: false` means that at least one result has `fail`. The specific action appears in `results[].message`. Only `status: passed` with `healthy: true` means that this diagnostic run has no failed checks. The `runtime` and `codegraph` fields provide additional Runtime and CodeGraph details.
+
+## When to use `--repair`
+
+Run `comet doctor` without `--repair` first to confirm the problem and suggested action. Use `--repair` only when the output points to a repair, or when you have confirmed that Comet-managed Hooks, Rules, selection state, or migration state should be repaired:
+
+```bash
+comet doctor --repair
+```
+
+`--repair` is a write operation, not an alias for another diagnostic pass. For an interrupted Classic root move, choose `continue` or `rollback` based on the recorded state. Add `--yes` for project repairs that require authorization, such as CodeGraph operations.
 
 ## Troubleshooting order
 
 ```mermaid
 flowchart TD
-  A["comet status looks wrong"] --> B["comet doctor"]
-  B --> C{"Install problem?"}
-  C -->|yes| D["comet update or rerun init"]
-  C -->|no| E{"Change state problem?"}
-  E -->|yes| F["Restore the evidence named by diagnostics"]
-  E -->|no| G["Return to /comet"]
+  A["The change state is unclear"] --> B["comet status"]
+  B --> C{"Output contains error or fail"}
+  C -->|yes| D["comet doctor"]
+  D --> E{"Output contains a run command"}
+  E -->|yes| F["Run the repair or recovery command"]
+  E -->|no| G["Check scope and project configuration"]
+  C -->|no| H["Follow next into the next phase"]
 ```

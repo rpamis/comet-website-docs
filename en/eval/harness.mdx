@@ -4,8 +4,18 @@ description: "Deeply understand how Comet wraps the local eval harness, the harn
 ---
 
 <Info>
-  This is advanced content. For day-to-day evaluation you only need the single command in [Quickstart](/en/eval/quickstart). What's covered here is the internal mechanism of the harness, useful for troubleshooting or understanding profile/task selection.
+  This is advanced content. For day-to-day evaluation you only need the single
+  command in [Quickstart](/en/eval/quickstart). What's covered here is the
+  internal mechanism of the harness, useful for troubleshooting or understanding
+  profile/task selection.
 </Info>
+
+<Warning>
+  This is advanced Eval source/maintainer content. Ordinary users do not need to clone Comet, enter
+  its `eval/` directory, or run pytest manually; use the installed `comet eval` and the user-level
+  `%USERPROFILE%\\.comet\\eval\\.env` / `~/.comet/eval/.env` instead. Clone the source only when
+  modifying the built-in harness, using `--project`, or reproducing low-level tasks.
+</Warning>
 
 The eval harness ships inside the npm package at a matching version. A normal `comet eval` uses that package's `eval/` directory. Comet repository development or a custom harness can pass `--project <repository-root>` explicitly. You do not need to clone the Comet repository merely to obtain the harness.
 
@@ -13,10 +23,10 @@ The eval harness ships inside the npm package at a matching version. A normal `c
 
 The CLI checks the harness before it checks `uv`:
 
-| Error | Meaning | Action |
-| --- | --- | --- |
-| `Eval harness is missing at ...` | The npm package is incomplete, or `--project` does not contain a valid `eval/`. | Reinstall `@rpamis/comet` or correct `--project`. |
-| `uv is not installed or not in PATH` | The harness exists, but the local Python launcher is unavailable. | Install `uv` and verify PATH. |
+| Error                                | Meaning                                                                         | Action                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `Eval harness is missing at ...`     | The npm package is incomplete, or `--project` does not contain a valid `eval/`. | Reinstall `@rpamis/comet` or correct `--project`. |
+| `uv is not installed or not in PATH` | The harness exists, but the local Python launcher is unavailable.               | Install `uv` and verify PATH.                     |
 
 ## Harness Directory Structure
 
@@ -43,8 +53,9 @@ eval/
 │   ├── treatments/         # Control / experiment groups
 │   ├── tests/
 │   │   └── tasks/test_tasks.py   # Parameterized tests actually invoked by the CLI
-│   └── logs/experiments/   # Output: reports + artifacts per run
-└── langsmith/             # LangSmith suite (reuses local tasks)
+│   └── logs/experiments/   # Built-in task harness logs
+├── langsmith/             # LangSmith suite (reuses local tasks)
+└── langfuse/              # Langfuse suite (reuses local tasks)
 ```
 
 ## What It Wraps
@@ -53,7 +64,8 @@ eval/
 
 - Launches the harness from the `<project>/eval` root directory (using `uv run`)
 - Converts `--manifest` or `--skill-path` into pytest parameters
-- Selects the default profile (`generic`) or task (`recommended`, `generic-skill-smoke`)
+- Selects the default profile (`generic`) and task set (`recommended`, `generic-skill-smoke`, or generated tasks)
+- When no manifest task is available, generates and caches 2–4 bounded tasks from the Skill content
 - Generates a temporary report config on demand (when using `--html`)
 - Prints a set of execution info to help locate the report
 
@@ -69,12 +81,12 @@ You don't need to remember this command — `comet eval` assembles it for you.
 
 `comet eval` is a single entry-point command, distinguishing two phases via `--collect`:
 
-| Command | Executes model tasks? | Underlying difference | Purpose |
-| --- | --- | --- | --- |
-| `comet eval <target> --collect` | No | Adds `--collect-only` to pytest | Validates manifest, task, profile and paths; low-cost troubleshooting |
-| `comet eval <target> --html` | Yes | Adds `-v` to pytest | Executes the real evaluation and generates a report |
+| Command                         | Executes model tasks? | Underlying difference           | Purpose                                                               |
+| ------------------------------- | --------------------- | ------------------------------- | --------------------------------------------------------------------- |
+| `comet eval <target> --collect` | No                    | Adds `--collect-only` to pytest | Validates manifest, task, profile and paths; low-cost troubleshooting |
+| `comet eval <target> --html`    | Yes                   | Adds `-v` to pytest             | Executes the real evaluation and generates a report                   |
 
-Both share the same parameter-building logic (`buildEvalArgs`); the only difference is that collect adds `--collect-only` while normal execution adds `-v`. `--suite local|langsmith` selects the entry point and report directory; `--report-config`, `--html`, and `--quick` are for the real evaluation path.
+Both share the same parameter-building logic (`buildEvalArgs`); the only difference is that collect adds `--collect-only` while normal execution adds `-v`. `--suite local|langsmith|langfuse` selects the backend; `--report-config`, `--html`, and `--quick` are for the real evaluation path.
 
 ## skill-path mode (default entry)
 
@@ -84,13 +96,14 @@ When you pass a local Skill directory or `SKILL.md`, `comet eval` uses skill-pat
 comet eval ./my-skill --html
 ```
 
-This is the default entry point for evaluating any local Skill. When you pass a directory it defaults to `generic-skill-smoke` (verifying that "the Skill can be injected, invoked, and produce files"), so the `--quick` flag is optional; `--skill-name` is inferred from the directory name. You can also explicitly specify a task with `--task`, or override the profile with `--profile`.
+This is the default entry point for evaluating any local Skill. Comet discovers `comet/eval.yaml` under the target directory when it exists. Without a manifest, a normal run generates and caches 2–4 bounded tasks from the Skill content; `--quick` explicitly selects `generic-skill-smoke` (verifying that "the Skill can be injected, invoked, and produce files"). The `--skill-name` is inferred from the directory name. You can also explicitly specify a task with `--task`, or override the profile with `--profile`.
 
-| Mode | Default profile | Default task | Suitable scenario |
-| --- | --- | --- | --- |
-| `--skill-path` (default quick) | `generic` | `generic-skill-smoke` | Evaluate your own Skill, run a Docker evaluation |
-| `--skill-path` (explicit `--task`) | `generic` | Your specified task | When manually specifying a task |
-| `--manifest` | Manifest's own (usually `authoring-skill`) | `recommended` | Evaluate a `/comet-any` full package, as publish evidence |
+| Mode                               | Default profile                            | Default task                                                   | Suitable scenario                                         |
+| ---------------------------------- | ------------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------- |
+| `--skill-path` (normal run)        | `generic`                                  | Automatically generated 2–4 tasks when no manifest tasks exist | Evaluate your own Skill with bounded coverage             |
+| `--skill-path --quick`             | `generic`                                  | `generic-skill-smoke`                                          | Run a fixed low-cost smoke evaluation                     |
+| `--skill-path` (explicit `--task`) | `generic`                                  | Your specified task                                            | When manually specifying a task                           |
+| `--manifest`                       | Manifest's own (usually `authoring-skill`) | `recommended`                                                  | Evaluate a `/comet-any` full package, as publish evidence |
 
 ## manifest mode (evaluating a /comet-any full package)
 
@@ -131,14 +144,14 @@ The actual on-disk experiment id format is `<experiment_name>_<YYYYMMDD_HHMMSS>`
 Report directory:
 
 ```text
-eval/local/logs/experiments/<experiment-id>/
+.comet/eval/runs/<experiment-id>/
   ├── summary.md            # Main report (always generated)
   ├── summary.html          # HTML version (with --html)
   ├── metadata.json         # Experiment metadata
   ├── events/               # stream-json events per run
   ├── raw/                  # Raw stdout/stderr
   ├── reports/              # report.json per run
-  └── artifacts/            # Files produced by Claude
+  └── artifacts/            # Files produced by the selected Agent
 ```
 
 ### summary.md contains
@@ -171,10 +184,17 @@ flowchart TD
 ```
 
 <p align="center">
-  <img src="/assets/eval-harness-illustrations/01-docker-agent-rubric-scene.png" alt="Little fish observing the subject Agent, user simulator Agent, and rubric evaluation scene outside the Docker isolation box" width="800" />
+  <img
+    src="/assets/eval-harness-illustrations/01-docker-agent-rubric-scene.png"
+    alt="Little fish observing the subject Agent, user simulator Agent, and rubric evaluation scene outside the Docker isolation box"
+    width="800"
+  />
 </p>
 
-<p align="center">A real evaluation runs Agent interactions in an isolated environment, then records evidence via validators and rubric</p>
+<p align="center">
+  A real evaluation runs Agent interactions in an isolated environment, then
+  records evidence via validators and rubric
+</p>
 
 Key points:
 
@@ -194,7 +214,7 @@ Report output is controlled by `ReportOutputConfig`, with priority:
 Config format (top-level or nested both accepted):
 
 ```json
-{"report_outputs": {"markdown": true, "html": false}}
+{ "report_outputs": { "markdown": true, "html": false } }
 ```
 
 `--html` is equivalent to `{"markdown": true, "html": true}` and writes a temporary file passed to pytest.
@@ -203,44 +223,48 @@ Config format (top-level or nested both accepted):
 
 The report helps distinguish sources of failure. The attribution logic (`attribution.py`) judges each failed check in this order:
 
-| Attribution | Judgment condition | Next step |
-| --- | --- | --- |
-| `harness` | Required skill not invoked at all; or generic profile with no skill run | Check dependencies, Docker, network, or local environment |
-| `task` | Check involves artifact path / validator / task directory | Check eval task definition and fixtures |
-| `workflow` | Check involves `.comet.yaml` / guard / state / transition / archive; or skill invocation contract failed | Go back to `/comet-any` to improve the Skill |
-| `model` | Other default fallback (task failed after an observable workflow execution) | Rerun or reduce reliance on non-deterministic behavior |
+| Attribution | Judgment condition                                                                                       | Next step                                                 |
+| ----------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `harness`   | Required skill not invoked at all; or generic profile with no skill run                                  | Check dependencies, Docker, network, or local environment |
+| `task`      | Check involves artifact path / validator / task directory                                                | Check eval task definition and fixtures                   |
+| `workflow`  | Check involves `.comet.yaml` / guard / state / transition / archive; or skill invocation contract failed | Go back to `/comet-any` to improve the Skill              |
+| `model`     | Other default fallback (task failed after an observable workflow execution)                              | Rerun or reduce reliance on non-deterministic behavior    |
 
 This attribution is used to decide whether to fix the Skill, fix the eval config, or rerun the environment. See [Reading Evaluation Reports](/en/eval/reports).
 
 ## Environment Variable Reference
 
-| Variable | Purpose |
-| --- | --- |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | **Required**; when neither is present the suite is skipped |
-| `BENCH_CC_MODEL` | Override the Claude model |
-| `BENCH_CC_VERSION` | Claude Code version in the Docker image (default `latest`) |
-| `BENCH_SIMULATOR_PROMPT_FILE` | Custom user simulator prompt file (default `eval/simulator-instruction.md`; relative paths resolved from `eval/`). The `--simulator-prompt` command-line argument takes higher priority |
-| `BENCH_LLM_JUDGE=1` | Enable the optional LLM-as-judge override scoring |
-| `COMET_EVAL_REPORT_CONFIG` | Report output config path |
-| `BENCH_SUITE_ROOT` / `BENCH_TASKS_DIR` / `BENCH_TREATMENTS_DIR` / `BENCH_SKILLS_DIR` / `BENCH_LOGS_DIR` | Path overrides |
-| `BENCH_TEST_CONTEXT` / `BENCH_TEST_RESULTS` | Override host↔Docker transfer file names |
+| Variable                                                                                                | Purpose                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`                                                            | **Required**; when neither is present the suite is skipped                                                                                                                              |
+| `BENCH_CC_MODEL`                                                                                        | Override the Claude model                                                                                                                                                               |
+| `BENCH_CC_VERSION`                                                                                      | Claude Code version in the Docker image (default `latest`)                                                                                                                              |
+| `BENCH_SIMULATOR_PROMPT_FILE`                                                                           | Custom user simulator prompt file (default `eval/simulator-instruction.md`; relative paths resolved from `eval/`). The `--simulator-prompt` command-line argument takes higher priority |
+| `BENCH_LLM_JUDGE=1`                                                                                     | Enable the optional LLM-as-judge override scoring                                                                                                                                       |
+| `COMET_EVAL_REPORT_CONFIG`                                                                              | Report output config path                                                                                                                                                               |
+| `BENCH_SUITE_ROOT` / `BENCH_TASKS_DIR` / `BENCH_TREATMENTS_DIR` / `BENCH_SKILLS_DIR` / `BENCH_LOGS_DIR` | Path overrides                                                                                                                                                                          |
+| `BENCH_TEST_CONTEXT` / `BENCH_TEST_RESULTS`                                                             | Override host↔Docker transfer file names                                                                                                                                                |
 
 The LangSmith suite additionally requires `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `TRACE_TO_LANGSMITH=true`. The user-facing entry is `comet eval <target> --suite langsmith`; you do not need to enter `eval/langsmith/` and invoke pytest manually.
+
+The Langfuse suite requires `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. The user-facing entry is `comet eval <target> --suite langfuse`; it still writes the local report while synchronizing traces, scores, and experiment summaries to Langfuse. `--collect --suite langfuse` does not initialize the SDK or make network requests.
 
 ### Authenticating with an Anthropic-compatible proxy
 
 When `ANTHROPIC_API_KEY` is not set, the `claude` inside Docker switches to authenticating via an **Anthropic-compatible proxy** (BigModel / mimo / OpenRouter, etc.). Required variables:
 
-| Variable | Purpose |
-| --- | --- |
-| `ANTHROPIC_AUTH_TOKEN` | Proxy-type auth token |
-| `ANTHROPIC_BASE_URL` | The proxy's Anthropic-compatible endpoint |
-| `ANTHROPIC_MODEL` | Default model |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` / `ANTHROPIC_DEFAULT_OPUS_MODEL` | Per-tier model mappings |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL_NAME` / `ANTHROPIC_DEFAULT_OPUS_MODEL_NAME` | Per-tier model display names |
-| `CLAUDE_CODE_SUBAGENT_MODEL` | Subagent model |
+| Variable                                                                                            | Purpose                                   |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `ANTHROPIC_AUTH_TOKEN`                                                                              | Proxy-type auth token                     |
+| `ANTHROPIC_BASE_URL`                                                                                | The proxy's Anthropic-compatible endpoint |
+| `ANTHROPIC_MODEL`                                                                                   | Default model                             |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` / `ANTHROPIC_DEFAULT_OPUS_MODEL` | Per-tier model mappings                   |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL_NAME` / `ANTHROPIC_DEFAULT_OPUS_MODEL_NAME`                         | Per-tier model display names              |
+| `CLAUDE_CODE_SUBAGENT_MODEL`                                                                        | Subagent model                            |
 
-All of these variables have placeholder entries in `eval/.env.example`. Write them into `eval/.env` and the harness will inject them when starting Docker.
+These variables have placeholder entries in the automatically generated user-level `.env` template.
+Ordinary users can edit `%USERPROFILE%\\.comet\\eval\\.env` / `~/.comet/eval/.env`; only source
+maintainers debugging a harness selected with `--project` need to edit the checkout's `eval/.env`.
 
 ### Custom User Simulator Prompt
 
@@ -257,7 +281,7 @@ Never refuse; always let the workflow move forward. Do not write code or files.
 If you want to swap in a different user behavior (e.g. more demanding, asks for more clarification), write your version to a file and point `BENCH_SIMULATOR_PROMPT_FILE` to it:
 
 ```bash
-# eval/.env
+# User-level ~/.comet/eval/.env
 BENCH_SIMULATOR_PROMPT_FILE=my-simulator-prompt.md
 ```
 

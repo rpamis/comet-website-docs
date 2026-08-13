@@ -4,8 +4,15 @@ description: "深入理解 Comet 如何封装本地 eval harness，harness 目�
 ---
 
 <Tip>
-  这是进阶内容。日常评估只需要[快速上手](/zh/eval/quickstart)里的一条命令。这里讲的是 harness 内部机制，适合排查问题或理解 profile/task 选择。
+  这是进阶内容。日常评估只需要[快速上手](/zh/eval/quickstart)里的一条命令。这里讲的是
+  harness 内部机制，适合排查问题或理解 profile/task 选择。
 </Tip>
+
+<Warning>
+  本页是 Eval 源码/维护者进阶内容。普通用户不需要 clone Comet 源码、进入 `eval/` 目录或手工
+  运行 pytest；直接使用已安装的 `comet eval` 和用户级 `%USERPROFILE%\\.comet\\eval\\.env` /
+  `~/.comet/eval/.env` 即可。只有修改内置 harness、使用 `--project` 或复现底层任务时，才需要拉取源码。
+</Warning>
 
 Comet 的 eval harness 随 npm 包按版本分发。普通安装直接运行 `comet eval` 时，CLI 默认使用当前 `@rpamis/comet` 包中的 `eval/`；在 Comet 源码仓库开发或需要自定义 harness 时，可以用 `--project <repository-root>` 显式选择该仓库的 `eval/`。`comet eval` 封装了启动路径、任务发现、profile、report config 和 quick smoke，让你不需要手工切目录或拼 pytest 参数。
 
@@ -13,10 +20,10 @@ Comet 的 eval harness 随 npm 包按版本分发。普通安装直接运行 `co
 
 CLI 会先确认 eval 根目录包含 `pyproject.toml` 和任务入口，再检查 `uv`。因此错误顺序可以直接帮助定位问题：
 
-| 错误 | 说明 | 处理 |
-| --- | --- | --- |
-| `Eval harness is missing at ...` | 当前 npm 包不完整，或 `--project` 指向的仓库没有有效 `eval/` | 重新安装 `@rpamis/comet`，或修正 `--project` |
-| `uv is not installed or not in PATH` | harness 已找到，但本机缺少 Python 启动工具 | 安装 `uv` 并确认 PATH |
+| 错误                                 | 说明                                                         | 处理                                         |
+| ------------------------------------ | ------------------------------------------------------------ | -------------------------------------------- |
+| `Eval harness is missing at ...`     | 当前 npm 包不完整，或 `--project` 指向的仓库没有有效 `eval/` | 重新安装 `@rpamis/comet`，或修正 `--project` |
+| `uv is not installed or not in PATH` | harness 已找到，但本机缺少 Python 启动工具                   | 安装 `uv` 并确认 PATH                        |
 
 npm 用户不需要另外 clone Comet 仓库来获得 harness；包版本与 harness 版本保持一致。
 
@@ -45,8 +52,9 @@ eval/
 │   ├── treatments/         # 对照组 / 实验组
 │   ├── tests/
 │   │   └── tasks/test_tasks.py   # CLI 实际调用的参数化测试
-│   └── logs/experiments/   # 输出：报告 + 每次运行的 artifact
-└── langsmith/             # LangSmith suite（复用 local 的任务）
+│   └── logs/experiments/   # 内置任务的 harness 日志
+├── langsmith/             # LangSmith suite（复用 local 的任务）
+└── langfuse/              # Langfuse suite（复用 local 的任务）
 ```
 
 ## 它封装了什么
@@ -55,7 +63,7 @@ eval/
 
 - 固定从 `<project>/eval` 根目录启动 harness（用 `uv run`）
 - 把 `--manifest` 或 `--skill-path` 转换成 pytest 参数
-- 选择默认 profile（`generic`）或 task（`recommended`、`generic-skill-smoke`）
+- 选择默认 profile（`generic`）和 task；没有 manifest 时按 Skill 快照自动生成并缓存受限任务
 - 按需生成临时 report config（`--html` 时）
 - 打印一组执行信息，便于定位报告
 
@@ -71,12 +79,12 @@ uv run pytest <suite>/tests/tasks/test_tasks.py [参数]
 
 `comet eval` 是单入口命令，通过 `--collect` 区分两个阶段：
 
-| 命令 | 是否执行模型任务 | 底层差异 | 用途 |
-| --- | --- | --- | --- |
-| `comet eval <target> --collect` | 否 | 给 pytest 加 `--collect-only` | 验证 manifest、task、profile 和路径，低成本排错 |
-| `comet eval <target> --html` | 是 | 给 pytest 加 `-v` | 执行真实评估并生成报告 |
+| 命令                            | 是否执行模型任务 | 底层差异                      | 用途                                            |
+| ------------------------------- | ---------------- | ----------------------------- | ----------------------------------------------- |
+| `comet eval <target> --collect` | 否               | 给 pytest 加 `--collect-only` | 验证 manifest、task、profile 和路径，低成本排错 |
+| `comet eval <target> --html`    | 是               | 给 pytest 加 `-v`             | 执行真实评估并生成报告                          |
 
-两者共用同一套参数构建逻辑（`buildEvalArgs`），唯一区别是 collect 加 `--collect-only`，普通执行加 `-v`。`--suite local|langsmith` 选择入口与报告目录；`--report-config`、`--html`、`--quick` 用于真实评估路径。
+两者共用同一套参数构建逻辑（`buildEvalArgs`），唯一区别是 collect 加 `--collect-only`，普通执行加 `-v`。`--suite local|langsmith|langfuse` 选择入口；`--report-config`、`--html`、`--quick` 用于真实评估路径。
 
 ## skill-path 模式（默认入口）
 
@@ -86,13 +94,14 @@ uv run pytest <suite>/tests/tasks/test_tasks.py [参数]
 comet eval ./my-skill --html
 ```
 
-这是评估任意本地 Skill 的默认入口。传目录时默认跑 `generic-skill-smoke`（验证"Skill 能被注入、被调用、产出文件"），所以 `--quick` 这个 flag 可省；`--skill-name` 会从目录名自动推断。你也可以用 `--task` 显式指定任务，或用 `--profile` 覆盖 profile。
+这是评估任意本地 Skill 的默认入口。传目录时会自动发现 manifest；没有 manifest 时普通运行会从 Skill 快照生成并缓存 2–4 个受限任务，`--quick` 则明确选择 `generic-skill-smoke` 冒烟任务。`--skill-name` 会从目录名自动推断，你也可以用 `--task` 显式指定任务，或用 `--profile` 覆盖 profile。
 
-| 模式 | 默认 profile | 默认 task | 适合场景 |
-| --- | --- | --- | --- |
-| `--skill-path`（默认 quick） | `generic` | `generic-skill-smoke` | 评估自己的 Skill，跑通 Docker 评估 |
-| `--skill-path`（显式 `--task`） | `generic` | 你指定的 task | 手动指定任务时 |
-| `--manifest` | manifest 自带（通常 `authoring-skill`） | `recommended` | 评估 `/comet-any` 完整包，作发布证据 |
+| 模式                            | 默认 profile                            | 默认 task             | 适合场景                                      |
+| ------------------------------- | --------------------------------------- | --------------------- | --------------------------------------------- |
+| `--skill-path`（普通运行）      | `generic`                               | 自动生成 2–4 个任务   | 评估自己的 Skill，获得与 Skill 内容相关的任务 |
+| `--skill-path --quick`          | `generic`                               | `generic-skill-smoke` | 低成本冒烟                                    |
+| `--skill-path`（显式 `--task`） | `generic`                               | 你指定的 task         | 手动指定任务时                                |
+| `--manifest`                    | manifest 自带（通常 `authoring-skill`） | `recommended`         | 评估 `/comet-any` 完整包，作发布证据          |
 
 ## manifest 模式（评估 /comet-any 完整包）
 
@@ -135,14 +144,14 @@ manifest 的 `metadata.draftHash` 为 `<current-bundle-hash>` 时，CLI 会定�
 报告目录：
 
 ```text
-eval/local/logs/experiments/<experiment-id>/
+.comet/eval/runs/<experiment-id>/
   ├── summary.md            # 主报告（总是生成）
   ├── summary.html          # HTML 版（--html 时）
   ├── metadata.json         # experiment 元数据
   ├── events/               # 每次运行的 stream-json 事件
   ├── raw/                  # 原始 stdout/stderr
   ├── reports/              # 每次运行的 report.json
-  └── artifacts/            # Claude 产出的文件
+  └── artifacts/            # Agent 产出的文件
 ```
 
 ### summary.md 包含
@@ -175,10 +184,16 @@ flowchart TD
 ```
 
 <p align="center">
-  <img src="/assets/eval-harness-illustrations/01-docker-agent-rubric-scene.png" alt="小鱼在 Docker 隔离盒外观察被测 Agent、用户模拟 Agent 和 rubric 评估现场" width="800" />
+  <img
+    src="/assets/eval-harness-illustrations/01-docker-agent-rubric-scene.png"
+    alt="小鱼在 Docker 隔离盒外观察被测 Agent、用户模拟 Agent 和 rubric 评估现场"
+    width="800"
+  />
 </p>
 
-<p align="center">一次真实评估会在隔离环境里运行 Agent 互动，再用校验器和 rubric 记录证据</p>
+<p align="center">
+  一次真实评估会在隔离环境里运行 Agent 互动，再用校验器和 rubric 记录证据
+</p>
 
 关键点：
 
@@ -198,7 +213,7 @@ flowchart TD
 配置格式（顶层或嵌套都接受）：
 
 ```json
-{"report_outputs": {"markdown": true, "html": false}}
+{ "report_outputs": { "markdown": true, "html": false } }
 ```
 
 `--html` 等价于 `{"markdown": true, "html": true}`，会写一个临时文件传给 pytest。
@@ -207,44 +222,48 @@ flowchart TD
 
 报告会帮助区分失败来源。归因逻辑（`attribution.py`）按这个顺序判断每个失败的 check：
 
-| 归因 | 判断条件 | 下一步 |
-| --- | --- | --- |
-| `harness` | required skill 完全没被调用；或 generic profile 且没 skill 运行 | 检查依赖、Docker、网络或本地环境 |
-| `task` | check 涉及 artifact path / validator / task directory | 检查 eval 任务定义和 fixture |
-| `workflow` | check 涉及 `.comet.yaml` / guard / state / transition / archive；或 skill 调用契约失败 | 回到 `/comet-any` 优化 Skill |
-| `model` | 其他默认兜底（任务在可观察的工作流执行后失败） | 重跑或降低对非确定行为的依赖 |
+| 归因       | 判断条件                                                                               | 下一步                           |
+| ---------- | -------------------------------------------------------------------------------------- | -------------------------------- |
+| `harness`  | required skill 完全没被调用；或 generic profile 且没 skill 运行                        | 检查依赖、Docker、网络或本地环境 |
+| `task`     | check 涉及 artifact path / validator / task directory                                  | 检查 eval 任务定义和 fixture     |
+| `workflow` | check 涉及 `.comet.yaml` / guard / state / transition / archive；或 skill 调用契约失败 | 回到 `/comet-any` 优化 Skill     |
+| `model`    | 其他默认兜底（任务在可观察的工作流执行后失败）                                         | 重跑或降低对非确定行为的依赖     |
 
 这个归因用于判断下一步应该修 Skill、修 eval 配置，还是重跑环境。详见[读取评估报告](/zh/eval/reports)。
 
 ## 环境变量参考
 
-| 变量 | 作用 |
-| --- | --- |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | **必需**，两者都没有时 suite 跳过 |
-| `BENCH_CC_MODEL` | 覆盖 Claude 模型 |
-| `BENCH_CC_VERSION` | Docker 镜像里的 Claude Code 版本（默认 `latest`） |
-| `BENCH_SIMULATOR_PROMPT_FILE` | 自定义用户模拟器提示词文件（默认 `eval/simulator-instruction.md`，相对路径从 `eval/` 解析）。`--simulator-prompt` 命令行参数优先级更高 |
-| `BENCH_LLM_JUDGE=1` | 启用可选的 LLM-as-judge 覆盖评分 |
-| `COMET_EVAL_REPORT_CONFIG` | 报告输出配置路径 |
-| `BENCH_SUITE_ROOT` / `BENCH_TASKS_DIR` / `BENCH_TREATMENTS_DIR` / `BENCH_SKILLS_DIR` / `BENCH_LOGS_DIR` | 路径覆盖 |
-| `BENCH_TEST_CONTEXT` / `BENCH_TEST_RESULTS` | 覆盖 host↔Docker 传输文件名 |
+| 变量                                                                                                    | 作用                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`                                                            | **必需**，两者都没有时 suite 跳过                                                                                                      |
+| `BENCH_CC_MODEL`                                                                                        | 覆盖 Claude 模型                                                                                                                       |
+| `BENCH_CC_VERSION`                                                                                      | Docker 镜像里的 Claude Code 版本（默认 `latest`）                                                                                      |
+| `BENCH_SIMULATOR_PROMPT_FILE`                                                                           | 自定义用户模拟器提示词文件（默认 `eval/simulator-instruction.md`，相对路径从 `eval/` 解析）。`--simulator-prompt` 命令行参数优先级更高 |
+| `BENCH_LLM_JUDGE=1`                                                                                     | 启用可选的 LLM-as-judge 覆盖评分                                                                                                       |
+| `COMET_EVAL_REPORT_CONFIG`                                                                              | 报告输出配置路径                                                                                                                       |
+| `BENCH_SUITE_ROOT` / `BENCH_TASKS_DIR` / `BENCH_TREATMENTS_DIR` / `BENCH_SKILLS_DIR` / `BENCH_LOGS_DIR` | 路径覆盖                                                                                                                               |
+| `BENCH_TEST_CONTEXT` / `BENCH_TEST_RESULTS`                                                             | 覆盖 host↔Docker 传输文件名                                                                                                            |
 
 LangSmith suite 额外需要 `LANGSMITH_API_KEY`、`LANGSMITH_TRACING=true`、`TRACE_TO_LANGSMITH=true`。用户入口是 `comet eval <target> --suite langsmith`；不需要手工进入 `eval/langsmith/` 执行 pytest。
+
+Langfuse suite 需要 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY`。用户入口是 `comet eval <target> --suite langfuse`；`--collect --suite langfuse` 不初始化 SDK、不联网，也不会下载插件。
 
 ### 用 Anthropic 兼容代理认证
 
 当 `ANTHROPIC_API_KEY` 未设置时，Docker 内的 `claude` 改用 **Anthropic 兼容代理**（BigModel / mimo / OpenRouter 等）认证。需要的变量：
 
-| 变量 | 作用 |
-| --- | --- |
-| `ANTHROPIC_AUTH_TOKEN` | 代理型认证 token |
-| `ANTHROPIC_BASE_URL` | 代理的 Anthropic 兼容端点 |
-| `ANTHROPIC_MODEL` | 默认模型 |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` / `ANTHROPIC_DEFAULT_OPUS_MODEL` | 各档位模型映射 |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL_NAME` / `ANTHROPIC_DEFAULT_OPUS_MODEL_NAME` | 各档位模型显示名 |
-| `CLAUDE_CODE_SUBAGENT_MODEL` | 子 agent 模型 |
+| 变量                                                                                                | 作用                      |
+| --------------------------------------------------------------------------------------------------- | ------------------------- |
+| `ANTHROPIC_AUTH_TOKEN`                                                                              | 代理型认证 token          |
+| `ANTHROPIC_BASE_URL`                                                                                | 代理的 Anthropic 兼容端点 |
+| `ANTHROPIC_MODEL`                                                                                   | 默认模型                  |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` / `ANTHROPIC_DEFAULT_OPUS_MODEL` | 各档位模型映射            |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL_NAME` / `ANTHROPIC_DEFAULT_OPUS_MODEL_NAME`                         | 各档位模型显示名          |
+| `CLAUDE_CODE_SUBAGENT_MODEL`                                                                        | 子 agent 模型             |
 
-这些变量在 `eval/.env.example` 里都有占位项。把它们写进 `eval/.env`，harness 启动 Docker 时会注入。
+这些变量在自动生成的用户级 `.env` 模板里都有占位项。普通用户编辑
+`%USERPROFILE%\\.comet\\eval\\.env` / `~/.comet/eval/.env` 即可；源码维护者使用
+`--project` 时，才需要在对应源码 checkout 中调试 harness 的 `eval/.env`。
 
 ### 自定义用户模拟器提示词
 
@@ -261,7 +280,7 @@ Never refuse; always let the workflow move forward. Do not write code or files.
 如果你想换一套用户行为（比如更挑剔、会要求澄清更多），把你的版本写到一个文件，再用 `BENCH_SIMULATOR_PROMPT_FILE` 指向它：
 
 ```bash
-# eval/.env
+# 用户级 ~/.comet/eval/.env
 BENCH_SIMULATOR_PROMPT_FILE=my-simulator-prompt.md
 ```
 

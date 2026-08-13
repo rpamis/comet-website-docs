@@ -1,0 +1,378 @@
+---
+title: 'Eval Agent 启动配置'
+description: '在运行 comet eval 前，分别准备 Claude Code、Codex、Qoder 或 CodeBuddy 的 CLI、认证信息和模型配置。'
+---
+
+`comet eval` 会在隔离的 Docker 容器中启动你选择的 Agent。不同 Agent 的登录方式和模型协议并不通用：Claude Code 可以使用 Anthropic 兼容接口，Codex 需要 OpenAI Responses API，Qoder 需要 Qoder 自己的登录态或 Personal Access Token，CodeBuddy 的自定义模型使用它自己的 API 配置。
+
+本页只说明 Agent 启动前需要准备什么。Eval 的主任务（Bench）和 LLM-as-judge 仍然分别使用 `BENCH_*` 和 `BENCH_JUDGE_*` 配置；完整变量表见 [Eval harness](/zh/eval/harness#环境变量参考)。
+
+<Warning>
+  不要把真实密钥写进 Skill、manifest、公开仓库、Dockerfile 或报告。建议使用当前 shell
+  环境变量，或使用用户级 <code>%USERPROFILE%\\.comet\\eval\\.env</code> /{' '}
+  <code>~/.comet/eval/.env</code>；发布包不会包含这些文件。
+</Warning>
+
+## 用户级 `.env` 在哪里
+
+普通用户只需要配置用户目录下的 `.env`，不需要拉取 Comet 源码，也不需要修改安装包里的
+`eval/.env`：
+
+- Windows：`%USERPROFILE%\\.comet\\eval\\.env`
+- macOS/Linux：`~/.comet/eval/.env`
+
+第一次执行 `comet eval` 时，如果这个文件不存在，CLI 会自动创建一份包含全部 Eval 参数的
+注释模板，并在终端输出实际路径。编辑后再次执行即可；已有文件不会被覆盖，当前 shell
+中的环境变量优先级更高。完整参数按主任务、独立 Judge、Claude Code、Codex、Qoder、
+CodeBuddy、LangSmith 和 Langfuse 分组，直接编辑自动生成的模板即可，不需要手工新建参数表。
+
+## 先选择一个 Agent
+
+```bash
+# Claude Code（默认）
+comet eval ./my-skill --agent claude-code --quick --html
+
+# OpenAI Codex
+comet eval ./my-skill --agent codex --quick --html
+
+# Qoder
+comet eval ./my-skill --agent qoder --quick --html
+
+# CodeBuddy
+comet eval ./my-skill --agent codebuddy --quick --html
+```
+
+每个 Agent 都先在宿主机上单独验证启动，再运行 Eval。这样可以把“Agent 没有登录”与“Skill 评估失败”区分开。
+
+## Claude Code
+
+### 启动前需要什么
+
+- PATH 中可执行的 `claude` CLI；
+- 任选一种认证方式：首次交互式登录，或 `ANTHROPIC_API_KEY`；
+- 如果使用 Anthropic 兼容代理，还需要 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL` 和模型名。
+
+Claude Code 官方快速开始说明，首次运行 `claude` 会进入登录流程；设置 `ANTHROPIC_API_KEY` 后可以跳过登录提示并改为确认该 key。使用其他 LLM gateway 时，官方支持通过 `ANTHROPIC_AUTH_TOKEN` 和 `ANTHROPIC_BASE_URL` 配置代理。
+
+官方参考：[Claude Code overview](https://code.claude.com/docs/en/overview)、[LLM gateway](https://code.claude.com/docs/en/llm-gateway)。
+
+### 宿主机快速验证
+
+```bash
+claude --version
+claude -p "Reply with exactly OK" --output-format json
+```
+
+### 使用 Anthropic 兼容代理
+
+```dotenv
+BENCH_EVAL_AGENT=claude-code
+BENCH_MODEL=your-anthropic-compatible-model
+BENCH_BASE_URL=https://your-anthropic-gateway.example/v1
+BENCH_API_KEY=your-subject-key
+
+# 或直接使用 Claude Code 原生变量
+ANTHROPIC_AUTH_TOKEN=your-subject-key
+ANTHROPIC_BASE_URL=https://your-anthropic-gateway.example/v1
+ANTHROPIC_MODEL=your-anthropic-compatible-model
+```
+
+Eval 会把通用配置映射到 Claude Code 的原生变量。显式设置的 `ANTHROPIC_*` 优先于通用 `BENCH_*` fallback。
+
+## Codex
+
+### 启动前需要什么
+
+- PATH 中可执行的 `codex` CLI；
+- 一个能访问 OpenAI Responses API 的 API key 或登录态；
+- 一个与该 key 对应的模型名；
+- 如果使用自定义 provider，需要在用户级 `~/.codex/config.toml` 中声明 `model_provider`、`base_url`、`env_key` 和 `wire_api = "responses"`。
+
+Codex 的自定义 provider 配置位于用户级 `config.toml`。官方配置参考说明：`base_url` 是 provider API 地址，`env_key` 指定从哪个环境变量读取 key，当前 `wire_api` 使用 `responses`。不要把 Anthropic Messages 地址填给 Codex；它必须提供 Responses 接口，通常是 `<base-url>/responses`。
+
+官方参考：[Codex configuration reference](https://developers.openai.com/codex/config-reference/)。
+
+### 宿主机快速验证
+
+```bash
+codex --version
+codex exec --json --yolo "Reply with exactly OK"
+```
+
+### 自定义 Responses provider
+
+在启动 Codex 前设置 key：
+
+```bash
+# macOS / Linux
+export OPENAI_API_KEY=your-subject-key
+
+# Windows PowerShell
+$env:OPENAI_API_KEY = "your-subject-key"
+```
+
+用户级 `~/.codex/config.toml` 示例：
+
+```toml
+model = "your-responses-model"
+model_provider = "comet-eval"
+
+[model_providers.comet-eval]
+name = "Comet Eval provider"
+base_url = "https://your-openai-compatible-gateway.example/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
+在 Comet Eval 的用户级 `.env` 中，对应配置为：
+
+```dotenv
+BENCH_EVAL_AGENT=codex
+OPENAI_API_KEY=your-subject-key
+OPENAI_BASE_URL=https://your-openai-compatible-gateway.example/v1
+OPENAI_MODEL=your-responses-model
+
+# 也可以使用通用主任务配置；Codex 会映射到 OPENAI_*。
+# BENCH_API_KEY=your-subject-key
+# BENCH_BASE_URL=https://your-openai-compatible-gateway.example/v1
+# BENCH_MODEL=your-responses-model
+```
+
+Eval 运行时会在容器内生成临时 `config.toml`，其中只保存 `env_key = "OPENAI_API_KEY"`，不会保存真实 key。你仍然必须确认 provider 实际支持 Responses API；仅支持 `/chat/completions` 或 Anthropic `/messages` 的地址不能直接用于 Codex。
+
+## Qoder
+
+### 启动前需要什么
+
+- PATH 中可执行的 `qodercli` CLI；
+- Qoder 登录态，或 Qoder Personal Access Token（PAT）；
+- 自动化和 Eval 推荐使用 `QODER_PERSONAL_ACCESS_TOKEN`。
+
+Qoder 官方文档支持两种 CLI 登录方式：运行 `qodercli` 后输入 `/login` 进行浏览器登录或粘贴 Qoder PAT；非交互式启动可以设置 `QODER_PERSONAL_ACCESS_TOKEN`。PAT 在 [Qoder Account → Integrations](https://qoder.com/account/integrations) 创建。
+
+官方参考：[Qoder CLI quick start](https://docs.qoder.com/en/cli/quick-start)、[Qoder CLI authentication](https://docs.qoder.com/en/cli/sdk/authentication)。
+
+### 宿主机快速验证
+
+```bash
+qodercli --version
+qodercli
+# 在 Qoder 提示符中输入：
+/login
+```
+
+非交互式验证可以使用：
+
+```bash
+# macOS / Linux
+QODER_PERSONAL_ACCESS_TOKEN=your-qoder-pat \
+  qodercli -p "Reply with exactly OK" --output-format stream-json --yolo
+
+# Windows PowerShell
+$env:QODER_PERSONAL_ACCESS_TOKEN = "your-qoder-pat"
+qodercli -p "Reply with exactly OK" --output-format stream-json --yolo
+```
+
+### Comet Eval 配置
+
+```dotenv
+BENCH_EVAL_AGENT=qoder
+QODER_PERSONAL_ACCESS_TOKEN=your-qoder-pat
+QODER_MODEL=your-qoder-model
+
+# 或使用通用模型配置
+# BENCH_MODEL=your-qoder-model
+```
+
+Qoder 的 PAT 是 Qoder 自己的登录凭据，不是 Anthropic/OpenAI API key。不要把 Claude Code 使用的 `ANTHROPIC_AUTH_TOKEN` 或其他模型网关 key 填到 `QODER_PERSONAL_ACCESS_TOKEN`；这会在 Qoder 启动时认证失败。当前 Eval 不要求为 Qoder 填写 Claude Code 的 `ANTHROPIC_BASE_URL`。
+
+Eval 会把 `QODER_PERSONAL_ACCESS_TOKEN` 仅注入本次容器进程，并为 Qoder 使用隔离的临时配置根；不会读取或挂载宿主机的 Qoder 登录文件。
+
+## CodeBuddy
+
+### 启动前需要什么
+
+- PATH 中可执行的 `codebuddy` CLI；
+- 如果使用 CodeBuddy 平台登录，使用 `CODEBUDDY_AUTH_TOKEN`；
+- 如果使用第三方或 OpenAI-compatible 模型，使用 `CODEBUDDY_API_KEY`、`CODEBUDDY_BASE_URL` 和该 provider 接受的模型名。
+
+CodeBuddy 的自定义模型通过 `--model <model-id>` 选择。`CODEBUDDY_MODEL` 可以设置默认模型，`CODEBUDDY_BASE_URL` 覆盖请求地址。不要把 Claude Code 的 `ANTHROPIC_BASE_URL`（尤其是 `/anthropic` 或 `/messages` 地址）直接复用给 CodeBuddy；模型名也必须使用 CodeBuddy/provider 接受的 ID，不要直接带上 Claude 专用的模型后缀。
+
+官方的宿主机模型注册文件是用户级 `~/.codebuddy/models.json` 或工作区级 `.codebuddy/models.json`。其中 `url` 应填写完整的 OpenAI-compatible `/chat/completions` 地址，`apiKey` 可以写成 `${CODEBUDDY_API_KEY}`，不要写真实密钥。例如：
+
+```json
+{
+  "models": [
+    {
+      "id": "your-model-id",
+      "name": "Your Model",
+      "vendor": "custom",
+      "apiKey": "${CODEBUDDY_API_KEY}",
+      "url": "https://your-openai-compatible-gateway.example/v1/chat/completions"
+    }
+  ],
+  "availableModels": ["your-model-id"]
+}
+```
+
+Eval 不会挂载宿主机的 `models.json` 或 CodeBuddy 登录目录，而是在容器内使用临时 `settings.json`，并通过原生环境变量和 `--model` 传入配置。推荐先在宿主机验证：
+
+```bash
+CODEBUDDY_API_KEY=your-subject-key \
+CODEBUDDY_BASE_URL=https://your-openai-compatible-gateway.example/v1 \
+CODEBUDDY_MODEL=your-model-id \
+  codebuddy -p "Reply with exactly OK" --model your-model-id --output-format json -y
+```
+
+然后在用户级 Eval `.env` 中配置同一组值：
+
+```dotenv
+BENCH_EVAL_AGENT=codebuddy
+CODEBUDDY_API_KEY=your-subject-key
+CODEBUDDY_BASE_URL=https://your-openai-compatible-gateway.example/v1
+CODEBUDDY_MODEL=your-model-id
+
+# 也可以使用通用主任务配置；Eval 会映射到 CODEBUDDY_*。
+# BENCH_API_KEY=your-subject-key
+# BENCH_BASE_URL=https://your-openai-compatible-gateway.example/v1
+# BENCH_MODEL=your-model-id
+
+# 可选：覆盖 CodeBuddy 的不同模型用途。
+# CODEBUDDY_SMALL_FAST_MODEL=your-fast-model-id
+# CODEBUDDY_BIG_SLOW_MODEL=your-reasoning-model-id
+# CODEBUDDY_CODE_SUBAGENT_MODEL=your-subagent-model-id
+```
+
+官方参考：[CodeBuddy 模型配置](https://www.codebuddy.cn/docs/cli/models)、[环境变量](https://www.codebuddy.cn/docs/cli/env-vars)、[CLI 参数](https://www.codebuddy.cn/docs/cli/cli-reference)。
+
+Eval 运行时只把凭据注入本次容器进程；临时 `settings.json` 使用 `apiKeyHelper` 读取环境变量，运行结束后随容器配置目录销毁，不会把真实 key 写入报告、manifest 或 Skill 工作区。
+
+## 扩展自定义 Agent
+
+非预定义的 Agent 通过用户目录下显式注册的 `adapter.yaml` 接入。仅仅把可执行文件放到 `PATH`
+上不会自动启用它，也不需要 clone Comet 源码：
+
+```text
+# macOS/Linux
+~/.comet/eval/adapters/<agent-id>/adapter.yaml
+
+# Windows
+%USERPROFILE%\\.comet\\eval\\adapters\\<agent-id>\\adapter.yaml
+```
+
+也可以在用户级 `%USERPROFILE%\\.comet\\eval\\.env` / `~/.comet/eval/.env` 中设置
+`COMET_EVAL_ADAPTERS_DIR`，覆盖默认的适配器注册目录。`<agent-id>` 必须是小写字母开头、只包含
+小写字母/数字/连字符、长度 2–32 的标识符。
+
+### `adapter.yaml` 最小完整示例
+
+```yaml
+apiVersion: comet.eval.agent/v1alpha1
+kind: EvalAgentAdapter
+metadata:
+  id: my-agent
+  version: 1.0.0
+runtime:
+  executable: my-agent
+  install:
+    kind: npm
+    package: my-agent
+    version: latest
+credentials:
+  - MY_AGENT_API_KEY
+  - MY_AGENT_AUTH_TOKEN
+modelEnv: MY_AGENT_MODEL
+baseUrlEnv: MY_AGENT_BASE_URL
+capabilities:
+  singleTurn: true
+  resume: true
+  structuredEvents: true
+  telemetry: false
+  skillInvocationEvidence: true
+```
+
+字段规则：
+
+- `runtime.executable` 是容器内启动的命令；npm/pip 包必须暴露这个可执行入口。
+  `runtime.install.kind` 支持 `npm`、`pip`、`none`；`none` 表示该命令已经存在于基础镜像中。
+- `credentials` 只能声明最多两个环境变量名，不能写密钥值。主 Agent 只会把这些变量转发进容器；
+  如果用于 Judge，`BENCH_JUDGE_API_KEY` 映射到第一个名称，`BENCH_JUDGE_AUTH_TOKEN` 映射到第二个名称。
+- `modelEnv`、`baseUrlEnv` 是可选的自定义变量名。自定义 Agent 不会自动继承 `BENCH_API_KEY`、
+  `BENCH_MODEL` 或 `BENCH_BASE_URL`；请使用声明的变量、CLI 参数或 manifest 配置。
+- `resume` 支持 `auto_user` 多轮交互；`structuredEvents` 要求输出 JSONL；
+  `skillInvocationEvidence` 要求输出明确的 Skill 调用事件；`telemetry: false` 时 token/cost 可以是
+  `N/A`。真实评估至少需要 `singleTurn`、`resume`、`structuredEvents` 和
+  `skillInvocationEvidence` 为 `true`。
+
+自定义 CLI 必须兼容 Eval 的调用约定：
+
+```text
+<executable> -p "<prompt>" --output-format stream-json --model <model> [--resume <session-id>]
+```
+
+每条结构化事件写到 stdout。若要让评分器确认 Skill 被调用，输出中还要包含类似下面的 JSONL：
+
+```json
+{"type":"skill_invocation","skill":"my-skill"}
+```
+
+在自动生成的用户级 `.env` 中补上 `adapter.yaml` 声明的变量：
+
+```dotenv
+BENCH_EVAL_AGENT=my-agent
+MY_AGENT_API_KEY=your-subject-key
+MY_AGENT_MODEL=your-model
+MY_AGENT_BASE_URL=https://your-provider.example/v1
+
+# 作为独立 Judge 时使用独立凭据：
+# BENCH_LLM_JUDGE=1
+# BENCH_JUDGE_AGENT=my-agent
+# BENCH_JUDGE_API_KEY=your-judge-key
+# BENCH_JUDGE_MODEL=your-judge-model
+# BENCH_JUDGE_BASE_URL=https://your-judge-provider.example/v1
+```
+
+然后先静态检查，再执行真实评估：
+
+```bash
+comet eval ./my-skill --collect --agent my-agent
+comet eval ./my-skill --quick --agent my-agent --model your-model
+```
+
+适配器可以通过 npm/pip 包或 wrapper CLI 分发，但 `adapter.yaml` 目前不支持自定义参数模板、
+宿主机配置目录挂载或任意 Docker 指令。真实凭据只能放在每个用户自己的 `.env` 或当前 shell 中。
+
+## Bench 和 Judge 要分开
+
+如果启用了 LLM-as-judge，Judge 需要自己的模型名和凭据：
+
+```dotenv
+BENCH_LLM_JUDGE=1
+BENCH_JUDGE_MODEL=your-judge-model
+BENCH_JUDGE_API_KEY=your-judge-key
+BENCH_JUDGE_BASE_URL=https://your-judge-gateway.example/v1
+```
+
+不要因为主 Agent 能调用，就省略 `BENCH_JUDGE_MODEL` 或让 Judge 复用主任务配置。主任务和 Judge 可以选择不同的 Agent，但各自的认证必须匹配所选 Agent。
+
+## 常见不匹配
+
+| 现象                               | 通常原因                                                                    | 处理方式                                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Claude Code 返回 401               | 没有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`，或 Base URL 与模型不匹配 | 先运行 `claude -p` 验证，再检查 `ANTHROPIC_*`                                                   |
+| Codex 请求返回 404                 | 网关只实现了 Anthropic Messages 或 Chat Completions                         | 换成支持 Responses API 的 provider，并设置 `wire_api = "responses"`                             |
+| Qoder `auth.exchangeJobToken` 失败 | 把其他厂商 API key 当成 Qoder PAT                                           | 在 Qoder Integrations 创建并使用 Qoder PAT                                                      |
+| CodeBuddy 返回 401/404             | 使用了 Claude Code 的 Anthropic 地址，或模型 ID 不被 provider 接受          | 改用 `CODEBUDDY_BASE_URL`、`CODEBUDDY_API_KEY` 和 provider 的模型 ID；先单独运行 `codebuddy -p` |
+| Eval 瞬间跳过                      | Agent 凭据没有进入 Eval 进程                                                | 检查用户级 `.env` 或当前 shell；不要只检查 GUI 客户端的配置                                     |
+
+<Info>
+  CodeBuddy 的自定义模型需要使用 CodeBuddy 的 OpenAI-compatible 配置；Claude Code 的 `ANTHROPIC_*`
+  配置不会自动变成 CodeBuddy 配置。
+</Info>
+
+## 下一步
+
+- [评估快速上手](/zh/eval/quickstart) — 从 Skill 目录开始第一次评估
+- [Eval harness](/zh/eval/harness) — 环境变量、Docker 和任务运行机制
+- [comet eval 命令](/zh/cli/eval) — CLI 选项和报告路径

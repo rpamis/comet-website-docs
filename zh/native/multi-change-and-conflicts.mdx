@@ -1,49 +1,83 @@
 ---
-title: '多 Change 与规格冲突'
-description: '并行管理多个 Native change，理解当前归属、工作区选择和安全的归档顺序。'
+title: "多 Change 与规格冲突"
+description: "使用 Native Supervisor Change 模式或独立 Change 管理大型需求、并行工作和规格冲突。"
 ---
 
-一个项目可以同时推进多个 Native change。`.comet/current-change.json` 只选择下一次写入归属哪个 workflow/change，不限制 active change 数量。Runtime 在归档时按 capability 串行处理，避免一个 change 擅自覆盖另一个 change。
+Native 支持两种多 Change 方式：对一个大型目标使用 Supervisor Change 模式，或分别推进多个相互独立的 Change。选择哪种方式取决于需求之间是否可以独立实现和验收。
 
-## 并行 change 与工作目录
+## 什么时候使用 Supervisor Change 模式
 
-创建新 change 时，Native 会检查当前目录和已注册的 worktree；适用时一次展示 `current`、`branch`、`worktree` 选项和推荐。当前目录已被其他 active change 使用时，通常推荐 `worktree`。每个 change 会记住自己的 branch/worktree 绑定，错误目录恢复会停下来。
+当一个目标至少包含两个可以独立实现、独立验证的结果，并且存在真实的依赖关系或并行价值时，Native 会在 Shape 阶段建议 Supervisor Change 模式。需求文字很长、任务数量很多，但目标仍然紧密耦合时，不会仅因为规模而拆分。
 
-已有 change 不会被自动搬到新 worktree。跨设备继续前，先同步代码和正式 Native 文件，再确认 artifact root、branch/worktree 一致。
+Supervisor Change 负责整体目标、依赖关系和最终验收；每个 child 都是一个完整的 Native Change，可以单独恢复和验证。
 
-## 查看并选择
+## 使用 Supervisor Change 模式
+
+在 Agent 中从统一入口开始：
+
+```text
+/comet-native
+```
+
+描述完整目标，例如：
+
+```text
+为管理后台增加权限 API、权限配置页面和审计日志，并分别验证这三个结果。
+```
+
+Shape 阶段会：
+
+1. 判断目标是否适合拆分；
+2. 展示候选 child、依赖顺序和验收覆盖；
+3. 等待你确认拆分、调整方案或保持为单个 Change。
+
+确认前不会创建 child、worktree 或派发 Agent。确认后，Runtime 会从当前可执行的 `readyChildren` 开始推进：支持并行时同时运行，不支持并行时按顺序运行。
+
+每个 child 都在独立 worktree 中完成 Build 和 Verify，并在 Archive 时按顺序合并回 Supervisor Change 的分支。所有 child 完成后，Supervisor Change 会在最终集成结果上重新 Verify，确保整体目标仍然满足。
+
+查看 Supervisor Change 和 child 的状态：
+
+```bash
+comet native status <supervisor-change> --details --json
+```
+
+正常推进时，按照 Runtime 返回的 continuation 执行下一步，不要手工创建重复的 child 或 worktree。恢复 `/comet-native` 时，Comet 会复用已有状态。
+
+如果 Supervisor Change 的最终 Verify 失败，已归档的 child 不会被重新打开。Runtime 会提示创建覆盖失败验收项的 repair child，确认 Supervisor Change Shape 后继续。
+
+## 多个独立 Change 与工作目录
+
+如果几个目标没有共同的整体验收，可以直接创建多个独立 Change。创建 Change 时，Native 会根据当前目录和已有 Change 提供 `current`、`branch` 和 `worktree` 选项：
+
+- 串行处理且当前目录干净时，可以使用 `current`；
+- 需要独立分支但不需要同时使用多个目录时，可以使用 `branch`；
+- 并行开发、多个会话或当前目录已有未提交改动时，使用 `worktree`。
+
+Native 会复用已经登记的匹配 worktree；如果分支仍然存在但 worktree 已被移除，会在恢复时重建它。每个 Change 都会保留自己的分支和工作目录绑定，错误 checkout 不会被静默使用。
+
+## 查看、选择和恢复
 
 ```bash
 comet native status
 comet native status <change-name> --details --json
 comet native select <change-name>
+comet native doctor <change-name>
 ```
 
-`status` 和 `show` 是只读的，不会擅自切换当前 change。多个候选、selection 缺失或指向另一套 workflow 时，写入和恢复会返回 `await-user`，不会猜测。
+`status`、`show` 和 `doctor` 不会替你切换 Change。多个候选、缺少选择或工作目录不匹配时，Runtime 会等待明确决定。
 
-## 哪些工作适合并行
+## 处理规格冲突
 
-不同 capability、没有共享行为约束的 change 可以并行。开始前确认：
+不同 capability 且没有共享行为约束的 Change 可以并行。开始前确认：
 
 - 是否修改同一个 capability 的 Spec；
-- 是否都需要修改同一用户文档或配置；
-- 一个 change 的验收是否依赖另一个尚未归档的行为；
-- 当前工作目录是否混入了其他 change 的修改。
+- 是否都需要修改同一份用户文档或配置；
+- 一个 Change 的验收是否依赖另一个尚未归档的行为。
 
-Runtime 能发现当前已注册 worktree 中的 capability 重叠，但它不是跨远端分支或跨设备的团队锁。没有同步的代码和 worktree 仍需要团队自己协调。
+如果多个 Change 修改同一个 capability，Archive 会要求确定顺序。先归档的 Change 成为新的 canonical Spec，后续 Change 需要重新读取；如果 Runtime 返回重新对齐（rebase）动作，按返回的 continuation 执行，再重新 Build 和 Verify。不要直接覆盖前一个 Change 的文件，也不要复用冲突前的通过结果。
 
-## 同一 capability 的归档顺序
+## 跨设备继续
 
-如果两个 change 都要修改同一 capability，Archive 会返回一个需要串行顺序的 blocker。先选定哪个 change 归档，再让另一个 change 读取归档后的 canonical Spec，必要时执行：
+同步项目代码、`.comet/config.yaml`、brief、Specs、`comet-state.yaml` 和已有的 `verification.md`。本机 `.comet/runtime/native/` 可以缺失，Runtime 会重建；如果 artifact root、分支或 worktree 不一致，恢复会等待明确修正。
 
-```bash
-comet native spec rebase <change-name> --summary <调整摘要>
-```
-
-rebase 会让目标 Spec 对齐最新行为，并要求重新 Build 和 Verify。不要直接把后归档的文件覆盖到前一个 change，也不要复用冲突前的通过结论。
-
-## 跨设备协作
-
-同步项目代码、`.comet/config.yaml`、brief、Specs、`comet-state.yaml` 和已有的 `verification.md`。本机 `.comet/runtime/native/` 可以缺失，Runtime 会重建；如果两个设备的 artifact root、branch/worktree 不一致，恢复会等待用户修正。
-
-继续阅读：[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复手册](/zh/native/recovery-playbook)。
+继续阅读：[Native 快速开始](/zh/native/quickstart)、[产物与状态](/zh/native/artifacts-and-state) 和 [验证与修复](/zh/native/verification-and-repair)。
