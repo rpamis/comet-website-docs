@@ -1,11 +1,13 @@
 ---
 title: 'Native 工作流'
-description: '面向 Fable 5、GPT-5.6 及同档强模型的自包含需求工作流：需求具体、方法轻量、验收可恢复。'
+description: '面向强模型的独立需求工作流：四个阶段、一个入口、文件化状态，完成判定不靠模型自报。'
 ---
 
-Native 面向 Fable 5、GPT-5.6 及同档强模型。这类模型能自主调查代码、形成实现方案并按风险选择测试，因此 Native 不强制固定的设计、计划、TDD 或 review 方法；但完成判定不交给模型自报。Runtime 运行必要检查、分派新的只读 Verifier，并保存可跨设备恢复的用户状态。
+Native 是 Comet 面向强模型的需求工作流。Fable 5、GPT-5.6 这一档的模型能自己调查代码、形成方案、按风险挑测试，再给它们套固定的设计、计划和 TDD 流程，收益已经不大。Native 因此只管两件事：需求用什么固定下来，完成由谁判定。brief 和完整目标规格写清"做什么"，Runtime 检查加独立 Verifier 判定"算不算做完"；计划、实现、测试和审查方法留给模型自己选。
 
-## Native Loop
+这个取舍有实测数据支撑。与 Classic 的对齐评估（16 个任务、48 次运行，取双方均通过的 41 组配对样本）里，Native 的总 token 少 76.8%，Agent 轮次少 57.4%，耗时短 47.4%，三次全通过率 87.5%。实验设计和原始数字见 [Native 与 0.4.0 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
+
+## 一个 change 的生命周期
 
 ```mermaid
 flowchart LR
@@ -15,40 +17,32 @@ flowchart LR
   V -->|通过| A["Archive：应用 Specs 并归档"]
 ```
 
-每轮都覆盖完整 A1…An。Builder 的“完成”只是交接信息；漏项、重复项、未知项或检查失败都会返回 Build。相同候选下已完成的检查会复用，Archive 正常路径不再重复验收。
+每一轮验收都覆盖完整的 A1…An 列表。Build 提交的"完成"只是交接信息：漏项、重复项、未知项或检查失败，一律打回 Build 重来。同一候选已经跑过的检查会复用，Archive 的正常路径不再重复验收。
 
-## 四阶段
+## 四个阶段
 
 ### Shape：固定目标与用户决定
 
-Shape 调查仓库事实，写 `brief.md`、完整 target Specs 和用户可确认的共享理解。改变用户可见结果、默认行为、兼容性、范围、风险或不可逆结果的问题交给用户；实现结构和库选择由模型自主决定。新项目默认 Batch，Sequential 仍可配置。
+Shape 先调查仓库里能确定的事实，再写 `brief.md`、完整 target Specs 和一份用户可确认的共享理解。会改变用户可见结果、默认行为、兼容性、范围、风险或不可逆结果的问题，交给用户；实现结构和库的选择，模型自己定。新项目默认 Batch 澄清，Sequential 仍可配置。
 
 ### Build：模型自主实现
 
-Build 以 brief、Specs 和仓库规则为边界。模型自行选择实现、测试和修复方式；完成后提交 Builder handoff，不直接写通过结论。出现新的产品决定时，回 Shape；实现缺口则在下一轮 Build 修复。
+Build 以 brief、Specs 和仓库规则为边界。模型自己选择实现、测试和修复方式，完成后提交 Builder handoff，不写通过结论。过程中冒出新的产品决定，回 Shape；实现缺口，留在下一轮 Build 修。
 
 ### Verify：Runtime 检查 + 新 Verifier
 
-Runtime 解析必要检查并执行，stdout/stderr 流入本机日志，状态保留摘要。新的只读 Verifier 必须逐项给出 A1…An 结果；需要额外检查时，在当前 attempt 通过 `request-checks` 请求 Runtime。没有独立 Verifier execution 时，Runtime 明确标记降级，并在 Archive 前等待用户确认。
+Runtime 解析并执行必要检查，命令输出进本机日志，状态里只留摘要。新的只读 Verifier 逐项给出 A1…An 的结果；需要额外检查时，在当前 attempt 内向 Runtime 申请。宿主提供不了独立 Verifier execution 时，Runtime 会明确标记降级，并在 Archive 前等你确认。
 
 ### Archive：只应用最终结果
 
-Verify 通过后，Runtime 写入 `verification.md`，按 Spec 更新 canonical 文档并移动 change。正常 Archive 不重复运行检查。归档后的用户产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；本机 `.comet/runtime/native/` 执行目录会清理。
+Verify 通过后，Runtime 生成 `verification.md`，按 Spec 更新 canonical 文档并移动 change，不重复跑检查。归档后留下的用户产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；本机 `.comet/runtime/native/` 下的执行目录会被清理。
 
-## 状态和恢复
+## 状态与恢复
 
-`comet-state.yaml` 保存阶段、Loop、验收、handoff、检查摘要、Verifier 结论、阻塞、有限 history 和下一步；本机 `state.json`、日志、锁和事务位于 `.comet/runtime/native/`。换设备或缺少 overlay 时，从 YAML 重建；代码、artifact root 或 branch/worktree 不匹配则等待用户。
+`comet-state.yaml` 保存阶段、Loop、验收、handoff、检查摘要、Verifier 结论、阻塞、有限的 history 和下一步；`state.json`、日志、锁和事务这些本机文件都在 `.comet/runtime/native/`。换设备或本机 overlay 缺失时从 YAML 重建；代码、artifact root 或 branch/worktree 对不上，就停下来等你。
 
-## Native 与 Classic
+## 和 Classic 的关系
 
-| 维度      | Native                                 | Classic                                          |
-| --------- | -------------------------------------- | ------------------------------------------------ |
-| 主要适用模型 | Fable 5、GPT-5.6 及同档强模型 | 低于这一能力档、需要更细阶段指导的模型 |
-| 工作流    | Shape → Build → Verify → Archive       | open → design → build → verify → archive         |
-| 状态/产物 | Comet brief、完整 Specs、portable YAML | OpenSpec change、`.comet.yaml`、Superpowers 产物 |
-| 方法      | 模型按仓库事实和风险自主选择           | 显式设计、计划、TDD、调试和 review               |
-| 依赖      | Comet Native Runtime，不依赖外部 Skill | OpenSpec 与 Superpowers                          |
-
-`/comet` 只按 `.comet/config.yaml` 确定性转发；两套工作流的 change、Guard、状态和目录互不转换。
+Native 和 Classic 是两套独立的工作流，不是轻重档位，也不会互相升级，怎么选见 [Native 与 Classic 如何选择](/zh/native/native-vs-classic)。`/comet` 只按 `.comet/config.yaml` 确定性转发，两边的 change、Guard、状态和目录互不转换。
 
 继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native Loop](/zh/native/native-loop)、[产物与状态](/zh/native/artifacts-and-state) 和 [安全与恢复](/zh/native/safety-and-recovery)。

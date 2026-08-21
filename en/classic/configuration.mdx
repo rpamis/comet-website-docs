@@ -1,0 +1,186 @@
+---
+title: 'Classic configuration'
+description: 'Understand the shared entry fields, classic.* defaults, configuration precedence, and environment variables in .comet/config.yaml.'
+---
+
+`.comet/config.yaml` is the single project-level configuration file. This page covers the shared entry fields and the `classic.*` defaults. See [Native configuration](/en/native/configuration) for `native.*` fields.
+
+This page uses `<classic-root>` for the configured Classic OpenSpec root: `docs/openspec/` for new projects and `openspec/` for projects that retain the legacy layout. The location is selected by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
+
+## Complete example
+
+When both workflows are enabled and the project uses English, an installation can generate a configuration like this. From the Classic perspective, the shared fields and the `classic:` block are the relevant parts:
+
+```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+
+classic:
+  artifact_layout: docs
+  language: en
+  context_compression: off
+  review_mode: standard
+  auto_transition: true
+```
+
+## Shared entry fields
+
+| Field              | Allowed values              | Meaning                                                               |
+| ------------------ | --------------------------- | --------------------------------------------------------------------- |
+| `schema`           | `comet.project.v1`           | Current structured project configuration version managed by Comet      |
+| `default_workflow` | `native` \| `classic`        | Which permanent Skill `/comet` enters by default                      |
+| `workflows`        | `native`, `classic`, or both | Workflows enabled for the project; must include the default workflow  |
+| `ambient_resume`   | `true` \| `false`             | Whether the Agent may run the read-only recovery probe for ordinary natural-language continuation requests |
+| `hook.allow_paths` | Project-relative directory list, empty by default | Project-relative directories the Agent may write during guarded phases; matching is by prefix and protected areas cannot be allowed. See [Hook write allowlist](#hook-write-allowlist) |
+
+<Note>
+  Changing <code>default_workflow</code> changes only the <code>/comet</code> entry. It does not
+  migrate any existing change.
+</Note>
+
+### Hook write allowlist
+
+`hook.allow_paths` is a shared write policy. When it is empty, writes inside the project outside artifact areas follow each workflow's phase and Guard rules. Once configured, writes to matching directories and their subdirectories pass through directly. A typical use is allowing implementation directories such as `src/` to be modified during any phase, avoiding blocks outside Build.
+
+```yaml
+hook:
+  allow_paths:
+    - src
+    - apps/web
+```
+
+The `.comet` Runtime state directory and Classic's OpenSpec and Superpowers artifact roots are always protected and cannot be allowed through this setting. Out-of-bounds or malformed paths are reported by `comet doctor`.
+
+## Classic fields
+
+`artifact_layout` selects the project-level directory; the other four fields are snapshotted into a new Classic change's `.comet.yaml`:
+
+| Field                         | Allowed values                    | Default                                                                                             | Meaning                                                                                           |
+| ----------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `classic.artifact_layout`     | `legacy` \| `docs`                | `docs`; `update` backfills `legacy` only when an existing root `openspec/` must be retained       | Selects `openspec/` or `docs/openspec/` as the OpenSpec root                                      |
+| `classic.language`            | `en` \| `zh-CN`                   | Mapped from the Skill language selected during `comet init`; `--yes` defaults to `en`              | Controls the primary language of OpenSpec, Superpowers, verification reports, and archive notes |
+| `classic.context_compression` | `off` \| `beta`                   | `off`                                                                                               | Controls context compression during the design-to-build handoff. See [Context compression](/en/concepts/context-compression) |
+| `classic.review_mode`         | `off` \| `standard` \| `thorough` | `standard` for full workflow                                                                      | Controls code review strength. See [Review mode](/en/concepts/review-mode)                      |
+| `classic.auto_transition`     | `true` \| `false`                 | `true`                                                                                              | Controls whether Comet invokes the next phase Skill after phase advancement. See [Automatic progression](/en/concepts/auto-transition) |
+
+<Note>
+  Classic project defaults are snapshotted into <code>.comet.yaml</code> when a new change is
+  created. Later edits do not rewrite existing changes.
+</Note>
+
+<Warning>
+  Editing <code>classic.artifact_layout</code> changes where Comet reads artifacts but does not move
+  existing files. To migrate an existing project, run{' '}
+  <code>comet classic root move docs --dry-run</code> to inspect current state, conflicts, and
+  blockers, then run <code>comet classic root move docs --apply</code>.
+</Warning>
+
+### Artifact language versus Skill language
+
+The Skill language selected by `comet init` determines whether the English or Chinese Comet Skills are installed. Classic artifact language is stored in `classic.language`:
+
+| Init selection              | Installed Skill | `classic.language` |
+| --------------------------- | --------------- | ----------------- |
+| `English` / `--language en` | English Skills  | `en`              |
+| `Chinese` / `--language zh` | Chinese Skills  | `zh-CN`            |
+
+When a new Classic change is created, Comet snapshots project-level `classic.language` into `<classic-root>/changes/<name>/.comet.yaml`. OpenSpec proposals, designs, tasks, Superpowers design and plan documents, verification reports, and archive notes follow this setting instead of guessing from the language of the request that triggered the workflow.
+
+<Warning>
+  Project-level and change-level language values accept only <code>en</code> or <code>zh-CN</code>.
+  <code>zh</code> is only the CLI selection value for <code>comet init --language zh</code>; it is not
+  valid inside <code>.comet/config.yaml</code>.
+</Warning>
+
+## Configuration precedence
+
+The following precedence applies only to Classic `language`, `context_compression`, `review_mode`, and `auto_transition`:
+
+```text
+change-level .comet.yaml field > environment variable > project-level .comet/config.yaml > global language default > built-in default
+```
+
+| Layer                              | Description                                                                                          | Set by                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Change-level `.comet.yaml`         | Highest priority. Snapshotted from project config when the change is created, then updated by phase Skills | Comet                                                             |
+| Environment variables              | Used only when the change-level field is empty; useful for CI/CD overrides                           | `export COMET_AUTO_TRANSITION=true` / `export COMET_LANGUAGE=zh-CN` |
+| Project-level `.comet/config.yaml` | Fallback when no change-level field or environment override exists                                   | User or `init`                                                        |
+| Global `~/.comet/config.yaml`      | Cross-project fallback for `language` only; project config wins                                      | Global `init`/`update`                                                |
+| Default                            | Last fallback                                                                                        | See the table above                                                   |
+
+## auto_transition in detail
+
+`auto_transition` controls whether Comet invokes the next Skill after a phase advances.
+
+| Value          | Behavior                                                                                                  |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `true` (default) | After Guard advances `phase`, it outputs `NEXT: auto` and invokes the next phase Skill automatically.   |
+| `false`          | After Guard advances `phase`, it outputs `NEXT: manual` and prints a HINT for you to run the next Skill. |
+
+<Warning>
+  <strong>Phase advancement still happens.</strong> Guard's <code>--apply</code> always updates the
+  <code>phase</code> field regardless of <code>auto_transition</code>. The setting controls only whether
+  the next Skill is invoked automatically. User decision points, such as approving a proposal or
+  choosing an execution mode, block in either setting.
+</Warning>
+
+## Environment variables
+
+| Environment variable        | Purpose                                                     | Typical use                       |
+| --------------------------- | ----------------------------------------------------------- | --------------------------------- |
+| `COMET_LANGUAGE`             | Overrides `language` when the change-level field is empty   | CI/CD or temporary artifact language for a new change |
+| `COMET_AUTO_TRANSITION`      | Overrides `auto_transition` when the change-level field is empty | Temporary override                |
+| `COMET_CONTEXT_COMPRESSION`  | Overrides `context_compression` when the change-level field is empty | Temporary compression-mode testing |
+| `COMET_REVIEW_MODE`          | Overrides default `review_mode` resolution                  | Temporary review-mode selection   |
+| `COMET_FORCE_PHASE`          | Allows direct `set phase` when `=1` (repair escape hatch)   | State repair and troubleshooting  |
+| `COMET_OPENSPEC`             | Sets the OpenSpec CLI path; defaults to `openspec`          | Custom OpenSpec installation      |
+
+<Note>
+  <code>COMET_LANGUAGE</code>, <code>COMET_AUTO_TRANSITION</code>, <code>COMET_FORCE_PHASE</code>,
+  and <code>COMET_OPENSPEC</code> are user-facing environment variables.
+  <code>COMET_CONTEXT_COMPRESSION</code> and <code>COMET_REVIEW_MODE</code> exist in the resolver
+  layer but are not formally documented for general use; they are mainly for internal and test use.
+</Note>
+
+## How to configure
+
+### Configure project defaults
+
+Edit `.comet/config.yaml`:
+
+```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+classic:
+  language: en
+  context_compression: beta
+  review_mode: thorough
+  auto_transition: true
+```
+
+Commit the file so new changes created by teammates use the same defaults.
+
+### Temporary overrides with environment variables
+
+```bash
+export COMET_LANGUAGE=en
+export COMET_AUTO_TRANSITION=false
+```
+
+These affect the current session without changing the file.
+
+## Next steps
+
+- [State management](/en/concepts/state-management) — `.comet.yaml` field reference and state-machine constraints
+- [Context compression](/en/concepts/context-compression) — the `off` and `beta` modes
+- [Review mode](/en/concepts/review-mode) — the `off`, `standard`, and `thorough` modes
+- [Automatic progression](/en/concepts/auto-transition) — how `auto_transition` behaves
+- [Project file structure](/en/guides/project-structure) — where configuration and artifacts live

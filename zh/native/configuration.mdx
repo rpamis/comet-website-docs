@@ -37,12 +37,12 @@ classic:
 
 ## 共享入口字段
 
-| 字段               | 允许值 / 默认值            | 作用                    |
-| ------------------ | -------------------------- | ----------------------- | -------------------------------------- |
-| `schema`           | `comet.project.v1`         | 配置版本，由 Comet 管理 |
-| `default_workflow` | `native`                   | `classic`               | `/comet` 的默认入口                    |
-| `workflows`        | `native`、`classic` 或两者 | 本项目已启用的工作流    |
-| `ambient_resume`   | `true`（默认）             | `false`                 | 是否对自然语言续接请求运行只读恢复探测 |
+| 字段               | 允许值 / 默认值            | 作用                                   |
+| ------------------ | -------------------------- | -------------------------------------- |
+| `schema`           | `comet.project.v1`         | 配置版本，由 Comet 管理                |
+| `default_workflow` | `native` \| `classic`      | `/comet` 的默认入口                    |
+| `workflows`        | `native`、`classic` 或两者 | 本项目已启用的工作流                   |
+| `ambient_resume`   | `true`（默认）             | 是否对自然语言续接请求运行只读恢复探测 |
 
 `default_workflow` 只管入口，不会迁移已有 change。YAML 里增加 `native` 也不会安装 Skill；安装或更新请使用：
 
@@ -72,13 +72,13 @@ hook:
 
 ## Native 字段
 
-| 字段                          | 允许值 / 默认值             | 作用                                  |
-| ----------------------------- | --------------------------- | ------------------------------------- | ------------------------------------------------------ |
-| `native.artifact_root`        | 项目内相对路径；默认 `docs` | 用户文档放在 `<artifact-root>/comet/` |
-| `native.language`             | `en`                        | `zh-CN`；默认 `en`                    | 新 change 的 brief、Spec、报告语言                     |
-| `native.clarification_mode`   | `batch`                     | `sequential`；新项目默认 `batch`      | 一轮询问所有已具备前提的问题，或每轮询问一个最上游问题 |
-| `native.archive_confirmation` | `automatic`                 | `required`；默认 `automatic`          | 通过 Verify 后是否等待一次用户确认                     |
-| `native.max_verify_failures`  | 正整数；默认 `5`            | 同一实现需求允许的失败轮次上限        |
+| 字段                          | 允许值 / 默认值                              | 作用                                                   |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------ |
+| `native.artifact_root`        | 项目内相对路径；默认 `docs`                  | 用户文档放在 `<artifact-root>/comet/`                  |
+| `native.language`             | `en` \| `zh-CN`；默认 `en`                   | 新 change 的 brief、Spec、报告语言                     |
+| `native.clarification_mode`   | `batch` \| `sequential`；新项目默认 `batch`  | 一轮询问所有已具备前提的问题，或每轮询问一个最上游问题 |
+| `native.archive_confirmation` | `automatic` \| `required`；默认 `automatic`  | 通过 Verify 后是否等待一次用户确认                     |
+| `native.max_verify_failures`  | 正整数；默认 `5`                             | 同一实现需求允许的失败轮次上限                         |
 
 ### 修改产物根目录
 
@@ -104,6 +104,21 @@ native:
 ### 归档确认和失败上限
 
 `automatic` 在 Verify 通过后继续归档，`required` 会停下等待一次明确确认。`max_verify_failures` 只限制实现失败轮次；Runtime 执行错误和语义阻塞会以 `await-user`/`blocked` 返回，不会通过手改计数继续循环。
+
+### PR 收尾 provider
+
+仓库要求使用自有 PR 模板或校验脚本时，可以在 `.comet/config.yaml` 中为 Native 配置仓库命令 provider：
+
+```yaml
+native:
+  finish:
+    pull_request:
+      provider: repository-command
+      command: [pwsh, -NoProfile, -File, scripts/comet-create-pr.ps1]
+      timeout_ms: 120000
+```
+
+选择 Archive 的 `pull-request` 收尾后，Comet 仍负责提交、推送、观察已有 PR、核对 base/head/head SHA、幂等恢复和安全清理；仓库命令只负责标题、正文、模板及仓库特有的远端校验。命令的可执行文件必须是 PATH 中的裸名称或项目内相对路径；它在项目根目录执行，通过 stdin 接收 `comet.native.pull-request-finish-input.v1` JSON，并在 stdout 返回 `comet.native.pull-request-finish-result.v1` JSON。即使使用 `repository-command`，仍须安装并认证 GitHub CLI（`gh`），Comet 会用它独立核验远端状态。未配置时保持兼容的 `gh pr create --fill` 行为。
 
 ## 旧项目升级说明
 

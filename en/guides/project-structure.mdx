@@ -20,36 +20,11 @@ All recovery state lives in repository files, not chat history. After a device s
   sessions.
 </p>
 
-## Native workflow directories
-
-Native separates user-readable facts from device-local execution state. A change root keeps only the files users read, sync, and archive:
-
-The example below uses the default `native.artifact_root: docs`. If the project selects another project-relative root, replace the `docs/` prefix; the file responsibilities stay the same.
-
-```text
-docs/comet/
-├── changes/<name>/
-│   ├── brief.md
-│   ├── comet-state.yaml       # portable state for sessions and devices
-│   ├── specs/<capability>/spec.md
-│   └── verification.md        # user report rebuildable from YAML
-└── archive/<date>-<name>/     # archived changes keep the same readable artifacts
-```
-
-The project-level `.comet/` directory keeps configuration and the centralized Runtime:
-
-```text
-.comet/
-├── config.yaml
-├── current-change.json
-└── runtime/native/
-    ├── changes/<name>/state.json
-    ├── logs/
-    ├── locks/
-    └── transactions/
-```
-
-`comet-state.yaml` is Native's recovery boundary. `state.json`, logs, locks, and transactions are device-local execution data and cannot replace YAML. A new Native change does not create change-local Runtime, trajectory, checkpoint, receipt, or evidence files.
+<Note>
+  This page focuses on the Classic directory structure. Native keeps user-readable artifacts and
+  device-local execution state separately; see [Artifacts and state](/en/native/artifacts-and-state)
+  for its directory structure.
+</Note>
 
 ## Classic workflow directories
 
@@ -86,26 +61,32 @@ docs/
 
 Upgrading does not move an existing Classic project's root-level `openspec/`. To migrate from the legacy layout to `docs/openspec/`, see [Migrate Classic layout](/en/guides/classic-layout-migration).
 
-## Runtime artifacts inside a change
+### Runtime artifacts inside a change
 
 ```text
 docs/openspec/changes/<name>/.comet/
-├── run-state.json
-├── state-events.jsonl
-├── pending-action.json
-├── trajectory.jsonl
-├── context.md
-├── artifacts.json
-├── checkpoint.json
-├── handoff/
-└── subagent-progress.md
+├── run-state.json          # Engine Run state (machine-owned)
+├── state-events.jsonl      # Classic state-transition audit log (append-only)
+├── pending-action.json     # Current pending action
+├── trajectory.jsonl        # Append-only trajectory audit
+├── context.md              # Current Agent context
+├── artifacts.json          # Artifact mapping
+├── checkpoint.json          # Consistency checkpoint
+├── handoff/                # Handoff package generated during Design
+│   ├── design-context.json     # Default mode machine index
+│   ├── design-context.md       # Default mode readable summary
+│   ├── spec-context.json       # Beta compression mode
+│   ├── spec-context.md
+│   └── brainstorm-summary.md   # Brainstorming recovery checkpoint
+└── subagent-progress.md     # Subagent dispatch checkpoint
 ```
 
 Most files in this directory are machine-owned. Do not edit them manually unless a recovery guide specifically tells you to.
 
 <Tip>
-  <code>brainstorm-summary.md</code> and <code>subagent-progress.md</code> are recovery anchors.
-  Agents can reload them after context compaction.
+  <code>brainstorm-summary.md</code> and <code>subagent-progress.md</code> are <strong>recovery
+  anchors</strong>. After context compaction, an Agent reloads them to continue. You normally do not
+  need to read these files, but knowing where they live helps with troubleshooting.
 </Tip>
 
 ## Project-level .comet directory
@@ -139,34 +120,35 @@ Only directories for features you use will exist. A project that has never used 
 
 | Path                                                              | Responsibility                                                                                                | Who writes it                       |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `docs/comet/changes/<name>/comet-state.yaml`                      | Portable Native state: phase, Loop, acceptance, checks, blockers, and next action                             | Runtime; Agent follows continuation |
-| `docs/comet/changes/<name>/brief.md`, `specs/`, `verification.md` | Native user-readable requirements, target Specs, and verification report                                      | Agent and Runtime                   |
-| `.comet/runtime/native/`                                          | Native device-local execution state, logs, locks, and transactions                                            | Runtime                             |
-| `docs/openspec/changes/<name>/.comet.yaml`                        | User-readable workflow projection: phase, workflow, language, execution settings, verification result, run id | Agent and Comet scripts             |
-| `docs/openspec/changes/<name>/.comet/run-state.json`              | Engine Run details                                                                                            | Machine-owned                       |
-| `docs/openspec/changes/<name>/.comet/state-events.jsonl`          | Append-only phase transition audit                                                                            | Comet scripts                       |
+| `docs/openspec/changes/<name>/.comet.yaml`                        | Classic workflow state: phase, workflow, language, build decisions, verification result, and run-id link     | Agent and Comet scripts             |
+| `docs/openspec/changes/<name>/.comet/run-state.json`               | Engine Run details                                                                                            | Machine-owned                       |
+| `docs/openspec/changes/<name>/.comet/state-events.jsonl`            | Classic phase-transition audit with event, source, and effects                                              | Comet scripts                       |
 | `docs/openspec/changes/`                                          | Active and archived changes                                                                                   | OpenSpec + Comet                    |
-| `docs/openspec/specs/`                                            | Main specifications after archive                                                                             | OpenSpec                            |
+| `docs/openspec/specs/`                                            | Main specifications merged from deltas at archive                                                            | OpenSpec                            |
 | `docs/superpowers/specs/`                                         | Design Docs                                                                                                   | Superpowers + Comet                 |
 | `docs/superpowers/plans/`                                         | Implementation plans                                                                                          | Superpowers + Comet                 |
-| `.comet/config.yaml`                                              | Project-level settings; `native.*` and `classic.*` control their respective workflows                         | User                                |
-| `.comet/skill-preferences.yaml`                                   | Skill Creator preferences                                                                                     | User or `/comet-any`                |
-| `.comet/skills/`                                                  | Project Skill pool                                                                                            | `comet skill add`                   |
+| `.comet/config.yaml`                                              | Project-level Comet configuration; `native.*` and `classic.*` set workflow defaults                           | User                                |
+| `.comet/skill-preferences.yaml`                                   | `/comet-any` preferences (`advisory`/`strict`, `prefer`/`require`)                                          | User or `/comet-any`                |
+| `.comet/skills/`                                                  | Project Skill pool, with same-named built-in overrides                                                       | `comet skill add`                   |
 
 ## What to commit
 
-- **Commit**: Native `docs/comet/changes/` (including `brief.md`, Specs, `comet-state.yaml`, and `verification.md` once generated), the active Classic root (`docs/openspec/` for new projects or `openspec/` for retained legacy layouts), `docs/superpowers/`, `.comet/config.yaml`, and `.comet/skill-preferences.yaml`.
+- **Commit**: the Classic artifact root (`docs/openspec/` for new projects or `openspec/` for retained legacy layouts), `docs/superpowers/`, `.comet/config.yaml`, and `.comet/skill-preferences.yaml`. These are sources of truth and must be committed for cross-device recovery. See [Artifacts and state](/en/native/artifacts-and-state) for Native artifact commit guidance.
 - **Maybe commit**: `.comet/skills/`, `.comet/bundles/` if the team shares them.
 - **Usually ignore**: `.comet/tmp/` and temporary runtime files.
 
 <Note>
-  <code>.comet.yaml</code> is the user-readable projection. Full machine state lives in{' '}
-  <code>run-state.json</code>. Use <code>.comet.yaml</code> to understand progress and event logs to
-  investigate how it changed.
+  The boundary between <code>.comet.yaml</code> and <code>run-state.json</code> is important:
+  <code>.comet.yaml</code> stores the <strong>user-understandable workflow projection</strong> such as
+  <code>phase</code>, <code>build_mode</code>, and <code>verify_result</code>, and links to Engine through
+  <code>run_id</code>. Full Run details live in <code>run-state.json</code>. The append-only event log
+  explains successful state transitions; it is not the current state source. Read
+  <code>.comet.yaml</code> for current progress and the event log when you need to understand why it
+  changed.
 </Note>
 
 ## Next steps
 
 - [Resuming interrupted work](/en/guides/resuming-workflow)
 - [Broken state and recovery](/en/guides/state-recovery)
-- [State and configuration](/en/concepts/state-management)
+- [State management](/en/concepts/state-management)

@@ -37,12 +37,12 @@ Shared fields govern entry and recovery. `native.*` affects only Native and `cla
 
 ## Shared entry fields
 
-| Field              | Values / default             | Purpose                                |
-| ------------------ | ---------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
-| `schema`           | `comet.project.v1`           | Configuration version managed by Comet |
-| `default_workflow` | `native`                     | `classic`                              | Default `/comet` entry                                                          |
-| `workflows`        | `native`, `classic`, or both | Workflows enabled for this project     |
-| `ambient_resume`   | `true` (default)             | `false`                                | Whether natural-language continuation requests run the read-only recovery probe |
+| Field              | Values / default             | Purpose                                                                  |
+| ------------------ | ---------------------------- | ------------------------------------------------------------------------ |
+| `schema`           | `comet.project.v1`           | Configuration version managed by Comet                                   |
+| `default_workflow` | `native` \| `classic`        | Default `/comet` entry                                                   |
+| `workflows`        | `native`, `classic`, or both | Workflows enabled for this project                                      |
+| `ambient_resume`   | `true` (default)             | Whether natural-language continuation requests run the read-only probe |
 
 `default_workflow` controls entry only; it does not migrate existing changes. Adding `native` to YAML does not install the Skill. Install or refresh it with:
 
@@ -72,13 +72,13 @@ Notes:
 
 ## Native fields
 
-| Field                         | Values / default                      | Purpose                                                       |
-| ----------------------------- | ------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `native.artifact_root`        | Project-relative path; default `docs` | User documents under `<artifact-root>/comet/`                 |
-| `native.language`             | `en`                                  | `zh-CN`; default `en`                                         | Language for new change briefs, Specs, and reports                                    |
-| `native.clarification_mode`   | `batch`                               | `sequential`; new projects default to `batch`                 | Ask all currently answerable questions in a round, or one upstream question per round |
-| `native.archive_confirmation` | `automatic`                           | `required`; default `automatic`                               | Whether to wait for one explicit confirmation after Verify                            |
-| `native.max_verify_failures`  | Positive integer; default `5`         | Maximum implementation-failure iterations for one requirement |
+| Field                         | Values / default                              | Purpose                                                       |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------- |
+| `native.artifact_root`        | Project-relative path; default `docs`        | User documents under `<artifact-root>/comet/`                 |
+| `native.language`             | `en` \| `zh-CN`; default `en`                  | Language for new change briefs, Specs, and reports            |
+| `native.clarification_mode`   | `batch` \| `sequential`; new projects default to `batch` | Ask all currently answerable questions in a round, or one upstream question per round |
+| `native.archive_confirmation` | `automatic` \| `required`; default `automatic` | Whether to wait for one explicit confirmation after Verify    |
+| `native.max_verify_failures`  | Positive integer; default `5`                | Maximum implementation-failure iterations for one requirement |
 
 ### Change the artifact root
 
@@ -104,6 +104,21 @@ Both modes investigate discoverable facts and require confirmation of the comple
 ### Archive confirmation and failure cap
 
 `automatic` continues to Archive after Verify passes; `required` waits for one explicit confirmation. `max_verify_failures` limits implementation-failure iterations. Runtime execution errors and semantic blockers return `await-user` or `blocked` instead of being bypassed by editing counters.
+
+### Pull-request finish provider
+
+When a repository requires its own pull-request template or validation script, configure a repository command provider for Native in `.comet/config.yaml`:
+
+```yaml
+native:
+  finish:
+    pull_request:
+      provider: repository-command
+      command: [pwsh, -NoProfile, -File, scripts/comet-create-pr.ps1]
+      timeout_ms: 120000
+```
+
+After you choose the Archive `pull-request` finish path, Comet still owns the commit, push, existing-PR discovery, remote base/head/head-SHA checks, idempotent recovery, and safe worktree cleanup. The repository command owns only the title, body, template, and repository-specific remote validation. Its executable must be a bare name on `PATH` or a project-relative path. Comet runs it from the project root, sends `comet.native.pull-request-finish-input.v1` JSON on stdin, and expects `comet.native.pull-request-finish-result.v1` JSON on stdout. Even with `repository-command`, GitHub CLI (`gh`) must be installed and authenticated so Comet can verify remote state independently. Without this configuration, the compatible `gh pr create --fill` behavior remains.
 
 ## Upgrading an older project
 

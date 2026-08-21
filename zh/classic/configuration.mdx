@@ -1,0 +1,188 @@
+---
+title: 'Classic 配置'
+description: '理解 .comet/config.yaml 的共享入口字段、classic.* 各字段的含义、Classic 的配置优先级和环境变量，以及用户能配置什么、怎么配置。'
+---
+
+`.comet/config.yaml` 是项目级配置，全局一份。本页只讲 Classic 相关的部分：共享入口字段和 `classic.*` 默认值。`native.*` 字段的含义见 [Native 配置](/zh/native/configuration)。
+
+下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。实际位置由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
+
+## 完整示例
+
+同时启用两套工作流并选择中文时，项目级安装会生成类似配置（Classic 视角只关心共享字段和 `classic:` 块）：
+
+```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+
+classic:
+  artifact_layout: docs
+  language: zh-CN
+  context_compression: off
+  review_mode: standard
+  auto_transition: true
+```
+
+## 共享入口字段
+
+| 配置项             | 允许值                     | 含义                                                  |
+| ------------------ | -------------------------- | ----------------------------------------------------- |
+| `schema`           | `comet.project.v1`         | 当前结构化项目配置版本，由 Comet 管理                 |
+| `default_workflow` | `native` \| `classic`      | `/comet` 默认进入哪套永久 Skill                       |
+| `workflows`        | `native`、`classic` 或两者 | 项目已启用的工作流；必须包含默认工作流                |
+| `ambient_resume`   | `true` \| `false`          | 是否允许 Agent 对普通自然语言续接请求自动运行恢复探测 |
+| `hook.allow_paths` | 项目相对目录列表（默认空） | 受保护阶段允许 Agent 写入的项目相对目录；前缀匹配，受保护区域无法放行。详见 [Hook 写入放行](#hook-写入放行) |
+
+<Note>
+  修改 <code>default_workflow</code> 只改变 <code>/comet</code> 的入口，不迁移任何 change。
+</Note>
+
+### Hook 写入放行
+
+`hook.allow_paths` 是共享的写入放行策略：默认为空时，项目内（产物区之外）的写入按 Classic 自身的阶段与守卫规则判定；配置后，匹配目录及其子目录的写入会直接放行。典型用途是让实现代码目录（如 `src/`）在任意阶段都能修改，避免在非编码阶段触发拦截。
+
+```yaml
+hook:
+  allow_paths:
+    - src
+    - apps/web
+```
+
+`.comet`（Runtime 状态）、Classic 的 openspec 与 superpowers 产物根永远受保护，无法通过本配置放行。路径越界或格式错误会在 `comet doctor` 检查时报错。
+
+## Classic 字段
+
+`artifact_layout` 是项目级目录选择；其余四项会在创建新 Classic change 时快照到该 change 的 `.comet.yaml`：
+
+| 配置项                        | 允许值                            | 默认值                                                            | 含义                                                                                         |
+| ----------------------------- | --------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `classic.artifact_layout`     | `legacy` \| `docs`                | 默认为 `docs`；升级时检测到已有根目录 `openspec/` 才补为 `legacy` | 选择 OpenSpec 根目录：`openspec/` 或 `docs/openspec/`                                        |
+| `classic.language`            | `en` \| `zh-CN`                   | 由 `comet init` 选择的 Skill 语言映射；`--yes` 默认为 `en`        | 控制 OpenSpec、Superpowers、验证报告、归档说明等工作流产物的主语言                           |
+| `classic.context_compression` | `off` \| `beta`                   | `off`                                                             | 控制 design→build 交接时的上下文压缩。详见[上下文压缩机制](/zh/concepts/context-compression) |
+| `classic.review_mode`         | `off` \| `standard` \| `thorough` | `standard`（full workflow 默认）                                  | 控制代码审查强度。详见[代码审查机制](/zh/concepts/review-mode)                               |
+| `classic.auto_transition`     | `true` \| `false`                 | `true`                                                            | 阶段推进后是否自动调用下一个阶段 Skill。详见[自动推进机制](/zh/concepts/auto-transition)     |
+
+<Note>
+  Classic 项目默认值在创建新 change 时快照到 <code>.comet.yaml</code>；之后修改不会追溯改变已有 change。
+</Note>
+
+<Warning>
+  直接修改 <code>classic.artifact_layout</code> 只会改变 Comet
+  读取的目录，不会移动已有产物。已有项目切换布局时，应使用{' '}
+  <code>comet classic root move docs --dry-run</code> 检查当前状态、冲突和阻塞项，再用{' '}
+  <code>comet classic root move docs --apply</code> 执行迁移。
+</Warning>
+
+### 产物语言和 Skill 语言的区别
+
+`comet init` 里的“Skill 语言”会决定安装中文还是英文版 Comet Skill，Classic 的产物语言写入 `classic.language`：
+
+| init 选择                   | 安装的 Skill | `classic.language`   |
+| --------------------------- | ------------ | -------------------- |
+| `English` / `--language en` | 英文 Skill   | `en`                 |
+| `中文` / `--language zh`    | 中文 Skill   | `zh-CN`              |
+
+之后新建 Classic change 时，Comet 会把项目级 `classic.language` 快照到 `<classic-root>/changes/<name>/.comet.yaml`。OpenSpec proposal、design、tasks、Superpowers 设计/计划、验证报告和 archive 说明都会按这个配置输出，而不是按某次触发请求的语言临时判断。
+
+<Warning>
+  项目级和 change 级语言值只接受 <code>en</code> 或 <code>zh-CN</code>。<code>zh</code> 只用于{' '}
+  <code>comet init --language zh</code> 的 CLI 选择，不是 <code>.comet/config.yaml</code> 的合法值。
+</Warning>
+
+## 配置优先级
+
+以下优先级只描述 Classic 的 `language`、`context_compression`、`review_mode` 和 `auto_transition`：
+
+```text
+change 级 .comet.yaml 字段 > 环境变量 > 项目级 .comet/config.yaml > 全局 language 默认 > 内置默认值
+```
+
+| 层级                        | 说明                                                          | 设置方式                                                            |
+| --------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| change 级 `.comet.yaml`     | 最高优先级。change 创建时从项目配置快照，之后由 `/comet` 流转 | 由 `/comet` 阶段 Skill 写入                                         |
+| 环境变量                    | 仅在 change 级字段为空时生效，适合 CI/CD 临时覆盖             | `export COMET_AUTO_TRANSITION=true` / `export COMET_LANGUAGE=zh-CN` |
+| 项目级 `.comet/config.yaml` | change 级为空、环境变量也未设时的回退                         | 手写或 init 生成                                                    |
+| 全局 `~/.comet/config.yaml` | 只为 `language` 提供跨项目默认；项目配置优先                  | 全局 init/update 生成                                               |
+| 默认值                      | 最后回退                                                      | 见上表                                                              |
+
+## auto_transition 详解
+
+`auto_transition` 控制阶段推进后是否自动调用下一个 Skill。
+
+| 值             | 行为                                                                            |
+| -------------- | ------------------------------------------------------------------------------- |
+| `true`（默认） | guard 推进 `phase` 后，输出 `NEXT: auto`，自动调用下一个阶段 Skill              |
+| `false`        | guard 推进 `phase` 后，输出 `NEXT: manual`，打印 HINT，由你手动运行下一个 Skill |
+
+<Warning>
+  <strong>阶段推进一定发生</strong>——guard 的 <code>--apply</code> 总是更新 <code>phase</code>{' '}
+  字段，与 <code>auto_transition</code> 无关。<code>auto_transition</code> 只影响是否自动调用下一个
+  Skill。用户决策点（确认 proposal、选择执行方式等）无论 <code>auto_transition</code>{' '}
+  是什么都会阻塞。
+</Warning>
+
+环境变量覆盖（仅 change 级为空时生效）：
+
+```bash
+export COMET_AUTO_TRANSITION=true
+```
+
+## 环境变量
+
+| 环境变量                    | 用途                                            | 适用场景                             |
+| --------------------------- | ----------------------------------------------- | ------------------------------------ |
+| `COMET_LANGUAGE`            | 覆盖 language（change 级为空时生效）            | CI/CD 或临时指定新 change 的产物语言 |
+| `COMET_AUTO_TRANSITION`     | 覆盖 auto_transition（change 级为空时生效）     | CI/CD 或临时覆盖                     |
+| `COMET_CONTEXT_COMPRESSION` | 覆盖 context_compression（change 级为空时生效） | 临时测试压缩模式                     |
+| `COMET_REVIEW_MODE`         | 覆盖 review_mode 默认解析（resolver 层）        | 临时指定审查模式                     |
+| `COMET_FORCE_PHASE`         | `=1` 时允许直接 `set phase`（修复用逃逸口）     | 状态修复排障                         |
+| `COMET_OPENSPEC`            | 指定 openspec CLI 路径（默认 `openspec`）       | 自定义 OpenSpec 安装位置             |
+
+<Note>
+  <code>COMET_LANGUAGE</code>、<code>COMET_AUTO_TRANSITION</code>、<code>COMET_FORCE_PHASE</code>、
+  <code>COMET_OPENSPEC</code> 是用户可用的环境变量。<code>COMET_CONTEXT_COMPRESSION</code> 和{' '}
+  <code>COMET_REVIEW_MODE</code> 存在于解析层但未在用户文档中正式记录，主要用于内部和测试。
+</Note>
+
+## 怎么配置
+
+### 配置项目默认值
+
+编辑 `.comet/config.yaml`：
+
+```yaml
+schema: comet.project.v1
+default_workflow: classic
+workflows:
+  - native
+  - classic
+ambient_resume: true
+classic:
+  language: zh-CN
+  context_compression: beta
+  review_mode: thorough
+  auto_transition: true
+```
+
+提交到仓库，团队成员的新 change 会用这些默认值。
+
+### 临时覆盖（环境变量）
+
+```bash
+export COMET_LANGUAGE=zh-CN
+export COMET_AUTO_TRANSITION=false
+```
+
+影响当前会话，不改文件。
+
+## 下一步
+
+- [状态管理](/zh/concepts/state-management) — `.comet.yaml` 字段全表和状态机硬约束
+- [上下文压缩机制](/zh/concepts/context-compression) — context_compression 的 off/beta 模式详解
+- [代码审查机制](/zh/concepts/review-mode) — review_mode 的 off/standard/thorough 详解
+- [自动推进机制](/zh/concepts/auto-transition) — auto_transition 的行为详解
+- [项目文件结构](/zh/guides/project-structure) — 配置和产物分别放在哪里

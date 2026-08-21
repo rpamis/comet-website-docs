@@ -5,6 +5,46 @@ description: "Comet 发布记录。"
 
 本页默认展开当前版本，历史版本按版本逐个折叠。日常升级时先看最新版本的重点变化、破坏性调整和修复项；只有排查旧版本行为时才需要展开对应版本。
 
+<Update label="0.4.0-beta.19" description="2026-08-21" rss={{ title: "Comet 0.4.0-beta.19", description: "2026-08-21 发布记录" }}>
+Beta 19 将 Grok 纳入一等平台，新增按需代码审查入口 `/comet-review` 和仓库自有的 Native PR 收尾 provider，并修复了多个 Windows 与 Classic 流程问题。
+
+### Added（新增）
+
+- **Grok 平台支持**：`comet init`、`comet update`、`comet doctor` 和 `comet uninstall` 现在把 Grok 作为一等宿主。Skill、规则和 Hook Router 分别位于 `.grok/skills/`、`.grok/rules/` 和 `.grok/hooks/comet.json`；Router 识别 `--platform grok`，并匹配 Grok 原生的 `write` / `search_replace` 工具。
+- **仓库自有 Native PR finish provider**：项目可以选择用结构化仓库命令校验 PR 标题、正文、模板和仓库策略；Comet 仍保留提交、推送、远端 base/head/SHA 核对、已有 PR 复用、可恢复的失败状态和安全的 worktree 清理。配置方式见[Native 配置 · PR 收尾 provider](/zh/native/configuration)。
+- **CodeBuddy 规则支持**：Comet 现在会安装并刷新 CodeBuddy `.codebuddy/rules/` 目录下的 Markdown 工作流规则。
+- **按需代码审查**：新增 `/comet-review` Skill，对照实现 diff 和已有证据审查当前 Native 或 Classic change，按优先级报告正确性、安全、边界和覆盖问题；保持只读，不推进工作流，也不替代 Verify。详见[Skill 的类型与用途](/zh/concepts/skills)。
+- **Fork PR 引导**：首次从 fork 发起 PR 的贡献者现在会通过可信 workflow 收到仓库引导评论。
+- **PR 模板校验**：PR 缺少必需的模板段落或条目、或清单项未完成勾选时，现在会收到可执行的评论和一个失败的检查。
+- **Issue 分诊标签**：新 issue 会自动标记为待分诊，并根据结构化 issue 表单的选择分配仓库区域标签。
+
+### Changed（变更）
+
+- **Hook 写入放行文档**：网站现在说明了如何为受保护的工作流阶段配置项目相对的 `hook.allow_paths` 目录。
+- **Native 子计划**：新的 Supervisor Change 子计划保留可读的父验收索引，Runtime 验证仍持有完整的 brief 与 Spec 验收矩阵；历史子计划文件保持兼容。
+- **Dashboard 产物预览**：全屏预览现在支持 Escape 关闭，长表格保持水平滚动，表头保持可读，目录导航使用更大的缩放比例。
+- **Native 需求来源**：以文件或链接提供的需求来源现在在 Native brief 中保留完整的覆盖图，把每条活跃的可执行需求同时映射到目标 Spec 和验收标准；不完整或不可用的来源继续阻塞，等待澄清。
+- **Native 验证决策**：Native 的 await-user continuation 现在允许用户接受当前结果、修订实现，或修订需求与验收标准，同时使旧目标周期的归档授权失效。
+- **PR 标题 scope**：约定式 PR 标题现在支持 Native、Classic、Hook、Dashboard、Platform、Workflow、Eval 等仓库区域，包括 `feat(native): ...` 这类标题。
+- **Ambient Resume 非 Comet Skill 豁免**：`AGENTS.md` 和 `CLAUDE.md` 中托管的 Ambient Resume 说明现在豁免显式调用的非 Comet Skill 和斜杠命令，无关的插件或工具安装任务不再以 `comet resume-probe` 调用开头。已有项目通过 `comet update` 获得修订后的说明块。
+
+### Fixed（修复）
+
+- **Windows 初始化可靠性**：`comet init` 不再在 exFAT/FAT32 等无稳定文件标识的文件系统（如可移动盘和网络盘）上以 "Contained atomic write temporary file changed before commit" 中断 OpenSpec 和 Skills 安装。提交时的完整性检查原来把临时文件与写前快照比较，使 comet 自己的写入看起来像篡改；现在改为与写后快照比较，符号链接和目录位移检测保持不变。
+- **Classic design handoff 刷新**：OpenSpec 产物变更后运行 `comet handoff <change> design --write` 不再报过期 handoff 错误，design guard 可以通过，Classic 完整流程可以从 Design 推进到 Build。刷新时即使手工对齐的 hash 本会短路成功，也会重写过期的上下文文件；OpenSpec delta spec 新增、变更或删除时会重新生成上下文包；guard 已推进到 build 阶段后刷新仍然可用。
+- **Classic Ambient Resume**：`comet init` 和 `comet update` 现在在 `ambient_resume` 开启时为 Classic-only 项目保留托管的 Ambient Resume 说明，重跑这些命令不再把它从 `AGENTS.md` 或 `CLAUDE.md` 中移除。
+- **Classic 工作区命令上下文**：`comet classic workspace prepare` 和 `comet classic workspace resolve` 不再对所有隔离模式（`current`、`branch`、`worktree`）都报 "Classic command project context is unavailable"，修复了 Classic Open 流程的工作区准备步骤。
+- **Native Archive**：Archive 暂存工作区产物时现在遵守 Git ignore 规则；有效的可移植验证报告不再被当作不完整的迁移。
+- **Windows Eval 打包**：打包不再在应用包边界前遍历被忽略的 pytest 和 Eval 运行时产物，陈旧的 Windows 测试目录不会再让 `pnpm pack` 以 `EPERM` 失败。
+- **Windows Eval 隔离**：重复运行 `comet eval` 不再把生成的 `.comet` 缓存、运行产物或框架自身的 Runtime 状态复制进 Skill 工作区，避免 Windows 上的嵌套缓存和深路径 `MAX_PATH` 失败。
+- **Monorepo Dashboard 工作区**：从持有 `.comet/config.yaml` 的 monorepo 子目录启动 `comet dashboard` 时，现在以该子目录为工作区根，并把兄弟 Git worktree 映射到同一子目录；Comet 项目根不是 worktree 根时，change 列表不再为空。
+- **Ambient Resume 流程内回复**：按已安装 Ambient Resume 说明行事的 Agent，在用户以简短选项回复流程内问题后，不再卡住正在运行的 Comet change。托管说明块现在豁免对 Comet 流程内提问的回复，并澄清 `out_of_scope` 结果只会阻止进入 workflow，绝不会中断已在进行的流程。
+- **Windows stdin 和文件 JSON 解析**：Runtime 命令现在在解析 JSON 前剥离开头的 UTF-8 BOM，来自 Windows PowerShell 5.1 重定向或 `Out-File`（默认输出带 BOM 的 UTF-8）的帧 JSON 不再让 `comet-intent.mjs route --stdin` 报 "Invalid JSON"。同样的容忍覆盖 `comet-resume-probe.mjs --stdin`、`comet-hook-guard.mjs` 和 Hook Router 中的 Hook 载荷解析，以及从 stdin 或 `--entries` 文件读取的 Native `evidence format` 条目。
+- **Classic record-check 步骤同步**：Agent 在 Build 期间勾选 tasks.md 最后一条后，`comet state record-check` 不再报 "Classic Run step mismatch"。勾选任务会在不运行状态命令的情况下推进证据推导的 Run 步骤，合法地把已记录步骤留在后面；record-check 现在会在记录检查前重新同步 Run 投影（打印 `[RECONCILED] currentStep ... -> ...` 行并追加轨迹转换），而不是阻塞 Build 证据。真正的损坏——skill 身份、快照或迁移标记不匹配——仍然会硬失败。
+- **Classic Build 计划卸载**：Build Step 1 的计划编写子代理不再频繁退化回主会话（#345）。派发提示现在告诉子代理跳过交互式 skill 步骤（如 `writing-plans` 的 Execution Handoff 提问），完整计划路径由主会话在派发前固定，子代理必须以一行 `PLAN_PATH:` 结束回复，供协调者优先读取。没有 Skill 工具的子代理会以 `SKILL_UNAVAILABLE` 快速失败而不是空转；计划范围限定为 tasks.md；同一会话内派发失败后，后续 Step 1 条目会直接转入 inline。
+
+</Update>
+
 <Update label="0.4.0-beta.18" description="2026-08-13" rss={{ title: "Comet 0.4.0-beta.18", description: "2026-08-13 发布记录" }}>
 Beta 18 将 Eval 扩展为可以直接评估任意本地 Skill 的独立入口，同时加入 Native 大型需求编排和跨 worktree 的变更查看能力。
 
