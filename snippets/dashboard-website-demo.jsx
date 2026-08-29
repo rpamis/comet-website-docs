@@ -36,9 +36,9 @@ export const DashboardWebsiteDemo = () => {
 
     let cancelled = false;
     let unmountDashboard;
-    const scriptUrl = '/assets/dashboard-website-demo/dashboard-website-demo.js?v=rc1-website-9';
+    const scriptUrl = '/assets/dashboard-website-demo/dashboard-website-demo.js?v=rc1-website-10';
     const stylesheetUrl =
-      '/assets/dashboard-website-demo/dashboard-website-demo.css?v=rc1-website-9';
+      '/assets/dashboard-website-demo/dashboard-website-demo.css?v=rc1-website-10';
 
     const loadDashboardBundle = () => {
       if (globalThis.CometDashboardWebsiteDemo) {
