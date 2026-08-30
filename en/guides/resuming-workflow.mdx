@@ -1,201 +1,194 @@
 ---
-title: "Resume interrupted work"
-description: "After a session interruption, context compression, or device switch, use /comet to resume interrupted Classic work."
+title: "Resuming Interrupted Work"
+description: "After a session interruption, context compression, or device change, resume the interrupted Classic operation using /comet."
 ---
 
-If a session ends, context is compressed, or you switch devices, enter `/comet` again to resume. Comet reads the project-root configuration, enters `/comet-native` or `/comet-classic`, and lets that workflow continue from its own disk-backed state. Neither side scans, guesses, or converts changes from the other.
+After a session is interrupted, the context is compressed, or the device is changed, simply re-enter `/comet` to restore it. Comet first reads the project root configuration, enters `/comet-native` or `/comet-classic`, and then continues from its own disk state by the corresponding workflow. Neither side will scan, guess or convert the change on the other side.
 
-## Short path
+## The shortest path
 
-Type this in your agent platform:
+Enter: In the Agent platform
 
 ```text
-/comet continue
+/comet continues
 ```
 
-Comet does not depend on conversation history. Classic rereads the project configuration, OpenSpec, `.comet.yaml`, and runtime evidence.
+Comet does not rely on dialogue history: Classic re-read project configuration, OpenSpec, `.comet.yaml`, and runtime evidence.
 
 <Tip>
   <strong>
-    You do not need to run <code>comet status</code> or{" "}
-    <code>comet doctor</code> before recovery.
-  </strong>{" "}
-  Those are diagnostic commands for when something <strong>looks wrong</strong>,
-  such as broken CLI or Skill installation, incorrect change routing, or
-  inconsistent evidence. Normal recovery is one step: <code>/comet</code>.
+Recovery does not require running <code>comet status</code> or <code>comet doctor</code> first.
+  </strong>
+Those two are diagnostic commands and are only used when <strong> appears to have a problem with </strong> (CLI/Skill)
+The installation is broken, the change does not route, and the evidence does not match. Recovery is <code>/comet</code>{" "} normally
+One step to perfection.
 </Tip>
 
-## You can also say “continue”
+## You can also directly say "continue".
 
-Starting in 0.4.0-beta.4, `comet init` and `comet update` merge Comet recovery instructions into `AGENTS.md` and `CLAUDE.md`. After context compaction or a cross-session or cross-device continuation, the agent may no longer know that the request belongs to Comet while the user has not invoked `/comet` again. The agent can run read-only `comet resume-probe` to decide whether “continue the login refactor” matches an existing change before re-entering the workflow.
+Starting from 0.4.0-beta.4, `comet init` and `comet update` will incorporate a Comet recovery description into the project's `AGENTS.md` and `CLAUDE.md`. When a long-term task is compressed in context, continues across sessions or devices, the Agent may have forgotten that the current request originally belonged to Comet, and the user has not re-entered `/comet`. At this point, the Agent can first run the read-only `comet resume-probe` to determine whether "continue the previous login refactoring" corresponds to the existing change, and then decide whether to re-enter the workflow.
 
-| Situation                                                                  | Probe result                                                             |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| The default workflow has one clear target whose state allows recovery      | Returns `auto_resume` and enters the corresponding permanent entry point |
-| Multiple candidates, damaged state, or a required user choice              | Returns `ask_user` and asks one question                                 |
-| An informational request, explicit opt-out, or a turn already inside Comet | Returns `out_of_scope` and does not enter the workflow again             |
-| No active Comet change                                                     | Returns `none` and does not resume                                       |
+|Scene|Detection results|
+| --------------------------------------------------- | ---------------------------------------- |
+|By default, the workflow has only one clear target, and the state allows for recovery|Return to `auto_resume` and enter the corresponding permanent entrance|
+|There are multiple candidates, statuses are corrupted, or users need to select|Return `ask_user` and ask only one question|
+|Just asking questions, clearly not going through Comet, or currently within the Comet process|Return `out_of_scope` without re-entering the workflow|
+|There is no active Comet Change|Return `none` and do not perform the recovery|
 
-The managed instructions apply only to Comet's recovery probe and preserve existing user-authored rules in the file. The probe parses configuration first and then inspects only one workflow; malformed configuration does not fall back. Set `ambient_resume: false` in `.comet/config.yaml` to disable probing for ordinary requests. This does not affect explicit `/comet` calls or bypass existing decision points.
+This description only restricts Comet's recovery detection and will retain the existing user rules in the file. The probe first parses the configuration and then only checks one set of workflows. It will not roll back when the configuration is damaged. The `ambient_resume: false` in `.comet/config.yaml` can turn off probes triggered by ordinary requests. It will not affect the explicit `/comet`, nor will it bypass existing decision points.
 
-See [Resume probe](/en/cli/resume-probe).
+For details, please refer to the [Restore Detection Command ](/en/cli/resume-probe)
 
-## How Classic resumes
-
-<Note>
-  This section is also <strong>background mechanics</strong>: it explains which
-  files <code>/comet-classic</code> re-reads internally and the rules it uses to
-  route to the next phase. You only need to type <code>/comet continue</code> —
-  the routing below is handled automatically by Comet.
-</Note>
-
-`/comet-classic` can recover through a few mechanisms:
-
-| Mechanism                                             | Description                                                                                                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Reread file state instead of conversation history** | Every recovery discovers active changes and reads `.comet.yaml` again instead of guessing the phase from chat history                                                          |
-| **File state wins and metadata self-heals**           | If `.comet.yaml` conflicts with actual files, Comet uses file facts, repairs `.comet.yaml`, and continues                                                                      |
-| **Deterministic phase routing**                       | Fields such as `phase`, `workflow`, and `verify_result` route to the corresponding phase Skill, including `hotfix` → `/comet-hotfix` and `tweak` → `/comet-tweak` during Build |
-
-Recovery uses the first matching route, with file state as the source of truth:
-
-| Current state                                    | `/comet-classic` routes to                                                                           |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `archived: true`                                 | The workflow is complete                                                                             |
-| `verify_result: pass`                            | `/comet-archive` after pre-archive confirmation                                                      |
-| `verify_result: fail`                            | Verification-failure decision point, waiting for a choice between repair and accepting the deviation |
-| `phase: verify` or every task checked            | `/comet-verify`                                                                                      |
-| `phase: build`                                   | `/comet-hotfix`, `/comet-tweak`, or `/comet-build` according to `workflow`                           |
-| `phase: design` or a change without a Design Doc | `/comet-design`                                                                                      |
-| `phase: open` or missing `.comet.yaml`           | `/comet-open`                                                                                        |
-| No active change                                 | `/comet-open`                                                                                        |
-
-With exactly **one** active Classic change, `/comet-classic` selects it automatically. With **multiple**, it presents a list and asks you to choose.
-
-Natural-language recovery never guesses among multiple active changes. The recovery probe returns `ask_user` until you name the target.
-
-### Classic change workspace reuse
-
-When creating or resuming a Classic change, Comet first reads the branch and worktree binding recorded for that change. It reuses a matching registered worktree; if the branch still exists but the worktree is missing, recovery recreates it. If the current directory, branch, or worktree does not match, Comet pauses for a choice instead of silently using another workspace.
-
-From the target project directory, enter `/comet` or `/comet continue`. If several Classic changes are active, select the target first and then let Classic continue; do not copy change directories by hand to “recover” work.
-
-## Resume across devices and platforms
-
-Portable Classic recovery uses repository files: `.comet/config.yaml`, the OpenSpec artifact root (`docs/openspec/` for new projects), the change's `.comet.yaml` and runtime evidence, and `docs/superpowers/`. Open the same repository on another device or agent platform and `/comet` can recover from the corresponding files. For Native change recovery across devices, see [Recovery and troubleshooting](/en/native/recovery-playbook).
+## How to restore Classic
 
 <Note>
-  Uncommitted worktree changes do not travel with <code>git push</code>. Commit
-  and push before switching devices, or the new device will recover from a clean
-  worktree. Checked tasks in <code>tasks.md</code> still persist when committed.
+  This section also explains the <strong>background mechanism</strong>: which files <code>/comet-classic</code>{" "}
+  rereads and which rules it uses to route to the next phase. You only need to enter{" "}
+  <code>/comet continue</code>; Comet completes the routing below automatically.
 </Note>
 
-### Cross-device recovery walkthrough
+The recovery ability of `/comet-classic` depends on several mechanisms:
 
-The image below shows a real cross-device recovery. As long as the repository is the same, `/comet` reconstructs the checkpoint from file state and continues on any device or platform, without additional context transfer.
+|Mechanism|Explanation|
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+|Re-read the file status without relying on conversations|Each time it is restored, it re-executes the discovery of active change + reads `.comet.yaml`, not relying on the chat history to guess the stage|
+|"File status priority, self-healing metadata.|If there is a conflict between `.comet.yaml` and the actual file, the file shall prevail. Comet will automatically correct `.comet.yaml` before continuing|
+|"Deterministic routing by stage.|Based on fields such as `phase`/`workflow`/`verify_result`, route to the corresponding stage Skill (including presets: build stage hotfix→`/comet-hotfix`, tweak→`/comet-tweak`)|
 
-<img
-  src="/img/comet-zero-resume.png"
-  alt="Zero-context Comet recovery across devices"
-/>
+Routing during recovery (stops upon hit, subject to file status) :
 
-## After context compression
+|Current status|`/comet-classic` is routed to|
+| ----------------------------------------- | -------------------------------------------------------------- |
+| `archived: true`                          |The process has been completed.|
+| `verify_result: pass`                     |`/comet-archive` (Confirm before filing first)|
+| `verify_result: fail`                     |Verify the failure decision blocking point (you can choose to fix or accept the bias)|
+|Check all of `phase: verify` or tasks| `/comet-verify`                                                |
+| `phase: build`                            |According to workflow: `/comet-hotfix`/`/comet-tweak`/`/comet-build`|
+|`phase: design` may have change but no Design Doc| `/comet-design`                                                |
+|`phase: open` or `.comet.yaml` is missing| `/comet-open`                                                  |
+|No active change| `/comet-open`                                                  |
 
-If the agent platform compresses earlier conversation for a Classic change, enter `/comet` again. Project configuration selects Classic again, and the internal `/comet-classic` entry reloads state through the context-compression recovery protocol. It reads `brainstorm-summary.md`, the handoff package, and `.comet/subagent-progress.md` when needed. You do not manage these files manually.
+As long as there is ** one ** active Classic change, `/comet-classic` will automatically select it; When there are multiple options, make a list for you to choose one.
 
-## Resume from a specific phase entry point
+If restored through natural language, multiple active changes will not be automatically guessed; The recovery detection will return `ask_user`, waiting for you to name the target.
 
-Normal Classic recovery uses `/comet`. Phase and preset entry points are for manual control or debugging: `/comet-open`, `/comet-design`, `/comet-build`, `/comet-verify`, `/comet-archive`, `/comet-hotfix`, and `/comet-tweak`.
+### Workspace reuse of Classic Change
 
-This is a deterministic guarantee of the progressive loading introduced in 0.4.0-beta.1. Every Classic sub-Skill first uses `comet/reference/scripts.md` to locate scripts, then runs its own **entry or recovery check** instead of inferring a phase from conversation history.
+When creating or restoring a Classic change, Comet first reads the branch and worktree binding of the change record. The matched registered worktree will be directly reused. When a matching worktree cannot be found but the branch still exists, the recovery process will rebuild it. When the current directory, branch, and worktree do not match, Comet will pause and wait for selection instead of silently switching to another workspace.
+
+You just need to enter `/comet` or `/comet continues` from the target project directory. If there are multiple active changes,    select the target first and then let the Classic continue. Do not manually copy the "change" directory to "restore"  the   work.
+
+## It can also be restored by changing the device or platform
+
+The Classic states that can be recovered across devices are saved in the repository files: `.comet/config.yaml`, OpenSpec product roots (new items are `docs/openspec/`), change's `.comet.yaml` and running evidence, `docs/superpowers/`. So when the same repository is opened on another device or another Agent platform, `/comet` can recover from the corresponding file. The cross-device recovery of Native change can be found in the recovery manual ](/en/native/recovery-playbook).
+
+<Note>
+The only point to note: Uncommitted workspace changes will not follow <code>git push</code>{" "}
+Let's go Before crossing devices, push the change commit forward first; otherwise, the new device will show a clean workspace restoration.
+The checkmark status of <code>tasks.md</code> is still valid.
+</Note>
+
+### Cross-device 0-context breakpoint recovery of the scene
+
+The following figure shows cross-device breakpoint recovery: As long as the repositories are consistent, regardless of which device or platform it is, `/comet` can rebuild the breakpoint from the file state and continue without any additional operations or context passing.
+
+<img src="/img/comet-zero-resume.png" alt="Cross-device 0-context breakpoint recovery of the scene" />
+
+## What should be done after context compression
+
+If the Agent platform where Classic change is located automatically compresses the context, re-enter `/comet`. The project configuration will re-enter Classic, and the internal `/comet-classic` will be restored to the overloaded state according to the protocol. Read the `brainstorm-summary.md`, handoff handover packet and `.comet/subagent-progress.md` when necessary. You don't need to operate these files manually.
+
+## Recover from any stage entry
+
+Classic resumes normal use of `/comet`. The stage and preset entry points are only for manual control or debugging: `/comet-open`, `/comet-design`, `/comet-build`, `/comet-verify`, `/comet-archive`, `/comet-hotfix`, `/comet-tweak`.
+
+This is the deterministic guarantee brought by the progressive loading of 0.4.0-beta.1: when each sub-skill enters, it will first locate the script through `comet/reference/scripts.md`, and then run the ** entry check or recovery check ** of its own stage. The stage is subject to the current file status.
 
 ```bash
 comet state check <change-name> <phase> --recover
 ```
 
-- If the check finds that the actual phase, workflow, or evidence belongs to **another** Skill, follow the script output and `/comet-classic` routing rules. **Do not keep writing state from the wrong phase.**
-- If the worktree has uncommitted changes, attribute them using the rules in `comet/reference/dirty-worktree.md` first.
+- If the inspection reveals that the actual phase, workflow or evidence belongs to ** another ** Skill, switch according to the script output and `/comet-classic` routing rules, ** do not continue writing the state in the wrong phase **.
+- If there are any uncommitted changes to the working tree, first attribute them using the rule of `comet/reference/dirty-worktree.md`.
 
 ```mermaid
 flowchart TD
-    A["Enter /comet-build or another phase directly"] --> B["Locate scripts through scripts.md"]
-    B --> C["Run the phase entry/recovery check --recover"]
-    C --> D{"Does the actual phase match?"}
-    D -->|yes| E["Continue in the current phase"]
-    D -->|no| F["Switch to the correct Skill from script output"]
-    F --> G["Do not write state in the wrong phase"]
+    A["Directly adjust /comet-build and any other entry points"] --> B["Location script scripts.md"]
+    B --> C["Run this stage entry/recovery check --recover"]
+    C --> D{"Actual stage matching?"}
+    D -->|is| E["Continue at the current stage"]
+    D -->|no| F["Switch to the correct Skill according to the script output"]
+    F --> G["Do not write the status at the wrong stage"]
 ```
 
 <Tip>
-  When you <strong>know the current Classic phase</strong>, this rule lets you
-  skip the routing overhead of <code>/comet-classic</code> and work directly. If
-  you remember incorrectly, the entry check stops the mismatch before it damages
-  state.
+This rule enables you to skip the unified entry and Classic when <strong> already knows which stage </strong> you are in
+Internal routing
+Directly enter the corresponding stage, and at the same time ensure that even if the stage is remembered wrongly, the status will not be disrupted: The entry check will block the entry of mismatched entries.
 </Tip>
 
-## Special cases when resuming Build
+## Special circumstances for recovery during the build phase
 
-Classic Build has the most complex recovery cases, but `/comet-classic` handles most of them automatically:
+The recovery during the build phase is the most complex, but in most cases, `/comet-classic` can also handle it automatically
 
-| Situation                                                                     | Behavior                                                                                                               |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `build_pause: plan-ready` with `isolation` and `build_mode` already set       | Clears the stale pause automatically and continues                                                                     |
-| `build_pause: plan-ready` with a plan but without `isolation` or `build_mode` | Returns to the plan-ready checkpoint and asks you to choose isolation and execution mode without regenerating the plan |
-| `build_pause: plan-ready` but the plan file is missing                        | Treats state as damaged and returns to `/comet-build` to repair or regenerate the plan                                 |
-| `isolation`, `build_mode`, or `tdd_mode` is unset                             | Returns to the corresponding `/comet-build` step and asks you to choose                                                |
-| All choices are set and tasks remain                                          | Reads the next unchecked task from `tasks.md` and continues                                                            |
+|"Situation|"Behavior"|
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+|`build_pause: plan-ready`, but `isolation`/`build_mode` have already been set|** Automatically clear ** stale pause and continue execution (no action required)|
+|`build_pause: plan-ready` and plan exist, but `isolation`/`build_mode` are not set|Return to the Plan-Ready recovery point, ** Let you select ** isolation and execution mode (without regenerating the plan)|
+|`build_pause: plan-ready` but the plan file is missing|The status is damaged. Return to `/comet-build` for repair or regenerate the plan|
+|`isolation`/`build_mode`/`tdd_mode` is not set|Reply to the corresponding steps of `/comet-build` ** to allow you to make additional selections **|
+|All have been set, but there are still unfinished tasks|Read tasks.md to continue the execution of the next unselected task|
 
-In `build_mode: subagent-driven-development`, the main session does not execute tasks directly after recovery. It returns to the background-subagent dispatch protocol and acts only as coordinator.
+When the subagent mode (`build_mode: subagent-driven-development`) is restored, the main session will not directly execute the task. Instead, it will return to the backend sub-agent scheduling rules, where the main session only performs coordination.
 
-## When the worktree has uncommitted changes
+## When there are unsubmitted changes
 
-Comet attributes uncommitted changes automatically; you do not need to explain them in advance:
+If there are uncommitted changes in the workspace, Comet will automatically make ** attribution ** without you having to explain what has been changed first:
 
-- Changes belonging to the current change are folded in and work continues.
-- Unrelated changes pause the workflow and ask whether to include them, create another change, preserve them separately, or discard them.
-- If origin is uncertain, Comet pauses and reports the file list and reasoning.
+- The changes belong to the current change → Fold in and continue
+- Unrelated to the current change → Pause asked how to handle (merge/split new change/retain/discard)
+- Source uncertain → Suspend the list of reporting documents and the basis for judgment
 
-Ignored build artifacts such as `node_modules/` and `dist/` are excluded and are not treated as user changes.
+The built products (such as `node_modules/`, `dist/`, etc., `.gitignore`) will be automatically excluded and modified by improper users.
 
 <Warning>
-  A dirty worktree represents code facts only. It does{" "}
-  <strong>not automatically advance</strong> the <code>phase</code> in{" "}
-  <code>.comet.yaml</code> or check tasks in <code>tasks.md</code>. State
-  advances only after attribution, verification, and the phase checks pass.
+dirty worktree only represents code facts. <strong> will not automatically advance </strong>{" "}
+<code>.com et. <code>tasks to yaml</code> <code>phase</code> or checked. Md</code>
+Only after completing attribution, verification, and passing the stage guard will the status be advanced.
 </Warning>
 
-## When you must intervene
+## The situation where your intervention is truly necessary
 
-`/comet-classic` automatically handles unambiguous transitions, but **decision points** require an explicit user choice. Common recovery cases include:
+`/comet-classic` can automatically promote unambiguous connections, but the ** decision point ** must be clearly chosen by you. Common situations that require your intervention during recovery:
 
-- **Verification failed** (`verify_result: fail`): you decide whether to repair or accept the deviation.
-- **A genuine plan-ready pause**: you choose isolation and execution mode.
-- **Missing Build decisions**: you choose `isolation`, `build_mode`, or `tdd_mode`.
-- **Unattributable uncommitted changes**: you explain where the changes belong.
-- **Multiple active changes**: you select the target to recover.
+- ** Verification Failed ** (`verify_result: fail`) : You need to decide whether to fix it or accept the deviation
+- ** True plan-ready pause ** : You need to select the isolation and execution methods
+- ** Missing build decision ** : You need to make up the selection of `isolation`/`build_mode`/`tdd_mode`
+- ** Unattributed unsubmitted changes ** : You need to specify the attribution of the changes
+- ** Multiple active changes ** : You need to choose which one to restore
 
-Other phase-specific pauses are described in [Five-phase decision points](/en/concepts/decision-points). Outside these cases, `/comet-classic` continues on its own.
+The rest are the inherent pause points of each stage (see [Five-stage pause points ](/en/concepts/decision-points)). Beyond these, `/comet-classic` will automatically advance.
 
-## When to use comet status or comet doctor
+## When should comet status/comet doctor be used
 
-These are **diagnostic tools**, not mandatory recovery steps:
+These two are diagnostic tools, not essential steps for recovery:
 
-| Command        | When to use it                                                                                                                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `comet status` | You want to inspect the current phase and whether declared artifacts still exist, especially when `/comet-classic` routes incorrectly or evidence does not match |
-| `comet doctor` | Installation or environment is broken, such as a missing CLI or Skill, invalid `.comet.yaml`, or `/comet-classic` failing to start                               |
+|Command|When to use it|
+| -------------- | ----------------------------------------------------------------------------------- |
+| `comet status` |When the route of `/comet-classic` is incorrect or the evidence does not match, want to see "at which stage am I? Are all the declared products still there?|
+| `comet doctor` |Environment or installation issues: CLI/Skill missing, `.comet.yaml` format broken, `/comet-classic` fails to start|
 
 ```bash
-comet status        # Inspect active changes, phase, tasks, and runtime_eval
+comet status        # Look at the phase/ task /runtime_eval of the active change
 comet doctor        # Diagnose installation, environment, and Skill integrity
 ```
 
-`runtime_eval` reports whether declared step evidence actually exists on disk. On failure, it prompts you to `run <command> or restore missing evidence`.
+`runtime_eval` will tell you whether the evidence of the declared steps is really on the disk. When it fails,    `run < command > or restore missing evidence` will be prompted.
 
-## Next steps
+## Next step
 
-- [Resume probe](/en/cli/resume-probe) — Understand the read-only check before natural-language recovery
-- [Broken state and recovery](/en/guides/state-recovery) — Troubleshoot incorrect routing or damaged state
-- [Project file structure](/en/guides/project-structure) — See where workflow state is stored
-- [Automatic progression](/en/concepts/auto-transition) — Understand transitions after recovery
-- [Five-phase decision points](/en/concepts/decision-points) — See where user input is required
+- [Restore probe command ](/en/cli/resume-probe) - Learn about read-only probes before natural language restoration
+- [Status Damage and Recovery ](/en/guides/state-recovery) - `/comet-classic` What should I do if the route is incorrect or the status is bad
+- The project file structure ](/en/guides/project-structure) - in which files does the status exist
+- Automatic propulsion mechanism ](/en/concepts/auto-transition) - Automatic connection after recovery
+- Five-stage pause points and user selection points ](/en/concepts/decision-points) - Where your intervention is needed

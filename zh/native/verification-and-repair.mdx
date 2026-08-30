@@ -1,54 +1,130 @@
 ---
-title: '验证与修复'
-description: '理解 Native 如何由 Runtime 执行必要检查、分派独立 Verifier，并在失败时通过有界 Loop 修复。'
+title: "验证与修复"
+description: "了解 Native 如何审查候选结果、执行必要检查、逐项验收需求，并把未通过项送回下一轮修复。"
 ---
 
-Native 不要求固定的 TDD 或审查方法，但不接受“我做完了”作为验收结果。**Builder 负责实现，Runtime 负责执行检查，新的只读 Verifier 负责逐项判断，Runtime 负责决定是否完成。**
+Verify 要回答的不是“Builder 有没有写完代码”，而是“当前实现是否满足已经确认的需求”。
 
-## Verify 的实际顺序
+Comet RC1 使用三层验证建立结论：新的只读 Reviewer Subagent 先审查候选实现，Runtime 再执行必要检查，最后由新的只读 Verifier Subagent 对照 `brief.md`、Specs 和验收项逐项判断。Builder 不能用自己的总结宣布完成，Verifier 也不能绕过 Runtime 直接修改代码。
 
-1. Builder 提交 handoff：说明已完成的实现、相关 brief/Spec 和准备交给验收的候选。
-2. Runtime 解析当前完整验收列表，解析必要检查计划，并在短状态更新中登记本次 attempt。
-3. Runtime 执行必要检查；同一候选下已完成且匹配的检查直接复用，不重复跑。命令输出流入本机日志，报告只保留安全的摘要。
-4. Runtime 分派新的只读 Verifier。Verifier 必须对每个 A1…An 恰好给出一次结果；漏项、重复项、未知 ID 或把 Builder 自己的自报结果当成验收都会被拒绝。
-5. Runtime 根据结果进入 `pass`、回 Build，或等待用户处理的状态。Archive 正常路径不会再次运行这些检查。
+## 三层验证共同建立可信结论
 
-Verifier 不能使用 Builder 的上下文替自己背书。能提供独立 subagent 的宿主会分派新的 execution；只有 Skill 协调、没有可信独立 execution 时，Runtime 会明确标记“语义验收不可用”，并在归档前要求用户确认降级结果。
+| 验证层 | 主要作用 | 结论如何使用 |
+| --- | --- | --- |
+| Reviewer Subagent | 在 Builder 提交候选结果前发现代码、测试和实现层面的问题 | 审查通过后，候选结果才可以进入 Verify |
+| Runtime 检查 | 实际运行测试、构建或其他必要命令 | 结果是命令是否通过的权威依据 |
+| Verifier Subagent | 对照需求判断每条验收项是否满足 | 结果决定归档、返回 Build 或等待用户 |
 
-## 检查和报告
+这三层关注的问题不同。Reviewer 关注代码质量，Runtime 证明命令确实执行，Verifier 判断功能是否符合需求。任何一层通过，都不能替代另外两层。
 
-必要检查由 Runtime 根据项目和 change 的正式内容解析，不由 Agent 通过一段“已通过”的文字替代。检查结果至少包含命令状态、退出码、耗时和可读摘要；完整 stdout/stderr 留在本机日志，长输出会截断预览而不会单独使有效结果失败。
+## 候选结果带着独立审查进入 Verify
 
-如果确实需要额外检查，Verifier 在当前 attempt 通过 `request-checks` 请求 Runtime 执行。Runtime 会去重相同计划、限制请求轮数，并把新的结果返回给 Verifier；Agent 不应自己伪造检查结果或把第三方命令的输出直接写成通过。
+Builder 完成一轮实现后，必须先启动一个新的只读 Reviewer Subagent。Reviewer 检查本轮代码改动、相关测试和当前验收范围；发现问题时，Builder 修复后需要重新审查。
 
-`verification.md` 是 Runtime 从 `comet-state.yaml` 生成的用户报告，包含检查、逐项验收、限制和结论。它可以重建；缺失报告不是绕过 Verify 的理由。
+审查通过后，Builder 向 Runtime 提交一份精简的 `handoff`，其中包括：
 
-## 失败如何回到 Build
+- 本轮完成了什么；
+- 处理了哪些验收 ID；
+- 实际运行或没有运行哪些开发期检查；
+- 当前已知限制；
+- Reviewer 的通过状态、简短摘要和执行标识。
 
-只要有验收项失败、检查失败、Verifier 漏项或结果不完整，Runtime 就把明确的缺口写入下一轮 continuation，并把 change 返回 Build。下一轮优先修复失败项，再由新的 Builder handoff 和新的 Verifier 重新验收；不能在原 attempt 上反复提交一个“通过”。
+Reviewer 的执行标识必须与 Builder 不同。Runtime 会把 `handoff` 保存到 `comet-state.yaml`，并绑定候选 ID、`iteration` 和 Builder 身份。`handoff` 只是待验收候选的状态记录，不是已经通过的证明。
 
-Loop 只把真实收敛算作进展：未解决验收项严格减少、失败检查变为通过，或已明确补齐缺失信息。只是改写说明、重复同一命令或在不同失败集合之间来回切换，都不会无限延长循环。
+## Runtime 先执行检查，Verifier 再逐项验收
 
-## 停滞和错误预算
+候选结果进入 Verify 后，流程按以下顺序推进：
 
-`comet-state.yaml` 会保存 `iteration`、`attempt`、`no_progress_count`、`failed_iteration_count`、`execution_failure_count` 以及有限的 history。相同或退化的未解决集合会增加停滞计数；连续的 Runtime 执行错误也会增加错误计数。达到上限时，状态会变为 `await-user` 或 `blocked`，并给出具体的 `resolution_action`，而不是继续消耗时间。
+1. **确定验收范围。** 首轮 Verify 覆盖全部验收项；修复轮只覆盖上一轮未解决项和本次修改可能影响的项目。
+2. **执行必要检查。** Runtime 运行测试、构建或其他项目命令，并记录状态、退出码、耗时和摘要。
+3. **准备验收上下文。** `verifierDispatch` 提供实际工作区、需求和证据位置、当前 `scopeIds`、Reviewer 摘要以及 Runtime 检查结果。
+4. **启动新的 Verifier Subagent。** Verifier 保持只读，对当前范围内的每个验收 ID 给出一次结论。
+5. **校验并接受结果。** Runtime 检查候选、身份、轮次、`attempt` 和验收范围是否匹配，再决定下一步。
 
-用户可以在需求确实改变时回到 Shape，或者在实现没有变化且外部阻塞已经解决时确认重试 Verifier。普通的“再试一次”不会清除历史，也不会把旧的通过结果直接带到新候选。
+Verifier 会先阅读当前验收场景、`brief.md`、完整目标 Specs、实际实现和 Runtime 检查结果，最后才把 Builder `handoff` 当作调查线索。这种顺序可以减少 Builder 自述对验收判断的影响。
 
-Skill 协调的 Verifier 通过后，Runtime 会等待一次明确的用户决策，三个选项互斥：
+每个 `scopeId` 必须恰好出现一次，并且只能标记为：
 
-| 决策                     | 结果                                                             |
-| ------------------------ | ---------------------------------------------------------------- |
-| `--accept-result`        | 接受当前 Verify 结果，进入 Archive                               |
-| `--revise-implementation` | 保留已确认的需求，回到 Build 修订实现                            |
-| `--revise-requirements`  | 用户可见目标或验收标准变化时回到 Shape，更新正式产物后重新确认   |
+- `passed`：实现已经满足该验收项；
+- `failed`：实现不满足该验收项，需要回到 Build；
+- `blocked`：缺少用户决定、外部条件或其他必要信息，暂时无法判断。
 
-决策命令携带 continuation 签发的 `--expected-state-version` 和 `--expected-action` 守卫，状态过期或动作不匹配时会拒绝执行；新目标周期开始后，旧的归档授权会失效。
+漏项、重复项、未知 ID、身份不匹配或迟到的旧结果都会被 Runtime 拒绝。只要 Runtime 检查中仍有失败项，Verifier 就不能提交整体通过结论。
 
-`--revise-requirements` 不仅可以在 Verify 之后使用；当 Archive 停在 `archive-ready` 等待时也可以使用。它会把 change 返回 Shape，开始新的目标周期，使旧的验证结果和归档授权失效，同时保留 change workspace。
+## 补充检查仍由 Runtime 统一执行
 
-## 可靠性边界
+如果现有证据不足，Verifier 可以通过 `request-checks` 请求额外检查。它只说明需要运行什么，真正的命令仍由 Runtime 执行并记录。
 
-Runtime 能保证命令确实执行、非零退出不能当作通过、验收列表不能漏项，以及同一候选的检查不会无意义地重复。它不能替模型判断测试是否足够有意义，也不能观察没有被宿主暴露的后台进程或 IDE 写入。无法提供独立 Verifier 时，Dashboard 和报告会明确显示降级状态，不会伪装成独立语义验收。
+补充检查属于当前 Verifier `attempt`，不会单独增加 `attempt`。Runtime 会复用当前候选已经完成的相同检查，过滤重复请求，并把新结果交回同一个 Verifier。RC1 为每次 `attempt` 最多提供 `2` 轮补充检查，避免验收无限追加命令。
 
-继续阅读：[Native Loop](/zh/native/native-loop)、[连续推进](/zh/native/continuation-and-checkpoints) 和 [恢复手册](/zh/native/recovery-playbook)。
+完整的 `stdout` 和 `stderr` 保存在本机日志中，用户报告只显示结论和必要摘要。长输出会截断预览，但不会仅仅因为日志过长就把有效检查判为失败。
+
+## 局部修复后必须再次全量验收
+
+出现失败检查或 `failed` 项时，Runtime 会把明确缺口写入最新 continuation，并把当前变更送回 Build。Builder 根据这些缺口修改实现，再提交经过新一轮只读审查的候选结果。遇到 `blocked` 项时，Runtime 会先等待用户或外部条件补齐，不会把缺少信息误当成代码缺陷直接修改。
+
+修复轮的验收范围由两部分组成：
+
+- 上一轮仍未解决的验收项；
+- Builder 声明可能受本轮修改影响的验收项。
+
+已经通过且未受影响的项目不需要在每个修复轮重复验收。不过，局部范围全部通过后，Runtime 不会直接允许归档。它会把完整验收列表重新置为待验收，并启动一个新的 Verifier Subagent 做最终全量验收。
+
+这种“**局部修复，最终全量确认**”的方式减少了重复工作，同时防止修复一个问题时引入新的回归。
+
+## 不同结果进入不同处理路径
+
+| Verify 结果 | Runtime 状态 | 下一步 |
+| --- | --- | --- |
+| 可证明独立执行的最终全量验收通过 | `archive-ready` | 使用已经接受的验证结果进入 Archive |
+| 存在 `failed` 项 | `repairing` | 返回 Build，修复明确缺口并提交新候选 |
+| 存在 `blocked` 项 | `await-user` | 补充用户决定或外部信息，再启动新的 Verifier |
+| Verifier 任务执行出错 | `verify-ready` 或 `blocked` | Runtime 决定重试；连续出错达到上限后暂停 |
+| 无法启动独立 Verifier | `await-user` | 明确展示降级风险，由用户决定是否接受只有 Runtime 检查的结果 |
+
+“验收未通过”和“Verifier 执行出错”不是一回事。前者说明实现或需求仍有缺口，后者说明验收任务本身没有正常完成。Runtime 会分别记录，避免把基础设施故障误判为产品失败。
+
+## 修复循环设有明确的次数上限
+
+Runtime 通过未解决验收项是否真正减少来判断进展。只有当前未解决项比上一轮更少，而且没有新增未解决项，才算可靠收敛。
+
+- 连续两轮没有可靠进展时，Runtime 会要求 Builder 更换修复思路；
+- 连续三轮仍没有进展时，流程进入 `await-user`；
+- 验收失败轮次达到 `native.max_verify_failures` 时进入 `await-user`，默认上限为 `5`；
+- Verifier 连续执行出错 `3` 次时进入 `blocked`，等待明确的重试动作。
+
+这些计数都由 Runtime 更新。重复同一条命令、改写说明文字或再次报告相同原因，都不会重置失败历史。
+
+## 用户决定是否接受结果或调整目标
+
+当 Skill 启动的最终 Verifier 已判断全部通过，但宿主无法向 Runtime 证明它与 Builder 是独立执行时，Runtime 会暂停并提供三个互斥选项：
+
+| 用户选择 | 实际结果 |
+| --- | --- |
+| `--accept-result` | 接受当前通过结果，允许进入 Archive |
+| `--revise-implementation` | 保留已确认需求，返回 Build 修改实现 |
+| `--revise-requirements` | 返回 Shape，修改用户可见目标或验收标准并重新确认 |
+
+如果平台根本无法启动语义 Verifier，即使所有 Runtime 检查都通过，也只能得到降级结果。Runtime 会明确说明“只有自动检查，没有独立语义验收”，并要求用户使用 continuation 返回的 `--confirmed` 动作明确接受。用户确认不会把这份结果伪装成独立验证，报告仍会保留降级标记。
+
+所有决定命令都带有 `--expected-state-version` 和 `--expected-action`。如果状态已经变化、操作来自旧页面或旧任务，Runtime 会拒绝执行，避免迟到决定覆盖当前结果。
+
+## Supervisor Change 在集成工作区完成最终验收
+
+Supervisor Change 的子任务必须依次达到 `active`、`verified` 和 `integrated`。子任务通过自己的验收，不代表整个 Supervisor Change 已经完成。
+
+所有子任务集成后，Runtime 会在 Supervisor 的集成 worktree 中运行至少一项集成检查，并对完整验收范围执行最终 Verify。如果集成后的结果失败，Runtime 会保留现场，根据实际失败项补充修复子任务，并重新确认 Shape；已经完成集成的子任务不会因为父级失败而被直接重新打开。
+
+## 验证报告可以重建和恢复
+
+`verification.md` 是面向用户的验收报告，包含 Runtime 检查、逐项结果、风险、限制和最终结论。稳定状态保存在 `comet-state.yaml`，因此报告缺失、写入中断或版本落后时，可以根据可信状态重新生成。
+
+换到另一台设备后，旧设备上的本机执行不能直接沿用。处于 `verify-ready` 的候选会重新运行必要检查并启动新的 Verifier；处于 `archive-ready` 的候选也会先返回 Verify，重新确认同步后的实现。恢复过程本身不会增加失败轮次或停滞计数。
+
+## Native 不会把无法确认的内容算作通过
+
+Runtime 可以确认命令是否真正执行、退出码是否正常、验收项是否完整，以及返回结果是否属于当前候选和当前 `attempt`。正常 Archive 会使用已经接受的验证结果，不会无意义地再次运行同一批检查。
+
+如果一项结论依赖测试本身是否合理，或依赖宿主没有提供的后台进程、IDE 写入和外部系统状态，Runtime 就不能独自确认。平台无法提供独立 Verifier 或无法完成语义验收时，Dashboard 和报告会直接说明缺少什么，并把是否接受当前结果的决定交还用户。
+
+继续阅读 [Native Loop](/zh/native/native-loop)，了解完整的 Build ↔ Verify 循环。阅读 [连续推进](/zh/native/continuation-and-checkpoints) 和 [恢复手册](/zh/native/recovery-playbook)，了解状态推进与异常恢复。

@@ -26,6 +26,8 @@
 - Use sentence case for headings
 - Bold for UI elements: Click **Settings**
 - Code formatting for file names, commands, paths, and code references
+- 中文内容优先直接说明职责、行为和结果。避免反复使用“不是……而是……”、“而不是”、“不会……”等先否定再解释的句式。
+- 安全边界、禁止行为、失败条件和术语辨析需要明确表达时，保留必要的否定。
 
 ## Content boundaries
 

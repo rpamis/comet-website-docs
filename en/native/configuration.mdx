@@ -1,113 +1,184 @@
 ---
-title: 'Native configuration'
-description: 'Configure the /comet default route, enabled workflows, recovery probing, and Native artifact root, language, clarification mode, and archive confirmation.'
+title: "Native Configuration"
+description: "Understand the recommended configuration of Native, the actual impact of each field, and how to set up language, clarification, memory, Project Knowledge, and delivery methods."
 ---
 
-Native and Classic share one project-level `.comet/config.yaml`. It selects the workflow for `/comet`, records enabled workflows, and holds each workflow's defaults. New Native changes do not need a project-wide scan scope.
+Comet saves the project configuration in `.comet/config.yaml` in the root directory. When running `comet init`, available configurations will be generated, and most projects do not require manual adjustments. You only need to modify it when you want to change the default workflow, document language, clarification method, memory policy or delivery method.
 
-## Complete example
+## Recommended Native configuration
+
+The following configuration is suitable for new projects that use Chinese documentation:
 
 ```yaml
 schema: comet.project.v1
 default_workflow: native
 workflows:
   - native
-  - classic
 ambient_resume: true
+
+memory:
+  learning: true
+  retrieval: true
+
+knowledge:
+  provider: local
 
 native:
   artifact_root: docs
-  language: en
+  language: zh-CN
   clarification_mode: batch
   archive_confirmation: automatic
   max_verify_failures: 5
-
-classic:
-  language: en
-  context_compression: off
-  review_mode: standard
-  auto_transition: true
-
-# hook:
-#   allow_paths:
-#     - src
 ```
 
-Shared fields govern entry and recovery. `native.*` affects only Native and `classic.*` affects only new Classic changes. The two workflows keep separate directories and state.
+This will cause `/comet` to default to Native, save the change document in `docs/comet/`, generate the official product in Chinese, and complete the requirement clarification in Batch mode.
 
-## Shared entry fields
+<Tip>
+Prioritize using `comet init --workflow native` to create configurations and `comet update` to complete or upgrade managed fields. Do not merely add a workflow name in YAML to replace the installation of Skill, Rule and Hook.
+</Tip>
 
-| Field              | Values / default             | Purpose                                                                  |
-| ------------------ | ---------------------------- | ------------------------------------------------------------------------ |
-| `schema`           | `comet.project.v1`           | Configuration version managed by Comet                                   |
-| `default_workflow` | `native` \| `classic`        | Default `/comet` entry                                                   |
-| `workflows`        | `native`, `classic`, or both | Workflows enabled for this project                                      |
-| `ambient_resume`   | `true` (default)             | Whether natural-language continuation requests run the read-only probe |
+## Entrance and Restoration
 
-`default_workflow` controls entry only; it does not migrate existing changes. Adding `native` to YAML does not install the Skill. Install or refresh it with:
+|Field|Default value|The influence on you|
+| --- | --- | --- |
+| `schema` | `comet.project.v1` |The configuration format version is managed by Comet and should not be changed manually|
+| `default_workflow` |Select during initialization|Decide whether `/comet` will default to Native or Classic|
+| `workflows` |Select during initialization|Declare that the project has enabled `native`, `classic`, or both|
+| `ambient_resume` | `true` |Natural language seems to be running read-only recovery probes while continuing with old tasks|
+
+`default_workflow` only affects the entry point and does not convert existing changes from Native to Classic, nor does it convert Classic Changes to Native.
+
+If you need to enable two workflows simultaneously, run:
 
 ```bash
-comet init --workflow native|classic|both
-comet update
+comet init --workflow both
 ```
 
-## Hook write allowlist
-
-`hook.allow_paths` lists the project-relative directories the Agent may write during guarded phases. It is a write policy shared by Native and Classic, and it is empty by default.
-
-When unset, writes inside the project (outside artifact areas) follow each workflow's phase rules: Native allows implementation writes only during Build, and Classic applies its own phase and guard rules. Adding a directory to `hook.allow_paths` lets writes to that directory and its subdirectories pass through directly, bypassing the phase check — a typical use is allowing implementation code directories (such as `src/`, `apps/web/`) to be modified in any phase, avoiding rollbacks or blocks outside Build.
+To disable natural language-triggered recovery detection, you can set it up:
 
 ```yaml
-hook:
-  allow_paths:
-    - src
-    - apps/web
+ambient_resume: false
 ```
 
-Notes:
+When explicitly calling `/comet`, the route will still follow `default_workflow`.
 
-- Paths must be project-relative, `/`-separated, one directory per item; matching is by prefix, so `src` covers every file under `src/`.
-- The following areas are always protected and cannot be allowed through this setting: `.comet` (Runtime state), the Native artifact root (for example `docs`), and the Classic openspec and superpowers roots. They always follow their own write rules.
-- Out-of-bounds or malformed paths are reported by `comet doctor`.
+## Native core field
 
-## Native fields
+|Field|Allowed value/default value|The influence on you|
+| --- | --- | --- |
+| `native.artifact_root` |Project relative path Default: `docs`|change, Spec and reports are saved in `<artifact-root>/comet/`|
+| `native.language` | `en` \|`zh-CN`;" The default is `en`|Determine the brief, Spec and reporting language for the new change|
+| `native.clarification_mode` | `batch` \|`sequential`;" The default is `batch`|Decide whether to conduct centralized inquiries in each round or to ask one option point at a time|
+| `native.archive_confirmation` | `automatic` \|`required`;" The default is `automatic`|Decide whether to wait for additional archiving confirmation after verification is passed|
+| `native.max_verify_failures` |Positive integer Default: `5`|After reaching the continuous failure limit, pause the Loop and wait for the user to handle it|
 
-| Field                         | Values / default                              | Purpose                                                       |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------- |
-| `native.artifact_root`        | Project-relative path; default `docs`        | User documents under `<artifact-root>/comet/`                 |
-| `native.language`             | `en` \| `zh-CN`; default `en`                  | Language for new change briefs, Specs, and reports            |
-| `native.clarification_mode`   | `batch` \| `sequential`; new projects default to `batch` | Ask all currently answerable questions in a round, or one upstream question per round |
-| `native.archive_confirmation` | `automatic` \| `required`; default `automatic` | Whether to wait for one explicit confirmation after Verify    |
-| `native.max_verify_failures`  | Positive integer; default `5`                | Maximum implementation-failure iterations for one requirement |
+### Product Catalogue
 
-### Change the artifact root
+`artifact_root: docs` corresponds to `<project>/docs/comet/`; `artifact_root: .` corresponds to `<project>/comet/`. The path must be located within the project.
 
-`artifact_root: .` maps to `<project>/comet/`, and `docs` maps to `<project>/docs/comet/`. For an existing project, do not edit YAML and move directories by hand:
+When existing projects need to migrate directories, do not directly modify YAML and manually move files. Let the Runtime complete the inspection, switching and restoration of records:
 
 ```bash
 comet native root show
 comet native root move docs
 ```
 
-### Change language and clarification mode
+### Document language
 
-Language affects only changes created afterward; existing changes keep the language recorded at creation. Batch is the default for new projects, but you can choose explicitly:
+`native.language` has decided to create a new official product language for change later. Existing changes will continue to use the language recorded at the time of creation and will not be automatically rewritten due to configuration changes.
 
 ```yaml
 native:
-  language: en
-  clarification_mode: sequential
+  language: zh-CN
 ```
 
-Both modes investigate discoverable facts and require confirmation of the complete shared understanding before Build. Switching modes does not remove `[blocking]` questions already in the brief.
+### Clarification mode
 
-### Archive confirmation and failure cap
+- `batch`: Raising all the questions for this round at once, where the premises are clear and independent of each other, is suitable for reducing round trips.
+- `sequential`: In each round, only one most upstream or most influential question is raised, which is suitable for the need where the answer will change the subsequent questions.
 
-`automatic` continues to Archive after Verify passes; `required` waits for one explicit confirmation. `max_verify_failures` limits implementation-failure iterations. Runtime execution errors and semantic blockers return `await-user` or `blocked` instead of being bypassed by editing counters.
+Both modes will first investigate the warehouse facts and require you to confirm the complete goals, scope, selection points, acceptance criteria, and non-goals before entering the Build. Switching modes will not clear the unanswered `[blocking]` questions in `brief.md`.
 
-### Pull-request finish provider
+### Archiving confirmation
 
-When a repository requires its own pull-request template or validation script, configure a repository command provider for Native in `.comet/config.yaml`:
+- `automatic`: After the final verification is passed, the Runtime can continue to complete the archiving.
+- `required`: After the final verification is passed, we will wait for your explicit consent to file.
+
+`automatic` only controls whether to wait for additional archive confirmation and will not authorize merge, push or create PR for you. When using branch or worktree, Comet will still allow you to choose the actual delivery method.
+
+### Verify failure limit
+
+`max_verify_failures` limits the number of failed implementation rounds that the same confirmed requirement can go through. When the upper limit is reached, Native will pause and allow you to decide whether to continue, modify the requirements, or stop. It will not retry indefinitely.
+
+Runtime execution errors, missing external information, and states that cannot be safely recovered will return `await-user` or `blocked` separately and should not be bypassed by modifying the count.
+
+## Personal Memory
+
+`memory` is applicable to both Native and Classic switches. By default, both switches are `true`.
+
+|Field|Function|
+| --- | --- |
+| `memory.learning` |Allow Comet to organize reusable personal preferences and collaboration experiences from workflow results|
+| `memory.retrieval` |Allow Comet to retrieve and inject existing personal memories in related tasks|
+
+For example, only using existing memories but not continuing to learn automatically:
+
+```yaml
+memory:
+  learning: false
+  retrieval: true
+```
+
+## Project Knowledge
+
+By default, `knowledge.provider` is `local`. Comet will use the built-in project corpus. You can also append the Markdown documents in the project:
+
+```yaml
+knowledge:
+  provider: local
+  local:
+    include:
+      - docs/architecture/**/*.md
+      - packages/*/README.md
+```
+
+`knowledge.local.include` only accepts Markdown glob within the project. The path should use `/` and must not go beyond the project root directory. These paths will be appended to the built-in corpus instead of being replaced.
+
+If the team has deployed Comet Retrieval API v1, it can switch to the remote Provider:
+
+```yaml
+knowledge:
+  provider: remote
+  remote:
+    endpoint: https://knowledge.example.com
+    token_env: COMET_KNOWLEDGE_TOKEN
+    scope: engineering
+    timeout_ms: 5000
+```
+
+`endpoint` is the complete URL where your service actually receives requests. Comet will directly send `POST` to this address and will not automatically append `/comet` or any other path. The sample domain name needs to be replaced with your real interface address.
+
+The remote address must use HTTPS. Only localhost and other loopback addresses can use HTTP. Fill in the environment variable names for `token_env`. Do not directly write the Token into the configuration. The timeout period is allowed from `100` to `30000` milliseconds.
+
+## Hook write release
+
+`hook.allow_paths` is an advanced configuration shared by Native and Classic. It allows the specified directory to continue writing during the originally protected phase, which is empty by default.
+
+```yaml
+hook:
+  allow_paths:
+    - docs/team-notes
+```
+
+The path must be the project's relative directory and use `/`. Configuring `docs/team-notes` will allow all files under it simultaneously.
+
+<Warning>
+This configuration will bypass the stage write restrictions of the corresponding directory. Do not allow source code directories to avoid normal interception by Shape, Verify, or Archive. The `.comet`, Native official product area and Classic official product area are still protected by dedicated rules and cannot be bypassed through the allow list.
+</Warning>
+
+## Custom PR creation command
+
+Only when the warehouse must use its own PR template generator or remote verification script is it necessary to configure `native.finish.pull_request`:
 
 ```yaml
 native:
@@ -118,36 +189,22 @@ native:
       timeout_ms: 120000
 ```
 
-After you choose the Archive `pull-request` finish path, Comet still owns the commit, push, existing-PR discovery, remote base/head/head-SHA checks, idempotent recovery, and safe worktree cleanup. The repository command owns only the title, body, template, and repository-specific remote validation. Its executable must be a bare name on `PATH` or a project-relative path. Comet runs it from the project root, sends `comet.native.pull-request-finish-input.v1` JSON on stdin, and expects `comet.native.pull-request-finish-result.v1` JSON on stdout. Even with `repository-command`, GitHub CLI (`gh`) must be installed and authenticated so Comet can verify remote state independently. Without this configuration, the compatible `gh pr create --fill` behavior remains.
+The repository command is responsible for PR titles, bodies, templates, and library-specific validations. Comet is still responsible for submitting, pushing, finding existing PRS, verifying base/head/head SHA and failure recovery.
 
-## Upgrading an older project
+Please note the following restrictions:
 
-Older versions may leave `native.snapshot`, change-local Runtime files, old receipts, or evidence documents. They are not configuration fields or acceptance inputs for a beta17 change. `comet update` and `comet doctor` handle the migration; do not add these fields to make a new Verify pass and do not copy old Runtime files by hand.
+- Currently, `provider` only supports `repository-command`.
+- `command` must be a non-empty parameter array; The first item should use the command name in the PATH or the relative path of the project. Absolute paths cannot be used.
+- The default `timeout_ms` is `120000`, and the maximum is `600000`.
+- The command is executed in the project root directory, receiving `comet.native.pull-request-finish-input.v1` JSON via stdin and returning `comet.native.pull-request-finish-result.v1` JSON via stdout.
+- Even if custom commands are configured, it is necessary to install and authenticate the GitHub CLI (`gh`) for Comet to independently verify the remote status.
 
-## Common configurations
+When not configured, Comet uses the compatible `gh pr create --fill` process.
 
-### Native only
+## Do not manually configure fields
 
-```yaml
-schema: comet.project.v1
-default_workflow: native
-workflows:
-  - native
-ambient_resume: true
-native:
-  artifact_root: docs
-  language: en
-  clarification_mode: batch
-  archive_confirmation: automatic
-  max_verify_failures: 5
-```
+Currently, Native v4 no longer writes `native.snapshot` into the user configuration. The Runtime can still read the old configuration to complete compatibility and migration, but `comet update` will remove this old block. Don't add it again to adjust the acceptance scope.
 
-### Disable the automatic recovery probe for ordinary requests
+`native.pending_root_move` is the Runtime recovery state during the product directory migration and should not be created or modified manually. The old version of change-local Runtime, receipt and evidence files are also only used for migration or compatibility; Run `comet update` and `comet doctor` to process them.
 
-```yaml
-ambient_resume: false
-```
-
-This disables the read-only probe for natural-language continuation only; an explicit `/comet` still follows `default_workflow`.
-
-Continue with [Single Skill and entry routing](/en/native/skills-and-routing), [Artifacts and state](/en/native/artifacts-and-state), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+Continue reading: [User Selection Points and Requirements Clarification Protocol ](/en/native/decision-ownership), [Products and Status ](/en/native/artifacts-and-state) and [Recovery Manual ](/en/native/recovery-playbook).

@@ -1,74 +1,118 @@
 ---
-title: '恢复与故障处理'
-description: '按 portable 状态恢复 Native，处理跨设备、执行中断、分支不匹配、事务和归档冲突。'
+title: "Native 任务恢复"
+description: "了解 Native 如何在会话中断、设备切换、工作区变化或 Archive 中断后，从最近的安全节点继续任务。"
 ---
 
-遇到中断或错误，先读取 Runtime 返回的状态，再执行它给出的动作。Native 的恢复依据是 `.comet/config.yaml`、brief、Specs、`comet-state.yaml` 和必要的本机 Runtime；不是聊天记录，也不是 Agent 自述。
+Native 会自动恢复大多数中断。它保留仓库中能够证明的需求、实现进度和验收结果，只重新执行已经丢失的本机过程或验证证据。你可以直接继续原来的 Change，Runtime 会读取当前状态、检查工作目录，并返回安全的下一步。
 
-## 标准诊断顺序
+恢复依据来自项目文件。`brief.md`、目标 Specs、`comet-state.yaml` 和 `verification.md` 记录任务已经确认和完成的内容；`.comet/runtime/native/` 保存当前设备上的执行过程，可以在需要时重建。
+
+## 自动恢复机制
+
+每次继续 Change 时，Native 都会对照仓库状态和本机执行记录：
+
+1. 找到 Change 实际所在的分支或 worktree；
+2. 读取最近一次完整写入的 `comet-state.yaml`；
+3. 检查正在运行的任务、测试或 Verifier 是否已经中断；
+4. 重建缺失或过期的本机执行记录；
+5. 根据现有证据继续当前阶段，或回到需要重新验证的位置。
+
+Shape 和 Build 的本机记录丢失时，Native 会在原阶段继续，已经确认的需求和验收项保持不变。Verify 或 Archive 依赖本机执行证据，相关记录丢失时会重新验证当前实现。
+
+## 会话中断恢复
+
+关闭终端、Agent 会话结束或进程意外退出后，Native 会把仍在运行的本机任务标记为中断，再判断哪些步骤可以安全重试。
+
+| 中断位置 | Native 的处理方式 |
+| --- | --- |
+| Shape | 恢复已经保存的问题和决定，继续需求确认 |
+| Build | 保留当前需求和实现范围，从现有代码继续 |
+| Verify 等待结果 | 放弃已经失联的 Verifier，从当前候选重新开始验证 |
+| Archive 准备完成 | 返回 Verify，重新确认同步后的实现和全部验收项 |
+| 可重复检查正在运行 | 重新执行该检查 |
+| 含副作用且无法安全重复的检查 | 返回 Build，生成新的实现候选后再验证 |
+
+恢复造成的重新验证归入执行恢复，实现失败和连续无进展计数保持不变。实际启动新的 Verifier 时，Verifier 尝试次数会正常增加。
+
+## 跨设备继续
+
+换设备前，先同步以下内容：
+
+- 项目代码；
+- Change 中的 `brief.md`、目标 Specs 和 `comet-state.yaml`；
+- 已经生成的 `verification.md`；
+- 使用自定义产物目录时对应的 `.comet/config.yaml`。
+
+新设备打开同一仓库后，Native 会根据这些文件重建本机执行记录。旧进程、Agent 会话和 Subagent 任务停留在原设备；新设备从仓库中可以证明的状态创建新的执行任务。
+
+已经完成的 Shape 和 Build 会保留。Change 正在 Verify，或已经等待 Archive 时，新设备会重新验证同步后的代码。恢复期间，验收失败次数、实现失败次数和无进展计数保持不变。
+
+旧设备上尚未同步的代码无法从 Change 状态中还原。同步后的实现存在缺口时，新的 Verifier 会指出未满足的验收项，并把 Change 返回 Build。
+
+## 工作区恢复
+
+Native 会扫描 Git 已登记的 worktree，优先选择与 Change 分支绑定一致的工作目录。即使你从仓库主目录开始，Runtime 也能找到 Change 实际所在的位置，并让 Agent 在该目录继续。
+
+当前分支、worktree 类型或项目根与 Change 记录不一致时，Runtime 会暂停写入并返回预期目录。原目录仍然存在时，Agent 会切换到正确位置；worktree 已移除但分支仍然有效时，Native 可以重建 worktree。
+
+以下情况需要你确认工作区：
+
+- 原分支已重命名或被其他工作接管；
+- 存在多个同样匹配的工作目录；
+- 原目录和分支已经丢失；
+- 同一份 Change 状态在两个位置出现不同版本。
+
+你可以选择可信目录、从备份恢复，或停止该 Change。Runtime 会保留现有文件，等待明确决定。
+
+## Archive 事务恢复
+
+Archive 会依次更新正式 Spec、最终状态和验证报告，再把 Change 移入归档目录。Runtime 使用事务记录每一步，因此进程在中途退出后，可以从已经完成的步骤继续。
+
+再次继续同一个 Archive 时，Native 会检查事务和实际文件：
+
+- 事务与文件一致时，从下一步继续；
+- Change 已归档、工作区收尾失败时，保留归档结果，并返回 Git 恢复动作；
+- active 和 archive 目录同时存在时，保留两侧内容并等待诊断；
+- 多个 Change 修改同一份 Spec 时，等待你确定归档顺序。
+
+工作区收尾失败发生在 Archive 之后，Change 可能已经完成归档或 Git 提交。此时按照返回的 `recoveryArgs` 检查实际 Git 状态，再继续 merge、push 或 PR 流程。
+
+## 验证报告恢复
+
+`verification.md` 是 `comet-state.yaml` 的可读投影。报告缺失、写入中断或版本落后时，Native 会根据当前状态重新生成报告。
+
+报告文件丢失，但状态和本机执行记录仍能证明验证已经通过时，恢复只重建报告。Archive 前的本机执行记录也丢失时，Native 会返回 Verify，重新取得完整验收证据。
+
+这一区分可以保留已经证明的结果，同时确保 Archive 使用当前设备和当前代码上可信的证据。
+
+## 需要用户处理的情况
+
+Native 会在自动判断可能造成错误覆盖、重复副作用或错误归档时暂停。常见情况如下：
+
+| 状态 | 你需要决定或处理的内容 |
+| --- | --- |
+| 工作区与 Change 绑定不一致 | 确认正确的分支或 worktree |
+| 同一份 Spec 被多个 Change 修改 | 确定 Archive 顺序 |
+| Git 同步产生冲突 | 合并实际代码和文档内容，再继续验证 |
+| 外部操作的执行结果无法确认 | 核对远端状态，再选择重试或继续 |
+| 达到连续失败上限 | 选择继续当前目标、调整需求或停止 |
+| active 与 archive 状态互相矛盾 | 保留现场并使用 `doctor` 诊断 |
+| 旧版 Change 需要迁移 | 按 Runtime 提供的迁移动作升级状态 |
+
+`await-user` 表示下一步需要你的选择；`blocked` 表示当前状态缺少安全推进路径。Runtime 会同时返回原因、负责处理的一方和允许执行的动作。
+
+## 状态查看与诊断
+
+正常恢复由 Native 自动完成。你想查看当前记录或排查阻塞时，可以运行：
 
 ```bash
-comet status
+comet native show <change-name>
 comet native status <change-name> --details --json
 comet native doctor <change-name>
 ```
 
-按以下顺序判断：
+`show` 和 `status` 展示正式产物、工作区、验收进度和下一步。`doctor` 检查迁移、事务、目录和状态一致性。`doctor --repair` 只用于诊断结果明确提供修复动作的情况。
 
-1. artifact root、启用的 workflow 和澄清模式是否正确；
-2. `status` 是否找到目标 change；
-3. 当前 branch/worktree 是否与 change 绑定一致；
-4. `status --details` 返回的 `status`、`phase`、Loop、acceptance、blockers 和 continuation；
-5. doctor 是否报告迁移残留、未完成事务、锁或 active/archive 冲突。
+恢复过程中，让 Runtime 管理 `comet-state.yaml`、本机执行记录、锁和事务。按照 `continuation`、`recoveryArgs` 或 `doctor` 返回的动作继续，可以保留已经确认的进度和故障现场。
 
-不要手工编辑 YAML、selection 或 `.comet/runtime/native/`。当输出有分页时，按 continuation 或 cursor 继续读取，不要把未读的验收项当成不存在。
-
-## 跨设备找不到 change
-
-同步项目代码、`.comet/config.yaml`、brief、Specs 和 `comet-state.yaml`。如果 `verification.md` 已存在也同步它；缺失报告可以重建。目标设备运行：
-
-```bash
-comet status
-comet native status <change-name> --details --json
-```
-
-如果 artifact root、branch/worktree 不匹配，先修复项目上下文或明确选择目标，不要新建第二个 change，也不要把同一份文档复制到两个 root。
-
-## 执行中断和本机 Runtime 缺失
-
-`.comet/runtime/native/changes/<name>/state.json`、日志和锁属于本机 overlay。进程被终止、设备切换或 overlay 缺失时：
-
-1. 运行 `comet native status <name> --details --json`；
-2. 让 Runtime 按 YAML 标记 running 为 interrupted，并重建匹配的 overlay；
-3. 若处于 Shape/Build，继续当前阶段；
-4. 若处于 Verify，按 continuation 重新执行必要的中断检查，再分派新的 Verifier；
-5. 若处于 `archive-ready`，先重新确认 Verify，再运行 Archive；正常 Archive 不会另外重跑已完成检查。
-
-## 迁移和 doctor
-
-升级中的旧 active change 可能有 change-local Runtime、旧状态或旧报告。首次 `comet update` 后，必要时运行：
-
-```bash
-comet native doctor <change-name> --repair
-```
-
-迁移只继承能够从旧 brief、Spec 和状态证明的事实；旧的通过结论不会直接变成新 v4 pass。无法确定的旧进度会保守回到 Build 或等待用户。普通新 change 不应运行 legacy-only 修复策略。
-
-## Archive 中断和并行冲突
-
-Archive 可能经历写入 Spec、更新最终 YAML、生成报告、移动目录和清理本机 Runtime。中断后再次运行同一个 Archive 命令会按事务继续；不要删除事务目录或手工把状态改成 done。若 active 和 archive 同时存在、事务丢失但目录已经部分移动，doctor 会停下要求人工处理。
-
-两个 change 要修改同一 capability 时，Archive 会返回需要串行顺序的 blocker。先选择哪个 change 归档，再按新的 continuation 继续；不会自动覆盖另一个 change 的 Spec。
-
-## 常见状态与处理
-
-| 现象                             | 正确处理                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------- |
-| `await-user`                     | 阅读 blocker 和 `resolution_action`，向用户展示选项；确认后按 continuation 继续 |
-| `blocked`                        | 先处理损坏、执行错误、冲突或停滞原因；不要直接增加计数或伪造结果                |
-| branch/worktree mismatch         | 回到正确 checkout，或由用户明确选择新的工作区；不要在错误目录写入               |
-| Verify 失败                      | 按失败 acceptance 和检查修复，提交新的 Builder handoff，再让新的 Verifier 验收  |
-| 报告缺失/过期                    | 让 Runtime 从 YAML 重建；不要手工复制一份“通过”报告                             |
-| 旧 Runtime/receipt/evidence 残留 | 运行 update/doctor 迁移或只读检查；不要把它们加入新 change                      |
-
-继续阅读：[连续推进与恢复](/zh/native/continuation-and-checkpoints)、[Native 安全与恢复](/zh/native/safety-and-recovery) 和 [产物与状态](/zh/native/artifacts-and-state)。
+继续阅读：[连续推进与稳定恢复点](/zh/native/continuation-and-checkpoints)、[Native 安全边界](/zh/native/safety-and-recovery)、[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts) 和 [产物与状态](/zh/native/artifacts-and-state)。

@@ -1,211 +1,211 @@
 ---
-title: "From 0.3.9 to 0.4.0: How Comet Grew from a Workflow Layer into a Skill Platform"
-description: "0.4.0-beta.1 is more than swapping Bash for Node. It ships three entirely new systems in one release — /comet-any lets you build Skills as good as Comet itself, comet eval makes Skill effectiveness measurable and steers their evolution, and comet dashboard gives artifact management a visual platform. This article explains the reasoning behind every change."
+title: "From 0.3.9 to 0.4.0: How Comet Evolved from Workflow Layer to Skill Platform"
+description: "0.4.0-beta.1 is not just about replacing Bash with Node. It has added three brand-new systems at once -/Comet-any enables you to create skills as useful as comet, comet eval makes the effect of skills quantifiable and determines the direction of evolution, and comet dashboard provides a visual platform for product management. This article clearly explains the reasons behind each change."
 ---
 
-The 0.3.9 Comet is an excellent "five-phase workflow layer" — it chains OpenSpec and Superpowers into a resumable development pipeline, guarded by Bash scripts at each phase boundary. But the more we used it, the more two categories of limitations stood out.
+Comet 0.3.9 is an excellent "five-stage workflow layer" - it links OpenSpec and Superpowers into a recoverable development pipeline and guards the stage boundaries with Bash scripts. But as time went by, two types of limitations became increasingly obvious:
 
-One category is **hard limits of existing capabilities** —
+One type is the "hard flaw of existing capabilities" -
 
-- Windows users had to install Git Bash or WSL to run the full pipeline;
-- `/comet` routing relied entirely on the Agent re-reading the prompt to "guess" once, with no way to review a wrong guess;
-- After an interruption, all state was crammed into a single `.comet.yaml`, where machine fields and human fields polluted each other.
+- Windows users must install Git Bash or WSL to run the entire process;
+- The routing of `/comet` relies entirely on the Agent to re-read the prompt word and "guess" it once. If it is wrong, there is no way to review it.
+- After the interruption and return, all states are crammed into one `.comet.yaml`, with machine fields and human fields polluting each other.
 
-The other category is **gaps that simply did not exist** —
+Another type is the "blank that doesn't exist at all" --
 
-- Users could only consume Comet's built-in `/comet` series of commands — there was **no way to author their own Skills**, let alone compose arbitrary Skills into a reusable package as good as `/comet`;
-- There was no way to quantify "is this Skill actually good" — improvements were all guesswork;
-- Halfway through a change, if you wanted to see what it had produced or where it was stuck, you had to dig through files.
+- Users can only consume the `/comet` series commands pre-installed by Comet. They have no way to create their own skills, let alone combine any Skill into a reusable package as useful as `/comet`.
+- There is no means to quantify "whether this Skill is good or not", and improvement depends entirely on feelings.
+- When a change is halfway through, if you want to see what it has produced and where it is stuck, you can only go through the files.
 
-0.4.0-beta.1 does a systematic rebuild for the first category, and **ships three entirely new systems at once** for the second. This article is not a feature checklist (see the [changelog](/en/changelog)) — it explains **the reasoning behind every decision**.
+0.4.0-beta.1 carried out a system reconfiguration for the first category and added three brand-new systems at once for the second category. This article does not discuss the list of functions (see [changelog](/en/changelog)), but rather the reasons behind each decision.
 
 <p align="center">
-  <img src="/assets/tech-blog-0-4-0-illustrations/01-runtime-rebuild-workbench.png" alt="A small fish at a workbench, swapping the 0.3.9 Bash scripts for the 0.4.0 Node runtime, and hanging intent routing, layered state, the Skill platform, eval, and Dashboard modules" width="800" />
+  <img src="/assets/tech-blog-0-4-0-illustrations/01-runtime-rebuild-workbench.png" alt="Xiaoyu replaced the 0.3.9 Bash script with the 0.4.0 Node runtime on the modification workbench and attached the intent routing, state layering, Skill platform, eval and Dashboard modules" width="800" />
 </p>
 
-<p align="center">0.4.0 rebuilds Comet from a Bash workflow layer into a cross-platform runtime, and grows three new systems: Skill authoring, evaluation, and visualization.</p>
+<p align="center">0.4.0 transformed Comet from a Bash workflow layer into a cross-platform runtime and developed three new systems </p> for Skill creation, evaluation, and visualization
 
-## 1. Why swap the Bash runtime for Node
+## I. Why replace the Bash Runtime with Node
 
-This is the biggest rebuild in 0.4.0, and the change Windows users welcome the most.
+This is the biggest refactoring in 0.4.0 and also the most popular change among Windows users.
 
-**The 0.3.9 state**: core logic like the state machine, phase guards, handoffs, and archiving was carried by 7 Bash scripts. The logic itself was fine, but the precondition — "you must have a Bash-compatible shell" — kept a sizeable group of users out. On Windows you either installed Git Bash or used WSL; path escaping, shell differences, and lost executable permissions (the classic `100644` → `100755` problem on macOS) were recurring hazards.
+** State of 0.3.9 ** : The core logics such as state machine, phase guard, handover, and archiving are handled by seven Bash scripts. The logic itself is fine, but the premise that "there must be a shell compatible with Bash" keeps a considerable number of users out. On Windows, either install Git Bash or use WSL. Path escape, shell differences, and loss of executable permissions (the classic `100644` → `100755` issue on macOS) are all recurring hidden dangers.
 
-**The 0.4.0 decision**: rewrite every script as a Node `.mjs` launcher, backed by a single shared TypeScript runtime (`domains/comet-classic/`). Each `.mjs` is an esbuild-generated single-file bundle with dependencies like `yaml` inlined.
+** Decision for 0.4.0 ** : Rewrite all scripts as the Node `.mjs` launcher, backed by a shared TypeScript runtime (`domains/comet-classic/`). Each `.mjs` is a single-file package generated by esbuild, and dependencies such as `yaml` are inlined together.
 
-**Why this way**:
+** Why change it like this ** :
 
-| Motivation | 0.3.9 | 0.4.0 |
+|Motivation| 0.3.9 | 0.4.0 |
 | --- | --- | --- |
-| Cross-platform | Windows needs Git Bash/WSL | Only Node.js 20+ |
-| Path reliability | shell escaping, CRLF, exec bit | handled natively by Node |
-| Implementation consistency | scattered shell logic | a single TypeScript transition-semantics table |
+|Cross-platform|Windows requires Git Bash/WSL|Only 20+ Node.js is needed|
+|Path reliability|shell escape, CRLF, executable bit|Native processing of Node|
+|Achieve consistency|Scattered shell logic|Single TypeScript transfer semantic table|
 
-The key is the "single transition-semantics table": `comet-state transition` and `comet-guard --apply` now share the same `classic-transitions.ts`, so the two advancement paths behave identically and you never again get "the guard approved but the state rejected" inconsistencies.
+The key lies in the "single transfer semantic table" : `comet-state transition` and `comet-guard --apply` now share the same `classic-transitions.ts`, so the behaviors of the two advancement paths are exactly the same, and there will no longer be the inconsistency of "guard allows but state rejects ".
 
 <Info>
-  The most important promise for existing users: <strong>the behavior of every <code>/comet*</code> command is unchanged</strong>. You do not need to change how you use them. The layer beneath switched from Bash to Node, but the workflow is still the same workflow.
+The most important commitment for old users: The behavior of all ZXQ1, QXZ/comet*ZXQ2, QXZ commands remains unchanged. You don't need to switch to the method. The underlying structure has been changed from Bash to Node, but the workflow remains the same.
 </Info>
 
-## 2. Why routing context exists
+## Ii. Why Do Routing Contexts
 
-**The 0.3.9 state**: the `/comet` entry relied on a natural-language rule inside the Skill body to decide whether to go `full`/`hotfix`/`tweak`. The problem is that this rule was **not explainable, not reviewable, not recoverable**. When routing went wrong you could not tell which signal was the problem; on re-entry after an interruption, the Agent could only guess again.
+** Status 0.3.9 ** : The `/comet` entry is determined by a natural language rule in the main body of the Skill to proceed with `full`/`hotfix`/`tweak`. The problem is that this rule is unexplainable, unverifiable and unrecoverable. The route is wrong. You don't know which signal has gone wrong. After an interruption and re-entry, the Agent can only guess again.
 
-**The 0.4.0 decision**: turn "what the user wants to do" into a structured routing context (implementation type name `CometIntentFrame`), then have the runtime re-score it against a fixed priority to produce an explainable final route.
+**0.4.0 Decision ** : Transform "What the user wants to do" into a structured routing context (implementation type named `CometIntentFrame`), and then re-score it by the runtime according to a fixed priority to provide an interpretable final route.
 
-**Why this way**: the core tension is a "trust problem". The old approach trusted the routing suggestion the Agent itself proposed; the new approach **does not trust the suggestion, only the evidence** — the runtime recomputes from the confidence, risk signals, and repository context inside the routing context, and when it disagrees with the Agent's suggestion it writes the disagreement into a diagnostic log.
+** Why change it this way ** : The core contradiction is the "issue of trust". The old practice trusted the routing suggestions put forward by the Agent itself. The new approach ** does not trust suggestions but only evidence ** - at runtime, the confidence level, risk signals, and repository context in the routing context are recalculated. When they are inconsistent with the Agent's suggestions, the differences are written into the diagnostic log.
 
-The design choice that best embodies this is **risk signals take priority over the stated process**: you say "go hotfix", but if `public_api_change` is hit, the runtime stops and asks you instead of letting through a lightweight flow that affects external contracts. This is Comet's safety baseline — it would rather ask one more question than gamble a high-risk shortcut on your behalf.
+The most representative aspect of this design is that the risk signal takes precedence over the oral process: you say "go hotfix", but if `public_api_change` is hit, the runtime will pause and you will be asked to confirm whether to continue this lightweight process that affects external contracts. This is Comet's safety bottom line: High-risk shortcuts always require you to clearly confirm.
 
-See [intent recognition and routing](/en/concepts/intent-routing).
+For details, please refer to [Intent Recognition and Routing ](/en/concepts/intent-routing)
 
-## 3. Why `/comet-any` exists: let everyone build Skills that work well
+## Iii. Why Do We need `/comet-any`: To Enable Everyone to create useful Skills
 
-The previous two items make existing capabilities more robust. From this section on, these are **capabilities 0.4.0 adds entirely new**.
+The first two items are to make the existing capabilities more stable. Starting from this section, it's the ability that has been newly added in 0.4.0.
 
-**The 0.3.9 state**: users could only consume Comet's built-in `/comet` series of commands. You wanted to build your own workflow Skill? You could not. You wanted to compose `brainstorming` + `writing-plans` + `systematic-debugging` + `verification-before-completion` into a "team PR review assistant" and ship it? **Comet had no such path at all** — it was a workflow to be consumed, not a factory that produces Skills.
+** Status 0.3.9 ** : Users can only consume the `/comet` series commands preset by Comet. Do you want to create your own workflow Skill? Can't do it. Do you want to combine the skills `brainstorming` + `writing-plans` + `systematic-debugging` + `verification-before-completion` into a "Team PR Review Assistant" for packaging and distribution? Comet has no such path at all - it is merely a consumed workflow, not a factory that can produce skills.
 
-**The 0.4.0 decision**: `/comet-any` is not a prompt generator, it is a complete **Skill authoring platform**. The core problem it solves is — **compose arbitrary Skills so users can build Skills as good as Comet itself**.
+Decision 0.4.0: Position `/comet-any` as a complete Skill creation platform. It helps users create skills with the ability to run stably, distribute and review by combining any Skill.
 
-**Why it has to be a platform, not a script**: because "build a reusable, distributable, reviewable Skill package" is fundamentally different from "write a prompt". A Skill that can stand alongside `/comet` needs:
+** Why build a Platform ** : Creating a reusable, distributable, and reviewable Skill package requires a more complete toolchain than generating a prompt word. A Skill that can be on par with `/comet` requires:
 
-1. **A deterministic skeleton** — the routing table, runtime scripts, and manifest must be reproducible, not different every time you generate;
-2. **Reviewable authored content** — the decision core of the entry point and the guidance of each node are written by an LLM, but must be human-reviewable and gated by evidence;
-3. **A release evidence chain** — eval evidence binds to the current draft hash, human approval binds to the current hash, and a preview is forced before distribution.
+1. ** Deterministic skeleton ** - The routing table, runtime script, and manifest must be reproducible and cannot change each time they are generated;
+2. ** Reviewable creative content ** - The decision-making core of the entry and the guidance of the nodes are written by the LLM, but they must be subject to review and evidence access control.
+3. ** Release Evidence Chain ** - eval evidence binds to the current draft hash, manually approves the binding to the current hash, and forces preview before distribution.
 
-So the output of `/comet-any` is a **stable composite Skill Bundle**, not a `SKILL.md`:
+So `/comet-any` produces a ** stable combination Skill Bundle** containing multiple types of products:
 
 ```text
 <bundle-draft>/
   bundle.yaml
   skills/<entry-skill>/
-    SKILL.md                    # the entry point users actually call
+SKILL.md # The entry point that users actually invoke
     comet/
-      skill.yaml                # internal run plan
-      guardrails.yaml           # constraints generated from preferences and risk policy
-      checks.yaml               # run-completeness checks
+skill.yaml # Internal Runtime Plan
+guardrails.yaml # Constraints generated by preferences and risk policies
+checks.yaml # Run Completion check
       eval.yaml                 # Eval manifest
     reference/
-      resolved-skills.json      # real Skill sources, hashes, selection evidence
-      composition-report.md     # composition plan, deviation explanations, risks
-    scripts/                    # control plane that advances the flow stably
+resolved-skills.json # True Skill source, hash, Select evidence
+composition-report.md # Composition Scheme, Deviation explanation, risk
+scripts/ # Steadily advance the control plane of the process
   rules/
   hooks/
 ```
 
-For the main line, ordinary users only need to remember one sentence:
+For this main line, ordinary users only need to remember one sentence:
 
 ```text
-/comet-any create -> comet eval verify -> comet creator status/next
+/ Comet-any create -> comet eval verify -> comet creator status/next
   -> comet publish review/approve/run -> comet publish distribute --preview
   -> comet publish distribute
 ```
 
-`/comet-any` also reads project-level preferences (`.comet/skill-preferences.yaml`): which Skills you want to reuse first, what to do about missing or ambiguous inputs, whether scripts/hooks are allowed. It must first show you the composition plan for confirmation, and only writes the Bundle draft after you nod — this is the starting point of "reviewable".
+`/comet-any` will also read project-level preferences (`.comet/skill-preferences.yaml`) : which skills you prefer to reuse first, what to do when missing or ambiguous, and whether scripts/hooks are allowed. It must first present the combination plan to you for confirmation, and only write the Bundle draft after you nod - this is the starting point of "reviewability".
 
-See the [Skill Creator full workflow](/en/skill-creator/workflow).
+For details, please refer to [Complete Process of Skill Creator ](/en/skill-creator/workflow).
 
-## 4. Why eval is the arbiter of the entire evolution direction
+## Iv. Why is eval the decision-maker of the entire evolution direction
 
-`/comet-any` solves "you can build it", but buildable does not mean good. If no one can quantify whether a Skill is actually good, improvement is all guesswork and the Skill has no reliable evolution direction. **`comet eval` is the new system that fills this gap — it is the arbiter that decides whether a Comet Skill can be released and which way it should evolve.**
+`/comet-any` has solved the problem of "being able to produce", but being able to produce does not mean being able to produce well. If no one can quantify whether a Skill is good or not, improvement can only be based on feelings, and there will be no reliable direction for the evolution of skills. `comet eval` is the new system that fills this gap. It is the decision-maker for whether Comet's Skill can be released and in which direction it should evolve. **
 
-**The 0.3.9 state**: whether a Skill was good was pure feel. You wrote a workflow Skill, but whether teammates could use it, whether it was stable, whether the tokens were well spent — there was no quantification, and no objective "can it be released" threshold.
+** Status 0.3.9 ** : Whether a Skill is good or not depends entirely on feeling. You have written a workflow Skill. Whether team members can use it, whether it is stable, and whether the token is worth spending - there are no quantitative means, nor is there an objective threshold of "whether it can be released or not".
 
-**The 0.4.0 decision**: `comet eval` is a pytest-based Skill evaluation framework. It does not just "run it and see if it passes" — it uses a metric system to break "is it good" into comparable numbers.
+**0.4.0 Decision ** : `comet eval` is a Skill evaluation framework based on pytest. It is not merely about "running it to see if it passes", but rather uses a set of indicator systems to break down the matter of "good or bad" into comparable figures.
 
-**Why eval decides the evolution direction**: because eval results are wired directly into the release gate — **you may not publish without eval evidence for the current draft hash, with a failed eval, or with eval evidence bound to a stale hash**. In other words, eval is the mandatory checkpoint a Skill passes through on its way from draft to distribution, and its scoring dimensions are the compass for where the Skill should invest effort.
+** Why does eval determine the evolution direction ** : Because the results of eval are directly bound to the release access control - ** Without the eval evidence of the current draft hash, if the eval fails, or if the eval evidence is for an old hash, it cannot be published **. In other words, eval is an essential step for a Skill to move from a draft to distribution, and its scoring dimension serves as a compass for where the Skill should focus its efforts.
 
-eval uses two key metrics to separate "capability" from "reliability":
+eval distinguishes "capability" and "reliability" using two key indicators:
 
-| Metric | Meaning | Question it answers |
+|Indicator|Meaning|The questions answered|
 | --- | --- | --- |
-| `pass@k` (capability ceiling) | the probability of **at least one success** in k independent attempts | "Can this Skill do it?" |
-| `pass^k` (reliability floor) | the probability of **all successes** in k independent attempts | "Can it do it every time?" |
+|`pass@k` (Capacity Limit)|The probability of success at least once out of k independent attempts|Can this Skill be achieved?|
+|`pass^k` (Lower Reliability Limit)|The probability of success in all k independent attempts|Can it be done every time?|
 
-Why both? Because for workflow-type Skills — things users run repeatedly — **reliability matters more than capability**. High `pass@k` and low `pass^k` means "occasionally right, but you cannot count on it every time", and this gap (`pass@k − pass^k`) is the most important quality signal: a high-capability, low-reliability Skill should next invest in "stability" rather than "more features".
+Why do we need both? Because for workflow-related skills - things that users will run repeatedly - reliability is more important than capability. High `pass@k` and low `pass^k` mean that Skill can occasionally get it right, but the outcome of a single attempt is still hard to predict. This gap (`pass@k − pass^k`) is the most crucial quality signal: a Skill with high capability and low reliability. The next step should prioritize stability.
 
-So that different types of Skills are scored on matching dimensions rather than by a one-size-fits-all rule, eval provides three rubric profiles:
+To score different types of skills based on matching dimensions, eval provides three sets of rubric:
 
-| Profile | Use case | Dimensions |
+| Profile |Purpose|"Dimension"|
 | --- | --- | --- |
-| `generic` | any Skill | 7 dimensions (completeness, Skill calls, artifacts, instruction following, interaction, efficiency, safety boundaries) |
-| `comet-workflow` | Comet workflows | 9 dimensions (adds main-flow evidence, phase guards, spec drift, recoverability) |
-| `authoring-skill` | `/comet-any` generated packages | 11 dimensions |
+| `generic` |Arbitrary Skill|Seven dimensions (Completion degree, Skill invocation, product, instruction compliance, interaction, efficiency, security boundary)|
+| `comet-workflow` |Comet Workflow|9 dimensions (including main process evidence, stage guard, specification drift, and recoverability)|
+| `authoring-skill` |`/comet-any` generation package|11 Dimensions|
 
-On failure, eval also performs **failure attribution**, sorting failures into four buckets to tell you what to fix next:
+When a failure occurs, eval will also perform "failure attribution", dividing the failure into four buckets and telling you what to fix next:
 
-- `harness` — likely an eval environment, Docker, or path issue;
-- `workflow` — likely the Skill execution flow did not meet expectations (**fix the Skill**);
-- `task` — likely a task definition or verification-condition issue;
-- `model` — likely unstable model behavior or tool use.
+- `harness` - Mostly due to eval environment, Docker, or path issues;
+- `workflow` - Most likely, the Skill execution process did not meet expectations (** The Skill needs to be repaired **);
+- `task` - Mostly issues related to task definition and verification conditions;
+- `model` - Mostly due to unstable model behavior or tool usage.
 
-For ordinary users it is two steps: first `--collect` for a low-cost discovery pre-check, then `--html` to run the real evaluation and get a browsable report.
+For ordinary users, it's a two-step process: First, `--collect` conducts a low-cost discovery pre-check, and then `--html` runs a real assessment to obtain a searchable report.
 
 ```bash
 comet eval ./generated-skill/comet/eval.yaml --collect
 comet eval ./generated-skill/comet/eval.yaml --html
 ```
 
-See [evaluating any Skill](/en/eval/quickstart).
+For more details, please refer to [Evaluate any Skill](/en/eval/quickstart)
 
-## 5. Why Dashboard exists: make artifact management visible
+## V. Why Have a Dashboard: Making Product Management Visible
 
-The Skill is built and evaluated, but a change in flight produces a large volume of artifacts — proposal, design, tasks, plan, verifyReport, handoff, checkpoint… In 0.3.9 these were scattered across `openspec/changes/`, `docs/superpowers/`, and `.comet/`, so to see which step a change was on, what it had produced, or whether it was stuck, you had to dig through files. **`comet dashboard` is the new system that fills this gap: it gives artifact document management a visual platform.**
+The Skill has been created and evaluated, but during the process of running a change, a large number of products will be produced - proposals, designs, tasks, plans, verifyreports, handoff, checkpoints... At 0.3.9, these items were scattered in different directories such as `openspec/changes/`, `docs/superpowers/`, and `.comet/`. To see where a change is now, what it has produced, or if it is stuck, one can only go through the files. `comet dashboard` is the new system that fills this gap: it provides a visual platform for the documentation management of products. **
 
-**The 0.3.9 state**: no visualization. Diagnosing a stuck change meant opening YAML files one by one, finding pointers, jumping to the corresponding directory, and assembling the full picture yourself.
+** Status 0.3.9 ** : No visualization means. Diagnosing a stuck change means opening YAML one by one, finding the pointer, jumping to the corresponding directory and piecing together the full picture yourself.
 
-**The 0.4.0 decision**: `comet dashboard` starts a local read-only browser interface that puts the **full picture** of each change onto a single panel.
+** Decision for 0.4.0 ** : `comet dashboard` starts a local read-only browser interface and puts the ** full picture ** of each change into a panel.
 
-**Why "artifact management visualization"**: dashboard groups all artifacts by source into three buckets, so you can see at a glance what a change should have, what it already has, and what is still missing:
+** Why "Product Management Visualization "** : The dashboard divides all products into three groups by source, allowing you to clearly see at a glance what a change should have, what is already there, and what is still lacking:
 
-| Group | Artifacts | Source |
+|Grouping|Product|Source|
 | --- | --- | --- |
-| **OpenSpec** | proposal, design, tasks, deltaSpec | spec files inside the change directory |
-| **Superpowers** | designDoc, plan, verifyReport | design/plan/review evidence under `docs/superpowers/` |
-| **Comet** | `.comet.yaml`, handoff, checkpoint, brainstorm, subagentProgress | intermediate artifacts in `.comet/` |
+| **OpenSpec** | proposal、design、tasks、deltaSpec |Change the specification files in the directory|
+| **Superpowers** | designDoc、plan、verifyReport |Design/plan/review evidence under `docs/superpowers/`|
+| **Comet** | `.comet.yaml`、handoff、checkpoint、brainstorm、subagentProgress |The intermediate products in `.comet/`|
 
-Each artifact is marked with a status — **generated** (previewable), **not generated** (expected but not yet created), or **not applicable** (not relevant to the current mode/phase). This turns "are this change's artifacts complete" from digging through files into reading a panel.
+Each product will be marked with status - ** Generated ** (previewable), ** Not Generated ** (expected but not created yet), ** Not needed to be generated ** (not applicable to the current mode/stage). This has transformed "Is the product of this change complete?" from flipping through files to looking at the panel.
 
-Beyond artifacts, the dashboard also shows phase progress, task progress, verify status, next-action suggestions, risk signals, and Git context on the same panel. The same snapshot can also be consumed by scripts and CI:
+In addition to the product, the dashboard also presents stage progress, task progress, verify status, next action suggestions, risk signals, and Git context on the same panel. The same snapshot can also be consumed by scripts and CI:
 
 ```bash
-comet dashboard . --json          # emit one snapshot, for scripts/CI
-comet dashboard . --port 4399     # specify a port
-GET /api/dashboard                # HTTP endpoint, same snapshot
+comet dashboard . --json          # Output a snapshot for the script /CI
+comet dashboard . --port 4399     # Specified port
+GET /api/dashboard                # HTTP interface, the same snapshot
 ```
 
-eval and dashboard share the same runtime evidence path — the problems `comet status` and `comet doctor` report are exactly the problems scripts will actually block on. This turns Comet's "recoverability" and "observability" from slogans into verifiable promises.
+eval and dashboard share the same runtime evidence path - the issues reported by `comet status` and `comet doctor` are the ones that the script actually intercepts. This has transformed Comet's "recoverability" and "observability" from slogans into verifiable commitments.
 
-See the [Dashboard overview](/en/dashboard/overview).
+For more details, please refer to [Dashboard Overview ](/en/dashboard/overview)
 
-## 6. Why state is split into three layers
+## Vi. Why is the state divided into three layers
 
-**The 0.3.9 state**: all state was stuffed into a single `.comet.yaml` — human-readable workflow fields and machine-managed runtime checkpoints were mixed together. The result was that users easily mistouched machine fields, and machine-field changes polluted the human-readable projection.
+**0.3.9 status ** : All statuses are stuffed into a `.comet.yaml` - user-readable workflow fields and machine-managed runtime checkpoints are mixed together. The result is that users are prone to mistakenly modify machine fields, and changes in machine fields also contaminate human-readable projections.
 
-**The 0.4.0 decision**: each change's state is split into three layers:
+**0.4.0 Decision ** : The status of each change is split into three layers:
 
-| File | Owner | Contents |
+|"File|Belonging|"Content|
 | --- | --- | --- |
-| `.comet.yaml` | human-readable | workflow projection (`workflow`/`phase`, etc.) + `run_id` link |
-| `.comet/run-state.json` | machine-managed | runtime checkpoint: current step, iteration, pending actions |
-| `.comet/state-events.jsonl` | append-only audit | a complete record of successful transitions |
+| `.comet.yaml` |User-readable|Workflow projection (`workflow`/`phase`, etc.) + `run_id` link|
+| `.comet/run-state.json` |Machine management|Runtime checkpoints: current step, iteration, pending action|
+| `.comet/state-events.jsonl` |Supplementary audit|A complete record of a successful transfer|
 
-**Why this way**: single responsibility. Users can directly read "which phase am I in now" but cannot touch machine fields; machine fields are written atomically by the runtime, and `comet-state set` refuses to write them directly; the audit log is append-only and never overwritten, giving you a traceable state history. Old changes migrate automatically on first read, with no manual handling needed.
+** Why change it this way ** : Single responsibility. Users can directly understand "which stage it is at now", but they cannot touch the machine field. Machine fields are written by runtime atoms, and `comet-state set` will refuse to write them directly. Audit logs only append and do not overwrite, providing you with a traceable status history. Old changes are automatically migrated when they are read for the first time without the need for manual processing.
 
-## What all of this points to
+## What does all this point to
 
-If you look at these six items together, the main line of 0.4.0 is clear: **Comet has gone from a "workflow layer" to a "workflow + Skill platform"**, and these three things support each other and form a closed loop:
+If we look at these six items together, the main thread of 0.4.0 is very clear: **Comet has transformed from a "workflow layer" to a "workflow + Skill platform "**, and these three things support each other and form a closed loop:
 
-- **You can build it** — `/comet-any` lets anyone compose arbitrary Skills into a reusable package as good as Comet;
-- **You can measure it** — `comet eval` makes Skill effectiveness quantifiable and acts as the release gate that decides which way a Skill evolves;
-- **You can see it** — `comet dashboard` gives artifact document management a visual panel.
+- "Create it" - `/comet-any` enables everyone to combine any Skill into a reusable package as useful as Comet.
+- ** Quantitative conclusion ** - `comet eval` makes the effect of Skill quantifiable and uses it as a release access control to determine which direction Skill will evolve.
+- ** Visible ** - `comet dashboard` provides a visual panel for the documentation management of products.
 
-Three more things hold the platform steady:
+The following three things keep the platform stable:
 
-- the runtime is now cross-platform (Node), so the platform can land in more environments;
-- routing is now explainable (routing context), so the platform's behavior is trustworthy;
-- state is now layered, so the platform is recoverable and auditable.
+- The runtime is cross-platform (Node), so the platform can be implemented in more environments.
+- The routing can be interpreted (routing context), so the behavior of the platform is trustworthy.
+- The status is stratified, so the platform is recoverable and auditable.
 
-0.3.9 solved "how to make a single workflow recoverable"; 0.4.0 solves "how to make workflows and Skills into a platform that can be authored, measured, seen, trusted, and scaled". That is what this major version jump is really trying to do.
+0.3.9 resolved the issue of "How to make a workflow recoverable"; 0.4.0 addresses the issue of "how to make workflows and skills a platform that is creative, quantifiable, clear, trustworthy, and scalable." This is what this major version leap truly aims to do.
 
-> For the complete line-by-line changes, see the [0.4.0-beta.1 changelog](/en/changelog).
+> For a complete list of individual changes, see [0.4.0-beta.1 changelog](/en/changelog).

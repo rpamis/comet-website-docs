@@ -1,6 +1,6 @@
 ---
-title: 'Native 常见问题'
-description: '解答 Native 模式选择、需求澄清、状态恢复、验证 Loop、工作区和并行 change 的常见问题。'
+title: "Native 常见问题"
+description: "解答 Native 模式选择、需求澄清、状态恢复、验证 Loop、工作区和并行 change 的常见问题。"
 ---
 
 关于 Native 的适用场景、四阶段工作流、portable 状态、验证、恢复和冲突处理的常见问题。
@@ -13,23 +13,25 @@ description: '解答 Native 模式选择、需求澄清、状态恢复、验证 
   </Accordion>
 
 <Accordion title="Native 是否依赖 OpenSpec、Superpowers 或其他外部 Skill">
-  不依赖。Native 自带 Shape、Build、Verify、Archive 和 Runtime。只有 Classic 才安装并使用
-  OpenSpec、Superpowers 等 Classic 参考。
+  不依赖。Native 自带 Shape、Build、Verify、Archive 和 Runtime。只有 Classic
+  才安装并使用 OpenSpec、Superpowers 等 Classic 参考。
 </Accordion>
 
 <Accordion title="为什么 Builder 说完成还不能归档">
-  Builder 只提交实现 handoff。Runtime 先运行必要检查，再分派新的只读 Verifier 覆盖全部 A1…An。Skill
-  协调但没有独立 Verifier execution 时，归档前还需要一次明确用户确认，并会在报告中标明降级。
+  Builder 只提交实现 handoff。Runtime 先运行必要检查，再分派新的只读 Verifier
+  覆盖全部 A1…An。Skill 协调但没有独立 Verifier execution
+  时，归档前还需要一次明确用户确认，并会在报告中标明降级。
 </Accordion>
 
 <Accordion title="Verify 为什么会回到 Build">
-  验收失败、检查失败、Verifier 漏项或结果无效都会写入下一步 continuation，并把 change 返回
-  Build。下一轮修复明确缺口后，由新的 Builder 和新的 Verifier 重新开始。
+  验收失败、检查失败、Verifier 漏项或结果无效都会写入下一步 continuation，并把
+  change 返回 Build。下一轮修复明确缺口后，由新的 Builder 和新的 Verifier
+  重新开始。
 </Accordion>
 
 <Accordion title="没有 verification.md 可以恢复吗">
-  可以。Shape 和 Build 只需要同步的 brief、Specs 和 `comet-state.yaml`；`verification.md`
-  是可重建报告。Verify 或 archive-ready
+  可以。Shape 和 Build 只需要同步的 brief、Specs 和
+  `comet-state.yaml`；`verification.md` 是可重建报告。Verify 或 archive-ready
   在另一台设备上会重建本机执行状态并重新确认，不会直接复用旧的本机结果。
 </Accordion>
 
@@ -40,7 +42,8 @@ description: '解答 Native 模式选择、需求澄清、状态恢复、验证 
 </Accordion>
 
 <Accordion title="为什么新项目默认 Batch">
-  Batch 会先整理问题依赖，再一次询问当前前提已具备的问题，减少重复往返。Sequential
+  Batch
+  会先整理问题依赖，再一次询问当前前提已具备的问题，减少重复往返。Sequential
   仍可配置，按轮次询问一个最上游问题；两者都要在 Build 前确认共享理解。
 </Accordion>
 
@@ -54,7 +57,45 @@ description: '解答 Native 模式选择、需求澄清、状态恢复、验证 
   </Accordion>
 </AccordionGroup>
 
+## Supervisor Change
+
+<AccordionGroup>
+  <Accordion title="什么时候使用 Supervisor Change">
+    一个整体目标包含至少两个能够独立实现和验证的结果，并且仍需要统一集成和最终验收时，适合使用 Supervisor Change。Runtime 会按验收项分配 child、管理依赖和独立 worktree，并在所有 child 集成后验证完整目标。
+
+    没有共同最终验收的目标应创建多个独立 Change。多个部分需要频繁修改同一核心区域，或者拆分成本高于并行收益时，继续使用单个 Native Change。
+
+  </Accordion>
+
+  <Accordion title="为什么要选择多会话协作或单会话推进">
+    推进方式只决定 child 在哪里执行，不改变拆分结果、依赖、验收或集成规则。多会话协作由当前会话统筹，优先使用 Codex 独立会话或 Claude Code Agent Teams；单会话推进由当前会话按顺序完成 child。
+
+    Runtime 在确认 Supervisor Shape 时把选择保存为 `coordination_mode`。恢复任务或因需求变化重新进入 Shape 时会沿用这个选择，不重复询问。
+
+  </Accordion>
+
+  <Accordion title="多会话任务消失后怎么恢复">
+    Comet 会先重新读取 Runtime，不会根据旧会话的残留信息判断 child 已经完成。持久化为 `multi-session` 时，独立会话或 Agent Team 不可用会自动改用 subagent，不会切换为单会话。
+
+    已经派发但丢失的任务会先通过 `supervisor-cancel` 使旧 `runId` 失效，再使用新的任务包和 `runId` 重新派发。旧执行的迟到结果会被拒绝；subagent 也不可用时，Comet 会报告真实阻塞。
+
+  </Accordion>
+</AccordionGroup>
+
 ## 恢复和排障
+
+<AccordionGroup>
+  <Accordion title="Verify 已通过后需求发生变化怎么办">
+    如果变化只是补齐已确认目标的实现，继续 Build 和 Verify Loop。变化修改了用户可见目标、范围或验收标准时，Native 会让 change 返回 Shape，记录新的决定并使旧验证失效。即使 change 已经 archive-ready，也要先重新确认需求，再针对当前目标取得新的验证结果。
+  </Accordion>
+
+  <Accordion title="升级到 RC1 后，旧 Native Change 还能继续吗">
+    可以先通过 `comet status` 和 `comet native doctor <change-name>` 判断状态。能够迁移的 active change 会按 Runtime 返回的动作保守迁移；旧版归档保持只读。不要手工移动旧 Runtime、修改状态文件或复制验证记录。
+
+    升级后先运行 `comet update` 刷新 Skill 和 Runtime。只有 Doctor 明确提供修复动作时，才运行 `comet native doctor <change-name> --repair`。
+
+  </Accordion>
+</AccordionGroup>
 
 先运行：
 
@@ -66,6 +107,6 @@ comet native doctor <change-name>
 
 不要手工修改 `comet-state.yaml`、`.comet/current-change.json` 或 `.comet/runtime/native/`。如果代码、artifact root、branch/worktree 未同步，或 active/archive 目录混合，Runtime 会返回具体的 `await-user`/`blocked` 动作。
 
-旧版本留下的 change-local Runtime、旧 receipt/evidence 或 `native.snapshot` 配置只用于迁移和只读兼容。新 beta17 change 不会创建它们；升级时运行 `comet update`，必要时运行 `comet native doctor <change-name> --repair`。
+旧版本留下的 change-local Runtime、旧 receipt/evidence 或 `native.snapshot` 配置只用于迁移和只读兼容。RC1 新建的 Portable State change 不会继续创建这套旧版账本。
 
 继续阅读：[Native 配置](/zh/native/configuration)、[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复手册](/zh/native/recovery-playbook)。

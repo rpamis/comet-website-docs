@@ -1,57 +1,138 @@
 ---
-title: "Native Loop 工程原理"
-description: "理解 Native 如何用 Runtime 检查、新 Verifier 和有界计数，把模型自述完成变成可恢复的验收循环。"
+title: "Native Loop：从实现到可信交付"
+description: "了解 Native 如何协调 Builder、Runtime 和独立 Verifier，通过有边界的实现与验收循环交付可信结果。"
 ---
 
-普通 Agent loop 让模型自己决定“做完了没”。Native Loop 把完成判定交给 Runtime：模型负责理解和实现，Runtime 负责检查、分派验收、记录缺口和停止循环。
+模型能够写出代码，不等于结果已经满足需求。它可能漏掉一条验收项，也可能把“测试命令运行过”误当成“功能已经通过”。
 
-## 一次 Loop 怎么走
+Native Loop 解决的，正是**完成实现**与**可信交付**之间的差距。Builder 负责实现，Runtime 负责控制流程和保存证据，全新的只读 Verifier Subagent 则根据 `brief.md`、Specs 和验收项独立判断。只有必要检查和最终全量验收都通过，当前变更（change）才能归档。
+
+本文以 Comet RC1 的实现为准。Native Loop 不是让模型无限自我反思，而是一套**输入明确、证据完整、预算有限、知道何时停止**的工程流程。
+
+## 闭环式实现与验收
 
 ```text
-Shape → Build handoff → Runtime checks → fresh Verifier
-                         ↑                 ↓
-                    repair gaps ← fail     pass → Archive
+Shape 已确认
+    ↓
+Builder 实现 → 新的只读 Reviewer Subagent 审查代码 → 提交候选结果
+    ↓
+Runtime 运行必要检查 → 新的只读 Verifier Subagent 逐项验收
+    ↓                         ↓
+需要修复 ← 未通过          全部通过 → 归档
+    ↓
+聚焦修复 → 局部验收通过 → 最终全量验收
 ```
 
-<p align="center">
-  <img
-    src="/assets/native-illustrations/10-native-loop.png"
-    alt="小鱼沿着目标、实现、验收、修复和归档组成的 Native Loop 循环整理记录"
-  />
-</p>
+首次进入 Verify 时，Verifier 会检查完整的验收范围。如果只有少数项目未通过，下一轮 Build 只需重点修复这些项目，并关注本次修改可能影响的其他项目。局部验收通过后，Runtime 仍会安排一次最终全量验收，防止修复 A 时破坏原本已经通过的 B。
 
-每轮都使用完整的验收列表 A1…An。Builder 的自报结果只作为上下文，不能代替 Verifier。Verifier 漏项、重复项、未知 ID 或检查失败都会被 Runtime 拒绝，并把具体缺口交给下一轮 Build。
+因此，Native Loop 同时兼顾两件事：修复阶段不重复做无关工作，交付前也不会降低验收标准。
 
-## 进展如何判定
+## 相互独立的角色分工
 
-Runtime 保存有限的 history 和计数：
+| 参与者 | 主要职责 | 不能替代的工作 |
+| --- | --- | --- |
+| Builder | 阅读 `brief.md`、Specs 和验收项，完成实现并修复缺口 | 不能仅凭自己的总结宣布通过 |
+| Reviewer Subagent | 在新的只读任务中审查候选实现，发现代码层面的问题 | 不代替面向需求的最终验收 |
+| Runtime | 运行必要检查，保存状态和证据，控制轮次、预算与下一步 | 不替模型实现业务逻辑 |
+| Verifier Subagent | 在全新的只读任务中，对照需求逐项给出 `passed`、`failed` 或 `blocked` | 不能跳过验收项，也不能自行修改代码 |
 
-- `iteration`：一次实现修复轮次；
-- `attempt`：当前 Verify 尝试；
+Builder 提交的是**候选结果**，不是“已经通过”的证明。每个新候选结果进入 Verify 前，都要先交给一个新的只读 Reviewer Subagent 审查代码。随后，Runtime 才会运行必要检查，并启动另一个全新的只读 Verifier Subagent，判断实现是否真正满足需求。Reviewer 和 Verifier 都不是 Builder 本身，两者也不是同一个任务。
+
+Verifier 会先阅读验收项、`brief.md`、Specs、实际实现和检查结果，最后才把 Builder 的总结作为辅助线索。这种阅读顺序可以降低 Builder 自述对验收判断的影响，让实现与验收真正分离。
+
+## Runtime 主导的验收流程
+
+1. **锁定候选结果。** Runtime 记录候选 ID、当前实现轮次和本次验收范围，确保后续结果对应正确的代码版本。
+2. **运行必要检查。** Runtime 执行测试、构建或其他项目命令。Builder 提供的检查结果只作为参考，不能替代 Runtime 的实际执行结果。
+3. **启动新的 Verifier Subagent。** Verifier 以只读方式检查代码，并为当前范围内的每个验收 ID 给出且只给出一次结论。
+4. **校验返回结果。** 如果结果存在漏项、重复项、未知验收 ID、过期响应或身份不匹配，Runtime 会直接拒绝，不会误记为通过。
+5. **决定下一步。** 全量验收通过后可以归档；存在实现缺口时返回 Build；需要产品决定或外部信息时暂停，并把决定权交还用户。
+
+如果现有证据不足，Verifier 可以请求补充检查。Runtime 会执行检查并保存结果，然后继续当前验收，避免 Verifier 在证据不足时依靠猜测作出结论。
+
+## 局部修复与最终全量验收
+
+假设完整验收范围是 A1–A8，第一次 Verify 发现 A3 和 A7 未通过。Builder 完成修复后，Runtime 会把 A3、A7 和 Builder 声明可能受此次修改影响的其他验收项，一起交给下一次 Verifier。
+
+- 如果局部范围仍未通过，Runtime 会把明确缺口返回 Build。
+- 如果局部范围通过，Runtime 不会直接归档，而是把 A1–A8 全部恢复为待验收状态。
+- 新的 Verifier 完成最终全量验收后，当前变更才具备归档条件。
+
+这种“**局部修复，最终全量确认**”的方式减少了无意义的重复检查，同时保留了对回归问题的完整防线。
+
+对于同一个候选结果，Runtime 可以复用当前验收尝试中已经完成的检查，避免重复执行。Verifier 通过 `request-checks` 请求额外检查时，Runtime 会限制请求轮数并过滤重复项目。
+
+完整日志会保存在本机，用户可读的报告只呈现结论和必要摘要。这样既保留了排查问题所需的细节，也不会让大量 `stdout` 和 `stderr` 淹没真正重要的验收结果。
+
+## 相互分离的实现轮次与验收尝试
+
+Native Loop 使用两个维度定位当前进度：
+
+| 字段 | 何时变化 | 表示什么 |
+| --- | --- | --- |
+| `iteration` | Builder 修改实现并提交新候选结果时 | 第几轮实现或修复 |
+| `attempt` | Runtime 对同一个候选结果启动新的 Verifier 时 | 该候选结果的第几次验收尝试 |
+
+例如，Runtime 为同一个候选结果启动新的 Verifier 验收尝试时，`attempt` 会增加，但 `iteration` 不变。Verifier 在当前尝试中请求补充检查，不会单独增加 `attempt`。只有 Builder 修改代码并提交新的候选结果后，`iteration` 才会进入下一轮。
+
+Runtime 会把候选 ID、Verifier 身份、`iteration`、`attempt` 和验收范围绑定在一起。即使旧任务稍后才返回结果，也无法覆盖当前状态。这项约束对长时间运行、任务恢复和并行执行尤其重要。
+
+## 基于验收缺口的进展判断
+
+Runtime 不会因为“这次改了很多代码”就认定取得了进展。它会比较连续两轮仍未解决的验收项：只有未解决项确实减少，而且没有新增未解决项时，才算取得可靠进展。在集合关系上，这意味着当前未解决项必须是上一轮的严格子集。
+
+RC1 会记录以下计数：
+
 - `no_progress_count`：未解决验收没有严格减少的次数；
-- `failed_iteration_count`：实现失败轮次；
-- `execution_failure_count`：Runtime/Verifier 执行错误次数。
+- `failed_iteration_count`：实现未通过验收的轮次；
+- `execution_failure_count`：Verifier 任务本身执行失败的次数。
 
-减少未解决验收项、让失败检查变为通过、补齐明确缺失的信息，才算真实进展。只改说明、重复同一命令、把失败项换个顺序，不能清零停滞计数。连续错误或没有进展达到上限后，状态进入 `await-user` 或 `blocked`。
+连续两轮没有可靠进展时，Runtime 会要求 Builder 换一种修复思路。如果第三轮仍然没有进展，Loop 就会暂停，让用户决定下一步。验收失败的轮次还受到 `native.max_verify_failures` 限制，默认最多为 `5` 轮。
 
-## 检查只做必要的工作
+“验收未通过”和“Verifier 任务执行出错”是两类不同的问题。前者说明实现或需求仍有缺口，后者表示 Verifier 没有正常完成任务。RC1 最多允许连续出现 `3` 次执行错误，每次验收尝试最多接受 `2` 轮额外检查请求。达到上限后，Runtime 会明确暂停，不会无限重试，更不会把异常当作通过。
 
-必要检查由 Runtime 解析和执行。相同候选下已完成的计划会复用，额外检查通过当前 attempt 的 `request-checks` 请求，并有轮数和重复预算。stdout/stderr 流入本机日志，报告保留摘要；长日志不会单独使结果失效。Archive 正常路径不重新执行检查。
+## 按问题类型精准回退
 
-## 状态和恢复
+Verify 暴露的问题不一定都是代码错误。Runtime 会根据问题类型返回对应阶段：
 
-`comet-state.yaml` 保存 Loop 的稳定摘要和下一步，`verification.md` 展示用户可读报告；本机 `state.json`、日志、锁和事务位于 `.comet/runtime/native/`。换设备时本机执行视为中断，Runtime 从 YAML 重建必要状态；不会把模型记忆或旧的本机 overlay 当成完成依据。
+- **实现遗漏或代码缺陷**：回到 Build，修复现有实现；
+- **用户可见行为或验收标准发生变化**：回到 Shape，更新需求并请用户重新确认；
+- **出现与当前变更无关的新需求**：另建一个 change，避免扩大当前验收范围；
+- **缺少用户决定或外部条件**：进入 `await-user`，并说明需要补充什么信息。
 
-## Runtime 何时停止
+这样一来，Loop 就不会为了“跑通流程”而擅自改写已经确认的目标。
 
-Runtime 在这些情况停止并返回明确动作：
+## 可跨任务恢复的持久化状态
 
-- 仍有产品决定需要用户确认；
-- 代码、branch/worktree 或 artifact root 不匹配；
-- acceptance 未完整覆盖，或必要检查失败；
-- Verifier 不可用、执行错误达到上限，或语义结果需要用户解决；
-- 并行 change 要修改同一 capability，需要决定归档顺序。
+Native Loop 不依赖某个模型始终记住全部上下文。Runtime 会把不同用途的状态分别保存：
 
-因此 Loop 不会一直运行下去：验收全部通过后归档，剩余的决定和风险则交还用户，避免无意义的轮次消耗。
+- `comet-state.yaml` 保存可同步、可恢复的稳定状态和下一步；
+- `verification.md` 保存用户可读的验收报告；
+- `.comet/runtime/native/` 保存本机运行状态、日志、锁和事务信息。
 
-继续阅读：[验证与修复](/zh/native/verification-and-repair) 和 [连续推进](/zh/native/continuation-and-checkpoints)。
+任务中断或换到另一台设备后，Runtime 会根据可信的 YAML 状态重建流程。尚未完成的本机任务会被视为已经中断。即使当前变更在另一台设备上已经进入“可以归档”的状态，换设备后仍要重新 Verify，不能直接沿用原设备上的执行结论。恢复流程本身不会被计入验收失败或停滞次数。
+
+## 有明确边界的自动推进
+
+Runtime 会在以下情况停止自动推进，并返回明确动作：
+
+- 仍有产品决定、外部条件或 `blocked` 验收项需要用户处理；
+- 当前代码、分支、worktree 或 artifact root 与 Runtime 记录不一致；
+- 没有可靠进展、失败轮次或执行错误达到预算；
+- Verifier 不可用，或当前宿主无法证明它与 Builder 相互独立；
+- 多个并行 change 修改同一项能力（capability），需要先决定归档顺序。
+
+有些宿主可以启动 Verifier，却无法向 Runtime 证明它确实运行在独立任务中。遇到这种情况，Runtime 会如实标记这项可靠性限制，并要求用户确认结果。它不会把“已经尽量隔离”包装成“已经完成独立验收”。
+
+## Native Loop 的核心价值
+
+- **完成标准可信**：是否允许归档，取决于 Runtime 检查和逐项验收，而不是 Builder 的自述。
+- **职责相互制衡**：实现、代码审查、检查执行和需求验收由不同角色承担。
+- **修复成本可控**：失败后聚焦未解决项，最终再做全量确认。
+- **不会无限空转**：停滞、失败、执行错误和额外检查都有明确预算。
+- **能够安全恢复**：状态落盘，旧响应受版本约束，中断后不依赖模型记忆继续。
+- **边界对用户透明**：需求变化、外部阻塞或独立性不足时，流程会停下来说明原因。
+
+Native Loop 的价值不在于“多跑几轮”，而在于每一轮都有可以核对的目标、证据和退出条件。模型继续负责它擅长的理解与实现，Runtime 则把交付过程变成一套可验证、可恢复、可审计的工作流。
+
+继续阅读 [验证与修复](/zh/native/verification-and-repair)，了解 Verifier 协议和失败处理。阅读 [连续推进](/zh/native/continuation-and-checkpoints)，了解 continuation、检查点与恢复机制。

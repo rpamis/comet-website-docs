@@ -1,77 +1,445 @@
 ---
-title: "Skill Creator workflow"
-description: "Follow the full /comet-any workflow from discovery and confirmation through generation, eval evidence, review, publish, and distribution."
+title: "The Complete Process of Creating Skill (Advanced)"
+description: "From preparing preferences to recovery, generation, evaluation, review, release and distribution, complete every stage of /comet-any (Skill Creator)."
 ---
 
-The `/comet-any` workflow is long because it creates a reviewable and distributable Skill package, not just a prompt file.
+<Tip>
+When creating, optimizing or combining skills, it is usually only necessary to call <code>/comet-any</code> in the Agent and confirm as prompted. Evaluation, release, distribution and recovery will be guided by processes; Unless troubleshooting or automation integration is involved, there is no need to first be concerned with underlying commands, internal states, or product structures. This page is advanced content, covering every step of the complete process. If you just want to run it through quickly, first take a look at [Quick Start: Combining Any Skill](/en/skill-creator/getting-started)
+</Tip>
+
+This page describes the complete process of `/comet-any` from the user's perspective. CLI provides deterministic underlying execution capabilities, and the daily entry points remain `/comet-any`. The commands listed here are for you to ** understand the process **, and you don't need to remember the Bundle subcommand.
+
+## First, look at the main path
+
+```text
+Created by /comet-any
+→ comet eval --collect / --html (Verification)
+→ comet creator status/next (see readiness and only next Step)
+→ comet publish review/approve/run
+→ comet publish distribute --preview/distribute
+```
+
+If you only need to complete the creation of a Skill once, prioritize following this main thread. The following 17 stages are complete references to explain what happens when stuck, why to pause, and which command to look at next.
+
+|Your current state|Next step|
+| --- | --- |
+|The creation hasn't started yet|Call `/comet-any` in the Agent|
+|Create an interrupt or be unsure of the next step|Run `comet creator next <name> --project . --json`|
+|Want to see the complete readiness/blocker/evidence|Run `comet creator status <name> --project . --json`|
+|A Skill has been generated and pre-release evidence is needed|Run `comet eval ./generated-skill/comet/eval.yaml --collect`, then run `--html`|
+|The assessment has been passed.|Run `comet publish review`, `approve`, `run`, `distribute --preview`|
+
+<Note>
+Internal terms such as draft hash, eval evidence, and Bundle draft may appear on this page. They are used to explain the recovery and release of access control. When in daily use, prioritize looking at the only next step given by <code>comet creator next</code>.
+</Note>
+
+## Complete stage reference
+
+The complete process can be divided into 17 stages. Let's talk about each one below. For ease of understanding, divide them into five logical stages:
+
+```mermaid
+flowchart TB
+    subgraph A["Preparation and Confirmation"]
+        S1["1. Recovery status"]
+        S2["2 First Guide"]
+        S3["3 Select the starting point + language"]
+        S4["4. Analyze real skills"]
+        S5["5. Resolve deficiencies/ambiguities"]
+        S6["6. Read the real realization"]
+        S7["7. Plan confirmation page"]
+        S8["8 Clarify the goal"]
+    end
+    subgraph B[""Generated"]
+        S9["9 Initialize draft"]
+        S10["10 Generate the Skill source code"]
+        S11["11 Generate the Engine Package"]
+        S12["12 Compilation Verification"]
+    end
+    subgraph C[""Evaluation"]
+        S13["13 Evaluate the workload"]
+        S14["14. Record the assessment evidence"]
+    end
+    subgraph D[""Publish"]
+        S15["15. Review and approval for release"]
+    end
+    subgraph E[""Distribute"]
+        S16["16 Installation Preview"]
+        S17["17 Real Distribution"]
+    end
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8
+    S8 --> S9 --> S10 --> S11 --> S12
+    S12 --> S13 --> S14
+    S14 --> S15
+    S15 --> S16 --> S17
+```
+
+|Logic stage|"Stage|Key access control|
+| --- | --- | --- |
+|"Preparation and Confirmation.| 1–8 |Scheme confirmation page: Do not write Bundle draft before user confirmation|
+|"Generate"| 9–12 |Compilation verification: The product is consistent with `workflow-protocol.json`|
+|"Evaluation.| 13–14 |The eval evidence is bound to the current draft hash; otherwise, the state will not be advanced|
+|"Published.| 15 |It will be released only after explicit manual approval|
+|"Distribution.| 16–17 |Force preview first and confirm before actual distribution|
 
 <p align="center">
-  <img src="/assets/skill-creator-workflow-illustrations/01-comet-any-long-chain.png" alt="Xiaoyu folds the /comet-any long chain into planning, generation, eval evidence, review, publish, and distribution sections" width="800" />
+  <img src="/assets/skill-creator-workflow-illustrations/01-comet-any-long-chain.png" alt="Xiaoyu broke down the 17-step process of comet-any into five parts: preparation and confirmation, generation, evidence evaluation, review and release, and preview and distribution" width="800" />
 </p>
 
-## Stages
+The main storyline of <p align="center">/comet-any is quite long, but it can be broken down into five segments: preparation and confirmation, generation, evaluation, release, and distribution to understand </p>
 
-1. Understand the target Skill.
-2. Read project preferences.
-3. Discover candidate Skills from real local sources.
-4. Present a confirmation plan.
-5. Initialize draft metadata after confirmation.
-6. Generate the package.
-7. Complete authoring lanes.
-8. Run eval evidence.
-9. Review readiness.
-10. Approve and publish.
-11. Preview distribution.
-12. Distribute to target platforms.
+## 1. Restore the current creative state
 
-## Key evidence
+By default, `/comet-any` attempts to restore the existing process first. It will only create a new process when you explicitly say "start over" or "abandon the old state".
 
-| Evidence | Why it exists |
+It will organize the recovery information into a "recovery summary", directly displaying `resumeSummary`, `Current step`, `Suggested user command` and the cause of the block, eliminating the need to manually check `.comet/bundle-authoring/`.
+
+If there are multiple recoverable entries, `/comet-any` will display the name, status, next action and reason of each entry, allowing you to choose which one to continue with.
+
+When restoring, it will check whether these items are still valid
+
+- Whether the Skill Creator state exists
+- Has the draft hash changed
+- Has the `preferenceHash` of `.comet/skill-preferences.yaml` changed
+- Whether the resolved Skill hash changes
+- Whether Eval evidence still matches the current hash
+- Whether approval still matches the current hash
+
+<Info>
+To see exactly what fields the backend returns, you can manually run <code>comet creator guide --project. --json</code>. It will return <code>preference</code>, <code>inventory</code>, <code>resumable</code>, <code>nextQuestions</code>, <code>userMessage </code>.
+</Info>
+
+## 2. Run the first use wizard
+
+If it is the first use (no preferences, no recoverable status), `/comet-any` will scan the platform Skill inventory supported by Comet, display the reusable capabilities by ** capability groups **, and ask whether to save the recommended preferences. You don't need to re-list a long string of skills in the input box every time.
+
+## 3. Select the starting point and language
+
+Choose one of the three starting points (see [Skill Creator overview · Three starting points](/en/skill-creator/overview#three-starting-points)). Each maps to a **Skill Creator intent** (`skillCreatorIntent`):
+
+|Starting point| `skillCreatorIntent` |
 | --- | --- |
-| `workflow-protocol.json` | Stable workflow contract. |
-| `resolved-skills.json` | Real source and hash evidence. |
-| `comet/eval.yaml` | Repository-local eval manifest. |
-| review/approval records | Human gate tied to draft hash. |
-| distribution preview | Shows exactly what will be installed. |
+|Five-stage customization based on Comet's existing Skill| `customize-comet` |
+|Create a brand-new workflow Skill| `new-skill` |
+|Sort out the existing skills| `upgrade-existing` |
 
-## `plan.json` structure
+Whichever starting point you choose, `/comet-any` compiles the target into the same **Workflow Contract** (`workflow.kind` is `comet-five-phase-overlay` or `workflow-kernel`). See [Workflow Contract](/en/skill-creator/overview#workflow-contract-the-shared-model-for-every-path).
 
-The main input in `plan.json` is `workflow` (the Workflow Contract):
+Confirm the default language and locales at the same time. At least record the default locale; Multilingual skills need to specify which files are overridden by locale overlay.
+
+## 4. Read preferences and parse real skills
+
+`/comet-any` reads `.comet/skill-preferences.yaml`, and then uses `find-skill` to parse the local real Skill. The analysis yields three types of results through candidate checking:
+
+|"Status"|Meaning|
+| --- | --- |
+| `available` |Find the sole source|
+| `missing` |Completely unfound|
+| `ambiguous` |There are multiple different sources|
+
+<Warning>
+One must not infer one's ability merely by name. <code>/comet-any</code> must read the final candidate real <code>SKILL.md</code>, direct reference, rules, scripts and hooks.
+</Warning>
+
+## 5. Handle missing and ambiguous candidates
+
+If the candidate `missing` or `ambiguous`, `/comet-any` ** must pause asking you **. It cannot silently ignore missing candidates, nor can it choose for you from multiple sources.
+
+After you clearly select the source, `/comet-any` will update the metadata of Skill Creator. When you explicitly agree to ignore missing preferences, it will record the reasons (enter the review summary). If there is still unresolved Skill candidates, `/comet-any` will not continue to be generated.
+
+Back-end equivalent commands (for understanding the process, no need to run manually) :
+
+```bash
+# Specify the source to resolve ambiguity
+comet creator resolve <name> --candidate <query> --source <root-or-hash> --json
+
+# Or explicitly ignore the missing (the reason must be given)
+comet creator resolve <name> --candidate <query> --ignore-missing --reason "<reason>" --json
+```
+
+## 6. Read the real candidate implementations
+
+`/comet-any` reads each candidate's real implementation (`SKILL.md`, references, rules, scripts, hooks), ** read-only and non-executable **, to understand the real capabilities.
+
+## 7. Generate the Skill Creator scheme and wait for confirmation
+
+`/comet-any` compiles the target into a **Workflow Contract**, proposes composition schemes according to preferences, and labels the responsibilities, implementation skills, Required Skill calls and Output Schema of each node. This page is "**Skill Creator Solution Confirmation Page **".
+
+The scheme confirmation page should at least include these blocks:
+
+|Block|"Content|
+| --- | --- |
+|What are you doing|Skill Creator intent, Skill name, goal|
+| Workflow contract |`kind` (`comet-five-phase-overlay`/`workflow-kernel`), responsibilities of each node/implementation Skill/ Skill/Output Schema that must be called, Output Schemas list|
+|Retain/Add/Replace/Close|Adjust the vocabulary corresponding to the starting point|
+|Can't do|Rejected adjustments (such as override control nodes)|
+|Which files will be generated|Product list|
+| Validate / Install / Advanced details |Verification, installation, and advanced information|
+
+<Info>
+It must be clearly informed to the user that what is displayed now is the "Skill Creator Solution Confirmation Page "<strong> </strong>. The Bundle draft will not be written until the user confirms.
+</Info>
+
+You need to make one of the three choices on the confirmation page:
+
+1. `confirm-generate` - Confirm generation and then write to Bundle draft (displayed only when blocker is not available).
+2. `revise-proposal` - Re-propose after modifying the target, preference, candidate or Workflow Contract.
+3. `cancel` - Do not write to Bundle state.
+
+## 8. Clarify the goals of Skill Creator
+
+If the plan requires supplementary information, `/comet-any` will clarify: what is the goal, whether it is an entry or an internal Skill, which resources are shared, the target platform, and whether an Engine is needed.
+
+## 9. Initialize the draft and Skill Creator metadata
+
+After the user confirms, `/comet-any` calls the backend initialization draft:
+
+```bash
+# dry-run proposal, do not write Bundle state
+comet creator propose <name> --file <plan.json> --json
+
+# Write the confirmed Factory state
+comet creator init <name> --file <plan.json> --confirmed-proposal --json
+```
+
+`comet creator init` will solidify the standardized plan to `.comet/bundle-factory-plans/<name>/plan.json` and record `planHash` and `preferenceHash`.
+
+### plan.json structure
+
+The main input of `plan.json` is `workflow` (Workflow Contract) :
 
 ```json
 {
-  "goal": "Customize the existing Comet five-phase Skill by adding grill-me clarification to the open node.",
+  "goal: "Based on the five-stage customization of Comet's existing Skill, add Gray-ME clarification requirements at the open node.",
   "skillCreatorIntent": "customize-comet",
   "workflow": {
     "kind": "comet-five-phase-overlay",
     "name": "comet-with-grill-me",
-    "goal": "Require grill-me during the open node to clarify requirements.",
+    ""goal":" In the open node, request to call Grilling-me to clarify the requirements.",
     "nodes": {
       "open": {
         "requiredSkillCalls": [
           {
             "skill": "grill-me",
-            "reason": "Clarify goals, boundaries, and acceptance criteria before creating the OpenSpec change."
+            "reason: "Clarify the objectives, boundaries, and acceptance criteria before creating the OpenSpec change."
           }
         ]
       }
     }
   },
-  "eval": {
-    "tasks": ["authoring-smoke"]
-  }
+  "engineMode": "deterministic",
+  "runnerMode": "standalone"
 }
 ```
 
-## Comet-native Skill generation
+Key field
 
-`/comet-any` assembles artifacts through **authoring lanes**. Generated output includes the entry `SKILL.md`, internal Skills for each Workflow Node, and:
+|Field|Explanation|
+| --- | --- |
+| `skillCreatorIntent` |`customize-comet`/`new-skill`/`upgrade-existing`, corresponding to three starting points; If not written, it will be inferred based on `workflow.kind` and `mode`|
+| `workflow.kind` |`comet-five-phase-overlay` (Five-stage Customization) or `workflow-kernel` (Brand-new workflow)|
+| `workflow.nodes` |Overwrite or enhance the built-in nodes (`requiredSkillCalls`, `augmentations`, `implementation`, `satisfies`, `disabled`) by Workflow Node id|
+| `workflow.customNodes` |The `workflow-kernel` mode declares a brand-new node (each must include `responsibility`)|
+| `workflow.outputSchemas` |`workflow-kernel` mode declaration custom Output Schema|
+| `engineMode` |`none`/`deterministic`/`adaptive` (default: `deterministic`)|
+| `runnerMode` |`change` (bound to the OpenSpec directory)/`standalone` (default)|
+| `mode` |`create` (default)/`optimize`, `optimize` must provide `sourceRoot`|
+| `defaultLocale` / `locales` |Default language and locales|
 
-- `reference/workflow-protocol.json` — the single runtime source of truth for nodes, edges, Output Schema, state, and evals
-- `reference/resolved-skills.json` — real Skill source evidence and workflow node bindings
-- `comet/eval.yaml` — the eval manifest used before publishing
+<Warning>
+Skill Creator plans reject unknown fields, and <code>workflow</code> must be a valid Workflow Contract. Reading a plan immediately calls <code>normalizeWorkflowDefinition</code>; invalid input fails directly. See [Skill Creator overview · Validation findings](/en/skill-creator/overview#validation-findings).
+</Warning>
 
-## Next steps
+#### Workflow Node operation semantics
 
-- [Publishing](/en/skill-creator/publishing)
-- [Engine](/en/skill-creator/engine)
+|Operation|Meaning|Applicable node|
+| --- | --- | --- |
+|`require` (default for requiredSkillCalls)|It is required that a certain Skill be called within the node without replacing the implementation|All nodes|
+|`augment` (default for augmentations)|Enhance the node without replacing the main implementation|All nodes|
+|`override` (implementation Replacement)|Replacement node implementation|Only producer (`satisfies` is required); control Not allowed; The override control in the normal mode will fail|
+| `disable` |Shut down the node|Only the `optional` node (`review`)|
+
+## 10. Generate Comet-native Skill source code
+
+`/comet-any` assemps products through authoring lanes. The product includes the entry `SKILL.md`, the internal Skill corresponding to each Workflow Node, and is written as:
+
+- `reference/workflow-protocol.json` - ** The only runtime fact source ** (node, edge, Output Schema, state, evals), read it in full by runtime/eval/review/readiness
+- `reference/resolved-skills.json` - Genuine Skill source evidence + workflow node binding
+
+<Info>
+<code>/ Comet-any </code> prefers to use the native <code>. Skills-creator </code> must obtain consent before using Comet as a safety net.
+</Info>
+
+## 11. Generate Engine Package
+
+Products that are multi-step, require recovery, require guardrails, require runtime checks, or contain script side effects will generate Engine packages. The lightweight single-step Skill (`engineMode: none`) may not enable Engine, but it will lose Run recovery and runtime check.
+
+The generated Engine four-piece set: `comet/skill.yaml`, `comet/guardrails.yaml`, `comet/checks.yaml`, `comet/eval.yaml`. Among them, `comet/eval.yaml` will carry the current draft hash placeholder, recommended task, baseline treatments, quality access control, required Output Schema and expected evidence. For a complete description of the Engine mechanism, please refer to [Skill and Engine](/en/skill-creator/engine)
+
+## 12. Compilation and verification
+
+Compile `/comet-any` to the reference platform and verify:
+
+```bash
+comet bundle compile <name> --platform <id> --json
+```
+
+The verification includes Workflow Contract semantics, required capability set for stability control plane and platform capability matching. The Workflow Contract has been verified by `normalizeWorkflowDefinition` before generation (the control node cannot override, the producer override needs to satisfy, the Output Schema needs to exist, etc.) During the compilation stage, the product will be rechecked to be consistent with `workflow-protocol.json`.
+
+## 13. Present the assessment workload
+
+`/comet-any` presents the assessment workload, allowing you to select `skip`/`quick`/`full`:
+
+```bash
+comet bundle eval-plan <name> --level quick --json
+comet bundle eval-plan <name> --level full --json
+```
+
+Return `level`, `components[]`, `estimatedRuns`, `tokenWorkload`, `explanation`. This is a descriptive estimate, not a token commitment.
+
+|"Level"|Coverage area|Estimation|
+| --- | --- | --- |
+| `quick` | static、entry-smoke、baseline、assertion-grading、platform-compile |`4 + entries*2` times|
+| `full` |quick all + trigger-accuracy, routing-overlap, failure-analysis, etc|`quick + 6 + entries*3` times|
+
+## 14. Record the assessment evidence
+
+Actually perform the evaluation (this step corresponds to `comet eval`) and bind the evidence to the current draft hash and the current eval manifest hash:
+
+```bash
+# Record the eval evidence (the result JSON must be bound to the current draft hash and eval manifest hash)
+comet bundle eval-record <name> --result <file> --json
+```
+
+`eval-record` only accepts the results of `schemaVersion: 2` and `provider: "comet-eval"`. Only when `passed: true` and `failures` are empty will the state advance to `eval-passed`. Otherwise, roll back to `draft` and clear review/ready/conflict.
+
+<Warning>
+Evidence <code>draftHash</code> is not equal to the current <code>currentHash</code>, Or <code>evalManifestHash</code> is not equal to the current generation of <code>comet/eval yaml</code> hash, only write file does not advance. Old evidence can be retained on the disk, but cannot be pushed forward.
+</Warning>
+
+## 15. Review, approve and release
+
+Check "readiness" and "Next" before releasing. `comet creator status` displays complete readiness, blocker, warning and evidence; `comet creator next` only returns one next command that the user should execute. `/comet-any` will display entry Skill, internal Skill, `planHash`, `preferenceHash`, real Skill evidence, recommended invocation sequence, deviation items and reasons, capability gap, executable disclosure, and Eval result summary based on the review summary. And `Readiness:`, `Blockers:`, `Warnings:`, `Evidence:`.
+
+```bash
+# Review Summary
+comet publish review my-skill --platform <reference-platform> --json
+
+# Manual approval
+comet publish approve my-skill --reviewer alice --json
+
+# "Publish
+comet publish run my-skill --platform <reference-platform> --json
+```
+
+Only after the user's explicit approval can the release continue. The blocking items can be found at [Publish and Distribute Skill](/en/skill-creator/publishing)
+
+## 16. Installation Preview (Mandatory)
+
+After release, `/comet-any` ** must ask you whether to distribute **, and it cannot be distributed automatically. Before actual execution, "preview" must be run first:
+
+```bash
+comet publish distribute my-skill --platform <id> --scope project --preview --json
+```
+
+preview will display `Install preview`, planned files, unsupported capability, executable disclosures, `No files were written`.
+
+## 17. True distribution
+
+After confirming the preview result, remove `--preview` to perform the actual distribution:
+
+```bash
+comet publish distribute my-skill --platform <id> --scope project --json
+```
+
+If the target platform contains executable capabilities such as hooks or scripts, the disclosed information must be displayed first. Only after the user confirms can `--confirm-executables` be added. Only if the user explicitly chooses to skip the optional capability can `--skip-capability <capability>` be added.
+
+---
+
+## Resume the interrupted process
+
+If you stop halfway through, come back and directly tell the Agent:
+
+```text
+Continue with the last Skill creation
+```
+
+`/comet-any` will first scan the recoverable status and display the name, status, next action, blockers and the summary of the last confirmed combination scheme. hash drift handling during recovery:
+
+|"Mode"|When preferences or the source of Skill change|
+| --- | --- |
+| `advisory` |Give a warning and ask you to choose to continue with the old combination scheme or regenerate it|
+| `strict` |Blocked, asking you to confirm whether to continue or regenerate|
+
+---
+
+## Complete example: Create a PR review assistant
+
+### 1. Preparation Preference (optional
+
+```yaml
+# .comet/skill-preferences.yaml
+version: 1
+mode: advisory
+
+prefer:
+  - brainstorming
+  - writing-plans
+  - requesting-code-review
+  - verification-before-completion
+
+require:
+  - requesting-code-review
+  - verification-before-completion
+
+policies:
+  missing: ask
+  ambiguous: ask
+  deviation: explain
+  scripts: disclose
+  hooks: disclose
+```
+
+### 2. Call /comet-any and describe the target
+
+```text
+/comet-any
+```
+
+```text
+Please create a PR review assistant based on project-level preferences.
+It needs to first clarify the review scope, then formulate the inspection plan, and finally carry out the code review.
+Finally, it is required to verify the evidence before completion.
+The goal is to be reused by the team, not just for the current task.
+```
+
+### After confirming the plan, proceed with the evaluation and release
+
+```bash
+# "Evaluation
+comet eval ./generated-skill/comet/eval.yaml --collect
+comet eval ./generated-skill/comet/eval.yaml --html
+
+# Review, approve, and release
+comet publish review review-helper --platform claude --json
+comet publish approve review-helper --reviewer alice --json
+comet publish run review-helper --platform claude --json
+
+# Distribution (Forced Preview → Real Distribution)
+comet publish distribute review-helper --platform claude --scope project --preview --json
+comet publish distribute review-helper --platform claude --scope project --json
+```
+
+## What is the minimum requirement for users to remember
+
+1. `/comet-any` is the sole primary entry point for creating, optimizing, and combining skills.
+2. `.comet/skill-preferences.yaml` is a project-level preference that can be handwritten or generated by `/comet-any`.
+3. Before generation, you must first look at the ** combination scheme ** and confirm it before writing the Bundle draft.
+4. "Eval is pre-release evidence, not the release action."
+5. Use `comet creator status` to check the complete readiness, and use `comet creator next` to check the only recommended next step. You don't need to write the internal Bundle status by hand.
+
+## Next step
+
+- [Skill Preferences and Real sources ](/en/skill-creator/preferences) - Configuration `.comet/skill-preferences.yaml`
+- publish and distribute Skill](/en/skill-creator/publishing) - readiness, approval, publish and distribute
+- Skill and Engine](/en/skill-creator/engine) - Engine Package and runtime check
+- Overview of the Evaluation System ](/en/eval/overview)-Eval: How Does eval Provide Evidence for Release

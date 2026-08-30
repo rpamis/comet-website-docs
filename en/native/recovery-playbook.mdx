@@ -1,74 +1,118 @@
 ---
-title: 'Recovery and troubleshooting'
-description: 'Recover Native from portable state and handle cross-device moves, interrupted execution, branch mismatches, transactions, and archive conflicts.'
+title: "Native Task Recovery"
+description: "Learn how Native continues tasks from the nearest secure node after a session interruption, device switch, workspace change, or Archive interruption."
 ---
 
-When a session is interrupted or an action fails, read the Runtime state first and follow its action. Native recovery uses `.comet/config.yaml`, the brief, Specs, `comet-state.yaml`, and the necessary local Runtime; it does not use chat memory or a Builder's self-report.
+Native will automatically resume most interrupts. It retains the provable requirements, implementation progress and acceptance results in the warehouse, and only re-executes the lost native processes or verification evidence. You can directly continue with the original Change. The Runtime will read the current state, check the working directory, and return to a safe next step.
 
-## Standard diagnostics
+The recovery basis comes from the project documents. `brief.md`, target Specs, `comet-state.yaml` and `verification.md` record the contents that have been confirmed and completed for the task; `.comet/runtime/native/` saves the execution process on the current device and can be rebuilt when needed.
+
+## Automatic recovery mechanism
+
+Each time the Change continues, Native will compare the repository status with the local execution record:
+
+1. Find the actual branch or worktree where the Change is located;
+2. Read the most recent complete write of `comet-state.yaml`;
+3. Check whether the running task, test or Verifier has been interrupted;
+4. Rebuild the missing or expired local execution records;
+5. Proceed to the current stage based on the existing evidence or return to the position that requires re-verification.
+
+When the Native records of Shape and Build are lost, Native will continue in the original stage, and the confirmed requirements and acceptance items remain unchanged. Verify or Archive relies on local execution evidence. When relevant records are lost, the current implementation will be re-verified.
+
+## Session interruption recovery
+
+After the terminal is closed, the Agent session ends, or a process exits unexpectedly, Native will mark the still-running native tasks as interrupts and then determine which steps can be safely retried.
+
+|Interrupt location|The processing method of Native|
+| --- | --- |
+| Shape |Restore the saved issues and decisions and continue with the requirement confirmation|
+| Build |Retain the current requirements and implementation scope and continue from the existing code|
+|Verify wait for the result|Abandon the already disconnected Verifier and start the verification from the current candidate again|
+|Archive is ready.|Return to Verify and reconfirm the synchronized implementation and all acceptance items|
+|The repeatable check is running|Re-execute this check|
+|Tests that contain side effects and cannot be safely repeated|Return to Build, generate a new implementation candidate and then verify it|
+
+Revalidation caused by recovery is included in the execution of recovery, and the counts of implementation failure and continuous no progress remain unchanged. When a new Verifier is actually started, the number of Verifier attempts will increase normally.
+
+## Continue across devices
+
+Before changing the equipment, please synchronize the following contents first
+
+- Project code;
+- `brief.md`, target Specs and `comet-state.yaml` in Change;
+- The generated `verification.md`;
+- When using the custom product catalog, the corresponding `.comet/config.yaml`.
+
+After the new device opens the same repository, Native will reconstruct the local execution records based on these files. Old processes, Agent sessions and Subagent tasks remain on the original device. The new device creates new execution tasks from the provable status in the warehouse.
+
+The completed Shape and Build will be retained. When Change is verifying or has already waited for Archive, the new device will re-verify the synchronized code. During the recovery period, the number of acceptance failures, the number of implementation failures, and the count of no progress remain unchanged.
+
+Code that has not been synchronized on old devices cannot be restored from the Change state. When there is a gap in the synchronized implementation, the new Verifier will point out the unmet acceptance items and return the Change to the Build.
+
+## Workspace restoration
+
+Native will scan the worktree registered by Git and give priority to the working directory that is bound to the Change branch. Even if you start from the main directory of the repository, the Runtime can find the actual location of the Change and allow the Agent to continue in that directory.
+
+When the current branch, worktree type, or project root does not match the Change record, the Runtime will pause the write and return to the expected directory. When the original directory still exists, the Agent will switch to the correct location. When worktree has been removed but the branch is still valid, Native can rebuild worktree.
+
+The following situations require you to confirm the workspace:
+
+- The original branch has been renamed or taken over by other work.
+- There are multiple working directories that match exactly.
+- The original directory and branch have been lost.
+- The same "Change" status appears in different versions at two locations.
+
+You can choose a trusted directory, restore from a backup, or stop the Change. The Runtime will retain the existing files and wait for a clear decision.
+
+## Archive transaction recovery
+
+Archive will update the official Spec, final status and verification report in sequence, and then move the Change into the archive directory. Runtime uses transactions to record each step, so when a process exits halfway, it can resume from a completed step.
+
+When continuing with the same Archive again, Native will check the transaction and the actual file:
+
+- When the transaction is consistent with the file, proceed from the next step.
+- When the Change has been archived and the workspace closure fails, retain the archived result and return to the Git recovery action.
+- When both the active and archive directories exist simultaneously, retain the contents on both sides and wait for diagnosis.
+- When multiple changes modify the same Spec, wait for you to determine the archiving sequence.
+
+The failure to wrap up the workspace occurred after Archive. Change might have completed the archiving or Git commit. At this point, check the actual Git status according to the returned `recoveryArgs`, and then continue with the merge, push or PR process.
+
+## Verification report restoration
+
+`verification.md` is a readable projection of `comet-state.yaml`. When the report is missing, the write is interrupted, or the version is outdated, Native will regenerate the report based on the current state.
+
+When the report file is lost but the status and local execution records can still prove that the verification has been passed, the recovery only involves rebuilding the report. When the local execution records before archiving are also lost, Native will return "Verify" to re-obtain complete acceptance evidence.
+
+This distinction can preserve proven results while ensuring that the Archive uses reliable evidence on current devices and current code.
+
+## Situations that require user handling
+
+Native will pause when it automatically determines that it may cause error overwriting, duplicate side effects, or incorrect archiving. Common situations are as follows:
+
+|"Status"|The content you need to decide or handle|
+| --- | --- |
+|The workspace is not bound to Change|Confirm the correct branch or worktree|
+|The same Spec has been modified by multiple changes|Determine the Archive sequence|
+|Git synchronization causes conflicts|Merge the actual code and documentation content, and then continue the verification|
+|The execution result of the external operation cannot be confirmed|Check the remote status and then select Retry or continue|
+|Reach the upper limit of consecutive failures|Choose to continue with the current goal, adjust the requirements or stop|
+|The active and archive states are contradictory to each other|Keep the site and use `doctor` for diagnosis|
+|The old version of Change needs to be migrated|Upgrade the status according to the migration actions provided by the Runtime|
+
+`await-user` indicates that your choice is needed for the next step. `blocked` indicates that the current status lacks a safe advancement path. The Runtime will simultaneously return the cause, the party responsible for handling, and the actions allowed to be executed.
+
+## Status viewing and diagnosis
+
+Normal recovery is automatically completed by Native. When you want to view the current record or troubleshoot blockages, you can run:
 
 ```bash
-comet status
+comet native show <change-name>
 comet native status <change-name> --details --json
 comet native doctor <change-name>
 ```
 
-Check them in this order:
+`show` and `status` showcase the official products, work areas, acceptance progress and next steps. `doctor` checks migration, transaction, directory and state consistency. `doctor --repair` is only used in cases where the diagnostic results clearly provide repair actions.
 
-1. artifact root, enabled workflow, and clarification mode;
-2. whether `status` can find the target change;
-3. whether the current branch/worktree matches the change;
-4. `status --details` for `status`, `phase`, Loop, acceptance, blockers, and continuation;
-5. doctor output for migration residue, unfinished transactions, locks, or active/archive conflicts.
+During the recovery process, let the Runtime manage `comet-state.yaml`, local execution records, locks, and transactions. Continuing according to the actions returned by `continuation`, `recoveryArgs` or `doctor` can preserve the confirmed progress and the fault scene.
 
-Do not edit YAML, selection, or `.comet/runtime/native/` by hand. If output is paged, follow its cursor or continuation instead of treating unseen acceptance items as absent.
-
-## A change is not found on another device
-
-Sync the project code, `.comet/config.yaml`, brief, Specs, and `comet-state.yaml`. Sync `verification.md` when present; a missing report can be rebuilt. On the target device run:
-
-```bash
-comet status
-comet native status <change-name> --details --json
-```
-
-If the artifact root or branch/worktree does not match, fix the project context or choose the target explicitly. Do not create a second change or copy the same documents into two roots.
-
-## Interrupted execution and missing local Runtime
-
-`.comet/runtime/native/changes/<name>/state.json`, logs, and locks are local overlays. After a process termination, device move, or missing overlay:
-
-1. run `comet native status <name> --details --json`;
-2. let Runtime mark running work interrupted from YAML and rebuild a matching overlay;
-3. if the change is in Shape or Build, continue that stage;
-4. if it is in Verify, rerun the necessary interrupted checks according to continuation, then dispatch a new Verifier;
-5. if it is `archive-ready`, reconfirm Verify before Archive; the normal Archive path does not rerun completed checks again.
-
-## Migration and doctor
-
-An older active change may contain change-local Runtime files, legacy state, or an old report. After `comet update`, run when needed:
-
-```bash
-comet native doctor <change-name> --repair
-```
-
-Migration carries forward only facts that can be established from the old brief, Specs, and state. An old passing conclusion never becomes a new v4 pass automatically. Unclear progress conservatively returns to Build or waits for the user. A new change should not use legacy-only repair strategies.
-
-## Interrupted Archive and parallel conflicts
-
-Archive can write Specs, update final YAML, generate the report, move the directory, and clean local Runtime in several steps. Re-running the same Archive command resumes its transaction; do not delete the transaction or edit the state to `done`. If active and archive directories both exist, or the transaction is missing after a partial move, doctor stops for explicit handling.
-
-When two changes target the same capability, Archive returns a serial-order blocker. Choose which change goes first, then follow the new continuation; Runtime does not overwrite the other change's Spec automatically.
-
-## Common states and responses
-
-| Symptom                                 | Correct response                                                                                            |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `await-user`                            | Read the blocker and `resolution_action`, show the choices, then continue after confirmation                |
-| `blocked`                               | Resolve the damage, execution error, conflict, or stagnation; do not edit counters or fabricate a result    |
-| branch/worktree mismatch                | Return to the correct checkout or have the user choose a new workspace; do not write in the wrong directory |
-| Verify failure                          | Repair the failed acceptance/check, submit a new Builder handoff, and let a new Verifier review it          |
-| Missing/stale report                    | Ask Runtime to rebuild it from YAML; do not copy a “pass” report by hand                                    |
-| Legacy Runtime/receipt/evidence residue | Run update/doctor migration or inspect read-only; do not add it to a new change                             |
-
-Continue with [Continuation and recovery](/en/native/continuation-and-checkpoints), [Native safety and recovery](/en/native/safety-and-recovery), and [Artifacts and state](/en/native/artifacts-and-state).
+Continue reading: [Continuous Advancement and Stable Recovery Point ](/en/native/continuation-and-checkpoints), [Native Security Boundary ](/en/native/safety-and-recovery), [Multi-Change Parallelism and Conflict Control ](/en/native/multi-change-and-conflicts) and [Product and State ](/en/native/artifacts-and-state).

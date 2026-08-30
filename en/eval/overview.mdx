@@ -1,85 +1,96 @@
 ---
-title: "Evaluation System Overview (Advanced)"
-description: "Understand how your own Skill is discovered, run, scored, and reported by comet eval, and how /comet-any connects eval evidence into publish readiness."
+title: "Overview of Evaluation System (Advanced)"
+description: "Understand how your Skill is discovered, run, scored, and reported by comet eval, and then understand how/Comet-any integrates eval evidence into release readiness."
 ---
 
-<Info>
-  This is advanced content. If you just want to quickly run an evaluation, start
-  with [Quickstart: Evaluating a Skill](/en/eval/quickstart).
-</Info>
+<Tip>
+This is advanced content. If you just want to run through an assessment quickly, first take a look at [Quick Start: Assess One
+  Skill](/en/eval/quickstart)。
+</Tip>
 
 <Warning>
-  This page is for source maintainers who need to inspect Eval internals. Ordinary users do not need
-  to clone Comet or enter its `eval/` directory; use the installed `comet eval` and user-level
-  `.env`. Clone the source only when modifying the harness, using `--project`, or reproducing an experiment.
+This page is suitable for source code maintainers who need to view the internal mechanism of Eval. Ordinary users do not need to clone Comet or enter `eval/`
+Table of Contents Please use the installed `comet eval` and user-level `.env`. Only by modifying the harness and using `--project`
+Or when reproducing the experiment, it is only necessary to pull the source code.
 </Warning>
 
-`comet eval` is Comet's general-purpose Skill evaluation entry point. It first answers one question: **the Skill you have in hand — as a product capability — can it pass a real task evaluation?**
+`comet eval` is the universal Skill assessment entry for Comet. It first answers a question: ** Can the Skill in your hand, as a product capability, be evaluated through real tasks? **
 
-This overview is split into two parts:
+This overview is divided into two parts:
 
-1. First, how your own Skill gets evaluated: entry points, tasks, scoring, reports, and failure attribution.
-2. Then, how `/comet-any` connects eval results into publish readiness.
+1. First, look at how your skills are evaluated: entry points, tasks, scores, reports, and failure attributions.
+2. Let's take a look at how `/comet-any` integrates the eval result into the release readiness.
 
-## What Problem It Solves
+## Start from here
 
-Ordinary users don't need to understand pytest, the task registry, profiles, treatments, or Docker details. `comet eval` wraps the local eval harness's launch path, task discovery, profile selection, and report generation, letting you run evaluations from the project root directory instead of manually switching to the `eval/` directory to assemble command-line parameters.
+|What do you want to accomplish|Let's take a look first|
+| ---------------------------------------- | ------------------------------------------------------------------ |
+|The first assessment run|Quick Start: Evaluate a Skill](/en/eval/quickstart)|
+|Not sure whether to pass a manifest or directory|[How to choose an entry point](#how-to-choose-an-entry-point)|
+|I can't understand the reasons for the failure in the report|[Read the assessment report ](/en/eval/reports)|
+|Want to understand pass@k, pass^k, rubric|[Scoring Criteria and Dual-Agent evaluation ](/en/eval/scoring)|
+|I want to write my own assessment task|[Configuration Evaluation and Custom Task](/en/eval/configuration)|
+|Want to publish `/comet-any` output using eval evidence|[How `/comet-any` connects to eval](#how-comet-any-connects-to-eval)|
 
-## Two Evaluation Systems, Don't Confuse Them
+## What problem does it solve
 
-Comet has two evaluation systems with similar names but completely different purposes:
+For daily use, just focus on the evaluation tasks and results. `comet eval` has encapsulated the startup details of pytest, task registry, profile, treatment, Docker and local eval harness. You can directly run the evaluation in the project root directory.
 
-| System                        | Command             | What it evaluates                 | Is it publish evidence? |
-| ----------------------------- | ------------------- | --------------------------------- | ----------------------- |
-| **Authoring-time evaluation** | `comet eval`        | Skill bundle or `comet/eval.yaml` | **Yes**                 |
-| **Runtime check**             | `comet skill check` | A specific Skill run              | No                      |
+## Two sets of evaluation systems, do not confuse them
 
-`comet eval` answers "can this Skill, as a product capability, pass the evaluation", executing real model tasks through a shared eval harness. `comet skill check` answers "is this Skill run missing files or state", checking only runtime check items without running the model. See [Runtime check](/en/eval/runtime).
+Comet has two evaluation systems, which have similar names but are completely different:
+
+|System|Command|Evaluation object|Is it the release of evidence|
+| -------------- | ------------------- | ---------------------------- | ------------ |
+|"Evaluation during the creation period.| `comet eval`        |Skill package or `comet/eval.yaml`|Yes, it is|
+|"Runtime inspection"| `comet skill check` |A certain Skill run|no|
+
+`comet eval` answers the question "Can this Skill pass the assessment as a product capability?" and executes real model tasks through the shared eval harness. When `comet skill check` answers "Is there a missing file or status during this Skill run?", it only checks the runtime check items and does not run the model. For details, see [Runtime check](/en/eval/runtime).
 
 <p align="center">
   <img
     src="/assets/eval-overview-illustrations/01-two-eval-systems.png"
-    alt="Little fish separating comet eval's publish evidence desk from comet skill check's run-completeness desk, holding up a sign reminding not to mix them"
+alt=" Xiaoyu separates the release evidence desktop of comet eval from the Run completion desktop of comet skill check and holds up a sign to remind not to use them interchangeably"
     width="800"
   />
 </p>
 
 <p align="center">
-  `comet eval` produces pre-release evidence; `comet skill check` only checks
-  whether a specific Skill run is complete — do not mix them
+`comet eval` produces pre-release evidence, while `comet skill check` only checks a certain Skill
+Whether the operation is complete or not, do not mix the two
 </p>
 
-## Part One: How Your Own Skill Gets Evaluated
+## The first part: How is one's own Skill evaluated
 
 From the user's perspective, `comet eval` does four things:
 
 1. Find your Skill.
-2. Find which evaluation tasks should run.
-3. Have the model execute tasks in an isolated environment, and check the results with validators.
-4. Generate a report that tells you whether it passed, why it failed, and what to do next.
+2. Find out which assessment tasks should be run.
+3. Let the model perform tasks in an isolated environment and check the results with a validator.
+4. Generate a report to tell you the reasons for passing, failing and the next steps.
 
 ```mermaid
 %%{init: {'flowchart': {'defaultRenderer': 'elk'}}}%%
 flowchart TB
   subgraph Input["Your Skill"]
-    A["Any local Skill directory<br/>default quick smoke"]
-    B["Has comet/eval.yaml<br/>full-package evaluation (publish evidence)"]
+    A["Any local Skill directory <br/> defaults to quick smoke"]
+    B["There is a complete package evaluation of comet/eval.yaml<br/> (release evidence)"]
   end
 
   subgraph Discover["Discovery and preparation"]
-    C["Parse entry point<br/>manifest or skill-path"]
-    D["Select profile and task<br/>decides eval dimensions"]
-    E["collect<br/>only discovery pre-checks"]
+    C["Parse the entry <br/>manifest or skill-path"]
+    D["Select profile and task<br/> to determine the evaluation dimension"]
+    E["collect<br/> only conducts discovery pre-checks"]
   end
 
-  subgraph Run["Real evaluation"]
-    F["run --html<br/>execute model tasks"]
-    G["Validate artifacts / scripts<br/>decide hard pass"]
-    H["rubric / pass@k<br/>provide diagnostic signals"]
+  subgraph Run[""True assessment"]
+    F["run --html<br/> executes the model task"]
+    G["Verify artifacts/scripts<br/> to determine a hard pass"]
+    H["rubric/pass@k<br/> provides diagnostic signals"]
   end
 
-  subgraph Output["Results"]
-    I["summary.html<br/>browsable report"]
+  subgraph Output["Result"]
+    I["The report can be viewed at summary.html<br/>"]
     J["failure attribution<br/>harness / workflow / task / model"]
   end
 
@@ -90,28 +101,27 @@ flowchart TB
   G --> J
 ```
 
-## How to Choose an Entry Point
+## How to choose the entrance
 
-`comet eval [target]` decides the entry point from the target: a directory or `SKILL.md` goes through skill-path, a `comet/eval.yaml` goes through manifest. You can also specify the entry point explicitly with `--skill-path` / `--manifest`; explicit entry points are mutually exclusive.
+`comet eval [target]` automatically determines the entry point based on the target: when passing to a directory or `SKILL.md`, it uses the skw-path; when passing to `comet/eval.yaml`, it uses the manifest. Both can also be explicitly specified using `--skill-path`/`--manifest`, with explicit entry mutual exclusion.
 
-| Scenario                            | Command                                               | Suitable for                                                    |
-| ----------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------- |
-| Any local Skill directory (default) | `comet eval ./my-skill --html`                        | Evaluate your own Skill, run a Docker evaluation in one command |
-| `/comet-any` generated full package | `comet eval ./generated-skill/comet/eval.yaml --html` | Run the full profile task set, as publish evidence              |
+|Scene|Command|Suitable|
+| --------------------------- | ----------------------------------------------------- | ------------------------------------------ |
+|Any local Skill directory (default)| `comet eval ./my-skill --html`                        |Evaluate your own skills and run a Docker assessment with one command|
+|The complete package generated by `/comet-any`| `comet eval ./generated-skill/comet/eval.yaml --html` |Run the entire profile task set as release evidence|
 
-When you pass a directory, Comet discovers `comet/eval.yaml` under it when present. Without a manifest task set, a normal run automatically generates and caches 2–4 bounded tasks from the Skill content; use `--quick` when you explicitly want the fixed `generic-skill-smoke` smoke. No Comet repo clone is needed — the npm package bundles the eval harness.
+When transferring directories, the manifest will be automatically discovered. When there is no manifest, normal operation will generate and cache 2 to 4 restricted tasks from the Skill snapshot. `--quick` is the fixed `generic-skill-smoke` that smokes. `--skill-name` will automatically infer from the directory name. No `comet/eval.yaml` is needed, nor is it necessary to clone the Comet repository - the npm package comes with an eval harness.
 
 <Warning>
-  The fixed <code>--quick</code> smoke is early validation: it only verifies
-  that "the Skill can be injected, invoked, and produce files." A normal
-  directory run uses declared or automatically generated Skill-specific tasks.
-  Publish readiness, when applicable, still requires evaluating the full package
-  generated by <code>/comet-any</code> (with <code>comet/eval.yaml</code>).
+Directly evaluating local skills does not equal publishing evaluations. `--quick` only verifies "Skill"
+It can be injected, invoked and produce files. Normal operation will generate restricted tasks related to the content of the Skill. "Publish
+readiness requires evaluating the complete package generated by <code>/comet-any</code> (with {" "})
+  <code>comet/eval.yaml</code>）。
 </Warning>
 
-## Why collect First
+## Why collect first
 
-`collect` is the user's cheapest troubleshooting entry point. It only does discovery and pre-checks, executing no model or Docker tasks, suitable for quickly surfacing path, manifest, and task registration problems.
+`collect` is the cheapest troubleshooting entry point for users. It only performs discovery and pre-checking, and does not execute model or Docker tasks. It is suitable for quickly identifying path, manifest, task cache and configuration issues.
 
 ```bash
 comet eval ./generated-skill/comet/eval.yaml --collect
@@ -119,29 +129,29 @@ comet eval ./generated-skill/comet/eval.yaml --collect
 
 It mainly answers:
 
-- Whether the `comet/eval.yaml` path is correct
-- Whether the eval harness can read this manifest
-- Whether the recommended tasks in the manifest can be discovered
-- Whether the current repo's eval dependency paths are available
+- Is the `comet/eval.yaml` path correct
+- Whether eval harness can read this manifest
+- Can the recommended tasks in the manifest be discovered
+- Is the eval dependency path of the current repository available
 
-It should not run the full model evaluation first, nor consume long-running tasks. On failure, you usually fix manifest, path, or task discovery issues first.
+It should not run a complete model evaluation first, nor should it consume long-term tasks first. When a failure occurs, it is usually necessary to fix the manifest, path or task first to identify the problem.
 
-## comet/eval.yaml Manifest Format
+## comet/eval.yaml manifest format
 
-`comet/eval.yaml` is the manifest for the full pre-release evaluation. It tells the eval harness: where the Skill is, which profile to use, which tasks to recommend running, and which evidence and artifacts are expected. Its format (parsed by the harness's `manifests.py`):
+`comet/eval.yaml` is a complete list of evaluations before release. It tells the eval harness: where the Skill is, which profile to use, which tasks are recommended to run, and which evidence and artifacts are expected. Its format (parsed by harness's `manifests.py`) :
 
 ```yaml
-apiVersion: comet.eval/v1alpha1 # Required, must exactly equal this value
-kind: SkillEvalManifest # Required, must exactly equal this value
+apiVersion: comet.eval/v1alpha1 # Required. It must be exactly equal to this value
+kind: SkillEvalManifest # Required. It must be exactly equal to this value
 metadata:
   name: my-skill
   description: A PR review assistant
 skill:
   name: my-skill
-  source: ".." # Skill directory relative to eval.yaml, default ".."
-  profile: authoring-skill # Optional, overrides profile
+  source: ".." # Relative to the Skill directory of eval.yaml, by default".."
+  profile: authoring-skill # Optional, overwrite profile
 evaluation:
-  recommendedTasks: # Recommended task list
+  recommendedTasks: # Recommended Task List
     - authoring-skill-smoke
     - workflow-route-conformance
   baselineTreatments: [CONTROL]
@@ -157,106 +167,102 @@ evaluation:
     - reference/workflow-protocol.json
 interaction:
   mode: none # none or auto_user, default none
-  maxTurns: 8 # Outer round-trip limit between subject/simulator under auto_user, default 12
+  maxTurns: 8 # The upper limit of the outer round trip of subject/simulator under auto_user is 12 by default
   simulatorPrompt: "" # Optional
 ```
 
 <Warning>
-  <code>apiVersion</code> and <code>kind</code> are strictly validated: not
-  equaling <code>comet.eval/v1alpha1</code> /{" "}
-  <code>comet.eval/SkillEvalManifest</code> will error directly. Ordinary users
-  usually don't need to hand-write this file — <code>/comet-any</code> generates
-  it.
+<code>apiVersion</code> and <code>kind</code> are strongly checked: they do not equal {" "}
+  <code>comet.eval/v1alpha1</code> / <code>comet.eval/SkillEvalManifest</code>{" "}
+It will directly report an error. For daily use, it is usually not necessary to write this file by hand. <code>/comet-any</code> will generate it.
 </Warning>
 
-The eval.yaml generated by `/comet-any` defaults to the `authoring-skill` profile. An ordinary workflow-kernel will recommend `generic-skill-smoke`, `authoring-skill-smoke`, and `workflow-route-conformance`; a `/comet`-based overlay additionally recommends `workflow-overlay-contract` and classic Comet workflow tasks to check the Output Schema, expected evidence, and overlay routing.
+The eval.yaml generated by `/comet-any` defaults to using the `authoring-skill` profile. For regular workflow-kernel, `generic-skill-smoke`, `authoring-skill-smoke` and `workflow-route-conformance` are recommended. The overlay based on `/comet` will additionally recommend `workflow-overlay-contract` and the classic Comet workflow task to check the Output Schema, expected evidence and overlay routing.
 
-## Profile System
+## Profile system
 
-The eval harness has three built-in profiles, each determining rubric dimensions, default interaction mode, and scorer:
+eval harness has three built-in profiles, each determining the rubric dimension, default interaction mode, and scoreer:
 
-| Profile           | Dimensions | Default interaction             | Suitable for                           |
-| ----------------- | ---------- | ------------------------------- | -------------------------------------- |
-| `generic`         | 7          | `mode=none`, `maxTurns=12`      | Generic Skill smoke testing            |
-| `comet-workflow`  | 9          | `mode=auto_user`, `maxTurns=12` | Classic `/comet` five-phase evaluation |
-| `authoring-skill` | 11         | `mode=auto_user`, `maxTurns=8`  | `/comet-any` generated Skills          |
+| Profile           |Dimension number|Default interaction|Suitable|
+| ----------------- | ------ | ------------------------------- | ------------------------- |
+| `generic`         | 7      | `mode=none`, `maxTurns=12`      |General Skill is smoking.|
+| `comet-workflow`  | 9      | `mode=auto_user`, `maxTurns=12` |The classic `/comet` five-stage assessment|
+| `authoring-skill` | 11     | `mode=auto_user`, `maxTurns=8`  |The Skill generated by `/comet-any`|
 
-Profile resolution priority: `--profile` override > manifest's `skill.profile` > task's `evaluation.profile` > `generic`.
+Profile parsing priority: `--profile` overwrite > manifest's `skill.profile` > task's `evaluation.profile` > `generic`.
 
 <Info>
-  <code>maxTurns</code> is not the number of internal Agent messages or tool calls. It only takes effect in <code>auto_user</code> mode, limiting how many outer round-trips of "subject Agent reaches a decision point -> user simulator replies -> subject Agent continues with <code>--resume</code>" may occur.
+<code>maxTurns</code> is not the number of internal messages of the Agent or the number of tool calls. It only takes effect in the <code>auto_user</code> mode, restricting the maximum number of outer round trips such as "the Agent under test runs to the decision point -> the user simulator replies -> the Agent under test continues with <code>--resume</code>".
 </Info>
 
 <Info>
-  Tasks starting with <code>comet-*</code> or with{" "}
-  <code>metadata.category=comet</code> are automatically inferred as the{" "}
-  <code>comet-workflow</code> profile, and the interaction mode is automatically
-  switched to <code>auto_user</code> (
-  <strong>two Agents interacting automatically</strong>: one runs the Skill
-  under test, the other simulates the user replying at decision points).
+Tasks starting with <code>comet-*</code> or <code>metadata.category=comet</code>{" "}
+The task will be automatically inferred as <code>comet-workflow</code> profile, and the interaction mode will be automatically switched to {" "}
+<code>auto_user</code> (<strong> two agents interact automatically </strong>: one runs under test.
+Skill, another simulated user replies at the decision point.
 </Info>
 
-## Scoring Metrics: rubric + pass@k/pass^k
+## Scoring criteria: rubric + pass@k/pass^k
 
-eval is a **metric-driven** evaluation that doesn't just give pass/fail:
+eval is an ** metric driven ** evaluation, not just for pass/fail:
 
-- **rubric multi-dimension scoring**: breaks Skill quality down into multiple dimensions (e.g. the five-phase main_flow/gate_guard, generic Skill's safety_boundary), each dimension 0.0–1.0, weighted and aggregated into `weighted_score`. **Informational**, for diagnosis.
-- **pass@k / pass^k**: distinguishes the **capability ceiling** (at least one success out of k runs) from the **reliability floor** (all k runs succeed). Computed from multiple repeated runs (`--count N`). **Informational**.
-- **Task validator pass/fail**: whether this implementation is actually correct (`target_artifacts` + `test_scripts`). **This is the hard pass/fail**.
+- **rubric Multidimensional Scoring ** : The Skill quality is split into multiple dimensions (such as the five-stage main_flow/gate_guard, safety_boundary for general Skill), with each dimension ranging from 0.0 to 1.0, and weighted and aggregated into `weighted_score`. "Informational", used for diagnosis.
+- **pass@k/pass^k** : distinguish between ** upper capability ** (at least one success out of k attempts) and ** lower reliability ** (all success out of k attempts). Calculated based on multiple repeated runs (`--count N`). "Informational".
+- ** Task Validator passes/fails ** : Is this implementation correct or not (`target_artifacts` + `test_scripts`)? This is the hard-judged pass/fail.
 
-For the complete dimension details, weights, formulas, and dual-agent interaction loop, see [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring).
+For the complete dimension details, weights, formulas, and dual-agent interaction cycles, please refer to [Scoring Indicators and Dual-Agent Evaluation ](/en/eval/scoring)
 
 ## Task System
 
-The eval harness has a built-in set of tasks, each task being a directory (containing `instruction.md`, `task.toml`, `environment/`, `validation/`). Common tasks:
+eval harness has a built-in set of tasks, each of which is a directory (including `instruction.md`, `task.toml`, `environment/`, `validation/`). Common tasks
 
-| Task                         | Category | Description                                                             |
-| ---------------------------- | -------- | ----------------------------------------------------------------------- |
-| `generic-skill-smoke`        | generic  | Generic Skill smoke test, produces and validates `result.md`            |
-| `authoring-skill-smoke`      | generic  | Generated Skill bundle smoke test, validates Engine bundle completeness |
-| `workflow-route-conformance` | -        | Validates whether the generated Skill runs in the expected stage order  |
-| `comet-full-workflow` etc.   | comet    | Different dimension evaluations of the classic five-phase               |
+| Task                         |Category|Explanation|
+| ---------------------------- | ------- | ------------------------------------------ |
+| `generic-skill-smoke`        | generic |The general Skill emits smoke, generates and verifies `result.md`|
+| `authoring-skill-smoke`      | generic |Generate smoke from the Skill package and verify the integrity of the Engine package|
+| `workflow-route-conformance` | -       |Verify whether the generated Skill runs in the expected stage sequence|
+|`comet-full-workflow`, etc| comet   |The different dimensions of the classic five-stage assessment|
 
-**`recommended`** is not a task name but the CLI's default resolution path: when using `--manifest` it reads the manifest's `recommendedTasks`; without a manifest it runs each task's `default_treatments`.
+**`recommended`** is the default parsing path of CLI: when `--manifest` is used, the manifest's `recommendedTasks` is read. Run the `default_treatments` of each task when there is no manifest. It does not represent a specific task name.
 
-## What the Default skill-path Entry Runs
+## What does the default entry of skill-path run
 
-When you pass a local Skill directory, `comet eval` uses the manifest's tasks when available. If no usable task is declared, a normal run generates and caches 2–4 bounded tasks from the Skill content:
+When passing a local Skill directory, the normal runtime will generate and cache restricted tasks based on the Skill snapshot. When a fixed quick smoke is required, explicitly use `--quick`:
 
 ```bash
 comet eval ./my-skill --html
 ```
 
-The normal run verifies:
+It verifies:
 
 - Whether the Skill directory is readable
-- Whether the eval harness can inject it as a dynamic Skill
-- Whether the generated or declared tasks can run and validate their expected results
+- Can the eval harness be injected as a dynamic Skill
+- Can the general smoke task run and produce `result.md`
 
-Use `comet eval ./my-skill --quick --html` when you specifically want the fixed `generic-skill-smoke` smoke. The normal directory entry point is a lightweight but real Skill evaluation; publish readiness, when applicable, requires evaluating the full package generated by `/comet-any` (with `comet/eval.yaml`).
+This is the default entry point for evaluating one's own Skill, lightweight yet genuine. It does not equal complete pre-release evidence - release readiness requires an assessment of the complete package generated by `/comet-any` (with `comet/eval.yaml`).
 
-## Part Two: How /comet-any Connects to eval
+## Part 2: How to connect /comet-any to eval
 
-`/comet-any` is responsible for creating or improving a Skill, and `comet eval` is responsible for verifying that the Skill can be discovered, run, and produce a report by the eval harness. The connection point between the two is the `comet/eval.yaml` in the artifact and the Eval evidence after evaluation.
+`/comet-any` is responsible for creating or optimizing the Skill, and `comet eval` is responsible for verifying whether this Skill can be discovered, run and generate reports by the eval harness. The connection point between the two is `comet/eval.yaml` in the product and Eval evidence after evaluation.
 
 ```mermaid
 %%{init: {'flowchart': {'defaultRenderer': 'elk'}}}%%
 flowchart TB
   subgraph Create["Create Skill"]
-    A["/comet-any<br/>create or improve Skill"]
-    B["Generate comet/eval.yaml<br/>evaluation manifest"]
+    A["/comet-any<br/> Create or optimize skills"]
+    B["Generate the comet/eval.yaml<br/> evaluation list"]
     A --> B
   end
 
   subgraph Eval["Evaluate Skill"]
-    C["comet eval --collect<br/>discovery and pre-checks"]
-    D["comet eval --html<br/>real evaluation and HTML report"]
-    E["Eval evidence<br/>bound to current draft hash"]
+    C["comet eval -collect<br/> Discovery and pre-inspection"]
+    D["comet eval - Real Evaluation and HTML report of html<br/>"]
+    E["Eval evidence<br/> binds the current draft hash"]
     C --> D --> E
   end
 
-  subgraph Publish["Enter publish preparation"]
-    F["comet creator status / next<br/>view readiness and next step"]
+  subgraph Publish["Enter the release preparation"]
+    F["comet creator status/next<br/> view readiness and Next"]
     G["comet publish<br/>review / approve / run / distribute"]
     F --> G
   end
@@ -265,21 +271,21 @@ flowchart TB
   E --> F
 ```
 
-Complete chain:
+Complete link
 
 ```text
-/comet-any generates Skill
-  -> produces comet/eval.yaml
-  -> comet eval --collect does discovery pre-checks
-  -> comet eval --html executes real evaluation
-  -> comet creator reads evaluation results and enters readiness / review / publish / distribute
+/comet-any generate Skill
+-> Produce comet/eval.yaml
+-> comet eval --collect for discovery pre-checking
+-> comet eval --html performs real evaluation
+comet creator reads the evaluation results and enters readiness/review/publish/distribute
 ```
 
-`comet eval` is not responsible for publishing. Publishing is still handled by the creator / publish commands: creation and state recovery are exposed to ordinary users as [comet creator](/en/cli/creator), and publishing and distribution as [comet publish](/en/cli/publish). eval's responsibility is to provide pre-release evidence.
+`comet eval` is not responsible for the release. Publication is still handled by the creator/publish command: the creation and restoration of status are exposed through [comet creator](/en/cli/creator)], and publication and distribution are exposed through [comet publish](/en/cli/publish)]. The responsibility of eval is to provide pre-publication evidence.
 
-## Recommended Path: Evaluating a /comet-any Generated Skill
+## Recommended path: Evaluate the Skill generated by comet-any
 
-After `/comet-any` generates a Skill, first look for this file:
+When `/comet-any` generates a Skill, the first file to look for is:
 
 ```text
 generated-skill/
@@ -287,21 +293,21 @@ generated-skill/
     eval.yaml
 ```
 
-Then run in two steps:
+Then press two steps to run:
 
 ```bash
 comet eval ./generated-skill/comet/eval.yaml --collect
 comet eval ./generated-skill/comet/eval.yaml --html
 ```
 
-The first step, `collect`, only confirms "can the tasks be discovered", suitable as a low-cost pre-check right after generating a Skill. The second step, `run --html`, executes the real evaluation and generates a browsable report.
+The first step, `collect`, only confirms "whether the task can be discovered", which is suitable for conducting a low-cost pre-check right after generating the Skill. The second step is for `run --html` to conduct a real assessment and generate a browsable report.
 
-## How Eval Results Enter Publish Readiness
+## How do Eval results enter publish readiness
 
-After recording the Eval result, `/comet-any` or the creator / publish backend incorporates it into publish readiness. Users only need to know two things:
+`/comet-any` or the creator/publish backend will incorporate the Eval result into publish readiness after logging it. There are only two points that the user needs to know
 
-1. The results produced by `comet eval` become the evidence source for `Publish readiness:`.
-2. When the current hash is missing Eval evidence, `User next steps:` must first point to completing the evaluation, not continuing to publish.
+1. The results produced by `comet eval` will serve as the source of evidence for `Publish readiness:`.
+2. When the current hash lacks Eval evidence, `User next steps:` must first point to the completion evaluation and suspend the release.
 
 The usual sequence is:
 
@@ -311,34 +317,34 @@ comet eval ./generated-skill/comet/eval.yaml --html
 comet creator next <name> --json
 ```
 
-`comet creator next` only outputs the single recommended next user command; `comet publish review` shows `Publish readiness:`, `User next steps:`, `Readiness:`, `Blockers:`, `Warnings:`, and `Evidence:` to the user.
+`comet creator next` only outputs the currently recommended one-step user command; `comet publish review` will display `Publish readiness:`, `User next steps:`, `Readiness:`, `Blockers:`, `Warnings:` and `Evidence:` to users.
 
-## How /comet-any Uses eval Results
+## How does /comet-any use eval results
 
-From the user's perspective, after eval finishes, hand the results back to `/comet-any` to continue. `/comet-any` will incorporate the eval evidence into readiness:
+From the user's perspective, after eval is completed, simply return the result to `/comet-any` to continue advancing. `/comet-any` will incorporate eval evidence into readiness:
 
-| Situation                                               | Can publish?                             |
-| ------------------------------------------------------- | ---------------------------------------- |
-| No eval evidence                                        | No                                       |
-| eval failed                                             | No                                       |
-| eval evidence matches an old hash                       | No                                       |
-| `.comet/skill-preferences.yaml` changed and strict mode | No — must reconfirm or regenerate        |
-| eval passed and hash matches                            | Can proceed to review / publish judgment |
+|"Situation|Can it be published|
+| -------------------------------------------------- | ------------------------------ |
+|There is no eval evidence.|"Can't|
+|eval failed|"Can't|
+|The eval evidence corresponds to the old hash|"Can't|
+|`.comet/skill-preferences.yaml` changes and is in strict mode|No, it must be reconfirmed or regenerated|
+|eval passes and hash matches|You can go to review/publish to make a judgment|
 
-Users don't need to manually edit internal state, nor should they manually write report paths into JSON. `/comet-any` records structured evidence through the backend.
+Users do not need to manually edit the internal state, nor should they manually write the report path into JSON. `/comet-any` will record structured evidence through the backend.
 
-## The Minimum You Need to Remember
+## What is the minimum requirement for users to remember
 
-1. The core question of `comet eval` is: can this Skill, as a product capability, pass a real task evaluation.
-2. Any local Skill directory can run a Docker evaluation via `comet eval ./your-skill`; when you want to publish, evaluate the full package generated by `/comet-any` (with `comet/eval.yaml`).
+1. The core issue of `comet eval` is: Can this Skill, as a product capability, be evaluated through real tasks?
+2. Any local Skill directory can be used to run Docker evaluations with `comet eval ./your-skill`. When it is time to release, evaluate the complete package generated by `/comet-any` (with `comet/eval.yaml`).
 3. First `collect`, then `run --html`.
-4. `/comet-any` artifacts connect eval results into publish readiness, but eval itself is not a publish action.
-5. `comet eval` (authoring-time) and `comet skill check` (runtime) are two different systems — don't mix them.
+4. The `/comet-any` product will access the eval result to the release readiness, but eval itself is not a release action.
+5. `comet eval` (creation period) and `comet skill check` (runtime period) are two separate systems and should not be used interchangeably.
 
-## Next steps
+## Next step
 
-- [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) — rubric dimension details, pass@k/pass^k, dual-agent interaction loop
-- [Eval harness](/en/eval/harness) — understand the internal mechanism of collect and run, environment variables, and report generation
-- [Reading Evaluation Reports](/en/eval/reports) — learn to read report signals and failure attribution
-- [Runtime check](/en/eval/runtime) — distinguish `comet eval` and `comet skill check`
-- [comet eval command](/en/cli/eval) — complete options and subcommand reference
+- [Scoring criteria and dual-agent evaluation ](/en/eval/scoring) - rubric dimension details, pass@k/pass^k, dual-agent interaction loop
+- [Eval harness](/en/eval/harness) - Understand the internal mechanisms, environment variables, and report generation of collect and run
+- Read the evaluation report ](/en/eval/reports) - Learn to understand the report signals and failure attributions
+- [Runtime check](/en/eval/runtime) - Distinguish between `comet eval` and `comet skill check`
+- [comet eval command ](/en/cli/eval) - Complete options and subcommand reference

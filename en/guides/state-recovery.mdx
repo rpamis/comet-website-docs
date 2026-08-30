@@ -1,105 +1,102 @@
 ---
-title: 'Broken state and recovery'
-description: 'Use comet status and comet doctor to diagnose bad Classic routing, missing .comet.yaml files, malformed state, or missing evidence.'
+title: "State Damage and Recovery"
+description: "How to diagnose and restore using comet status/comet doctor when the Classic route is incorrect,.comet.yaml is missing or the format is abnormal, or the evidence is missing. "
 ---
 
-Normal Classic recovery only needs the shared `/comet` entry; see [resuming interrupted work](/en/guides/resuming-workflow). After configuration selects Classic, the internal `/comet-classic` entry reads file state and chooses a phase. This page covers failures in that internal routing or damaged state.
+To restore Classic normally, only the unified entry `/comet` is required (see [Restoring Interrupted Work ](/en/guides/resuming-workflow)). After configuring and entering Classic, the internal `/comet-classic` will read the file status and select the stage; this page only handles this internal routing exception or status damage.
 
-When state is damaged, the goal is to **recover the real facts**, not to force fields forward until the workflow continues.
+When the state is damaged, first restore the true facts, and then allow the process to continue based on the correct state. Do not forcibly modify the fields just to understand the lock process.
 
 <p align="center">
   <img
     src="/assets/state-recovery-illustrations/01-state-recovery-first-aid.png"
-    alt="Xiaoyu diagnoses broken Comet state with status and doctor, then restores evidence from file facts"
+alt=" Little Fish diagnoses bad conditions on the status emergency table using Status and doctor, and restores evidence according to the file facts."
     width="800"
   />
 </p>
 
-<p align="center">
-  Recover state by diagnosing real file evidence first. Do not fake state just to move the workflow
-  forward.
-</p>
+To restore the status of <p align="center">, first diagnose the real file evidence, and then repair it as prompted. Do not manually forge the status </p> in order to advance the process
 
-## First check: damaged state or normal interruption?
+## First, determine: Is the status broken or is it just an interruption
 
-| Situation                                                  | What it means                                             | What to do                                                               |
-| ---------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Session ended, context compacted, or device changed        | Normal interruption                                       | Run `/comet`.                                                            |
-| A natural-language request matches multiple active changes | The target needs confirmation; state is not damaged       | Read the probe `reason` and name the change to resume.                   |
-| The worktree has uncommitted files                         | Attribution is required; state is not necessarily damaged | Decide which change owns the files before continuing.                    |
-| `/comet-classic` routes to the wrong phase                 | Metadata and files may disagree                           | `/comet-classic` tries to self-heal from files; if not, run diagnostics. |
-| `.comet.yaml` is missing or malformed                      | Damaged state                                             | Run `comet doctor`.                                                      |
-| Declared artifacts or evidence are missing                 | Missing evidence                                          | Run `comet status` and inspect `runtime_eval`.                           |
+|"Situation|What is this?|What should I do?|
+| ---------------------------------- | -------------------------- | ----------------------------------------------------------------- |
+|The session was interrupted, the context was compressed, and the device was changed|Normal interruption|Directly `/comet` (see [Restoring Interrupted Work ](/en/guides/resuming-workflow))|
+|Natural language requests hit multiple active changes|It is necessary to confirm the target, not the state damage|Check the `reason` in the recovery probe results and name the change to be restored|
+|There are unsubmitted changes to the work tree|It needs to be attributed first, not due to state damage|Confirm which change the change belongs to before continuing|
+|The stage to which `/comet-classic` is routed is incorrect|There might be a conflict between the metadata and the file|`/comet-classic` will self-heal based on the file. If it still doesn't work, go for a diagnosis|
+|`.comet.yaml` is missing or has an abnormal format|"Status damaged"|`comet doctor` diagnosis|
+|The product/evidence of the claim cannot be found on the disk|Lack of evidence|For `comet status`, look at `runtime_eval`|
 
-## Diagnostic commands
+## Diagnostic command
 
 ```bash
-comet resume-probe . --utterance "continue the previous work"
-comet status
-comet doctor
+comet resume-probe . --utterance "Continue with the work just now"  # Only read to determine whether it should be restored
+comet status        # Look at the phase, task completion degree, and runtime_eval of the active change
+comet doctor        # Diagnose installation, environment, Skill integrity, and the validity of.comet.yaml
 ```
 
-Use `--json` for agents and automation. For humans, start with text output.
+Adding `--json` is suitable for reading to Agents or automated tools. Ordinary users first look at the text output.
 
-The resume probe only classifies whether the workflow should be entered. An `ask_user` result usually means ambiguity or a decision point, not damaged state. See [Resume probe](/en/cli/resume-probe).
+Recovery detection is only responsible for the judgment before entering the workflow. When it returns `ask_user`, it usually represents multiple changes, uncommitted changes or user decision points, and does not mean that the state has been corrupted. For details, please refer to the [Restore Detection Command ](/en/cli/resume-probe)
 
-### What comet status shows
+### What to watch on comet status
 
-`comet status` reports active changes, phase, task progress, workflow/build mode, runtime mode, current step, runtime evidence, design doc, plan, verification result, and the recommended next command.
+Each active change reports: `phase`, task `done/total`, `workflow | build_mode`, `run_step`, `runtime_mode`, `runtime_eval` (whether the declared step evidence is truly on the disk), `design`, `plan`, `verify_result`, and `next:` prompt.
 
-When `runtime_eval` fails, it tells you which command to run or which evidence to restore.
+When `runtime_eval` fails, `run < command > or restore missing evidence (...)` will be prompted - follow the prompt to provide evidence or restore.
 
-### What comet doctor checks
+### What does comet doctor watch
 
-`comet doctor` checks the Comet CLI version, OpenSpec CLI, Superpowers, working directories, platform Skill integrity, scripts, CodeGraph, `.comet.yaml` validity, and runtime evidence for each active change.
+Check the Comet CLI version, openspec CLI, Superpowers, working directories (`docs/superpowers/specs`, `docs/superpowers/plans`), the integrity of skills on each platform, whether scripts exist, and CodeGraph And the validity of `.comet.yaml` and `runtime_eval` for each change. Common repair tips: `npm install -g @fission-ai/openspec@latest`, `run: comet init`, `run: comet update --scope ...`.
 
-## Common symptoms
+## Common symptoms and management
 
-| Symptom                                 | Likely cause                                                | Start with                                                                                              |
-| --------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `comet status` has no next step         | Missing or malformed `.comet.yaml`                          | `comet doctor`                                                                                          |
-| Build cannot enter verify               | Missing `build_mode`, `isolation`, or `tdd_mode`            | Run `/comet` and let Classic route back to build.                                                       |
-| Verify passed but archive is blocked    | Missing verification report, branch drift, or invalid state | Restore the report, switch to the bound branch, and let the Verify guard keep `branch_status: pending`. |
-| Archived change still appears active    | Directory/state mismatch                                    | Compare `openspec status` and rerun archive script if recoverable.                                      |
-| `/comet-classic` reports malformed YAML | Manual edit or broken merge                                 | Run `comet doctor`; restore from Git if severe.                                                         |
+|Symptoms|Possible reasons|What to do first?|
+| ------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------- |
+|`comet status` has no next step|`.comet.yaml` is missing or has an abnormal format| `comet doctor`                                                            |
+|build cannot enter verify|Missing `build_mode`/`isolation`/`tdd_mode`|Re-call `/comet` to route Classic back to build for supplementary selection|
+|verify passed but cannot archive|Missing verification reports, branch binding drift or abnormal status|Supplement the verification report, switch back to the bound branch, and keep verify guard `branch_status: pending`|
+|After archiving, it still shows "active"|Manual movement of directories or status is not synchronized|Check with `openspec status` and re-run with the archive script (recoverable)|
+|`/comet-classic` reports an abnormal format of `.comet.yaml`|The document was manually corrupted|`comet doctor`;" In severe cases, restore `.comet.yaml` from git|
 
-## Recovery principles
+## Restoration principle
 
-- Treat OpenSpec artifacts, Design Docs, Plans, tests, and the working tree as facts.
-- Do not hand-edit machine-owned Run fields such as `.comet/run-state.json`.
-- Do not confuse `build_pause` with `build_mode`.
-- Do not skip the verification-failure decision point.
-- Do not fake archive state by hand; use `/comet-archive` or `comet archive`.
-- Do not advance `.comet.yaml` phase manually; use `comet guard --apply` or `comet state transition`.
+- ** With documents as evidence ** : OpenSpec artifacts, Design Doc, Plan, test results, and actual working tree are the sources of facts.
+- ** Do not manually write the machine-owned Run field ** (`.comet/run-state.json`, etc.).
+- Don't mistake `build_pause` for `build_mode` - they are different fields.
+- ** Do not skip the verify failure decision point ** - It is up to you to choose to fix or accept the bias.
+- ** Do not manually forge the archive status ** - Archiving is completed by `/comet-archive` or `comet archive`.
+- ** Do not manually edit the `.comet.yaml` advance phase** - use `comet guard --apply` or `comet state transition`.
 
-## Missing or broken .comet.yaml
+## What should I do if.comet.yaml is missing or broken
 
-`/comet-classic` has compatibility paths for damaged state:
+`/comet-classic` has compatible paths for bad states:
 
-- If `.comet.yaml` is missing, it reconstructs from `openspec status --json`, `tasks.md`, and `docs/superpowers/` evidence.
-- If YAML is malformed, it uses file state and `comet state set` to repair supported fields.
-- If phase is `open` but proposal/design/tasks are complete, guard `--apply` can correct the phase.
+- When `.comet.yaml` is missing, roll back to the `openspec status --json` + `tasks.md` + `docs/superpowers/` file to check the reconstruction status.
+- When the format is abnormal, the file status shall prevail. Correct it with `comet state set` and then continue.
+- When proposal/design/tasks are complete, guard `--apply` to correct the status first and then make a judgment.
 
-If `/comet-classic` cannot repair the state, restore `.comet.yaml` from Git and run `comet doctor` again.
+If `/comet-classic` cannot be repaired by itself (for example, if the file is severely damaged), restore `.comet.yaml` from git and then run `comet doctor` to confirm.
 
-## Recommended flow
+## Recommended processing flow
 
 ```mermaid
 flowchart TD
-  A["/comet-classic route or state looks wrong"] --> B["comet status: inspect runtime_eval"]
-  B --> C["comet doctor: diagnose install/state"]
-  C --> D{"Install problem?"}
-  D -->|yes| E["Follow doctor fix\ninit / update / install OpenSpec"]
-  D -->|no| F["Check OpenSpec artifacts"]
-  F --> G["Check Design Doc and Plan"]
-  G --> H["Check working tree and verification evidence"]
-  H --> I["Recover through Comet commands"]
-  I --> J["Run /comet again"]
+  A["/comet-classic routing is incorrect or the status is abnormal"] --> B["comet status check runtime_eval"]
+  B --> C["comet doctor diagnoses the environment/status"]
+  C --> D{"Is it an installation/environment issue?"}
+  D -->|is| E["Fix <br/>comet init/update/install openspec as prompted by doctor"]
+  D -->|no| F["Check the OpenSpec artifacts"]
+  F --> G["Check the Superpowers design/plan"]
+  G --> H["Check the work tree and verify the evidence"]
+  H --> I["Use the Comet command to restore <br/> without manually modifying the machine-owned field"]
+  I --> J["Re-call /comet"]
 ```
 
-## Next steps
+## Next step
 
-- [Resume probe](/en/cli/resume-probe)
-- [Resuming interrupted work](/en/guides/resuming-workflow)
-- [Project file structure](/en/guides/project-structure)
-- [State management](/en/concepts/state-management)
+- Restore the probe command ](/en/cli/resume-probe) - Distinguish between requests that can be automatically restored, those that require confirmation, and those that should not enter the workflow
+- To resume the operation of the interrupt, ](/en/guides/resuming-workflow) - Classic normal interrupt only requires `/comet`
+- The project file structure ](/en/guides/project-structure) - in which files does the status exist
+- [Status management ](/en/concepts/state-management)-`.comet.yaml` fields and status guards

@@ -1,46 +1,174 @@
 ---
-title: 'Native 安全与恢复'
-description: '了解 Native 的写入归属、portable 状态、本机 Runtime、失败停止与环境感知恢复。'
+title: 'Native 的运行时保护与故障恢复'
+description: '了解 Native 如何通过写入归属、状态版本、原子文件和可恢复事务保障执行可靠性，并从中断状态安全恢复。'
 ---
 
-Skill 负责引导模型，Runtime 负责把关键边界落到可检查的状态和文件。两者职责不同：文案不能代替 Runtime 的检查，Runtime 也不会替模型判断一个测试是否有意义。
+Comet Native 使用多层机制保护工作流。Hook Router 在写入发生前确定归属，Native Guard 根据阶段处理写入，Runtime 再用状态版本、锁、原子文件操作和事务保护稳定状态。恢复流程以落盘状态为依据，不依赖上一轮对话或 Agent 自述。
 
-## 一次写入只属于一个 change
+这些机制承担不同职责。Hook 适合阻止宿主能够观察到的错误写入；Runtime 负责保护工作流状态和文件操作；Verifier 负责判断实现是否满足需求。任何一层都不能单独替代其他层。
 
-Comet 会把可观察的写入归属到当前选择的 workflow/change，一次写入最多交给一个 Guard。`.comet/current-change.json` 只记录当前请求归属，不限制 active change 的数量。没有可信项目上下文的遗留全局 Hook 保持中性，不会把另一个项目的 change 当成当前目标。
+## 分层运行时防护
 
-这套保护只覆盖宿主能观察到的写入。shell、IDE、后台进程或平台没有暴露给 Hook 的写入可能无法即时归属；下一次 Runtime 状态检查仍会拒绝不一致的结果，并要求回 Build、Shape 或用户处理。
+| 层级 | 主要职责 | 典型结果 |
+| --- | --- | --- |
+| Hook Router 与 Native Guard | 确定一次写入属于哪个 workflow 和 change，并应用阶段规则 | 放行、拒绝、回到 Shape 或使候选失效并回到 Build |
+| Native Runtime | 保护状态转换、检查执行、工作区绑定和归档条件 | 拒绝过期操作、暂停冲突、重建本机执行状态 |
+| 文件与事务层 | 保护 YAML、Spec、报告、目录移动和 Archive | 原子提交、内容校验、继续未完成事务或保留现场 |
 
-## Portable 状态与本机 Runtime
+## 确定性的写入归属
 
-跨设备稳定边界是 `comet-state.yaml`、brief、Specs 和可重建的 `verification.md`。它保存阶段、Loop、验收、handoff、必要检查、Verifier 结论、阻塞和下一步。
+`.comet/current-change.json` 使用 `comet.selection.v2`，记录当前写入所属的 workflow 和 change。它只负责当前归属，不限制项目中 active change 的数量。
 
-`.comet/runtime/native/` 只保存本机 `state.json`、日志、短时锁和事务。设备切换、文件缺失或 overlay 版本不匹配时，Runtime 从 YAML 重建；不会把旧机器的执行状态当作当前完成证明。
+Hook Router 按以下顺序确定写入归属：
 
-## Build 与 Verify 的安全边界
+1. 根据 Hook 请求提供的工作目录定位 Comet 项目；
+2. 读取项目启用的 workflow 和当前选择；
+3. 枚举对应 workflow 的 active change；
+4. 确定唯一 owner 后，只调用该 owner 的 Guard。
 
-- Builder 只能提交 handoff，不能直接写入通过结论；
-- Runtime 亲自执行必要检查，非零退出或超时不能当成通过；
-- 新 Verifier 必须覆盖完整 A1…An，漏项、重复项和未知项都会被拒绝；
-- Verify 失败回 Build，新的实现必须由新的 Verifier 重新验收；
-- 正常 Archive 不重新运行 Verify，只应用 Spec、生成报告并移动 change；
-- 没有独立 Verifier execution 时，报告和 Dashboard 显示降级状态，归档前需要用户确认。
+只有一个 active change 且没有当前选择时，Router 可以推断它是 owner。存在多个候选时，Router 会拒绝写入，直到通过 `comet native select <change-name>` 明确选择。选择文件损坏、目标已归档、workflow 已停用或 change 状态无法读取时，Router 也会停止写入。
 
-## 环境感知恢复
+旧版全局 Hook 如果没有可信的请求工作目录，会保持中性，避免从 Hook 安装目录或其他项目推断当前 change。项目发现或目标范围检查发生异常时，Router 会按失败关闭处理。
 
-`comet resume-probe` 是只读探针，只查看配置默认的工作流：
+## 阶段感知的变更控制
 
-| 结果           | 含义                           |
-| -------------- | ------------------------------ |
-| `auto_resume`  | 目标唯一且请求明确要继续       |
-| `ask_user`     | 有多个候选或归属不明确         |
-| `out_of_scope` | 当前请求不表示要进入恢复工作流 |
-| `none`         | 没有可恢复的 change            |
+Native Guard 会把项目内目标分为正式需求、实现文件和 Runtime 管理文件。
 
-配置损坏、代码未同步、branch/worktree 不匹配或 active/archive 布局矛盾时，探针停下并给出原因，不会扫描另一套工作流或猜测目录。`ambient_resume: false` 只关闭普通请求的自动探测；显式 `/comet` 不受影响。
+| 写入类型 | Shape | Build | Verify / Archive |
+| --- | --- | --- | --- |
+| `brief.md`、`children.yaml`、`specs/**` | 允许编辑 | 先返回 Shape，再允许编辑 | 先返回 Shape、开始新的目标周期，再允许编辑 |
+| 普通实现文件 | 拒绝，等待 Shape 确认 | 允许 | 使当前候选失效并返回 Build，再允许修改 |
+| `comet-state.yaml`、`verification.md` 和其他 change 内 Runtime 文件 | 由 Runtime 管理，Agent 写入会被拒绝 | 同左 | 同左 |
+| Supervisor 父 change 的实现文件 | 由 child change 推进，父级直接写入会被拒绝 | 同左 | 同左 |
 
-## Dashboard 的职责
+正式需求和实现文件必须分开写入。一次工具调用同时修改两类文件时，Guard 会拒绝该操作，避免需求变化和实现变化共享一个无法准确归属的状态转换。
 
-Dashboard 只读展示 portable YAML 的阶段、Loop、验收、检查、阻塞、历史和用户文档，并在匹配时补充本机 overlay。它不推进、修复或归档，也不读取原始日志和执行身份；所有状态变更都通过 Native CLI/Runtime 完成。
+Verify 或 Archive 期间观察到实现写入时，RC1 不会继续沿用原候选。Runtime 会增加实现轮次、清除失效的验收结论并回到 Build。正式需求发生变化时，Runtime 会回到 Shape，并使旧目标周期中的验证结果和归档授权失效。
 
-继续阅读：[验证与修复](/zh/native/verification-and-repair)、[产物与状态](/zh/native/artifacts-and-state) 和 [恢复手册](/zh/native/recovery-playbook)。
+## 可观察写入的前置保护
+
+Hook Router 只能处理宿主提供了写入意图和目标路径的事件。以下写入可能不经过阶段守卫：
+
+- IDE 或后台进程直接修改文件；
+- 宿主没有暴露给 Hook 的 Shell 或文件操作；
+- Hook 请求没有可归属的目标路径；
+- 明确位于当前项目之外的目标。
+
+因此，Hook 是写入前的工程保护，不是操作系统级沙箱。后续 Runtime 仍会校验状态版本、工作区、候选、检查和归档条件；Verifier 也会读取实际实现。宿主未暴露的写入需要依靠后续检查和验收发现，Comet 无法保证即时拦截。
+
+## 版本化状态一致性
+
+`comet-state.yaml` 中的 `state_version` 从 `1` 开始，每次稳定状态转换只能增加一次。Runtime 写入新状态前会比较磁盘版本：
+
+- 当前版本必须等于操作预期版本；
+- 新版本必须恰好是当前版本加一；
+- 提交前会再次读取磁盘状态，防止另一进程抢先修改。
+
+涉及用户决定的命令还会携带：
+
+```text
+--expected-state-version <version>
+--expected-action <action>
+```
+
+这两项保护可以拒绝旧对话中的确认、迟到的 Verifier 结果和已经过期的命令。发生版本冲突时，正确动作是重新读取最新 `continuation`，再执行当前状态允许的操作。
+
+## 项目级并发互斥
+
+Native 的状态修改、选择、迁移和 Archive 都通过项目级变更锁执行。同一时间只有一个受控变更操作可以进入临界区。
+
+取得锁后，Runtime 还会检查：
+
+- artifact root 是否正在移动；
+- 是否存在未提交、未回滚或无法识别的事务；
+- 当前操作是否正是该事务允许继续的恢复动作。
+
+发现未完成事务时，新的变更操作会停止，并返回需要先恢复事务的错误。锁和事务目录均由 Runtime 管理；手工删除可能使文件状态和事务记录失去对应关系。
+
+## 路径与文件身份校验
+
+RC1 对稳定文件采用受限读取和原子写入。
+
+读取正式产物时，Runtime 会检查：
+
+- 引用是规范化的项目内相对路径；
+- 路径没有进入敏感目录或本机 Runtime；
+- 文件是普通文件，父目录不是符号链接；
+- 文件大小在对应上限内，文本是有效 UTF-8；
+- 打开前、读取中和读取后仍是同一个文件对象；
+- 真实路径始终位于受管理根目录中。
+
+需要内容身份时，Runtime 会同时记录 SHA-256。文件在读取期间被替换、父目录指向发生变化或内容超过上限时，本次读取会失败。
+
+写入稳定文件时，Runtime 先在目标目录创建独占临时文件，写入并同步内容，再验证父目录链和临时文件身份，最后通过重命名或独占链接提交。提交过程中发现路径、目录或文件对象变化时，操作会停止，不会继续写入当前路径。
+
+## 可恢复的事务化归档
+
+Archive 会更新 canonical Spec、最终状态和报告，并把 active change 移入 archive。RC1 把这些动作记录为事务，而不是一组互不关联的文件命令。
+
+事务会记录预期内容哈希和文件对象身份。替换或删除已有目标前，Runtime 会把原内容放入受控隔离区，并验证隔离后的对象仍与事务记录一致。中断后，Runtime 可以根据日志继续已确认的步骤；内容、路径或对象身份发生变化时，事务会停止。
+
+以下情况需要先处理再继续 Archive：
+
+- active 和 archive 目录同时存在；
+- 事务日志损坏或与实际目录不一致；
+- canonical Spec 在事务期间发生变化；
+- 另一个 active change 在任何已登记 Git worktree 中声明了同一 capability。
+
+同一 capability 存在多个 owner 时，Archive 要求用户确定串行顺序。先归档的 change 成为新的 canonical Spec，后续 change 需要重新对齐并重新验收。Runtime 不会自动覆盖另一个 change 的规格。
+
+## 基于稳定状态的断点恢复
+
+跨会话和跨设备恢复的权威状态是 change 目录中的 `comet-state.yaml`。`.comet/runtime/native/changes/<change-name>/state.json` 只记录本机执行情况。
+
+Runtime 会根据现场选择恢复行为：
+
+| 现场 | 恢复结果 |
+| --- | --- |
+| 本机状态匹配 | 从当前稳定边界继续 |
+| 本机状态缺失、无效或版本落后 | 根据 YAML 重建本机执行状态 |
+| branch 或 worktree 与 change 绑定不一致 | 返回 `await-user`，保持现有文件 |
+| 可重复检查被中断 | 标记为中断，并按最新 continuation 重新执行 |
+| 不可重复检查被中断 | 返回 Build，要求新的实现候选 |
+| Verifier 任务丢失 | 保留候选，从稳定 Verify 边界启动新的 attempt |
+| `archive-ready` 丢失本机执行依据 | 返回 Verify，对同步后的实现重新做全量验收 |
+| `verification.md` 缺失或落后 | 根据同版本 YAML 重建报告 |
+
+恢复操作本身不计入验收失败或停滞次数。新设备无法延续旧设备上的进程、Agent 会话和日志连接，只能恢复已经写入稳定状态的事实。
+
+## 零写入的环境感知恢复
+
+`comet resume-probe` 根据 `.comet/config.yaml` 指定的默认 workflow 查找恢复目标。它不修改 change，也不切换分支或工作区。
+
+| 结果 | 含义 |
+| --- | --- |
+| `auto_resume` | 请求明确表示继续，并且目标唯一或已经明确选择 |
+| `ask_user` | 多个目标、状态损坏或工作区不匹配，需要用户决定 |
+| `out_of_scope` | 当前请求与恢复无关、用户已退出，或已经位于 Comet 流程中 |
+| `none` | 当前 workflow 没有可恢复的 change |
+
+`ambient_resume: false` 会关闭普通请求的环境感知恢复。显式进入 Comet 时仍按入口命令处理。多个 active change 存在时，探针使用明确名称或当前选择；缺少唯一归属时返回 `ask_user`。
+
+## 统一诊断与恢复入口
+
+日常推进只执行最新 `continuation`。需要排查时按以下顺序读取状态：
+
+```bash
+comet status
+comet native status <change-name> --details --json
+comet native doctor <change-name>
+```
+
+| 异常 | 处理方式 |
+| --- | --- |
+| 写入因多个 active change 被拒绝 | 明确 change 后执行 `comet native select <change-name>` |
+| 操作因状态版本过期被拒绝 | 重新读取 `status` 和最新 `continuation` |
+| 工作区绑定不匹配 | 回到 Runtime 返回的分支或 worktree，再继续 |
+| 未完成迁移或 Archive 事务 | 先运行只读 `doctor`，只执行其明确提供的恢复动作 |
+| active/archive 同时存在或事务来源不明 | 保留两侧现场，等待确定的修复路径 |
+| Verify 后发生实现修改 | 按已返回的 Build 状态重新提交候选并验收 |
+| 正式需求发生变化 | 更新 brief 和完整目标 Spec，重新确认 Shape |
+
+`doctor --repair` 只适用于 Runtime 已识别并支持恢复的状态。config、YAML、事务或目录归属无法确定时，保留现场比手工拼接状态更安全。
+
+继续阅读：[连续推进与稳定恢复点](/zh/native/continuation-and-checkpoints)、[产物与状态](/zh/native/artifacts-and-state) 和 [恢复与故障处理](/zh/native/recovery-playbook)。

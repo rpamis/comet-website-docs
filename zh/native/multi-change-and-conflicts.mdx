@@ -1,85 +1,98 @@
 ---
-title: "多 Change 与规格冲突"
-description: "使用 Native Supervisor Change 模式或独立 Change 管理大型需求、并行工作和规格冲突。"
+title: "多 Change 并行与冲突控制"
+description: "了解 Native 如何通过独立 worktree、工作区绑定和 Spec 归档顺序，让多个 Change 稳定并行。"
 ---
 
-Native 支持两种多 Change 方式：对一个大型目标使用 Supervisor Change 模式，或分别推进多个相互独立的 Change。选择哪种方式取决于需求之间是否可以独立实现和验收。
+Native 可以同时推进多个 Change。每个 Change 都有自己的需求、验收状态、分支和工作目录，Runtime 负责保持这些边界。Agent 因此可以并行实现，用户也能随时恢复其中任意一个 Change，同时避免把代码、状态或验证结果写到错误的任务中。
 
-## 什么时候使用 Supervisor Change 模式
+并行保护分成两层：worktree 隔离未提交代码，Spec 冲突检查保护正式需求。前者解决“代码写在哪里”，后者解决“多个 Change 同时修改同一份 Spec 时，应该按什么顺序更新”。
 
-当一个目标至少包含两个可以独立实现、独立验证的结果，并且存在真实的依赖关系或并行价值时，Native 会在 Shape 阶段建议 Supervisor Change 模式。需求文字很长、任务数量很多，但目标仍然紧密耦合时，不会仅因为规模而拆分。
+## Change 组织方式
 
-Supervisor Change 负责整体目标、依赖关系和最终验收；每个 child 都是一个完整的 Native Change，可以单独恢复和验证。
+目标之间的关系决定 Change 怎么组织：
 
-## 使用 Supervisor Change 模式
+| 目标关系 | 组织方式 |
+| --- | --- |
+| 一个产品目标包含多个需要协同交付的结果 | 使用 [Supervisor Change](/zh/native/supervisor-change) 统一拆分、集成和验证 |
+| 多个产品目标可以分别实现和交付 | 为每个目标创建独立 Change |
 
-在 Agent 中从统一入口开始：
+Supervisor Change 负责一个大型目标内部的 child 拆分和集成。本页聚焦多个独立 Change 如何在同一个仓库中并行推进。
 
-```text
-/comet-native
-```
+## 自动工作区隔离
 
-描述完整目标，例如：
+当你说“并行处理”“同时推进”或“用多个会话完成”时，Native 会直接为新 Change 选择 `worktree`。每个 Change 获得独立分支和工作目录，创建完成后，Agent 会进入 Runtime 返回的 `preparation.projectRoot` 继续工作。
 
-```text
-为管理后台增加权限 API、权限配置页面和审计日志，并分别验证这三个结果。
-```
+这个过程会结合仓库现状复用已有资源：
 
-Shape 阶段会：
+- 已登记的 worktree 与 Change 分支匹配时，继续使用原目录；
+- 分支仍然存在、原 worktree 已移除时，Runtime 重建工作目录；
+- 分支被重命名、由其他工作接管或归属无法确认时，Runtime 暂停并请求重新绑定。
 
-1. 判断目标是否适合拆分；
-2. 展示候选 child、依赖顺序和验收覆盖；
-3. 等待你确认拆分、调整方案或保持为单个 Change。
+当用户尚未指定并行方式时，Native 会根据当前目录是否有未提交工作、是否已有 active Change，再决定直接使用当前目录，或请你在 `current`、`branch` 和 `worktree` 之间选择。
 
-确认前不会创建 child、worktree 或派发 Agent。确认 Supervisor 拆分时，用户只选择一次多会话协作（推荐）或单会话推进；选择会写入 `comet-state.yaml`，恢复或重新进入 Shape 时不再重复询问。确认后，Runtime 会从当前可执行的 `readyChildren` 开始推进。选择多会话时优先使用独立会话或 Agent Team；这些能力不可用或恢复时已经丢失，则自动改用 subagent，但不会自动切换为单会话。subagent 也不可用时，流程会明确报告阻塞。
+## Change 工作区绑定
 
-每个 child 都在独立 worktree 中完成 Build 和 Verify，并在 Archive 时按顺序合并回 Supervisor Change 的分支。所有 child 完成后，Supervisor Change 会在最终集成结果上重新 Verify，确保整体目标仍然满足。
+Runtime 会为 Change 保存隔离方式、Change 分支、目标分支和工作目录绑定。后续写入前会重新检查这些信息。当前分支、目录类型或项目根与记录不一致时，Change 进入等待状态，并返回正确的工作目录。
 
-查看 Supervisor Change 和 child 的状态：
+这项绑定可以阻止几类常见错误：
 
-```bash
-comet native status <supervisor-change> --details --json
-```
+- 在主工作区继续修改原本属于 linked worktree 的 Change；
+- 切到另一个分支后沿用旧 Change 的状态；
+- 从旧对话复制命令，在错误目录继续 Build 或 Archive；
+- 两个工作目录同时声称自己是同一个 Change 的有效位置。
 
-正常推进时，按照 Runtime 返回的 continuation 执行下一步，不要手工创建重复的 child 或 worktree。恢复 `/comet-native` 时，Comet 会复用已有状态。
+即使宿主仍传入仓库主目录，Native 也会识别当前实际所在的 linked worktree，并把操作留在对应目录。存在多个同样匹配的绑定时，Runtime 会报告歧义，让用户决定保留哪一个来源。
 
-如果 Supervisor Change 的最终 Verify 失败，已归档的 child 不会被重新打开。Runtime 会提示创建覆盖失败验收项的 repair child，确认 Supervisor Change Shape 后继续。
+## 跨工作区发现与恢复
 
-## 多个独立 Change 与工作目录
+恢复时，Native 会扫描 Git 已登记的 worktree，读取各目录中的项目配置和 Change 状态，再优先选择工作区绑定一致的结果。你可以从仓库中的任意已登记工作目录开始，Agent 会找到 Change 真正所在的位置，然后在那里继续。
 
-如果几个目标没有共同的整体验收，可以直接创建多个独立 Change。创建 Change 时，Native 会根据当前目录和已有 Change 提供 `current`、`branch` 和 `worktree` 选项：
+因此，切换会话或重新打开项目时，磁盘中的 Change 状态和工作区绑定共同提供恢复依据。用户只在多个候选都合理、绑定已经漂移或原分支归属发生变化时参与选择。
 
-- 串行处理且当前目录干净时，可以使用 `current`；
-- 需要独立分支但不需要同时使用多个目录时，可以使用 `branch`；
-- 并行开发、多个会话或当前目录已有未提交改动时，使用 `worktree`。
-
-Native 会复用已经登记的匹配 worktree；如果分支仍然存在但 worktree 已被移除，会在恢复时重建它。每个 Change 都会保留自己的分支和工作目录绑定，错误 checkout 不会被静默使用。
-
-## 查看、选择和恢复
-
-日常推进用不到这些命令，Skill 自己会读状态。多个 change 并行时想手动看一眼、或需要明确写入归属，才用：
+想查看所有 Change 及其实际目录，可以运行：
 
 ```bash
 comet native status
 comet native status <change-name> --details --json
-comet native select <change-name>
-comet native doctor <change-name>
 ```
 
-`status`、`show` 和 `doctor` 是只读的，不会替你切换 Change。多个候选、缺少选择或工作目录不匹配时，Runtime 会等待明确决定。
+这些命令用于查看状态。正常恢复由 Native 自动完成。
 
-## 处理规格冲突
+## Spec 冲突检测
 
-不同 capability 且没有共享行为约束的 Change 可以并行。开始前确认：
+每份 Spec 描述一组完整的产品行为，例如认证、计费或通知。认证 Spec 可以保存在 `specs/authentication/spec.md`。每个 Change 会在 `comet-state.yaml` 中声明它准备创建、修改或删除哪些 Spec。Archive 前，Runtime 会扫描所有已登记 worktree 中的 active Change，找出同时修改同一份 Spec 的 Change。
 
-- 是否修改同一个 capability 的 Spec；
-- 是否都需要修改同一份用户文档或配置；
-- 一个 Change 的验收是否依赖另一个尚未归档的行为。
+这个检查关注产品语义。两个 Change 即使修改不同代码文件，只要都准备更新 `authentication` 这份正式 Spec，就存在归档顺序冲突。相反，分别修改 `authentication` 和 `billing` 的 Change 可以继续并行 Build 和 Verify，最终交付时再接受正常的 Git 集成检查。
 
-如果多个 Change 修改同一个 capability，Archive 会要求确定顺序。先归档的 Change 成为新的 canonical Spec，后续 Change 需要重新读取；如果 Runtime 返回重新对齐（rebase）动作，按返回的 continuation 执行，再重新 Build 和 Verify。不要直接覆盖前一个 Change 的文件，也不要复用冲突前的通过结果。
+这让冲突能够在 canonical Spec 更新前暴露出来，通常早于 Git 冲突标记。团队可以先处理产品行为的先后关系，再处理最终交付中的代码集成。
 
-## 跨设备继续
+## Spec 归档顺序
 
-同步项目代码、`.comet/config.yaml`、brief、Specs、`comet-state.yaml` 和已有的 `verification.md`。本机 `.comet/runtime/native/` 可以缺失，Runtime 会重建；如果 artifact root、分支或 worktree 不一致，恢复会等待明确修正。
+多个 active Change 声明同一份 Spec 时，Runtime 会在 Archive 暂停，并列出相关 Change，请你决定谁先归档。这个选择确定 Spec 更新顺序，双方已经完成的工作继续保留在各自 Change 中。
 
-继续阅读：[Native 快速开始](/zh/native/quickstart)、[产物与状态](/zh/native/artifacts-and-state) 和 [验证与修复](/zh/native/verification-and-repair)。
+先归档的 Change 更新 canonical Spec。后续 Change 重新读取最新 Spec，把自己的目标与新基线对齐，再完成需要的实现和验收。冲突前的 Verify 结果只证明旧基线下的行为，重新对齐后的结果需要新的证据。
+
+例如，`add-session-expiry` 和 `support-passkeys` 都修改 `authentication`：
+
+1. 两个 Change 在各自 worktree 中独立 Build 和 Verify；
+2. Archive 发现它们共同声明 `authentication`；
+3. 你选择先归档 `add-session-expiry`；
+4. `support-passkeys` 基于更新后的认证 Spec 重新对齐，再继续 Archive。
+
+## 需求与验收漂移保护
+
+Archive 还会重新计算 Change 当前声明的目标 Spec 和验收项，并与 Shape 确认时保存的内容比较。Spec 声明、验收文字或覆盖关系发生变化时，Runtime 会把 Change 返回 Shape，更新需求并重新确认。
+
+这项检查把并行修改造成的需求漂移与普通实现变化区分开。代码可以继续演进，正式需求和验收边界的变化需要重新确认；旧的验证报告也要与当前状态版本保持一致。
+
+## 用户决策边界
+
+日常并行过程中，Native 会处理 worktree 创建、复用、状态发现和绑定检查。用户主要在三个位置做决定：
+
+- 创建需求时说明它们属于同一整体目标，还是几个独立目标；
+- 工作区归属出现真实歧义时，确认正确目录或分支；
+- 多个 Change 声明同一份 Spec 时，确定 Archive 顺序。
+
+代码层面的 Git 冲突仍按仓库实际内容解决。Native 会保留各个 Change 的需求、状态和验收记录，让冲突处理完成后可以回到正确的任务继续验证。
+
+继续阅读：[Supervisor Change](/zh/native/supervisor-change)、[产物与状态](/zh/native/artifacts-and-state)、[安全与恢复](/zh/native/safety-and-recovery) 和 [恢复与故障处理](/zh/native/recovery-playbook)。

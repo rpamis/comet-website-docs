@@ -1,38 +1,58 @@
 ---
-title: "Skill and Engine (advanced)"
-description: "Understand the three sources of Comet Skills, the Skill package structure, the Engine run loop, the pending action/resume mechanism, immutable snapshots, guardrails, runtime checks, and the relationship between /comet-any artifacts and the Engine."
+title: "Skill and Engine (Advanced)"
+description: "Understand the three types of sources of Comet Skill, Skill package structure, Engine running loop, pending action/resume mechanism, immutable snapshot, guardrails, runtime checks And the relationship between /comet-any products and the Engine. "
 ---
 
-<Info>
-  This is advanced content, for users who want to deeply understand the artifacts produced by `/comet-any` and the underlying mechanics of `comet skill`. Classic Spec-mode `/comet` users don't need to understand the Engine to use the five-phase workflow.
-</Info>
+<Tip>
+When creating, optimizing or combining skills, it is usually only necessary to call <code>/comet-any</code>{' '} in the Agent
+And confirm as prompted. Unless you are debugging Engine Run, runtime checks
+Or the structure of the product, there is no need to first understand the underlying mechanism of this page. Classic Spec mode <code>/ Comet-Classic </code>{' '}
+Users do not need to understand the Engine to use the five-stage workflow either.
+</Tip>
 
-Comet Skills are more than just Markdown prompts. As of 0.4.0-beta.1, Comet ships a built-in **Skill Engine** — a deterministic runtime responsible for executing, constraining, persisting, recovering, and evaluating Comet Skills. It provides stable content hashes, immutable snapshots, pending action recovery, guardrails, and runtime checks for multi-step Skills.
+Comet's Skill is not just about Markdown prompts. Starting from 0.4.0-beta.1, Comet has built-in the **Skill Engine** - a deterministic runtime responsible for executing, constraining, persisting, restoring, and evaluating Comet Skill. It provides stable content hashing, immutable snapshots, pending action recovery, guardrails and runtime checks for multi-step skills.
 
-## Three types of Skill
+## Do you need to read this page
 
-| Type | Source | Common entry point | Notes |
-| --- | --- | --- | --- |
-| Built-in workflow Skills | Distributed in `assets/skills/` | `/comet`, `/comet-open`, `/comet-any` | Drive the five-phase workflow and Skill Creator |
-| Project Skills | Installed to `.comet/skills/<name>` | `comet skill add` | Override built-in Skills by name; invalid overrides fail closed |
-| Factory-generated Skills | Created or composed by `/comet-any` | `/comet-any`, `comet publish` | After generation they are ordinary Skill packages — evaluable, publishable, distributable |
+|Your goal|Suggestion|
+| ------------------------------------- | ----------------------------------------------------------------- |
+|Run the classic five-stage workflow using `/comet`|No need to read this page. First, take a look at [Quick Start ](/en/quickstart)|
+|Create or combine skills using `/comet-any`|First, take a look at [Quick Start: Combine Any Skill](/en/skill-creator/getting-started)|
+|Publish Skill|First, take a look at [Publishing and Distributing Skill](/en/skill-creator/publishing)|
+|Debug `comet skill run/continue/check`|Read this page|
+|Write the Engine-enabled Skill package|Read this page|
 
-### Skill discovery order
+For daily use, just remember three points:
 
-`resolveSkill` searches in the following order and stops when found:
+- `SKILL.md` is the entry description seen by both humans and agents.
+- The `comet/` directory is the runtime control plane that determines how to execute, restore, check and evaluate.
+- For `comet eval`, check the pre-release evidence; for `comet skill check`, check the runtime check of a certain Run. The two are not the same thing.
 
-1. **explicit** — the selector points to an existing directory, loaded directly. If the path doesn't exist, it errors out and doesn't keep searching.
-2. **project** — `<projectRoot>/.comet/skills/<selector>`, **takes precedence over built-in**, so projects can override built-in Skills by name.
-3. **builtin** — `assets/skills/<selector>`.
-4. None found → **fail closed**, no silent fallback.
+## Three types of skills
+
+|Type|Source|Common entrances|Explanation|
+| ------------------ | ----------------------------- | --------------------------------------------- | ----------------------------------------------- |
+|Built-in workflow Skill|Distributed with the package at `assets/skills/`| `/comet-classic`、`/comet-open`、`/comet-any` |Drive the five-stage process and Skill Creator|
+|Project Skill|Install to `.comet/skills/<name>`| `comet skill add`                             |Override the built-in Skill by name and fail closed for invalid ones|
+|Factory generates Skill|Create or combine `/comet-any`| `/comet-any`、`comet publish`                 |After generation, it becomes a regular Skill package, which can be evaluated, published and distributed|
+
+### Skill discovery sequence
+
+Search for `resolveSkill` in the following order. Stop once found:
+
+1. **explicit** -Selector points to an existing directory and loads directly. If the path does not exist, an error will be reported and the search will not continue.
+2. **project** - `<projectRoot>/.comet/skills/<selector>`, ** takes precedence over built-in **, so the project can override the built-in Skill by name.
+3. **builtin** — `assets/skills/<selector>`。
+4. None of them were found → **fail closed**, no silent rollback.
 
 <Warning>
-  When a project Skill overrides a built-in Skill by name, if the project Skill is invalid it fails outright rather than falling back to the built-in. This avoids the problem of "you think you're using a custom version, but you're silently using the built-in."
+When the project Skill overrides the built-in Skill by name, if the project Skill
+When invalid, it will fail directly and prohibit rollback to the built-in version. This can prevent silent downgrading when the custom version is invalid.
 </Warning>
 
-## Skill package structure
+## "Skill package structure"
 
-An Engine-enabled Skill package is more than just `SKILL.md` — it also includes a `comet/` control plane:
+An Engine-enabled Skill package is not only `SKILL.md`, but also includes a `comet/` control plane:
 
 <Tree>
   <Tree.Folder name="<skill-name>/" defaultOpen>
@@ -53,31 +73,34 @@ An Engine-enabled Skill package is more than just `SKILL.md` — it also include
   </Tree.Folder>
 </Tree>
 
-### Responsibilities of each file
+### Responsibilities of each document
 
-| File | Lifecycle | Responsibility | Loaded by |
-| --- | --- | --- | --- |
-| `comet/skill.yaml` | Runtime + authoring | Skill definition: goal, orchestration, skills, agents, tools | `loadSkillPackage` |
-| `comet/guardrails.yaml` | Runtime | Override default guardrails (allow lists, budgets, confirmation requirements) | `loadSkillPackage` |
-| `comet/checks.yaml` or `comet/evals.yaml` | Runtime | Runtime checks (progress/step/completion), one or the other | `loadSkillPackage` → `SkillPackage.evals` |
-| `comet/eval.yaml` | Authoring | Authoring-time eval manifest (task, quality gates, expected evidence) | `comet eval` / Bundle backend |
+|"File|Life cycle|Duties|By whom was it loaded|
+| ----------------------------------------- | --------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| `comet/skill.yaml`                        |Runtime + creation period|Skill definition: goal, orchestration, skills, agents, tools| `loadSkillPackage`                        |
+| `comet/guardrails.yaml`                   |Operating period|Override the default guardrails (allowed list, budget, confirmation requirements)| `loadSkillPackage`                        |
+|`comet/checks.yaml` or `comet/evals.yaml`|Operating period|runtime checks (progress/step/completion), choose one| `loadSkillPackage` → `SkillPackage.evals` |
+| `comet/eval.yaml`                         |Creation period|Creation period assessment manifest (task, quality gates, expected evidence)|`comet eval`/Bundle backend|
 
 <Note>
-  <strong>Easy-to-confuse naming:</strong> the plural <code>evals.yaml</code> (or <code>checks.yaml</code>) is a runtime eval, checked by the Engine at run time; the singular <code>eval.yaml</code> is the authoring-time eval manifest, validated by <code>comet eval</code> before publishing. The two have different lifecycles and shouldn't be conflated. <code>checks.yaml</code> and <code>evals.yaml</code> cannot coexist.
+<strong> confusing name: </strong> plural <code>evals yaml</code> (or <code>checks yaml</code>
+It is the runtime eval, which is checked by the Engine at runtime. The singular <code>eval.yaml</code> is the creation period evaluation manifest, which is {' '}
+<code>comet eval</code> is verified before release. The life cycles of the two are different and should not be confused. <code>checks yaml</code> and {' '}
+<code>evals.yaml</code> cannot exist simultaneously.
 </Note>
 
-## Skill definition: skill.yaml
+## skill Definition: Skill.yaml
 
-`skill.yaml` describes a Skill's goal, orchestration style, and declared capabilities:
+`skill.yaml` describes the objective, orchestration method and declared capabilities of a Skill:
 
 ```yaml
 apiVersion: comet/v1alpha1
 kind: Skill
 metadata:
   name: comet-classic
-  version: "1"
+  version: '1'
 goal:
-  statement: "Drive the five-phase recoverable workflow"
+  statement: 'Drive a five-stage recoverable workflow'
   inputs: []
   outputs: []
   success: []
@@ -90,194 +113,201 @@ orchestration:
         type: invoke_skill
         ref: comet-open
       next: full.design
-    # ...more steps
+    # ... More steps
 skills: [comet-open, comet-design, comet-build, ...]
 agents: []
 tools: []
 ```
 
-Key fields:
+Key field
 
-| Field | Meaning |
-| --- | --- |
-| `goal` | The Skill's goal, inputs, outputs, and success criteria — the basis for runtime completion evals; must be observable |
-| `orchestration.mode` | `deterministic` (static step graph) or `adaptive` (Agent-driven) |
-| `orchestration.entry` | Required in deterministic mode; references a known step id |
-| `orchestration.steps` | The step graph; each step has an `id`, `action`, `next`, and optional `completionEvals` |
-| `skills` / `agents` / `tools` | Declare available capabilities; the guardrails allow list can only reference declared items |
+|Field|Meaning|
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `goal`                        |Skill objectives, inputs, outputs and success criteria - the basis of runtime completion eval, must be observable|
+| `orchestration.mode`          |`deterministic` (static step diagram) or `adaptive` (Agent-driven)|
+| `orchestration.entry`         |The deterministic pattern must specify that a known step id is referenced|
+| `orchestration.steps`         |step diagram, each step has `id`, `action`, `next`, and optional `completionEvals`|
+| `skills` / `agents` / `tools` |When declaring the available capabilities, the allowed list of guardrails can only refer to the declared items|
 
-### Step action types
+### Step action type
 
-Each step's `action.type` is one of the following:
+The `action.type` for each step is one of the following:
 
-| Type | Meaning |
-| --- | --- |
-| `invoke_skill` | Invoke another Comet Skill |
-| `call_tool` | Call a tool (including script tools) |
-| `handoff` | Hand off control |
-| `ask_user` | Ask the user a question (must have a `question`) |
-| `checkpoint` | Checkpoint (usually used for terminal steps) |
+|Type|Meaning|
+| -------------- | ------------------------------- |
+| `invoke_skill` |Invoke another Comet Skill|
+| `call_tool`    |Calling tools (including script tools)|
+| `handoff`      |Transfer control|
+| `ask_user`     |Ask the user questions (must include `question`)|
+| `checkpoint`   |Checkpoint (typically used to terminate a step|
 
-## Two orchestration modes
+## Two arrangement modes
 
-Both modes share **the same execution loop**. The difference is who decides the next action.
+The two modes share the same execution loop. The difference lies in who decides the next move.
 
 ### deterministic
 
-- Steps form a static graph; `entry` specifies the starting point, and each step's `next` specifies the next step.
-- The Engine itself resolves the current step → constructs the action → passes it through guardrails → pauses for the result.
-- On success it advances to `next`; on failure it increments the retry count and stays on the current step.
-- When `next` is empty the Run completes. `comet skill run` currently only supports deterministic end-to-end execution.
+- The steps are a static diagram. `entry` specifies the starting point, and `next` of each step specifies the next step.
+- The Engine automatically parses the results of the current step → construct action → pass guardrails → pause, etc.
+- After success, move on to `next`; If it fails, increase the retry count and remain at the current step.
+- `next` indicates that the Run is completed in empty time. Currently, `comet skill run` only supports end-to-end execution of deterministic.
 
 ### adaptive
 
-- Cannot define `entry` or `steps`.
-- The Engine **doesn't propose actions itself** — an external Agent proposes them, injected via `acceptAdaptiveAction`, also passing through guardrails.
-- Completion is driven by evals/Agent; there is no `next: null` terminal step.
-- The loop layer is ready and covered by tests, but the public entry point of `comet skill run` currently rejects adaptive packages.
+- `entry` or `steps` cannot be defined.
+- Engine ** does not propose actions by itself ** - proposed by an external Agent, injected through `acceptAdaptiveAction`, and also through guardrails.
+- The completion is driven by evals/Agent, and there is no `next: null` termination step.
+- The loop layer is ready and has test coverage, but the public entry of `comet skill run` currently rejects adaptive packages.
 
 <Tip>
-  If you're writing a multi-step Skill that needs recovery, use deterministic. Adaptive is intended for Agent autonomous-decision scenarios — it's loop-ready but not yet exposed through the CLI.
+If you are writing a multi-step Skill that requires recovery, use deterministic. "adaptive" is an Agent
+Prepared for the autonomous decision-making scenario, currently loop-ready but not exposed through CLI yet.
 </Tip>
 
-## Engine run loop
+## Engine runs the loop
 
-The Engine's core is a ReAct-style loop, but the Engine itself **performs no side effects** — it only decides, constrains, records, and evaluates. The actual action execution is delegated externally (Agent, platform, or human).
+The core of Engine is a React-style loop, but Engine itself ** does not execute side effects ** - it is only responsible for decision-making, constraint, recording, and evaluation, while the actual action execution is left to the outside (Agent, platform, or person).
 
 ```mermaid
 flowchart LR
-  A["Observe<br/>Read Run state"] --> B["Decide<br/>Resolve current step, construct action"]
-  B --> C["Guardrail<br/>Check allow list and budget"]
-  C --> D["Propose<br/>Write pending action, pause"]
-  D --> E["External executes action"]
-  E --> F["Record<br/>Submit outcome, update trajectory/artifacts"]
-  F --> G["Evaluate<br/>Run step/completion evals"]
-  G --> H{"Complete?"}
-  H -->|No| A
-  H -->|Yes| I["Run completed"]
+  A["Observe<br/> reads the Run state"] --> B["Decide<br/> parse the current step and construct the action"]
+  B --> C["Guardrail<br/> checks the allowed list and budget"]
+  C --> D["Propose<br/> writes to the pending action and pauses"]
+  D --> E["External execution action"]
+  E --> F["Record<br/> submits the result and updates the trajectory/artifacts"]
+  F --> G["Evaluate<br/> runs step/completion evals"]
+  G --> H{"Finished?"}
+  H -->|no| A
+  H -->|is| I["Run completed"]
 ```
 
 <p align="center">
-  <img src="/assets/skill-creator-engine-illustrations/01-engine-pending-action-loop.png" alt="Xiaoyu records the pending action proposed by the Engine, and after external execution submits the outcome via resume" width="800" />
+  <img
+    src="/assets/skill-creator-engine-illustrations/01-engine-pending-action-loop.png"
+alt=" Xiaoyu records the pending action proposed by the Engine. After external execution, submit the outcome through resume."
+    width="800"
+  />
 </p>
 
-<p align="center">The Engine only proposes, constrains, and records; actual side effects are executed externally and then resumed</p>
+<p align="center">Engine only proposes, constrains and records; The real side effects are carried out externally before resume</p>
 
-### pending action: why it pauses
+### pending action: Why pause
 
-A pending action is the mechanism by which the Engine hands control back to the executor. After the Engine proposes an action, the Run state becomes `waiting`, until the external party submits the result of that action (`ActionOutcome`).
+The pending action is the mechanism by which the Engine returns control to the executor. After Engine proposes an action, the Run state changes to `waiting` until the result of this action (`ActionOutcome`) is submitted externally.
 
-Why pause: the Engine is a deterministic state machine that does no actual work itself (it doesn't call models, doesn't write code). It writes "what to do" into a pending action persisted to disk; after external execution, the result is submitted via `resume`. This also makes the Run **recoverable across processes** — the pending action is on disk, and a new process can read it and continue.
+Why pause: Engine is a deterministic state machine, and it does not do actual work itself (no model adjustment, no code writing). It writes "What to do" into the pending action and persists it to the disk. After the external execution is completed, the result is submitted through `resume`. This also makes the Run ** cross-process recoverable ** -- pending action on the disk, and the new process can continue by reading it.
 
-The action id is deterministic: the first 16 characters of `sha256(runId:iteration:stepId)`.
+The action id is deterministic: the first 16 digits of `sha256(runId:iteration:stepId)`.
 
-## Run lifecycle
+## "Run Lifecycle"
 
 ```mermaid
 flowchart TD
-  A["comet skill run"] --> B["Create immutable snapshot"]
+  A["comet skill run"] --> B[" Create immutable snapshots"]
   B --> C["Initialize Run state<br/>currentStep=entry, status=running"]
-  C --> D["decide: resolve entry step"]
-  D --> E["Guardrail check"]
-  E --> F["Write pending action<br/>status=waiting"]
-  F --> G["Return pending action"]
-  G --> H["External executes action"]
-  H --> I["comet skill continue<br/>submit outcome"]
-  I --> J{"outcome success?"}
-  J -->|Failure| K["Increment retry<br/>back to running"]
-  J -->|Success| L["Advance currentStep<br/>update artifacts/trajectory"]
+  C --> D["decide: Parse entry step"]
+  D --> E["guardrail inspection"]
+  E --> F["Write "pending action<br/>status=waiting""]
+  F --> G["Return Pending action"]
+  G --> H["External execution action"]
+  H --> I["comet skill continue<br/> submit outcome"]
+  I --> J{""outcome Success?""}
+  J -->|Failure| K["Add retry <br/> to return to running"]
+  J -->|Success| L["Push the currentStep<br/> to update the artifacts/trajectory"]
   K --> D
-  L --> M{"next empty?"}
-  M -->|No| D
-  M -->|Yes| N["status=completed<br/>run completion evals"]
+  L --> M{"Is "next" empty?"}
+  M -->|no| D
+  M -->|is| N["status=completed<br/> run completion evals"]
 ```
 
-### run: starting
+### run: Start
 
-1. Reject adaptive packages (currently).
-2. Reject an already-existing Run (change mode allows only one Run per directory).
-3. **Create an immutable snapshot** — freeze the entire Skill package to `.comet/skill-snapshots/<hash>/`; the hash is locked to the Run's `skillHash`.
-4. Initialize Run state: `currentStep = entry`, `status = running`.
-5. Record a `run_started` trajectory event.
-6. `decide` resolves the entry step, constructs the first action, passes it through guardrails, writes the pending action, `status = waiting`.
+1. Reject the adaptive package (currently).
+2. Reject existing runs (in change mode, there can only be one Run per directory).
+3. ** Create an immutable snapshot ** - Freeze the entire Skill package to `.comet/skill-snapshots/<hash>/` and hash lock it to Run's `skillHash`.
+4. Initialize the Run state: `currentStep = entry`, `status = running`.
+5. Record the `run_started` trajectory event.
+6. `decide` parses entry step, constructs the first action, passes guardrails, writes pending action, `status = waiting`.
 
-### resume: submit results or recover
+### resume: Submit results or resume
 
-With an outcome (actual advancement):
+With outcome (actual progress) :
 
-1. Verify the submitted outcome corresponds to the current pending action id.
-2. Merge the outcome's artifacts into the artifacts store.
-3. Record an `action_completed` trajectory event.
-4. `recordOutcome`: clear the pending; on failure increment retry, on success advance `currentStep`.
+1. Verify that the submitted outcome corresponds to the current pending action id.
+2. Merge the artifacts of outcome into the artifacts store.
+3. Record the `action_completed` trajectory event.
+4. `recordOutcome`: Clear pending, add retry if fails, and advance `currentStep` if successful.
 5. Run step-scope evals.
-6. If `next` is empty, set `status = completed` and run completion-scope evals.
-7. Otherwise `decide` again to propose the next action.
+6. If `next` is empty, `status = completed`, run completion-scope evals.
+7. Otherwise, `decide` proposes the next move again.
 
-Without an outcome (view / re-decide):
+Without outcome (view/redecide)
 
-- Return the current pending action (if one exists).
-- Or, when there's no pending, re-propose the next action.
+- Return the current pending action (if it exists).
+- Or re-propose the next action when there is no pending status.
 
-### eval: on-demand checks
+### eval: Check on demand
 
-`comet skill check` re-runs evals on demand against the persisted Run state and artifacts, outputting `PASS`/`FAIL` per item:
+`comet skill check` re-runs evals on the persistent Run state and artifacts as needed, and outputs `PASS`/`FAIL` item by item:
 
 ```bash
 comet skill check --run-id demo-run --scope completion
 ```
 
-## Immutable snapshots
+## Immutable snapshot
 
-At the start of every Run, the Engine freezes the Skill package into an immutable snapshot.
+Each time Run starts, the Engine freezes the Skill package into an immutable snapshot.
 
-### How the hash is computed
+### How is hash calculated?
 
-A stable JSON serialization of `{ definition, guardrails, evals }` (keys sorted alphabetically), plus `SKILL.md` and the `{ path, sha256 }` of each script tool source, ultimately produce a single SHA-256.
+Create a stable JSON for `{ definition, guardrails, evals }` (with keys sorted alphabetically), add `SKILL.md` and the `{ path, sha256 }` of each script tool source, and finally calculate a SHA-256.
 
-### Why it matters
+### Why is it important
 
-- **The Run is locked to the Skill version at startup** — subsequent modifications to `skill.yaml` don't affect an in-flight Run. On recovery it reloads from the snapshot, not the latest file in the workspace.
-- **Tamper protection** — reloading a snapshot recomputes the hash to verify integrity.
-- **Reproducibility** — the same snapshot + the same outcome sequence produces the same Run trajectory.
+- ** The Run is locked to the Skill version at startup ** -- Modifying `skill.yaml` afterwards does not affect the ongoing Run. When restoring, reload from the snapshot instead of reading the latest files in the workspace.
+- ** Tamper-proof ** - When reloading a snapshot, the hash will be recalculated to verify integrity.
+- ** Reproducibility ** - The same snapshot + the same outcome sequence generates the same Run trajectory.
 
-### Upgrading a Skill mid-run
+### Upgrade the running Skill
 
-The only legitimate way to change a Skill version for an in-flight Run is an explicit upgrade (`--upgrade`):
+The only legal way to modify a running Skill version is to explicitly upgrade (`--upgrade`) :
 
 ```bash
 comet skill continue --run-id demo-run --upgrade my-skill --project .
 ```
 
-Upgrades have strict guards: there must be no pending action, the Skill name must match, the orchestration mode must match, and the current step must still exist in the new version. After upgrading, a `state_migrated` event is recorded.
+Upgrades are strictly guarded: there cannot be pending actions, Skill names must match, orchestration patterns must match, and the current step must still exist in the new version. After the upgrade, record the `state_migrated` event.
 
 ## guardrails
 
-guardrails constrain what actions the Engine can execute, overridden by `guardrails.yaml`.
+guardrails restricts what actions the Engine can perform, with `guardrails.yaml` overriding the default values.
 
-### Defaults
+### Default value
 
-When `guardrails.yaml` doesn't exist, defaults are: allow list = all skills/agents/tools declared in the definition, `maxIterations = 50`, `maxRetriesPerAction = 3`, `confirmationRequiredFor` = all tools marked `requiresConfirmation: true`.
+When `guardrails.yaml` does not exist, by default: allow list = definition for all skills/agents/tools declared, `maxIterations = 50`, `maxRetriesPerAction = 3`, `confirmationRequiredFor` = all tools marked with `requiresConfirmation: true`.
 
-### Constraint checks
+### Constraint check
 
-Every action passes through `checkAction` before being proposed:
+Each action should go through `checkAction` before being proposed:
 
-| Check | Failure behavior |
-| --- | --- |
-| `iteration >= maxIterations` | Blocked: iteration budget exhausted |
-| The action's ref is not in the allow list | Blocked: skill/tool/agent not declared |
-| ref requires confirmation but none provided | Blocked: user confirmation required |
-| `retries[actionId] > maxRetriesPerAction` | Blocked: retry budget exhausted |
+|"Check|Failed behavior|
+| ----------------------------------------- | ----------------------------- |
+| `iteration >= maxIterations`              |Blocking: The iteration budget is exhausted|
+|The ref of the action is not in the allowed list|Blocking: skill/tool/agent is not declared|
+|ref requires confirmation but it is not provided|Blocking: User confirmation is required|
+| `retries[actionId] > maxRetriesPerAction` |Block: Retry budget exhausted|
 
 <Warning>
-  Dynamic replanning <strong>cannot relax guardrails</strong>. The allow list and budgets are fixed by the Skill; the runtime Agent cannot negotiate an expansion. This is core to Engine safety — the Skill defines the boundaries, and the executor can only act within them.
+Dynamic re-planning of <strong> cannot relax guardrails</strong>. Allow the list and budget to be fixed by the Skill, the runtime Agent
+It cannot be negotiated for expansion. This is the core of Engine security - Skill defines the boundaries, and the executor can only act within the boundaries.
 </Warning>
 
 ### Example
 
 ```yaml
 # guardrails for comet-classic
-allowedSkills: [comet-open, comet-design, comet-build, comet-verify, comet-archive, comet-hotfix, comet-tweak]
+allowedSkills:
+  [comet-open, comet-design, comet-build, comet-verify, comet-archive, comet-hotfix, comet-tweak]
 allowedAgents: []
 allowedTools: []
 maxIterations: 500
@@ -287,27 +317,27 @@ confirmationRequiredFor: []
 
 ## runtime checks
 
-runtime checks are conditions the Engine verifies at run time to see whether a Run satisfies them — different from authoring-time eval (`comet eval`).
+runtime checks is when the Engine checks whether the Run meets the conditions during runtime, which is different from eval (`comet eval`) during the creation period.
 
-### Two check types
+### Two types of inspections
 
-| Type | How it decides |
-| --- | --- |
-| `artifact_exists` | The corresponding artifact exists in the artifacts store |
-| `state_equals` | A field in the Run state equals the specified value |
+|Type|Judgment method|
+| ----------------- | --------------------------------- |
+| `artifact_exists` |The corresponding artifacts are stored in the Artifacts store|
+| `state_equals`    |A certain field of Run state is equal to the specified value|
 
 ### Three scopes
 
-| Scope | When it runs | Command |
-| --- | --- | --- |
-| `step` | Runs automatically after each action outcome is submitted | Automatic |
-| `completion` | Runs automatically when the Run reaches completed | Automatic |
-| `progress` | Runs on demand | `comet skill check --scope progress` |
+| scope        |When to run|Command|
+| ------------ | ---------------------------------- | ------------------------------------ |
+| `step`       |It runs automatically each time an action outcome is submitted|"Automatic|
+| `completion` |Run automatically when it reaches completed|"Automatic|
+| `progress`   |Run on demand| `comet skill check --scope progress` |
 
 ### Example
 
 ```yaml
-# runtime check for comet-classic (evals.yaml)
+# comet-classic runtime check (evals.yaml)
 runtime:
   - id: classic-completed
     scope: completion
@@ -316,54 +346,58 @@ runtime:
     equals: completed
 ```
 
-This eval checks that `status === completed` when the Run completes.
+This eval checks `status === completed` when the Run is completed.
 
 <Warning>
-  <code>comet skill check</code> only checks the completeness of a single Engine Run — it is not a general-purpose Skill evaluation. To evaluate whether a Skill's product capabilities are ready to publish, use <a href="/en/cli/eval">comet eval</a>. See <a href="/en/eval/runtime">Runtime check</a>.
+<code>comet skill check</code> only checks the completion degree of a certain Engine Run and is not a general Skill assessment. Evaluate a Skill
+Can the product capabilities be released? Use <a href="/en/cli/eval">comet eval</a>. For more details, see {' '}
+  <a href="/en/eval/runtime">Runtime check</a>。
 </Warning>
 
-## Authoring lanes
+## Product authoring lanes
 
-When `/comet-any` generates a Skill package, it assembles artifacts through **authoring lanes** rather than rendering all files at once. Each lane is responsible for one category of artifact and has its own author (deterministic-adapter or subagent).
+`/comet-any` classifies and assemps Skill packages through authoring lanes. Each channel is responsible for one type of product, has its own author (deterministic-adapter or subagent), and completes the rendering in sequence.
 
-| Lane | Output | Key artifacts |
-| --- | --- | --- |
-| `workflow-entry` | Entry Skill | `SKILL.md` |
-| `skill-core` | Internal Skill per Workflow Node | Each node's `../<node-skill>/SKILL.md` |
-| `script-contract` | Control-plane scripts | `scripts/workflow-state.mjs`, `workflow-guard.mjs`, `workflow-handoff.mjs`, `comet-plan.mjs`, `comet-check.mjs`, `comet-hook-guard.mjs` |
-| `reference` | Source of truth, protocols, and composition evidence | `reference/resolved-skills.json`, `workflow-protocol.json`, `composition-report.md`, `decision-points.md`, `recovery.md`, `authoring-lanes.json` |
-| `eval` | Eval manifest (when Engine is enabled) | `comet/eval.yaml` |
-| `skill-review` | Author self-review (runs last) | `reference/skill-review.md`, `authoring-lanes.json` |
+|Passage|Output|Key artifact|
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workflow-entry`  |Entry Skill| `SKILL.md`                                                                                                                                       |
+| `skill-core`      |The internal Skill corresponding to each Workflow Node|Each node is `../<node-skill>/SKILL.md`|
+| `script-contract` |Control plane script| `scripts/workflow-state.mjs`、`workflow-guard.mjs`、`workflow-handoff.mjs`、`comet-plan.mjs`、`comet-check.mjs`、`comet-hook-guard.mjs`          |
+| `reference`       |True source, agreement and combined evidence| `reference/resolved-skills.json`、`workflow-protocol.json`、`composition-report.md`、`decision-points.md`、`recovery.md`、`authoring-lanes.json` |
+| `eval`            |Evaluation Checklist (when Engine is enabled)| `comet/eval.yaml`                                                                                                                                |
+| `skill-review`    |Author's self-review (Final run)| `reference/skill-review.md`、`authoring-lanes.json`                                                                                              |
 
-Each lane's output carries a `protocolHash` that must equal `workflowProtocolHash(workflow)`, otherwise it throws `Factory authoring protocol hash drift`.
+The output of each channel will carry `protocolHash`, which must be equal to `workflowProtocolHash(workflow)`; otherwise, `Factory authoring protocol hash drift` will be thrown.
 
-### Review gate
+### Review access control
 
-After generation, `reviewFactoryArtifactProposals` is a mandatory review gate. It checks:
+After the generation is completed, `reviewFactoryArtifactProposals` is a mandatory review access control. It will check:
 
-- **Required lanes** are all present (`workflow-entry` / `skill-core` / `script-contract` / `reference` / `skill-review`, plus `eval` when the Engine is enabled).
-- **Required artifacts** exist (`SKILL.md`, `reference/workflow-protocol.json`, `decision-points.md`, `recovery.md`, `composition-report.md`, `resolved-skills.json`, `skill-review.md`, the six control-plane scripts, etc.).
-- **Required claims** exist and the artifacts they reference exist (`workflow-entry`, `script:workflow-state`, etc.).
-- Artifacts are consistent with the Workflow Contract (nodes, Output Schema, Required Skill Call all line up).
+- Whether all the necessary channels are complete (`workflow-entry`/`skill-core`/`script-contract`/`reference`/`skill-review`, and `eval` when Engine is enabled).
+- Whether the necessary artifacts exist (`SKILL.md`, `reference/workflow-protocol.json`, `decision-points.md`, `recovery.md`, `composition-report.md`, `resolved-skills.json`, `skill-review.md`, six control plane scripts, etc.).
+- ** Must claim** Whether it exists and the referenced artifact exists (`workflow-entry`, `script:workflow-state`, etc.).
+- The product is consistent with the Workflow Contract (nodes, Output Schema, Required Skill Call match).
 
-If the review doesn't pass (`passed === false`), `generateFactorySkillPackage` throws `Generated Skill package failed authoring review` and **writes no files**.
+If the review is not passed (`passed === false`), `generateFactorySkillPackage` will throw `Generated Skill package failed authoring review` and ** no documents will be written **.
 
 <Tip>
-  This lane design lets the platform produce artifacts in parallel using native subagents (each subagent reads only its own brief). When the platform doesn't support subagents, the same briefs run inline as a fallback. Ordinary users don't need to worry about this — just understand that "every artifact has an author and a review."
+This channel design is intended to enable the platform to generate artifacts in parallel using native subagents (each subagent only reads its own)
+brief. When the platform does not support subagent, the same brief
+It will run inline as a safety net. For daily use, there is no need to worry about these. Just understand that "every product has an author and a reviewer".
 </Tip>
 
-## Run state storage
+## Run state store
 
-Run state is machine-owned — don't edit it manually.
+Run state is machine-owned and should not be edited manually.
 
 ### Two storage locations
 
-| runnerMode | Storage location | Characteristics |
-| --- | --- | --- |
-| `change` | `<changeDir>/.comet/` | Bound to the OpenSpec change directory; one Run per directory. Used by the classic `/comet` workflow. |
-| `standalone` | `<projectRoot>/.comet/runs/<runId>/` | Standalone Run, addressed by runId; multiple Runs coexist |
+| runnerMode   |Storage location|Features|
+| ------------ | ------------------------------------ | --------------------------------------------------------------------------------- |
+| `change`     | `<changeDir>/.comet/`                |Bind the OpenSpec change directory, with one Run for each directory. The classic `/comet-classic` workflow uses this.|
+| `standalone` | `<projectRoot>/.comet/runs/<runId>/` |Independent Run, addressed by runId, multiple runs coexist|
 
-### run-state.json fields
+### The run-state.json field
 
 ```json
 {
@@ -380,26 +414,26 @@ Run state is machine-owned — don't edit it manually.
 }
 ```
 
-### Five companion files
+### Five supplementary documents
 
-| File | Contents |
-| --- | --- |
-| `.comet/pending-action.json` | The currently waiting pending action |
-| `.comet/trajectory.jsonl` | Append-only trajectory audit log |
-| `.comet/context.md` | Current Agent context |
-| `.comet/artifacts.json` | Mapping of produced artifacts |
-| `.comet/checkpoint.json` | Consistency checkpoint (written during classic migration) |
+|"File|"Content|
+| ---------------------------- | ------------------------------ |
+| `.comet/pending-action.json` |The pending action currently waiting|
+| `.comet/trajectory.jsonl`    |append-only trajectory audit record|
+| `.comet/context.md`          |Current Agent context|
+| `.comet/artifacts.json`      |The mapping of the produced artifacts|
+| `.comet/checkpoint.json`     |Consistency checkpoint (written during classic migration)|
 
-All file IO is sandboxed within the change/run directory; absolute paths, `~`, drive letters, and `..` path traversal are rejected. Writes are atomic (write to tmp then rename).
+All file I/O operations are sandboxed within the "change/run" directory, and absolute paths, `~`, drive letters, and `..` path traversals are rejected. The write is atomic (write to tmp and then rename).
 
-## Relationship between the classic workflow and the Engine
+## The relationship between classic workflows and engines
 
-The classic `/comet` five-phase workflow is driven by the Engine under the hood, but users don't need to operate the Engine directly.
+The classic five-stage workflow of `/comet-classic` is driven by the Engine at the bottom layer, but users do not need to directly operate the Engine.
 
 ```mermaid
 flowchart LR
-  A["/comet"] --> B[".comet.yaml user-visible state"]
-  B --> C["run_id link"]
+  A["/comet-classic"] --> B[".comet.yaml user visible state"]
+  B --> C[""run_id link""]
   C --> D[".comet/run-state.json<br/>machine-owned Run state"]
   B --> E["workflow / phase / verify_result"]
   D --> F["currentStep / pending / artifacts"]
@@ -407,31 +441,33 @@ flowchart LR
   F --> G
 ```
 
-### Boundary between .comet.yaml and run-state.json
+### The boundary between comet.yaml and run-state.json
 
-- `.comet.yaml` holds the user-understandable workflow projection (phase, build_mode, verify_result, etc.) and links to the Engine Run only via `run_id`.
-- Full Run details (currentStep, pending, trajectory, artifacts) live in `.comet/run-state.json` and are never written into `.comet.yaml`.
-- The first time you enter a change, `ensureClassicRun` derives the current step from the classic fields in `.comet.yaml`, creates the snapshot and Run state, and establishes the `run_id` link.
+- `.comet.yaml` saves workflow projections that users can understand (phase, build_mode, verify_result, etc.) and only links to Engine Run via `run_id`.
+- The complete Run details (currentStep, pending, trajectory, artifacts) are in `.comet/run-state.json` and not written into `.comet.yaml`.
+- When entering a change for the first time, `ensureClassicRun` deduces the current step from the classic field of `.comet.yaml`, creates a snapshot and Run state, and establishes the `run_id` link.
 
 <Note>
-  <code>comet-classic</code> itself is a deterministic Skill with 30 steps covering the full/hotfix/tweak profiles. It's an internal Skill — users never invoke it directly; instead they use <code>/comet</code>, <code>/comet-open</code>, etc., and the Engine runs it under the hood.
+The <code>ComET-Classic </code> definition within the Engine is a deterministic Skill with 30 steps to cover
+Three profiles: full, hotfix, and tweak. Users can enter through the permanent entry <code>/comet-classic</code> (or {' '} driven by project configuration)
+Enter (<code>/comet</code> alias forwarding) without directly operating these internal YAMLs; The Engine loads and runs them at the bottom layer.
 </Note>
 
-#### How the Classic control package is packaged
+#### The packaging method of the Classic control package
 
-`comet-classic` is packaged as an **internal control package** in pure YAML form under `comet/runtime/classic/`, containing three files:
+`comet-classic` is packaged as an "internal control package" in pure YAML form under `comet/runtime/classic/` and contains three files:
 
-| File | Contents |
-| --- | --- |
-| `comet/runtime/classic/skill.yaml` | Deterministic orchestration graph (30 steps, full/hotfix/tweak profiles) |
-| `comet/runtime/classic/guardrails.yaml` | The 7 allowed public Skills, `maxIterations: 500`, `maxRetriesPerAction: 3` |
-| `comet/runtime/classic/checks.yaml` | Runtime check (`classic-completed`: `status == completed` at completion) |
+|"File|"Content|
+| --------------------------------------- | ------------------------------------------------------------------------- |
+| `comet/runtime/classic/skill.yaml`      |deterministic layout diagram (30 steps, three profiles: full/hotfix/tweak)|
+| `comet/runtime/classic/guardrails.yaml` |The seven publicly allowed skills are `maxIterations: 500` and `maxRetriesPerAction: 3`|
+| `comet/runtime/classic/checks.yaml`     |runtime check (`classic-completed`: `status == completed` upon completion)|
 
-It is **not** a top-level `comet-classic/` directory like a user Skill — the installation artifact exposes only these three YAMLs, registered by `assets/manifest.json`'s `internalSkills`, and loaded by the Engine at runtime. All user-facing behavior of `/comet*` commands remains unchanged.
+The Engine definition here is not the top-level `comet-classic/` entry directory that the user calls. The internal installation products are these three YAMLs, registered by `internalSkills` of `assets/manifest.json` and loaded by Engine. The top-level `/comet-classic` is only responsible for stabilizing the entry point and workflow orchestration.
 
 ## When to use /comet-any
 
-If you want to turn a workflow into a team-reusable Skill, don't start by hand-writing Engine files. Use `/comet-any` to read real Skills, generate structured evidence, evaluate, and enter the publishing gate.
+If you want to turn a workflow into a team reusable Skill, don't start with a handwritten Engine file. Use `/comet-any` to make it read real skills, generate structured evidence, evaluate and enter the release access control.
 
 The normal user path is:
 
@@ -439,7 +475,7 @@ The normal user path is:
 /comet-any -> comet eval -> comet publish
 ```
 
-See [Compose any Skill — Quickstart](/en/skill-creator/getting-started).
+For more details, please refer to [Quick Start with Combining Any Skill ](/en/skill-creator/getting-started)
 
 ## Common commands
 
@@ -449,20 +485,20 @@ comet skill add ./my-skill --project .
 comet skill show my-skill --project .
 comet skill show my-skill --json
 
-# Run lifecycle
+# "Run Lifecycle"
 comet skill run my-skill --run-id demo-run --project .
-comet skill continue --run-id demo-run --status succeeded --summary "Done"
+comet skill continue --run-id demo-run --status succeeded --summary "Completed"
 comet skill check --run-id demo-run --scope completion
 
-# Upgrade an in-flight Run
+# Run is in the process of upgrading
 comet skill continue --run-id demo-run --upgrade my-skill --project .
 ```
 
-For the full set of options, see [comet skill](/en/cli/skill).
+Complete options see [comet skill](/en/cli/skill).
 
-## Next steps
+## Next step
 
-- [Workflow concepts](/en/concepts/workflow) — How `/comet` uses the Engine under the hood
-- [comet skill](/en/cli/skill) — Complete command reference
-- [Runtime check](/en/eval/runtime) — The difference between `comet skill check` and `comet eval`
-- [Skill Creator overview](/en/skill-creator/overview) — Create Engine-enabled Skills with `/comet-any`
+- Workflow Concept ](/en/concepts/workflow) - `/comet-classic` How to use Engine at the bottom layer
+- [comet skill](/en/cli/skill) - Complete Command Reference
+- [Runtime check](/en/eval/runtime) - The difference between `comet skill check` and `comet eval`
+- [Overview of Skill Creator ](/en/skill-creator/overview) - Creating Engine-enabled Skill with `/comet-any`
