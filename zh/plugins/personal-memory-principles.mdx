@@ -1,0 +1,200 @@
+---
+title: "个人记忆原理：从用户信号到任务上下文"
+description: "理解 Personal Memory 的记录模型、形成路径、任务匹配、渐进式上下文、纠正与遗忘机制。"
+---
+
+Personal Memory 将用户明确表达的长期要求和可复用的协作经验转换为规范化记录。每条记录都保留所有者、作用域、适用条件、来源和生命周期，系统只在相关任务中提供它。
+
+这套设计同时满足四项产品要求：记录可追溯、内容可纠正、上下文有边界、插件故障不阻塞当前工作。
+
+## 核心组件
+
+| 组件                             | 职责                                                      |
+| -------------------------------- | --------------------------------------------------------- |
+| Experience Journal（经验日志）   | 追加记录用户信号、任务结果和应用反馈，支持去重与失败重放  |
+| Reflection（经验提炼）           | 从结构化事件中识别具有长期价值的偏好、策略或经历          |
+| Consolidation（内容归并）        | 合并近义记录、补充证据、收紧适用范围并处理失效版本        |
+| Personal Memory Provider         | 保存和查询规范化个人记忆，对 Local 与 Remote 提供统一契约 |
+| Context Director（上下文调度器） | 根据当前任务筛选、排序并控制常驻上下文                    |
+| Context Manifest（上下文清单）   | 提供摘要、应用原因和稳定 ID，供 Agent 按需展开完整内容    |
+
+## 数据路径
+
+```mermaid
+flowchart TD
+  S["1. 捕获信号<br/>用户要求与任务结果"] --> J["2. 记录经验<br/>Experience Journal"]
+  J --> R["3. 提炼并归并<br/>Reflection + Consolidation"]
+  R --> P["4. 写入个人记忆<br/>Personal Memory Provider"]
+  U["用户主动管理<br/>新增、纠正、遗忘、回滚"] --> P
+  P --> D["5. 匹配当前任务<br/>Context Director"]
+  D --> A["6. 提供相关上下文<br/>关键正文或 Context Manifest"]
+  A --> O["7. 记录应用结果<br/>成功、忽略、覆盖、纠正或失败"]
+  O -. 继续校准 .-> J
+```
+
+同步管理和后台学习在这条路径中保持分离：
+
+- 用户明确新增、纠正或遗忘时，Provider 立即执行确定性操作；
+- 任务结果需要语义归纳时，Journal 先记录事件，再由 Reflection 后台处理；
+- Context Director 只选择当前任务需要的内容，不修改记录正文；
+- 应用结果重新进入 Journal，供后续排序和生命周期更新。
+
+## 记录模型
+
+Personal Memory Record（个人记忆记录）由正文和治理信息共同组成：
+
+| 字段          | 产品作用                                                    |
+| ------------- | ----------------------------------------------------------- |
+| 稳定 ID       | 支持展开、纠正、遗忘、回滚和历史追踪                        |
+| `scope`       | 区分全局用户记忆和项目范围记忆                              |
+| `projectKey`  | 将项目范围记录绑定到稳定的项目身份                          |
+| `memoryType`  | 区分 Core Profile、Collaboration Policy 和 Personal Episode |
+| `memoryClass` | 标记用户事实、用户偏好、协作习惯或个人项目约定              |
+| selectors     | 限定适用的路径、任务、操作和阶段                            |
+| `authority`   | 区分用户明确设置和系统推断                                  |
+| evidence      | 保留形成或纠正记录所需的最小证据                            |
+| lifecycle     | 表示 `trial`、`proven` 或 `superseded`                      |
+| application   | 记录最近一次应用原因和实际结果                              |
+
+Provider 保存规范化机器状态，供 CLI、Dashboard、Skill 和 Hook 共同读写。用户可读的 Markdown 用于查看和管理，也可以作为索引损坏后的重建输入。
+
+## 记录形成路径
+
+### 用户明确设置
+
+`user.signal` 表示用户主动提出的长期偏好、纠正或遗忘。协调器先将事件写入 Journal，再同步完成确定性处理。
+
+明确的长期要求可以直接进入 `proven`，因为当前用户就是这类内容的权威来源。系统还会识别一次性措辞，例如“这次先不要提交”；该要求继续约束当前任务，但不写入长期记忆。
+
+### 系统推断候选
+
+任务完成、验证、Review 和上下文应用结果可以形成推断候选。Reflection 将相关 Personal Episode 转换为 Learning Delta（记忆变更指令）：
+
+| 操作        | 含义                             |
+| ----------- | -------------------------------- |
+| `create`    | 创建新记录                       |
+| `update`    | 补充证据或收紧已有记录的适用范围 |
+| `supersede` | 停止使用冲突或失效的旧记录       |
+| `forget`    | 执行用户明确提出的遗忘           |
+| `noop`      | 当前证据不足，不形成长期内容     |
+
+Consolidation 合并近义记录，保留更具体的 selector（适用条件），并将新 evidence（证据）连接到已有记录。系统推断内容初始进入 `trial`，以较低优先级参与相关任务；一次成功应用后可以晋升为 `proven`。
+
+## Experience Journal 的职责
+
+Experience Journal 是追加式、可重放的机器事件日志，承担三项职责：
+
+1. 使用稳定 `eventId` 去重，避免重试产生重复学习；
+2. 使用 `episodeId` 关联恢复、复验和跨会话继续产生的事件；
+3. 在后台 Reflection 失败后保留重放能力，不阻塞当前工作流。
+
+Journal 保存结构化情境和证据引用，不保存完整 transcript、完整 diff、原始日志或隐藏推理。已经完成 Consolidation 的旧 Personal Episode 可以压缩，仍在使用的记录会保留必要证据链。
+
+## 任务匹配
+
+Provider 先返回可用候选，Context Director 再按当前请求执行分层匹配：
+
+```text
+project → path → task → operation → phase
+```
+
+排序同时考虑以下因素：
+
+- `proven` 的优先级高于 `trial`；
+- 用户明确设置的优先级高于系统推断；
+- 精确项目和路径 selector 的优先级高于宽泛全局内容；
+- 最近成功应用会提高后续排序；
+- 纠正或参与失败会降低排序，并触发后续 Reflection；
+- `superseded` 记录不进入任务上下文。
+
+当前用户要求、系统约束和项目策略始终具有更高优先级。个人记忆只提供协作上下文，不改变授权边界。
+
+## 渐进式上下文
+
+Comet 使用分层提供方式控制常驻上下文：
+
+1. 关键 Core Profile 可以完整进入上下文；
+2. 少量直接相关的稳定 Collaboration Policy 可以完整进入上下文；
+3. 其他相关候选先进入 Context Manifest；
+4. Agent 通过稳定 ID 展开所需的正文、来源和验证信息。
+
+Context Manifest 是一份精简索引。它为每条候选提供标题、摘要、稳定 ID 和 `whyApplied`。`whyApplied` 来自实际匹配条件，例如“当前项目匹配”“当前路径匹配”“用户明确设置”或“最近应用成功”。
+
+字符预算只限制一次任务中的常驻正文。保存成功的记录只有在命中当前条件时，才会出现在上下文或 Manifest 中。
+
+## 应用反馈
+
+Context Director 提供一条记录时会创建 application record（应用记录）。任务结束后可以写入以下结果：
+
+| 结果                     | 后续影响                         |
+| ------------------------ | -------------------------------- |
+| `used-successfully`      | 提高复用强度，`trial` 可以晋升   |
+| `ignored`                | 轻微影响排序，不直接判定内容错误 |
+| `overridden`             | 记录本次被更高优先级要求覆盖     |
+| `corrected`              | 触发纠正或替代                   |
+| `contributed-to-failure` | 降低复用强度，并触发重新提炼     |
+
+检索命中率用于衡量相关性，应用结果用于衡量实际任务价值。两类信息共同决定后续排序和生命周期。
+
+## 纠正、遗忘与重放
+
+纠正操作创建更新后的规范化记录，并将冲突旧版本标记为 `superseded`。系统推断内容不能覆盖用户明确设置的正文。
+
+遗忘操作写入 tombstone（遗忘标记）。该标记与生命周期分开保存，使历史事件重放时仍能识别用户已经撤回的内容。
+
+`forget` 默认保留回滚能力；`--permanent` 执行永久删除。显式操作失败时，Provider 保持原状态并返回实际错误。
+
+## Local 与 Remote Provider
+
+Personal Memory 领域通过统一的 `status / query / apply` 契约访问 Provider。
+
+### Local Provider
+
+- 保留用户可读的 `profile.md` 和项目投影；
+- 机器索引可以在升级或损坏后重建；
+- 使用稳定 repository identity 识别同一仓库；
+- 主工作区和 linked worktree 共享项目范围的个人记忆；
+- 不同仓库相互隔离。
+
+### Remote Provider
+
+- 使用与 Local 相同的版本化 Provider 契约；
+- token 只通过环境变量提供；
+- 配置启用 Remote 后，不再同时读取 Local；
+- Remote 失败时返回实际状态，不读取 Local 数据。
+
+项目配置可以分别控制自动学习和任务检索：
+
+```yaml
+memory:
+  learning: true
+  retrieval: true
+```
+
+关闭 `learning` 会停止形成新记录，并保留已有数据。关闭 `retrieval` 会停止向任务提供记忆，Dashboard 和显式管理操作仍然可用。
+
+## 失败隔离
+
+| 失败位置                   | 产品行为                                   |
+| -------------------------- | ------------------------------------------ |
+| 显式新增、纠正、遗忘、回滚 | 返回实际错误并保持原状态                   |
+| Journal 后台处理           | 记录诊断，保留后续重放能力                 |
+| 语义 Reflection            | 明确用户信号继续走确定性路径，推断任务延后 |
+| 任务检索                   | 当前工作流继续，不提供失败内容             |
+| Personal Memory 插件停用   | 停止学习和检索，其他工作流与项目知识继续   |
+
+## 召回诊断
+
+诊断一次记忆使用时，依次检查三个环节：
+
+1. **保存状态**：使用 `comet memory list .` 或 Dashboard 查看记录；
+2. **匹配条件**：检查 scope、project、path、operation 和 phase；
+3. **应用依据**：查看 `whyApplied`、delivery 和 application outcome。
+
+```bash
+comet memory status .
+comet memory retrieve . --task "修改身份验证模块"
+comet task . --task "修改身份验证模块" --path src/auth --phase build --json
+```
+
+返回[个人记忆](/zh/plugins/personal-memory)，或继续阅读[Agent Learning Loop](/zh/plugins/agent-learning-loop)。

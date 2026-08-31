@@ -1,0 +1,143 @@
+---
+title: "需求变化后继续推进 Native Change"
+description: "区分实现修订、需求变化和范围外新目标，并从 Build、Verify 或 Archive 返回正确的 Native 阶段。"
+---
+
+开发过程中经常会出现三类变化：实现没有满足原需求、已经确认的用户行为需要调整、当前任务之外又出现了新目标。Native 会根据变化类型回到 Build、Shape 或新的 change，保留仍然有效的状态，并使过期的验证结果失效。
+
+本页以“用户登录会话”为例，说明如何在不手工修改 Runtime 状态的前提下继续推进。
+
+![小鱼沿原支架补齐实现，并在需求变化时等待重新确认生长方向](/assets/requirement-changes-illustrations/01-realign-goal.png)
+
+## 三类变化对应三种归属
+
+| 变化类型     | 示例                                                 | 处理结果                                       |
+| ------------ | ---------------------------------------------------- | ---------------------------------------------- |
+| 实现修订     | 已确认会话超时为 30 分钟，但代码错误地实现成 60 分钟 | 保留需求，回到 Build 修改候选                  |
+| 需求变化     | 产品决定把会话超时从 30 分钟改为 2 小时              | 回到 Shape，更新 brief、完整目标 Spec 和验收项 |
+| 范围外新目标 | 登录完成后又要求新增管理员会话看板                   | 创建独立 change，避免扩大当前验收范围          |
+
+判断依据是用户可见目标是否变化。修改技术实现、修复遗漏或补齐测试通常属于实现修订；行为、验收标准、范围和约束发生变化时属于需求变化。
+
+## Shape 中直接收敛最新目标
+
+Change 仍在 Shape 时，需求尚未进入实现。新增或调整内容会直接写入：
+
+- `brief.md` 的目标、范围、决定和验收示例；
+- `specs/<capability>/spec.md` 的完整目标行为；
+- 需要用户回答的阻塞问题。
+
+用户确认前，Runtime 保持 Shape。确认内容应包含最终目标、非目标、关键决定和完整验收项。确认后再进入 Build。
+
+## Build 中发现需求变化会返回 Shape
+
+假设实现期间发现“退出登录后，其他设备上的会话也应同时失效”尚未纳入目标。这会改变用户可见行为，属于需求变化。
+
+Agent 应先停止实现，更新正式需求。Native Guard 观察到 `brief.md` 或完整目标 Spec 的写入时，会把 change 返回 Shape，并开始新的目标周期。用户重新确认后，再从最新需求进入 Build。
+
+原有实现文件会保留，方便 Builder 根据新目标继续修改。旧候选、旧验收结论和旧归档授权不会直接沿用。
+
+正式需求与实现文件应分开写入。一次工具调用同时修改两类文件会被拒绝，确保需求变化先形成可确认的稳定边界。
+
+## Verify 失败优先修订实现
+
+第一次 Verify 发现会话超时仍为 60 分钟，而确认的需求是 30 分钟。这是实现缺口，需求本身没有变化。
+
+Runtime 会把失败验收项写入 `continuation` 并返回 Build。对于需要用户明确选择的 Verify 结果，选择“修订实现”对应 `--revise-implementation`：
+
+```text
+Verify
+  → 保留 brief、Spec 和验收范围
+  → 清除当前候选的通过资格
+  → 回到 Build 修复实现
+  → 提交新的 Builder handoff
+  → 启动新的 Verifier
+```
+
+修复轮优先处理未通过项和受本次修改影响的验收项。局部修复通过后，Runtime 仍会安排最终全量验收。
+
+## Verify 中修改需求会开始新目标周期
+
+如果产品在 Verify 阶段决定把超时改为 2 小时，原有验收结论已经失去适用条件。此时选择“修订需求”，对应 `--revise-requirements`。
+
+Runtime 会：
+
+1. 返回 Shape；
+2. 增加目标周期；
+3. 清除当前验证结果和报告引用；
+4. 使旧候选和归档授权失效；
+5. 等待 brief、完整目标 Spec 和验收项更新；
+6. 在用户重新确认后进入 Build。
+
+需求变化不能通过改写 `verification.md` 表达。该文件由 Runtime 根据 `comet-state.yaml` 生成，只负责展示验收结果。
+
+## Archive 前仍可修订需求
+
+Change 已到达 `archive-ready` 时，代码通过了当前目标的验收，但尚未完成归档。如果此时决定增加“管理员可以撤销所有活跃会话”，仍然属于需求变化。
+
+Archive 的最新 `continuation` 会提供返回 Shape 的修订选项。执行后：
+
+- 已接受的 Verify 结果失效；
+- 当前归档授权失效；
+- change workspace 保留；
+- 新目标确认并实现后重新进行完整 Verify。
+
+正常 Archive 不会重复运行 Verify。只有目标变化、实现变化或恢复策略使原结果失效时，流程才会重新验收。
+
+## Verify 或 Archive 中直接改代码会使候选失效
+
+Native Guard 在 Verify 或 Archive 期间观察到实现文件写入时，会自动把 change 返回 Build。这个行为表示当前候选已经变化，原 Verifier 结论不能继续代表磁盘上的实现。
+
+返回 Build 后需要：
+
+1. 完成实现修改；
+2. 运行开发期检查和新的只读代码复核；
+3. 提交新的 Builder handoff；
+4. 由 Runtime 执行必要检查；
+5. 启动新的只读 Verifier。
+
+旧任务稍后返回的结果会受到候选 ID、`state_version`、`iteration`、`attempt` 和执行引用约束，无法覆盖新状态。
+
+## 范围外目标使用独立 change
+
+会话看板与登录会话超时可以分别交付，也没有共同的最终验收目标。此时创建新的 Native change 更清晰：
+
+```text
+session-timeout
+  负责会话超时、续期和失效语义
+
+admin-session-dashboard
+  负责管理员查看与筛选活跃会话
+```
+
+两个 change 可以使用独立 worktree 并行推进。它们如果修改同一 capability，Archive 会要求确定串行顺序；如果没有规格冲突，可以独立完成。
+
+## 状态保护避免执行过期决定
+
+`continuation.commandAlternatives` 中的每个用户决定都携带当前状态版本和预期动作：
+
+```text
+--expected-state-version <version>
+--expected-action <action>
+```
+
+选择实现修订或需求修订后，只执行对应选项的完整 `commandArgs`。状态已经变化、动作不匹配或命令来自旧对话时，Runtime 会拒绝操作。此时重新运行：
+
+```bash
+comet native status <change-name> --details --json
+```
+
+然后按照新的 `continuation` 继续。
+
+## 变化后的保留与失效规则
+
+| 操作                        | 保留                                   | 失效或重置                             |
+| --------------------------- | -------------------------------------- | -------------------------------------- |
+| 修订实现                    | brief、完整目标 Spec、验收范围、工作区 | 当前候选的验收资格                     |
+| 修订需求                    | change、工作区和历史                   | 当前候选、验证结果、报告引用、归档授权 |
+| 创建独立 change             | 原 change 的全部状态                   | 不影响原 change                        |
+| Verify / Archive 中修改实现 | 正式需求和工作区                       | 当前候选及其验证结果                   |
+
+Native 保留可证明仍然有效的事实，并让依赖旧目标或旧实现的结论失效。这样可以继续利用已有工作，同时避免把过期的通过结果带入新的交付。
+
+继续阅读：[决策归属](/zh/native/decision-ownership)、[验证与修复](/zh/native/verification-and-repair) 和 [连续推进与稳定恢复点](/zh/native/continuation-and-checkpoints)。

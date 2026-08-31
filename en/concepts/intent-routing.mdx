@@ -1,146 +1,235 @@
 ---
-title: 'Intent recognition and routing'
-description: 'After /comet selects Classic, learn how internal routing recognizes intent, reads state, and selects full, hotfix, tweak, or resume.'
+title: "Intent Recognition and Routing"
+description: "After the user calls /comet and enters Classic, how does the internal route recognize the intent, read the status, and select full, hotfix, tweak, or recovery path. "
 ---
 
-Users type `/comet` plus a request. After project configuration selects Classic, the internal `/comet-classic` entry decides which Classic profile applies using **intent recognition**, **slot extraction**, and actual file state.
+The user only needs to input "`/comet`" followed by one sentence. After the project configuration selects Classic, the internal `/comet-classic` needs to determine which Classic profile to follow this time. This judgment is jointly driven by ** intent recognition **, ** slot extraction ** and the actual file status.
 
-**Intent recognition** answers "what do you want to do": start a new change, fix an existing bug, make a light adjustment, resume an in-progress change, or just ask a question? **Slot extraction** breaks your utterance and repository state into structured routing signals — action, workflow candidate, risk flags — each labeled with its source, ready for the runtime to score with a fixed priority order.
+** Intent Recognition ** Answer "What do you want to do?" : Initiate new changes, fix existing bugs, make lightweight adjustments, restore ongoing changes, or just ask a question? ** Slot Extraction ** Break down your original words and repository status into structured routing signals - actions, candidate processes, risk markers - each signal is marked with its source for runtime to score according to a fixed priority.
 
-Starting in 0.4.0, this mechanism (implemented as `CometIntentFrame`) replaces the natural-language heuristics in Skill text and makes routing **explainable, reviewable, and recoverable**. In our baseline tests, this also improved Comet's recovery behavior for interrupted workflows.
+Starting from 0.4.0, this mechanism (implemented as `CometIntentFrame`) has replaced the natural language experience rules in the Skill body, making the routing results ** interpretable, reveritable, and recoverable **. In our benchmark tests, this has significantly enhanced Comet's recoverability.
 
 <p align="center">
   <img
     src="/assets/intent-routing-illustrations/01-routing-context-triage.png"
-    alt="Xiaoyu checks the utterance, repository state, and risk signals on a routing-context triage board before selecting the final route"
+alt=" Little Fish checks the user's original words, repository status, and risk signals at the route context triage desk, and then dials the request to the final route."
     width="800"
   />
 </p>
 
 <p align="center">
-  Routing context turns the request and repository evidence into a decision the runtime can review.
+The routing context organizes the original words, repository status, and risk signals into verifiable evidence, which is then handed over to the runtime to determine the final route
 </p>
 
-## Why routing context exists
+## Why is a routing context needed
 
 <Note>
-  In one sentence: routing context makes <code>/comet-classic</code> routing{' '}
-  <strong>explainable, reviewable, and recoverable</strong> instead of a black-box guess.
+  In short, routing context makes <code>/comet-classic</code> routing <strong>explainable, reviewable, and recoverable</strong>.
+  The entire decision process is backed by evidence.
 </Note>
 
-Before routing context, `/comet-classic` relied on prose rules such as “if this is a bug, use hotfix; if this is a copy tweak, use tweak.” That created three problems:
+Before the routing context, the `/comet-classic` entry relies on a natural language rule in the main body of the Skill - "If it's a bug, go for hotfix; if it's a copy change, go for tweak..." . This approach has three problems:
 
-| Problem             | What it felt like                                                           |
-| ------------------- | --------------------------------------------------------------------------- |
-| **Not explainable** | Users and agents could not tell why a route was selected.                   |
-| **Not reviewable**  | There was no structured record of the signals that drove the decision.      |
-| **Not recoverable** | After interruption, the agent had to read the prompt again and guess again. |
+|"Problem"|"Performance|
+| ------------ | -------------------------------------------------------------- |
+|"Unexplainable.|How is the routing result obtained? Neither the user nor the Agent can explain clearly, so they can only trust the prompt words|
+|"Non-repeatable.|Without structured judgment basis, it is impossible to locate which signal has gone wrong when the route is wrong|
+|"Irreversible.|After an interruption and re-entry, the Agent can only read the prompt word again and "guess" it once more|
 
-Routing context turns “what the user wants” into structured data with fields, evidence, and confidence. The runtime does not blindly trust the agent's proposed route. It rescores the context, returns the final route, and writes disagreements into diagnostics.
+The routing context turns "what the user wants to do" into a structured data with fields, evidence, and confidence. The runtime no longer trusts the routing suggestions put forward by the Agent itself. Instead, it ** re-scores ** and provides the final route, and writes the differences into the diagnostic log.
 
-## Route results
+## Six results of routing
 
-| Route          | Meaning                                                            | Next Skill                     | Requires confirmation |
-| -------------- | ------------------------------------------------------------------ | ------------------------------ | --------------------- |
-| `full`         | Run the full open -> design -> build -> verify -> archive workflow | `comet-open`                   | No                    |
-| `hotfix`       | Fix existing behavior quickly, skipping brainstorming              | `comet-hotfix`                 | No                    |
-| `tweak`        | Use the OpenSpec-backed medium-change path                         | `comet-tweak`                  | No                    |
-| `resume`       | Resume an active change                                            | Depends on that change's phase | No                    |
-| `ask_user`     | Evidence is insufficient or conflicting                            | None                           | **Yes**               |
-| `out_of_scope` | The user is asking a question, not starting work                   | None                           | **Yes**               |
+After runtime scoring, your request will be routed to one of the following six outcomes:
 
-Comet asks when it cannot prove a path is safe. It does not force an uncertain request into `full`, `hotfix`, or `tweak`.
+|"route|Meaning|The next step is Skill|Confirmation is needed.|
+| -------------- | ------------------------------------------------ | ---------------------- | -------- |
+| `full`         |Complete the five stages (open→design→build→verify→archive)| `comet-open`           |no|
+| `hotfix`       |Quickly fix existing behaviors and skip brainstorming| `comet-hotfix`         |no|
+| `tweak`        |Moderate changes to the OpenSpec link, while delta spec is a first-class citizen| `comet-tweak`          |no|
+| `resume`       |Restore an ongoing change|It is determined by the current stage of the change|no|
+| `ask_user`     |If there is insufficient evidence or a conflict, stop and ask you|no|Yes, it is|
+| `out_of_scope` |You're just asking a question and haven't requested the execution of the workflow|no|Yes, it is|
+
+Note two points:
+
+- Only `ask_user` and `out_of_scope` require ** explicit confirmation ** - when the evidence is insufficient, Comet will pause and wait for your choice.
+- `full`/`hotfix`/`tweak` each map to a definite entry Skill, while the next step for `resume` depends on which stage the change you want to restore is currently at.
 
 ## Intent recognition and slot extraction
 
-The two core inputs to the routing decision are `intent` (intent recognition) and `slots` (slot extraction), together with supporting fields in `CometIntentFrame` — the structure the runtime scores to produce a final route:
+The core inputs for routing decisions are `intent` (intent recognition) and `slots` (slot extraction), which, together with the remaining fields, form `CometIntentFrame` - the runtime uses this structure to score and provide the final route:
 
 ```mermaid
 flowchart LR
-    U["Your utterance<br/>utterance"] --> F["Routing context<br/>CometIntentFrame"]
-    R["Repository state<br/>active changes"] --> F
-    F --> I["intent<br/>name + confidence"]
-    F --> S["slots<br/>routing signals"]
-    F --> C["context<br/>repo context"]
-    F --> E["evidence<br/>supporting snippets"]
-    F --> P["proposed_route<br/>agent suggestion"]
+    U["Your exact words: <br/>utterance"] --> F["Route context <br/>CometIntentFrame"]
+    R["Warehouse status: <br/>active changes, etc"] --> F
+    F --> I["intent<br/> high-level intent + confidence level"]
+    F --> S["Slot <br/> routing slot"]
+    F --> C["context<br/> repository context"]
+    F --> E["evidence<br/> Evidence fragment"]
+    F --> P["proposed_route<br/>Agent candidate route"]
     I --> RT{"Runtime scoring"}
     S --> RT
     C --> RT
     E --> RT
-    RT --> O["Final route"]
+    RT --> O["Eventually route<br/>full/hotfix/tweak/resume/ask_user/out_of_scope"]
 ```
 
-| Part             | Purpose                                                             |
-| ---------------- | ------------------------------------------------------------------- |
-| `utterance`      | The original user request that triggered `/comet-classic`.          |
-| `intent`         | High-level intent and confidence.                                   |
-| `slots`          | Normalized routing slots: action, workflow candidate, risk signals. |
-| `context`        | Repository-derived context, not text extracted from the request.    |
-| `evidence`       | Source-labeled snippets that support key judgments.                 |
-| `proposed_route` | The agent's candidate route. The runtime still reviews it.          |
+|"Part|Function|
+| ---------------- | ------------------------------------------------------------- |
+| `utterance`      |The original words of the user who triggered `/comet-classic` are convenient for subsequent traceability|
+| `intent`         |High-level intentions (startup/restoration/bug fixes/minor improvements/questions/unknown) + confidence level|
+| `slots`          |The routing slots normalized from the original words: actions, candidate processes, risk signals, etc|
+| `context`        |The context read from the ** warehouse state ** is not extracted from your words|
+| `evidence`       |Evidence fragments supporting key judgments, each marked with a source (`user`/`repo`/`state`)|
+| `proposed_route` |The candidate routes submitted by the Agent - ** are only suggestions and will be reviewed at runtime **|
 
-### Intent recognition (`intent`)
+### Intent Recognition (`intent`)
 
-`intent` has two sub-fields:
+`intent` contains two subfields:
 
-- **`name`**: intent type. `start_new_change` / `fix_bug` / `make_tweak` / `resume_change` / `ask_question` / `unknown`
-- **`confidence`**: a 0-1 score. When confidence falls below 0.7, the runtime routes directly to `ask_user` — it will not gamble on an ambiguous intent.
+- **`name`**: (Intent type) `start_new_change`/`fix_bug`/`make_tweak`/`resume_change`/`ask_question`/`unknown`
+- **`confidence`**: (Confidence score from 0 to 1). When the confidence level is below 0.7, the runtime directly routes to `ask_user` - it is better to stop and ask than to rely on ambiguous intent to take the risk of choosing a route.
 
 ### Slot extraction (`slots`)
 
-| Slot                        | Routing tendency                   |
-| --------------------------- | ---------------------------------- |
-| `existing_behavior: true`   | Bug fix -> `hotfix`                |
-| `new_capability: true`      | New capability -> `full`           |
-| `public_api_change: true`   | External contract change -> `full` |
-| `schema_change: true`       | Structured data change -> `full`   |
-| `cross_module_change: true` | Cross-boundary change -> `full`    |
+The Boolean values of several ** risk signals ** that most affect routing in the slot are. They decide whether "this matter should go through the full process" :
+
+|Slot position|Tendency when hit|
+| --------------------------- | ---------------------------------------------------- |
+| `existing_behavior: true`   |Fix existing behavior → Lean towards `hotfix`|
+| `new_capability: true`      |New ability → Inclined to `full`|
+| `public_api_change: true`   |Changed the external interface/contract → inclined towards `full`|
+| `schema_change: true`       |Changed the structured data format (such as `.comet.yaml`) → tended to `full`|
+| `cross_module_change: true` |Cross-module/cross-workflow boundary → tend to `full`|
+
+As long as the hit any ** ** risk signal (`new_capability`/`public_api_change`/`schema_change`/`cross_module_change`), `full` runtime will tend to go, even if the user said is "tweaking".
 
 <Warning>
-  Risk signals take precedence over casual wording. If you ask for a hotfix but the request changes
-  a public API, Comet stops at <code>ask_user</code> instead of silently allowing a risky
-  lightweight path.
+This is Comet's security design: <strong> risk signals take precedence over verbally stated processes </strong>. If you explicitly request to go through {' '}
+<code>hotfix</code> but at the same time hitting the risk signal, it will stop to ask you when running (<code>ask_user</code>)
+And suspend confirmation at the entrance of the high-risk lightweight process.
 </Warning>
 
-## Runtime scoring order
+## How is it scored during runtime
+
+After the Agent organizes the routing context, the runtime (`comet-intent.mjs`) will re-score according to a set of ** fixed priorities ** and give the final `route`.
 
 <Note>
-  **This fixed-priority order is the core of explainable routing.** Each step has a clear condition,
-  and disagreements are written to diagnostics for later review.
+This fixed priority order is the core of interpretable routing. **
+Each step has clear judgment conditions, and any discrepancies are recorded in the diagnostic log for easy traceability afterwards.
 </Note>
 
-1. Low confidence -> `ask_user`.
-2. Multiple active changes with no target -> `ask_user`.
-3. Valid resume target -> `resume`.
-4. Question-only request -> `out_of_scope`.
-5. Explicit workflow conflicts with risk signals -> `ask_user`.
-6. Risk signals -> `full`.
-7. Existing bug with evidence -> `hotfix`.
-8. Tweak with evidence -> `tweak`.
-9. Not enough evidence -> `ask_user`.
+```mermaid
+flowchart TD
+    A(["Runtime scoring begins"]) --> B{"① Confidence level ≥ 0.7<br/> and no ambiguity?"}
+    B -->|no| AU1["ask_user"]
+    B -->|is| C{"② Clearly define the intention: <br/>resume/out_of_scope?"}
+    C -->|is| CLEAR["resume / out_of_scope"]
+    C -->|no| D{"③ Does the explicit process <br/> conflict with the risk signal?"}
+    D -->|is| AU2["ask_user"]
+    D -->|no| E{"④ Did the user explicitly specify the <br/> process?"}
+    E -->|is| WF["full / hotfix / tweak"]
+    E -->|no| F{"⑤ Hit the risk signal <br/> or is there workflow evidence?"}
+    F -->|"Risk signal"| FULL["full"]
+    F -->|"bug evidence"| HF["hotfix"]
+    F -->|"tweak evidence"| TW["tweak"]
+    F -->|"Insufficient evidence"| AU3["ask_user"]
+```
 
-Diagnostics record normalization, for example when an agent proposes `hotfix` but the runtime normalizes to `full`.
+This sequence answers several common questions of "Why is the routing like this?"
 
-## What this means for users
+1. Confidence level below 0.7 → `ask_user`. When the Agent is unable to determine your intention, it will pause during runtime and ask you to confirm.
+2. Multiple ongoing changes + no specific one to restore → `ask_user`. Comet will list the candidate changes and wait for you to name the target.
+3. Risk signals take precedence over verbal processes. You said "Go with hotfix", but when `public_api_change` is hit, the operation will pause and please confirm.
+4. No risk signals + Fix existing bugs + have evidence → `hotfix`. This is a typical portrait of hotfix.
+5. Insufficient evidence → `ask_user`. Rather than guessing a way, Comet would rather ask you.
 
-You do not write routing context by hand. Invoke `/comet`; after configuration selects Classic, `/comet-classic` builds and scores the context internally. Describe the work clearly, expect Comet to ask when evidence is weak, and use diagnostics to understand why a route was selected.
+## Several typical scenarios
 
-Advanced users can route a context JSON directly:
+The following uses specific examples to illustrate that the same user input will be routed to different results in different contexts.
+
+### Scene One: Fix a known bug
+
+```text
+The comet login interface occasionally gets 500. Could you please take a look at it for me
+```
+
+- `intent.name`: `fix_bug`, high confidence level
+- `existing_behavior: true` (Repair Existing behavior)
+- All risk signals are `false`
+- There is evidence of `workflow_candidate: hotfix`
+
+Route **`hotfix`**, then proceed to `comet-hotfix`. This is the standard profile of a hotfix: fix existing exceptions without touching new capabilities, apis, or schemas.
+
+### Scene Two: It's said to be a minor change, but in fact, the external interface has been modified
+
+```text
+Make a minor modification to /comet by removing the --force parameter from the CLI
+```
+
+- `intent.name`: `make_tweak`
+- `user_explicit_workflow: tweak` (You explicitly said "minor modification")
+- However, `public_api_change: true` (removing the CLI parameter makes it an external interface)
+
+Route **`ask_user`**. Explicit `tweak` conflicts with risk signals. During operation, the process will be paused and you will be asked to confirm whether to continue this lightweight process that affects external contracts.
+
+### Scene Three: Restore an ongoing change
+
+```text
+/comet continues from the last note-board
+```
+
+- `requested_action: continue`
+- `change_id: note-board`, and within `active_change_names`
+
+→ Route **`resume`**. The next step is determined by which stage the change of `note-board` is currently stopped at.
+
+### Scene Four: Just asking a question
+
+```text
+What does the verify stage of Comet do approximately?
+```
+
+- `intent.name: ask_question`
+- `requested_action: question`
+
+Route **`out_of_scope`**. You are asking a question and have not requested the execution of a workflow. Comet will remain within the information query range.
+
+## What does this mechanism mean to users
+
+For ordinary users, you ** do not need to write the routing context by hand **. After calling `/comet`, select Classic for configuration, and then `/comet-classic` will automatically complete the context organization and scoring internally. All you need to know is
+
+1. Make it clear what you want to do. The more specific, the more accurate the routing. Fixing this bug is more likely to hit `hotfix` than "Help me take a look".
+2. Comet, please confirm when the evidence is insufficient. When there is insufficient evidence or a conflict, it will pause at the route entry and wait for a clear decision.
+3. Routing can be traced back afterwards. If you think the route is wrong, the route context and diagnostic information record the complete basis for judgment.
+
+If you are an advanced user or contributor and want to view the actual routing output of the backend, you can run it manually
 
 ```bash
+# Hand over a routing context JSON to the runtime score
 node "$COMET_INTENT" route '{"schema_version":"comet.intent.v1", ...}'
+# Or read from stdin
 node "$COMET_INTENT" route --stdin < frame.json
 ```
 
-## Relationship to /comet-tweak
+It will return the final `route`, `diagnostics` (divergence diagnosis), and the complete `normalizedFrame`. The meanings of the fields can be found in the `reference/intent-frame.md` distributed with the Skill.
 
-`/comet` is the normal user entry. `/comet-classic` is the permanent internal Classic entry point it forwards to when configuration selects Classic; that router chooses `full`, `hotfix`, `tweak`, `resume`, or a pause.
+## The relationship with `/comet-tweak`
 
-`/comet-tweak` is the dedicated OpenSpec action path for medium changes when you already know tweak is the correct workflow.
+The routing context enables `/comet-classic` to automatically route to `tweak`. Then, is the independent command `/comet-tweak` still useful?
 
-## Next steps
+Useful, but with different positioning:
 
-- [Workflow concepts](/en/concepts/workflow)
-- [Decision points](/en/concepts/decision-points)
-- [Core scripts overview](/en/scripts/overview)
+- **`/comet`** : Normal user entry, select Native or Classic according to project configuration.
+- `/comet-classic` ** ** : Classic internal permanent entry, is decided by routing context go `full`/`hotfix`/`tweak`/`resume`; It is usually forwarded in by `/comet`.
+- **`/comet-tweak`** : ** OpenSpec action path for tweak. You already clearly know that you need to make a medium change to the OpenSpec link. It's faster to just go with it.
+
+In other words, `/comet-classic` is "helping me determine which one to go on within Classic", and `/comet-tweak` is "I already know to go on tweak". The complete five-stage `full` still follows the design/plan/build path of Superpowers.
+
+## Next step
+
+- Comet Workflow Overview ](/en/concepts/workflow) - Five-Stage, Phase Handover and verify Drift Decision
+- Decision point ](/en/concepts/decision-points) - How does Comet stop to ask you at critical nodes
+- Overview of Core Scripts: How Do Scripts like ZXQ0, QXZ, ZXQ1, and QXZ collaborate

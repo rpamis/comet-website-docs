@@ -1,109 +1,204 @@
 ---
-title: 'Phase 2: Deep Design — Brainstorming and Design Doc'
-sidebarTitle: 'Design'
-description: 'The Design phase uses Superpowers brainstorming to create a Design Doc and delta specs — a mandatory deep-design step for every full-workflow change.'
+title: "design Stage"
+description: "During the design phase, use the handoff handover package to hand over the artifacts from the open phase to Superpowers for brainstorming, guiding you through multiple rounds of in-depth technical Design and generating a Design Doc. "
 ---
 
-The Design phase is where OpenSpec hands off to Superpowers. After your change structure is confirmed in Phase 1, `/comet-design` generates a handoff package from your Phase 1 artifacts and loads the Superpowers brainstorming skill to perform deep technical exploration — working through implementation approaches, risks, trade-offs, and testing strategy. Only after you explicitly approve the design proposal does it write the final Design Doc and advance the workflow.
+In the design stage, conduct in-depth technical design. It first packages the OpenSpec artifacts in the open phase into a handover package using a script, then hands it over to Superpowers `brainstorming`, guiding you through multiple rounds of solution discussions, and finally produces a Design Doc. From your perspective, this is a real brainstorming session - Comet will repeatedly discuss the implementation plan, trade-offs, and risks with you, and only write the documentation after confirming the plan.
 
-This page uses `<classic-root>` for the configured Classic OpenSpec root: `docs/openspec/` for new projects and `openspec/` for projects that retain the legacy layout. The location is selected by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
+<Tip>
+Under normal circumstances, you only need <code>/comet</code>.
+After the configuration is selected as Classic, the internal <code>/comet-classic</code> will read the status and automatically call {' '} after the open is completed
+<code>/ Comet-design </code>. This article describes the internal stage Skill. Only <strong> can manually control </strong>
+Direct input is only required for manual control. See <a href="#how-this-phase-is-triggered">How this phase is triggered</a>.
+</Tip>
 
-## Trigger
+## How is this stage triggered
 
-Normally, invoke `/comet`. When configuration selects Classic, the internal `/comet-classic` router reads state and dispatches `/comet-design` after Phase 1 completes. Invoke the phase Skill directly only for manual control.
+`/comet-design` is usually automatically connected by `/comet-classic`.
 
-## Owner
+### Default: Use /comet for automatic connection
 
-**OpenSpec and Superpowers** — OpenSpec generates the handoff package from Phase 1 artifacts; Superpowers brainstorming drives the technical exploration and produces the Design Doc.
+After the open phase exits (`comet-guard <name> open --apply` advances `phase: design`), `/comet-classic` will automatically connect and call `/comet-design` - you don't need to manually enter the next phase command after the open phase is completed. The next time `/comet-classic` is called, if `phase: design` is detected or there is a change but the Design Doc is missing, it will also be routed to design. For details, please refer to [Automatic Propulsion Mechanism ](/en/concepts/auto-transition)
+
+### Manual: When is direct /comet-design needed
+
+- After the automatic connection (`auto_transition: false`) -- open is completed, `/comet-classic` will stop and print hints. You need to manually call `/comet-design`.
+- Just want to run the design alone (restore a change that already exists but lacks the Design Doc, or want to redo the technical design).
+- If the hotfix/tweak hits the qualitative change upgrade signal, roll back to design to complete the design.
+
+Use the unified entry `/comet` normally; The stage command is directly invoked only during the manual control stage. **
+
+---
+
+## What will you experience
+
+The core of the design stage is a brainstorming session based on real context. brainstorming directly uses scripts to generate "handover packages" from artifacts in the open phase, and the design basis thus comes from real requirements and project documents.
+
+```mermaid
+flowchart TD
+    Entry["Entry status verification"] --> S1a["Script generation handoff handover package <br/> (not agent summary)"]
+    S1a --> S1b["Load brainstorming<br/> with the handover package for multiple rounds of discussions"]
+    S1b --> S1c["Pause point 5: Confirm the design plan"]
+    S1c -->|needs revision| S1b
+    S1c -->|confirm| S1d["Finalize brainstorm-summary.md<br/>(recovery checkpoint)"]
+    S1d --> S1e["Active Context Compression Access control <br/> (You may need to compress it manually)"]
+    S1e --> S2["Create a Design Doc + Spec Patch"]
+    S2 --> S3["Update status + guard advancement"]
+```
+
+### Step 0: Entry status verification
+
+```bash
+node "$COMET_STATE" check <name> design
+```
+
+If `handoff_context` and `handoff_hash` already exist, first confirm whether they match the current artifacts, and then decide whether to regenerate them.
+
+### Step 1a: Generate the handoff handover package
+
+It must be generated by a script and cannot be replaced by a handwritten summary by the agent on the spot. This is the core of reliability in the design stage.
+
+```bash
+node "$COMET_HANDOFF" <change-name> design --write
+```
+
+The form of the handover package depends on the `context_compression` configuration:
+
+|"Mode"|Output|"Content|
+| ------------- | ----------------------------- | ----------------------------------------------------------------- |
+|`off` (Default)| `design-context.json` + `.md` |Complete summary, each file with sha256, over 80 lines truncated (retaining the complete source path)|
+| `beta`        | `spec-context.json` + `.md`   |delta spec verbatim projection, other file hash references (save approximately 25-30% token)|
+
+Write both `handoff_context` and `handoff_hash` into `.comet.yaml` simultaneously. When complete context is needed, add `--full`.
+
+The source of the handover package is the four artifacts in the open phase: `proposal.md` (target motivation range), `design.md` (high-level architecture), `tasks.md` (task boundary), and `specs/*/spec.md` (delta spec).
+
+<p align="center">
+  <img
+    src="/assets/design-phase-illustrations/01-scripted-handoff-package.png"
+alt=" Xiaoyu uses a script splint to press real OpenSpec artifacts into handoff handover packages marked with sha256."
+    width="800"
+  />
+</p>
+
+The <p align="center">handoff handover package is directly generated by the script reading real artifacts to produce </p>
+
+### Step 1b: Conduct brainstorming (with real context)
+
+Load Superpowers `brainstorming` and conduct in-depth technical design with the handover package as the context. Comet will not skip the clarification process of brainstorming just because of "context redundancy" - it will:
+
+- Discuss the implementation plan, technical risks, testing strategies, and boundary conditions
+- If the target/scope/non-target/acceptance scenario/key constraints are still unclear, ** continue to ask questions **
+- ** Do not create a Design Doc after just one round of Q&A ** -- Go through the complete process of clarification → 2-3 candidate proposals → step-by-step confirmation
+- During the Design process, ** incremental update ** `brainstorm-summary.md` (restore checkpoints, not Design Doc) will be carried out. The confirmed facts, constraints, candidate solutions, trade-offs, and Spec Patch candidates will be recorded. Unconfirmed items will be marked as "pending confirmation" or "candidate".
 
 <Warning>
-  **Brainstorming cannot be skipped.** For full-workflow changes, the Superpowers `brainstorming`
-  skill is mandatory — it cannot be replaced by a quick summary or normal conversation. The only
-  exceptions are the **hotfix** and **tweak** presets, which bypass Phase 2 entirely and go directly
-  to build. If the brainstorming skill is unavailable, the workflow stops and prompts you to install
-  or enable Superpowers skills.
+Comet cannot write the second requirement of <strong> spec</strong> in the Design Doc. If the delta spec lacks acceptance scenarios, only {' '} can be written
+<strong>Spec Patch</strong> (written back to OpenSpec delta
+(spec) - Only for supplementary acceptance scenarios, correction of ambiguous wording, and addition of boundary conditions. Substantial changes to the structure or scope must be returned as design findings
+brainstorming confirmation.
 </Warning>
 
-## What Happens
+<Note>
+If <code>brainstorming</code> skill is not available, the Comet will stop and prompt you to install/enable Superpowers,
+<strong> will not use ordinary conversations instead of </strong>.
+</Note>
 
-<Steps>
-  <Step title="Generate the OpenSpec → Superpowers handoff package">
-    Before brainstorming begins, `comet-handoff.sh` generates a deterministic context package from the Phase 1 artifacts. This produces two files and writes their paths and a SHA256 hash to `.comet.yaml`:
-    - `design-context.json` — machine-readable index (change, phase, canonical spec, source paths, hash)
-    - `design-context.md` — human-readable context Superpowers reads during brainstorming, with source path markers, line ranges, and SHA256 traceability
+### Pause point 5: Confirm the design plan
 
-    The handoff is script-generated — the AI cannot write it manually. This ensures Superpowers receives a verified, traceable snapshot of what OpenSpec actually contains.
+After brainstorming generates a plan, Comet pauses ** to wait for your clear confirmation **. Before confirmation, one cannot create a Design Doc, write `design_doc`, run design guard, or enter `/comet-build`. The summaries it presents include:
 
-  </Step>
-  <Step title="Brainstorming explores the technical problem">
-    The AI loads the Superpowers `brainstorming` skill with the handoff package as context and begins deep technical exploration:
-    - Implementation approach: architecture, data flow, key technology choices
-    - Trade-offs and risks for each option
-    - Testing strategy
-    - Any acceptance scenarios missing from the OpenSpec delta spec (proposed as Spec Patches, not rewritten requirements)
+- The adopted technical solution
+- Key trade-offs and risks
+- Test strategy
+- If there is a Spec Patch, list the delta spec changes that will be written back
 
-    Brainstorming is conversational — the AI presents proposals and iterates with you. The Design Doc file is **not written yet** at this stage.
+You confirm → continue; You need to adjust → Go back to 1b and continue the discussion until you confirm.
 
-  </Step>
-  <Step title="You confirm the design proposal (blocking pause)">
-    After brainstorming produces a design proposal, the AI pauses and presents a concise summary:
-    - The technical approach adopted
-    - Key trade-offs and risks
-    - Testing strategy
-    - Any delta spec changes to be written back
+### Step 1d: Finalizing brainstorm-summary.md
 
-    **The workflow cannot advance until you explicitly confirm.** If you request adjustments, brainstorming continues until you confirm.
+After confirmation and before creating the Design Doc, Comet writes the confirmed solution into `brainstorm-summary.md`. The structure is: confirmed technical solution/Key trade-offs and risks/Test strategy/Spec Patch. This is the recovery anchor point after context compression.
 
-  </Step>
-  <Step title="Design Doc is written">
-    Once you confirm, the AI creates the Design Doc at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`. The file's frontmatter is minimal by design:
+### Step 1e: Active Context Compression Access Control
 
-    ```yaml
-    ---
-    comet_change: <change-name>
-    role: technical-design
-    canonical_spec: openspec
-    ---
-    ```
+Before creating a Design Doc, Comet will ** actively trigger context compression once ** (because at this time handoff + brainstorming decisions + to-do items have all been written to disk) :
 
-    This links the Design Doc back to the OpenSpec change without duplicating requirements.
+- If the platform has a native compression mechanism (compact/compaction command or UI), Comet triggers it once - ** will not ** pretend to compress with a shell script.
+- If the platform cannot be programmed for compression, Comet ** pauses to tell you ** to manually run the platform's compression. Only after you confirm (or say "no compression/continue") will you proceed to Step 2.
 
-  </Step>
-  <Step title="Delta spec is created or updated">
-    If brainstorming identified missing acceptance scenarios or new capabilities, the OpenSpec delta spec at `<classic-root>/changes/<name>/specs/<capability>/spec.md` is created or updated with Spec Patches. The handoff hash is regenerated to reflect the updated artifacts.
-  </Step>
-  <Step title="State is updated and guard advances the workflow">
-    The `design_doc` path is recorded in `.comet.yaml`. If delta spec changes occurred, the handoff package is regenerated to keep the hash current. The phase guard then validates all exit conditions — including that `handoff_hash` matches current artifacts and `design-context.md` contains script-generated traceability markers — and auto-transitions to `phase: build`.
-  </Step>
-</Steps>
+This is a ** user-oriented pause point ** : You may be asked to compress manually or confirm "No compression mechanism/please continue".
 
-## Artifacts
+### Step 2: Create a Design Doc
 
-| Artifact                   | Path                                                               | Description                                                              |
-| -------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Design Doc                 | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`              | Technical RFC — implementation approach, trade-offs, testing strategy    |
-| Delta spec                 | `<classic-root>/changes/<name>/specs/<capability>/spec.md`         | Acceptance scenarios and capability spec for this change                 |
-| Handoff context (JSON)     | `<classic-root>/changes/<name>/.comet/handoff/design-context.json` | Machine-readable handoff index with SHA256 hash                          |
-| Handoff context (Markdown) | `<classic-root>/changes/<name>/.comet/handoff/design-context.md`   | Human-readable handoff context with source path and traceability markers |
+Create a Design Doc in the main session using the full brainstorming context with minimal frontmatter:
 
-## The Handoff Package
-
-`comet-handoff.sh` exists to solve a specific problem: AI agents summarizing context on the fly produce inconsistent, untraceable output. By generating the handoff deterministically from actual file content — with SHA256 hashes, source path markers, and line ranges — Comet ensures that Superpowers always works from a verified snapshot of what OpenSpec actually contains.
-
-The default package is a compact, traceable excerpt. If the full content of all source artifacts is genuinely needed, you can generate a full handoff explicitly:
-
-```bash
-"$COMET_BASH" "$COMET_HANDOFF" <change-name> design --write --full
+```yaml
+---
+comet_change: <change-name>
+role: technical-design
+canonical_spec: openspec
+---
 ```
 
-The `handoff_hash` stored in `.comet.yaml` is checked by the phase guard before the workflow can advance from design to build. If the hash doesn't match the current OpenSpec artifacts, the guard blocks the transition and reports a mismatch.
+Written in `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`. If there is a Spec Patch, edit the corresponding `specs/*/spec.md`.
 
-## Context Compaction Recovery
-
-The design phase can trigger context compaction during brainstorming. If that happens, run the recovery command to get a structured summary of what's been completed and what needs to happen next:
+### Step 3: Update status + Advance
 
 ```bash
-"$COMET_BASH" "$COMET_STATE" check <change-name> design --recover
+node "$COMET_STATE" set <name> design_doc <path>
+# If the delta spec changed, regenerate the handoff to update its hash
+node "$COMET_HANDOFF" <change-name> design --write
+# Advance the phase guard
+node "$COMET_GUARD" <change-name> design --apply
 ```
 
-The script outputs the current phase, which fields are complete, which are still pending, and the recommended recovery action. Follow the recovery action to resume from the correct step.
+If the delta spec is not modified, skip handoff and regenerate. Advance to `phase: build`.
+
+---
+
+## The invoked skill
+
+| Skill                   |Purpose|When to call|
+| ----------------------- | ------------------------------------ | ------------------------------------ |
+| `brainstorming`         |In-depth technical design (plan, risk, test strategy)|Step 1b, execute immediately, do not skip|
+|`brainstorming` (Again)|Redesign when the medium-scale spec is updated|When changes in interfaces/components/data flows are detected during the build phase|
+
+The OpenSpec skill is not called in the design phase -- OpenSpec artifacts have been created in the open phase.
+
+## Product
+
+|Product|Location|Explanation|
+| --------------------- | ----------------------------------------------------- | ------------------------------- |
+| Design Doc            | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` |Final technical design document|
+|handoff handover bag| `.comet/handoff/design-context.json` + `.md`          |"OpenSpec→Superpowers Handover context.|
+| brainstorm-summary.md | `.comet/handoff/brainstorm-summary.md`                |Context compression recovery checkpoint|
+
+## Exit condition (guard check)
+
+When leaving design, guard checks:
+
+- The Design Doc has been created
+- frontmatter includes `comet_change`, `role: technical-design`, and `canonical_spec: openspec`
+- `handoff_context` and `handoff_hash` have been written into `.comet.yaml`
+- `handoff_hash` matches the current OpenSpec artifacts (** Drift will be FATAL**)
+- markdown handover tape traceable markers (source path, mode, sha256)
+- The `spec-context.json` structure is effective in beta mode
+
+## When to enter
+
+Normally, `/comet-classic` enters Design automatically after Open completes (see [How this phase is triggered](#how-this-phase-is-triggered)). Manual scenarios include a hotfix/tweak that crosses the upgrade threshold and needs full Design, or a recovered Change whose design document is missing.
+
+<Warning>
+The full workflow should not skip the design. hotfix and tweak can be skipped, but once the range deteriorates, it should be upgraded back to full.
+</Warning>
+
+## "Restore
+
+The design stage is idempotent and can be safely repeated. `brainstorm-summary.md` is a persistent recovery checkpoint - after context compression, reloading it along with two handover package files will allow you to continue. If the design plan has not been confirmed yet, go back to 1b/1c; If confirmed, create a Design Doc.
+
+## Next step
+
+- After the design is completed in the build phase, it enters the planning and execution stage
+- Context Compression mechanism ](/en/concepts/context-compression) - Detailed Explanation of the off/beta Mode of handoff Handover Packet
+- Workflow intermediate products such as ](/en/concepts/intermediate-artifacts) - brainstorm-summary, etc
+- Five-stage pause points and user selection points ](/en/concepts/decision-points)-design pause points

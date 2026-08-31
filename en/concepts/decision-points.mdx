@@ -1,54 +1,328 @@
 ---
-title: 'Decision points'
-description: 'Learn where Comet must stop and ask you instead of choosing a default or continuing automatically.'
+title: "Five-Stage Pause Points and User Selection Points"
+description: "List all the pause points in the comet five-stage workflow where users need to make decisions - where each pause point is, what to choose, and what happens after the selection. "
 ---
 
-Comet automates safe transitions, but product and risk decisions still belong to you. A decision point is a hard pause where the agent must get an explicit answer before continuing.
+Comet will automatically advance to unambiguous stages and hand over product or risk decisions to you. Every place where your intervention is needed is a ** blocking decision point ** : Comet pauses and waits for your choice, and continues after receiving the choice.
+
+This page fully lists all the pause points of the five stages, making it convenient for you to know where you need to participate before using it.
+
+## What kind of questions will you see
+
+On platforms that support structured questioning, such as Claude Code, Comet prioritizes presenting pause points as clickable single-choice or multiple-choice questions. You will see short labels and impact descriptions for each option; The recommended items are used to assist in judgment, and the final choice is always confirmed by you.
+
+|Scene|The experience you see|How does Comet continue?|
+| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------- |
+|Select a single pause point|A single-choice question, such as whether to continue execution or which branch processing method to choose|After you select an item, Comet will write the status or execute the corresponding branch|
+|Select multiple pause points|A multiple-choice problem, such as choosing isolation mode, execution mode, TDD and review mode all at once|After you submit your selection, Comet records these workflow fields all at once|
+|The platform did not have structured questions, or the first structured question failed|Number the text option, clearly write "single choice" or "multiple choice", the impact of each item, and ask you to reply with the number|The subsequent pause points in this session will directly use numbered text and will not repeatedly attempt a failed structured UI|
+
+<Note>
+If you only see a list of numbers on a certain platform, this is not process degradation. It merely returns the text number from the clickable options in the input interface. The blocking rules, option meanings, and status writes to access control are all consistent.
+</Note>
+
+## Overview of the pause points
+
+The following lists all the pause points in stage order. The pause points of each stage are arranged in the order they occur. Only after the last pause point of the previous stage is passed can the next stage be entered.
+
+<Note>
+From 0.4.0 to beta.5, Comet will only be suspended at the true user decision point <strong>, </strong>. Top 3
+All repairable verification failures, single secure next steps, and operations that follow the persisted configuration will be automatically handled without being asked one by one.
+<code>auto_transition: false</code> generates <code>NEXT: manual</code> merely returns control.
+<strong> is not a user decision point. </strong> will not ask "Whether to continue or not".
+</Note>
+
+### Routing stage
+
+|Sequence|Pause point|What do you decide?|
+| ---- | ----------------- | ----------------------------------------------------------------- |
+| 1    |workflow target selection|When there are multiple active changes, which one to continue with, whether to create a new one or continue, and which one to do first after batch splitting|
+
+### "open stage"
+
+|Sequence|Pause point|What do you decide?|
+| ---- | -------------------------- | ---------------------------------------- |
+| 2    |PRD split pre-inspection|Should large demands be broken down into multiple changes|
+| 3    |proposal/design/tasks review|Finally, confirm whether the name, scope and the three documents meet expectations|
+
+### design stage
+
+|Sequence|Pause point|What do you decide?|
+| ---- | ------------ | -------------------------------- |
+| 4    |Design scheme confirmation|Whether the technical solution of brainstorming is adopted|
+
+### "build stage"
+
+|Sequence|Pause point|What do you decide?|
+| ---- | -------------- | ----------------------------------------------------------------------------------------- |
+| 5    |build Joint Decision-making|plan-ready Pause or select all working modes at once (Isolation + Execution + TDD + review, include branch name when selecting branch)|
+| 6    |spec Drift Split|Whether to split the new change when the new tasks exceed 50%|
+
+### verify stage
+
+|Sequence|Pause point|What do you decide?|
+| ---- | ------------ | ---------------------------------------------------------------------- |
+| 7    |Verify exceptional decisions|Accept WARNING/SUGGESTION bias, spec drift handling, or strategy selection after the fourth failure|
+
+### archive stage
+
+|Sequence|Pause point|What do you decide?|
+| ---- | ------------------ | ---------------------------------------------------------- |
+| 8    |Final confirmation of archiving and delivery|Archive and push immediately/Archive, push and create PR/Go back and adjust/Do not archive for the time being|
+
+### Upgrade signal (hotfix/tweak only)
+
+|Sequence|Pause point|What do you decide?|
+| ---- | -------- | ---------------------------------------------------- |
+| 9    |Upgrade evaluation|When the qualitative change signal is hit, continue the preset or upgrade to full workflow|
 
 <p align="center">
   <img
     src="/assets/decision-points-illustrations/01-decision-signposts.png"
-    alt="Xiaoyu waits at decision signposts along the five-phase Comet path"
+alt=" The little fish is waiting in front of the stop sign on the five-stage path for user confirmation."
     width="800"
   />
 </p>
 
-## Decide whether user input is actually required
+The <p align="center"> automatic propulsion only handles unambiguous connections. When encountering a pause point, you must wait for your confirmation before continuing with </p>
 
-Since 0.4.0-beta.5, Comet first classifies every situation before pausing:
+## Pause points in the routing stage
 
-- **User decision** — two or more valid options change scope, behavior, accepted risk, or an irreversible outcome; you must choose.
-- **Automatic handling** — exactly one safe next action remains (repair an objective failure, reconcile verifiable state, retry an idempotent check, follow persisted configuration); execute and report it without manufacturing confirmation.
-- **Stop condition** — a missing dependency, corrupt state, path escape, or unavailable external command leaves no valid next action; report the blocker and recovery condition.
-- **Manual handoff** — `NEXT: manual` returns control; it is not a new user decision point. Print `HINT`, end the current invocation, and do not ask whether to continue.
+### 1 - workflow target selection
 
-Only the first category uses the blocking rules below.
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------------------------- |
+|Trigger|There are multiple active changes, new and continue coexist, or select the starting item after the PRD batch is split|
+|Decision-making|Which existing change to continue with, whether to create a new one, and which item to do first in the batch|
+|"Display|The items to be started in the active change list and batch list|
 
-## Rules
+Comet only pauses when there is genuine ambiguity. When there is only one clearly relevant active change, restoration will be directly recommended.
 
-- The agent cannot replace your answer with a default.
-- A recommendation is not a decision.
-- A past preference is not a decision.
-- Text output alone is not enough when the platform has a structured question UI.
-- Merge adjacent choices that can be answered together, and do not re-ask persisted choices that remain valid.
+## Pause point in the open phase
 
-## Common decision points
+### 2 - PRD split pre-inspection
 
-| Area    | Examples                                                                                                                                                                                                                  |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Routing | Choose which active change to continue, new vs. resume, or which batch item starts first.                                                                                                                                 |
-| Open    | PRD split pre-check; final proposal/design/tasks review (including name and scope). Requirements clarification and naming are non-blocking by default.                                                                    |
-| Design  | Confirm approach, decide whether to patch specs.                                                                                                                                                                          |
-| Build   | One joint decision: plan-ready pause or all workflow settings (isolation + execution + TDD + review, plus branch name when branch is selected).                                                                           |
-| Verify  | Accept a WARNING/SUGGESTION divergence, handle spec drift, or choose a strategy after the 4th failure. The first 3 repairable failures return to build automatically; CRITICAL and IMPORTANT findings are never waivable. |
-| Archive | One final decision: archive and push now, archive and push then open a PR, adjust or verify again, or do not archive yet.                                                                                                 |
-| Presets | Continue hotfix/tweak or upgrade to full when a qualitative-change signal is hit.                                                                                                                                         |
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------- |
+|Trigger|The input is a large PRD/ roadmap, or a clarification summary that contains multiple independent capabilities|
+|Decision-making|Whether to split it into multiple changes|
+|"Display|Candidate split list (name, objective, scope, dependency, acceptance scenario)|
 
-## Why this matters
+Option
 
-Comet is designed to be recoverable and auditable. Silent defaults at risk points make later recovery misleading.
+|Options|Result|
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+|Create multiple OpenSpec changes|Each split item is created as an independent `/comet-open`, and the split list is persisted to `.comet/batches/<batch-id>.json`|
+|Remain as a change|Continue with single change and record the reasons for not splitting|
+|Adjust the split plan|Re-output the candidate list and confirm it again|
 
-## Next steps
+No artifact will be created before confirmation. After each split item is completed, it will pass the dual verification of `openspec status --json` and `comet state check`. Only when both pass will the split be declared complete. For details, please refer to [Large PRD Split ](/en/guides/prd-splitting)
 
-- [Workflow concepts](/en/concepts/workflow)
-- [Auto-transition](/en/concepts/auto-transition)
+### 3 - proposal/design/tasks Review (including Name and Scope)
+
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------------------------------------------------------- |
+|Trigger|proposal/design/tasks has been created and the integrity check has passed|
+|Decision-making|Confirm whether the name, scope and three documents of the change meet expectations|
+|"Display|The English names of the Kebab-cases for proposal (background/objective/scope), design (architecture/selection), tasks (quantity/key tasks), and derivation|
+
+|Options|Result|
+| ------------------ | ------------------ |
+|Confirm and proceed to the next stage|Execute guard flow|
+|Needs to be adjusted|Request confirmation again after modification|
+
+<Note>
+Starting from 0.4.0-beta.5, the default requirements clarification and naming in the open phase are <strong> and non-blocking </strong>
+. When the scope and name are clear, continue directly without pausing separately for you to confirm the summary or name. The final review will confirm the name, scope and three documents all at once. Only when it still exists will the scope or target be changed
+A joint question is only used once when the mutually exclusive selection of the change identity is made. A clear request skips the naming confirmation before the product.
+</Note>
+
+## Pause points in the design stage
+
+### 5 - Design scheme confirmation
+
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------------------ |
+|Trigger|After brainstorming to produce the Design plan and before creating the Design Doc|
+|Decision-making|Confirm the technical solution|
+|"Display|Adopted technical solutions, key trade-offs and risks, test strategies, Spec patches (if any)|
+
+|Options|Result|
+| -------- | ---------------------------------- |
+|Confirm|Enter Step 1d finalization and create the Design Doc|
+|Needs to be adjusted|Continue brainstorming and iteration until confirmation|
+
+Before confirmation, do not create a Design Doc, do not write `design_doc`, and do not run guard.
+
+<Note>
+  Step 1e
+When performing active context compression, if the platform does not support programmatic triggering, it will also pause and allow you to compress manually. This is not a product decision point, but you need to confirm that the compression is complete.
+</Note>
+
+## A pause point during the build phase
+
+### 5-Build joint decision-making
+
+One-time joint decision on plan-ready and all working modes:
+
+|"Attribute"|Explanation|
+| ---- | -------------------------------------------------------------------------------------------- |
+|Trigger|After the implementation plan is written into the file|
+|Decision-making|Immediately continue or pause the model switch, as well as isolation mode, execution mode, TDD mode, and review mode (include the branch name when selecting branch)|
+|"Display|The plan has generated prompts and various recommended values|
+
+#### plan-ready selection
+
+|Options|Result|
+| --------------- | ------------------------------------------------------ |
+|A: Proceed|Set `build_pause: null` and start execution immediately|
+|B: Pause the model switching|Set `build_pause: plan-ready`, stop, and later `/comet` resume|
+
+comet takes into account the real usage scenarios of users. It allows users to plan with advanced models and execute with low-level models, and supports cross-device zero-context resumption of execution after model switching.
+
+#### Isolation method
+
+|Options|Explanation|
+| -------- | --------------------------------------- |
+| branch   |The current repository creates a branch|
+| worktree |Independent workspace, allowing for parallel development|
+| current  |Record the current workspace truthfully (default for hotfix/tweak)|
+
+#### Execution method
+
+|Options|Explanation|
+| --------------------------- | --------------------------------------------------------------------- |
+| subagent-driven-development |Back-end sub-agent implementation, two-stage review|
+| executing-plans             |Lightweight execution|
+| direct                      |Direct implementation (only hotfix/tweak; full workflow requires `direct_override: true`)|
+
+#### TDD Pattern
+
+|Options|Explanation|
+| ------ | --------------------------------------------------- |
+| tdd    |Write the failure test first|
+| direct |No Red-Green-Refactor is performed, but relevant tests and regression evidence are still required|
+
+#### Review mode
+
+|Options|Explanation|
+| ------------------------- | ------------------------------------------ |
+| off / standard / thorough |See [Code Review Mechanism ](/en/concepts/review-mode)|
+
+#### Branch name
+
+When choosing branch isolation, it allows you to confirm or overwrite the recommended branch name:
+
+- full → `feature/YYYYMMDD/<name>`
+- hotfix → `hotfix/YYYYMMDD/<name>`
+- tweak → `tweak/YYYYMMDD/<name>`
+
+0.4.0-beta.5 combines plan-ready and working modes into ** one joint decision ** to avoid two pauses. The recommendation rules are for reference only and cannot replace your confirmation.
+
+### 6 - spec Drift Split Decision
+
+When new tasks are found to exceed 50% of the initial tasks.md during execution, you are forced to select:
+
+|Options|Result|
+| ----------------- | ----------------------------------------- |
+|Split into a new change|Create a new change through `/comet-open`|
+|Continue in the current change|Record range expansion, update tasks.md and delta spec|
+
+## The pause point of the verify stage
+
+### 7 - Verify exceptional decisions
+
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------------------------- |
+|Trigger|The light 6-item or full 7-item check failed, and it falls under the situation that requires user judgment|
+|Decision-making|Accept bias, handle spec drift, or make strategy choices after the fourth failure|
+|"Display|Failure items, the severity (CRITICAL/IMPORTANT/WARNING/the SUGGESTION), recommended treatment|
+
+Verification failures from 0.4.0 to beta.5 are classified and handled according to the following rules:
+
+|"Situation|"Processing"|
+| ----------------------------------------------- | ------------------------------------------------------ |
+|CRITICAL/IMPORTANT or objectively repairable issues|Automatically `verify-fail` back to build repair (within the retry limit), without asking you|
+|WARNING/SUGGESTION and fix the introduction of behavior/scope/risk trade-offs|Pause allows you to choose to fix or accept. When accepting, record the reasons and the extent of the impact|
+|WARNING/SUGGESTION and fix it safely without any trade-offs|Automatic repair, no pause|
+|The fourth time after three consecutive failures|Pause only offers two options: "Continue to repair" or "Stop and seek external decision-making"|
+
+CRITICAL and IMPORTANT discoveries ** can never be exempted **. Only when you accept the WARNING/SUGGESTION bias or the strategy choice after the fourth failure does you need to get involved. The consecutive failure count is persisted by the machine-owned `verify_failures` field and retained across recovery.
+
+### spec drift handling (only full check 6, which is a trigger of pause point 7)
+
+When there is a contradiction between delta spec and Design Doc, choose one of the three:
+
+|Options|Result|
+| ---- | ------------------------------------------------------------------------- |
+| A    |Add the "Implementation Divergence" description in the Design Doc|
+| B    |`transition verify-fail` → `/comet-build` → Load `brainstorming` and realign|
+| C    |Accept the deviation and mark `superseded-by-main-spec` in the Design Doc when archiving|
+
+## Pause point in the archive stage
+
+### 8 - Final confirmation of archiving and delivery
+
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------------------------------------------------------- |
+|Trigger|After the entry status verification is passed, before executing the archiving script|
+|Decision-making|Whether to archive immediately, and whether the complete archive submission is only pushed or pushed and a PR is created|
+|"Display|change name, verification report, current bound branch, workspace, and ownership summary of existing uncommitted changes, irreversible archiving actions, and selected remote delivery|
+
+|Options|Result|
+| --------------------------- | --------------------------------------------------------------------------------------------- |
+|Confirm the filing and push it immediately|Perform the archive, include `handled` in the unique archive submission, and then push it once|
+|Confirm the archive, push immediately and create a PR|Perform archiving, push a unique archive submission, and then create a PR|
+|Adjustments or reverification are required|`archive-reopen` returns to `phase: verify` → `/comet-verify`|
+|Not filed for the time being|Do not write `archive_confirmation`. Keep active change, `phase: archive` and `branch_status: pending`|
+
+<Note>
+<code>branch_status: handled</code> indicates that the delivery method has been confirmed, but it does not mean that the push or PR has been successful. Comet
+Write it in after the archiving is completed and before the unique archiving is submitted. current selection is cleared only after the selected remote operation is successful
+And declare it completed. The archiving phase no longer loads <code>finishing-a development-branch</code>.
+</Note>
+
+<Note>
+Whether <code>auto_transition</code> is auto or manual, a pause point will be executed before archiving
+8 Verification passing will not be automatically archived.
+</Note>
+
+## Upgrade signal pause point (hotfix/tweak only)
+
+### 9 - Upgrade Evaluation
+
+|"Attribute"|Explanation|
+| ---- | ------------------------------------------------------------------------ |
+|Trigger|hotfix/tweak hits qualitative change signals (cross-module, new API, schema changes, deep architecture, etc.)|
+|Decision-making|Continue to preset the lightweight process or upgrade to full workflow|
+|"Display|The hit signal and the upgraded impact|
+
+|Options|Result|
+| ------------ | ----------------------------------------------------------------- |
+|Continue the preset process|Confirm that the range is controllable and continue with hotfix/tweak|
+|Upgrade to full|`comet state transition <name> preset-escalate` is legally fallback to design|
+
+## Pause point rule
+
+All pause points follow the `comet/reference/decision-point.md` protocol. Starting from 0.4.0-beta.5, the protocol first determines whether user input is really required:
+
+- ** User Decision ** - Two or more valid options will change the scope, behavior, acceptable risk or irreversible outcome, and you must choose.
+- ** Automatic processing ** - There is only one safe next step left in the request (fixing objective failures, reconcilating verifiable states, retrying idempotent checks, following persisted configurations), which is executed directly and reported without generating confirmations.
+- ** Stop Condition ** - Missing dependencies, state corruption, path escape, or unavailable external commands, no valid next step, report blocking and recovery conditions.
+- ** Manual Handover ** - `NEXT: manual` only returns control, not a new user decision point; Print the HINT and end the current call without asking "Do you want to continue?"
+
+Only the first category uses the blocking rules of this protocol. Adjacent choices that can be combined for answers will be merged into questions, and persistent choices that are still valid will no longer be repeated. Before displaying the options, pre-check the platform's capabilities and status, and only show the executable options. When a certain field has only one valid value, it should be directly stated and applied without being paused separately.
+
+- ** Must be paused ** - cannot be automatically selected based on recommendations, default values or current status.
+- ** Prioritize structured questions ** - Display clickable single-choice/multiple-choice questions when supported by the platform; When unavailable, downgrade to the numbered text option.
+- ** Demotion is determined only once ** - If the first structured question fails, the subsequent pause points of this session will directly use the text option.
+- ** Do not advance before selection ** - Do not create products, do not run guards, and do not flow.
+- ** Recommendations are for reference only ** - The recommendation rules cannot replace your confirmation.
+
+## Next step
+
+- [open stage ](/en/phases/open) - the pause point of open
+- [build phase ](/en/phases/build) - Joint decision for build
+- [verify phase ](/en/phases/verify) - Verification exception decision of verify
+- [archive stage ](/en/phases/archive) - archive filing and remote delivery confirmation
+- Workflow Concept ](/en/concepts/workflow) - Overview of Blocking Points for User Participation

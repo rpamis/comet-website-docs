@@ -9,27 +9,38 @@ Native 把用户需要阅读和同步的内容放在 change 目录，把执行�
 
 默认布局如下：
 
-```text
-<project>/
-  .comet/
-    config.yaml
-    current-change.json
-    runtime/native/
-      changes/<change-name>/state.json
-      logs/
-      locks/
-      transactions/
-  docs/comet/
-    specs/
-    changes/
-      <change-name>/
-        brief.md
-        comet-state.yaml
-        specs/<capability>/spec.md
-        verification.md
-    archive/
-      YYYY-MM-DD-<change-name>/
-```
+<Tree>
+  <Tree.Folder name="<project>/" defaultOpen>
+    <Tree.Folder name=".comet/" defaultOpen>
+      <Tree.File name="config.yaml" />
+      <Tree.File name="current-change.json" />
+      <Tree.Folder name="runtime/native/" defaultOpen>
+        <Tree.Folder name="changes/<change-name>/" defaultOpen>
+          <Tree.File name="state.json" />
+        </Tree.Folder>
+        <Tree.Folder name="logs/" />
+        <Tree.Folder name="locks/" />
+        <Tree.Folder name="transactions/" />
+      </Tree.Folder>
+    </Tree.Folder>
+    <Tree.Folder name="docs/comet/" defaultOpen>
+      <Tree.Folder name="specs/" />
+      <Tree.Folder name="changes/" defaultOpen>
+        <Tree.Folder name="<change-name>/" defaultOpen>
+          <Tree.File name="brief.md" />
+          <Tree.File name="comet-state.yaml" />
+          <Tree.Folder name="specs/<capability>/" defaultOpen>
+            <Tree.File name="spec.md" />
+          </Tree.Folder>
+          <Tree.File name="verification.md" />
+        </Tree.Folder>
+      </Tree.Folder>
+      <Tree.Folder name="archive/" defaultOpen>
+        <Tree.Folder name="YYYY-MM-DD-<change-name>/" />
+      </Tree.Folder>
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
 
 `native.artifact_root` 可以改成项目内其他相对目录，例如 `artifacts/comet/`。`.comet/config.yaml` 和 `.comet/current-change.json` 仍属于项目级边界；`.comet/runtime/native/` 由 Runtime 管理并默认忽略，不应复制到 change 目录或提交为用户文档。
 
@@ -59,15 +70,20 @@ brief 说明目标、范围、非目标、已确认的用户决定、未解决�
 
 ## 跨设备恢复
 
-同步项目代码、`.comet/config.yaml`、`brief.md`、Specs 和 `comet-state.yaml`。如果已经生成报告，也一并同步 `verification.md`，但缺失报告不应阻止 Shape 或 Build 恢复。目标设备先确认 artifact root、分支或 worktree 匹配，再运行：
+你不需要手工执行恢复命令。在目标设备拉取或同步项目代码后，像平时一样告诉 Agent 继续当前需求即可。Comet 会先尝试通过环境感知恢复找到 active change，再由 Agent 根据 Runtime 返回的工作区和下一步动作，自动完成状态读取、change 选择和流程推进。
+
+需要同步的是项目代码、`.comet/config.yaml`、`brief.md`、Specs 和 `comet-state.yaml`。如果已经生成 `verification.md`，可以一并同步；即使缺失，Runtime 也能根据 `comet-state.yaml` 重建，不会阻止 Shape 或 Build 恢复。`.comet/runtime/native/` 属于本机执行状态，不需要跨设备复制。
+
+目标设备缺少 Runtime，或本机执行状态已经过期时，Runtime 会以 `comet-state.yaml` 中记录的稳定边界为准自动重建。执行到一半的检查会按中断处理；需要重新运行的检查会再次执行，不能安全复用的 Verifier 或 `archive-ready` 结果会重新验证。恢复不会依赖旧设备的 `state.json`，也不会因为复制了旧 Runtime 文件就直接归档。
+
+只有代码未同步、当前分支或 worktree 与 change 不匹配、存在多个同样匹配的工作区，或 active/archive 目录冲突时，Comet 才会停下来请你选择或修正。
+
+下面两个命令只在你想查看进度或排查问题时使用，也可以打开 Comet Dashboard 查看进度：
 
 ```bash
-comet status
-comet native status <change-name> --details --json
+comet native status <change-name> --details
 comet native doctor <change-name>
 ```
-
-正在执行的本机检查会被视为中断；Verify 或 `archive-ready` 的旧结果会按 Runtime 的恢复策略重新确认，不会因为复制了一个旧 `state.json` 就直接归档。代码未同步、分支不匹配或 active/archive 目录冲突时，Runtime 会停下并给出明确的用户动作。
 
 ## 归档后
 

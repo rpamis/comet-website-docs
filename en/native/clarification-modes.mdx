@@ -1,97 +1,112 @@
 ---
-title: 'Clarification modes and shared understanding'
-description: 'Configure Sequential or Batch clarification, and understand question dependencies, structured prompts, durable artifacts, and cross-session recovery.'
+title: "Clarification of Sequential and Batch"
+description: "Understand how Native organizes clarification rounds, saves issues, and enters the Build after the final requirements are confirmed."
 ---
 
-Sequential asks the most-upstream questions step by step, and Batch asks every question whose prerequisites are settled in a round, so you are never forced to guess while information is missing. `native.clarification_mode` only decides how questions are split into rounds; it does not change Shape, Build, Verify, or Archive, and it does not lower the shared-understanding confirmation required before Build. New projects default to Batch.
+After Native identifies the user choices that require your decision, it will organize clarification rounds based on the dependencies between the questions. `native.clarification_mode` controls how many questions are raised in each round; Both modes use the same formal product and both need to complete the requirement confirmation before entering the Build.
 
-## Choose a clarification mode
+The new project uses Batch by default. When the requirements are still changing rapidly or one answer may rewrite the subsequent questions, you can switch to Sequential.
 
-Configure it in `.comet/config.yaml`:
+The criteria for user selection points and the rules for source document coverage can be found in [Which decisions Need Your confirmation ](/en/native/decision-ownership)
+
+## Sequential and Batch
+
+Set the clarification mode in `.comet/config.yaml`:
 
 ```yaml
 native:
-  artifact_root: docs
-  language: en
   clarification_mode: batch
 ```
 
-| Mode         | Behavior per round                                                         | Best suited for                                                                                    |
-| ------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `sequential` | Asks one most-upstream question, then recomputes the next after the answer | Requirements are still changing quickly, or each answer materially changes the following questions |
-| `batch`      | Asks every question in the round whose prerequisites are already settled   | You want fewer round trips and the same round contains several mutually independent decisions      |
+|"Mode"|How are questions asked in each round|Suitable demands|
+| --- | --- | --- |
+|`batch` (Default)|Raise all the questions of this round that are complete in premise and independent of each other at one time|There is less correlation between the choices, and it is hoped to reduce the round trips of the conversation|
+| `sequential` |One question is raised in each round. After receiving the answer, the subsequent questions are recalculated|One answer may change the subsequent scope, options or the sequence of questions|
 
-When the field is absent, `batch` is used. Switching modes does not clear `[blocking]` items already in the brief, nor does it auto-fill unanswered questions with the recommended option. Handle the current persisted question first, then organize the next round under the new mode.
+Switching modes only affects the pace of the next round of questions. The `[blocking]` questions that have been saved in `brief.md` remain valid. Unanswered questions are still awaiting your decision.
 
-## The currently answerable question set
+## Problems arise from the decision tree
 
-Batch does not turn every unknown into a one-time questionnaire. Native checks, for each question, whether its prerequisites are ready:
+Native will establish a decision tree during the working process. Each node records a user decision, the upstream decision it depends on, the fact that needs to be investigated, and the current status. The decision tree remains in the working process of the Agent, and the Runtime only saves the actual unsolved problems.
 
-1. The user decision it depends on is settled;
-2. The repository or environment facts needed to answer it have been investigated;
-3. Its answer does not depend on another unanswered question in the same round.
+When a question meets the following conditions, it enters the set of answerable questions for this round:
 
-Native organizes the user-visible results as a decision tree. Questions for which all the above conditions hold are the questions that can be put to the user this round. Questions that still depend on another decision or investigation result wait for the next round. After the user answers, Native recomputes the whole decision tree rather than reusing the old question list.
+1. The decision of the upstream user has been determined.
+2. The facts of the warehouse or environment required for the answer have been clarified.
+3. It does not rely on other unanswered questions in this round.
 
-When a candidate branch needs an environment fact, investigating it is still the Agent's responsibility. When the host supports sub-agents or other parallel capability, Native launches mutually independent fact investigations in parallel; a fact under investigation only defers the downstream questions that depend on it, while other questions that can be asked this round are still put in the current round. When the host does not support parallelism, the current Agent investigates directly and does not hand a discoverable fact to the user, so you are not asked to guess without prerequisites.
+Sequential selects a question from this collection. When multiple issues are ready simultaneously, prioritize handling those that affect more downstream branches and have a greater impact on the visible results for users. Batch collects the entire set and presents them together in one round. Independent fact-finding investigations can be carried out in parallel. When the platform lacks parallel capabilities, the current Agent will complete each item one by one. Each time Native receives an answer or a new survey result, it recalculates the decision tree, so subsequent questions will change along with the confirmed requirements.
 
 <p align="center">
   <img
-    src="/assets/native-illustrations/05-clarification-modes.png"
-    alt="Xiaoyu clips a question card on folded paper steps, with settled prerequisites below and next-round questions waiting above"
+    src="/assets/native-illustrations/09-clarification-decision-tree.png"
+alt=" Little Fish compiles the verified facts, the current round of issues, and the next round of issues, and writes the confirmed results into the requirements summary."
   />
 </p>
 
-Each question should still provide separately:
+## Each question explains the actual impact
 
-- **Question**: the user-visible behavior that needs to be decided;
-- **Recommendation**: the suggested option based on the current goals and tradeoffs;
-- **Impact**: how each option changes scope, outcome, or risk.
+Native converts ambiguous expressions into executable behaviors, such as "Input → output" or "trigger condition → processing result". Each question consists of three parts:
 
-## Structured questions in Claude Code
+- ** Question ** : The visible user behavior that needs to be determined currently;
+- ** Recommendation ** : Suggestions given in combination with existing goals, constraints and trade-offs;
+- ** Impact ** : How each option will change the range, outcome or risk.
 
-When the current tool list provides `AskUserQuestion`, Native prefers Claude Code's structured question interface. Sequential submits one question per round; Batch puts the whole round into a single call only when the entire round fits the current tool's limits on question count, option count, and fields.
+When the platform provides a structured questioning tool, Native will use it when the option boundaries are clear and can be directly executed. Sequential: Submit one question each time; Batch places the complete problem set of this round in the same request. When the entire set of questions exceeds the tool's capacity, Native will uniformly switch to numbered text, retaining the original options, recommendations, and impacts.
 
-One round is never split across multiple blocking tool calls. If the entire round cannot fit in one call, Native uniformly downgrades the whole round to numbered text, keeping the same questions, options, recommendations, and impact, then waits for the user to answer by number.
+Single choice is used for mutual exclusion options. Use multiple selection only when the same decision allows the combination of multiple compatible options. After a structured call fails, the subsequent rounds of this session will directly use text, maintaining the stability of question numbers and response methods.
 
-Single-select and multi-select follow the semantics of the decision itself:
+## The answer will be immediately written into the official product
 
-- Use single-select when options are mutually exclusive;
-- Use multi-select only when a single decision allows several compatible options to be selected together;
-- Do not compress several independent decisions into one multi-select question.
+The dialogue content is only responsible for interaction, while the disk product is responsible for recovery. Upon receiving the answer, Native will immediately update the **Decisions** of `brief.md`, the complete target Spec and the corresponding acceptance items. Ambiguous, omitted or still subject to decision contents remain in the **Open questions**.
 
-If the first structured question call in a session fails, later rounds fall back to text directly and do not re-trigger the same host error. After a tool call succeeds, Native does not emit a duplicate set of text questions.
-
-## How questions are saved and resumed
-
-The conversation is not the recovery source. Sequential saves only the current most-upstream question in `brief.md`; Batch saves the round's questions with stable numbering:
+Sequential saves the current issue:
 
 ```markdown
 ## Open questions
 
-- [blocking] Q1: On an avatar upload failure, keep the existing avatar or clear it?
-- [blocking] Q2: May users delete their existing avatar?
+- [blocking] When the avatar upload fails, should the original avatar be kept or cleared?
 ```
 
-After the user answers, the settled content is written into Decisions and the target spec, and only then is the corresponding blocker removed. Unanswered or ambiguous items stay `[blocking]`.
-
-When all questions are resolved, both modes recheck for any omitted or silently-defaulted user-visible branches, then produce a single shared-understanding summary covering the outcome, scope, key decisions, acceptance criteria, and non-goals, and persist the final confirmation:
+Batch uses stable numbers to save the problems of this round:
 
 ```markdown
-- [blocking] CONFIRM: Confirm entering Build under the current summary
+## Open questions
+
+- [blocking] Q1: When the avatar upload fails, should the original avatar be kept or cleared?
+- [blocking] Q2: Are users allowed to delete their existing avatars?
 ```
 
-That item is removed and Build entered only after explicit confirmation from the user. Each Sequential round still asks only one product decision; the final shared-understanding confirmation is a separate last step and does not compress unresolved decisions into one round. The normal flow records that confirmation in Runtime; without it, Runtime blocks both Sequential and Batch from entering Build. A migrated older change must pass through the same confirmation and cannot bypass it by editing state.
+Some answers only address the corresponding questions. The remaining items will retain their original numbers, and the next round will continue the calculation based on the latest decision.
 
-## Continue a clarification round across sessions
+## Confirm the requirements before entering the Build
 
-On resume, read the project configuration first, then the numbering already saved in the brief:
+After all the issues have been resolved, Native will recheck the facts, decisions, default behaviors, boundaries, failure paths, and implicit assumptions, and present you with the final requirements summary. Abstract coverage
+
+- Objectives and Scope;
+- Key decision;
+- Acceptance item;
+- Non-target.
+
+The final confirmation will be saved as an independent blocking item:
+
+```markdown
+- [blocking] CONFIRM: Confirm entering the Build as per the current digest
+```
+
+Only after you clearly confirm will Native remove this item and enter the Build through the continue command with `--confirmed`. The Runtime implements the same access control for Sequential and Batch. When the final requirement confirmation is lacking, change will remain at Shape. The compatibility status in the old change also needs to be completed for this confirmation.
+
+## Continue clarification across sessions
+
+When opening a project again or continuing a change, Native will automatically read `.comet/config.yaml` and `brief.md`, restoring the current clarification mode, confirmed decisions, and questions still awaiting answers. You just need to continue explaining your choice, and the recovery process will be handled by Native.
+
+If you want to view the current record, you can run:
 
 ```bash
 comet native show <change-name>
 comet native status <change-name> --details
 ```
 
-Do not reconstruct questions from chat memory, and do not renumber the current round because the configured mode has changed. First map the user's answers to the saved Q1 and Q2, then compute later questions.
+Native will match your answers to questions such as Q1 and Q2 in `brief.md`, write them back to the official product, and then calculate the next round. Modifying the clarification mode in the middle will only change the rhythm of subsequent questions, while the current blocking item and its number remain unchanged.
 
-Continue with [User decisions and clarification protocol](/en/native/decision-ownership), [Native configuration](/en/native/configuration), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+Continue reading: [User Selection Points and Requirements Clarification Protocol ](/en/native/decision-ownership), [Native Configuration ](/en/native/configuration) and [Recovery and Troubleshooting ](/en/native/recovery-playbook)

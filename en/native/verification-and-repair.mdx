@@ -1,54 +1,130 @@
 ---
-title: 'Verification and repair'
-description: 'Understand how Native runs necessary checks, dispatches an independent Verifier, and repairs failures through a bounded Loop.'
+title: "Verification and Repair"
+description: "Understand how Native reviews candidate results, performs necessary checks, accepts requirements item by item, and sends the failed items back to the next round of fixes."
 ---
 
-Native does not require a fixed TDD or review method, but it does not accept “I am done” as an acceptance result. **The Builder implements, the Runtime executes checks, a fresh read-only Verifier reviews each item, and the Runtime decides whether the change is complete.**
+Verify does not answer "Whether the Builder has completed the code", but "whether the current implementation meets the confirmed requirements".
 
-## What Verify actually does
+Comet RC1 uses three-layer verification to establish conclusions: The new read-only Reviewer Subagent first reviews the candidate implementations, the Runtime performs the necessary checks, and finally the new read-only Verifier Subagent makes judgments item by item against `brief.md`, Specs and acceptance items. The Builder cannot declare completion with its own summary, and the Verifier cannot bypass the Runtime to directly modify the code.
 
-1. The Builder submits a handoff describing the implementation, the relevant brief/Specs, and the candidate to review.
-2. Runtime resolves the complete acceptance list and required-check plan, then records the attempt in a short state update.
-3. Runtime executes the required checks. A matching completed check for the same candidate is reused instead of run again. Command output streams to local logs, while the report keeps a safe summary.
-4. Runtime dispatches a fresh read-only Verifier. The Verifier must return exactly one result for every A1…An item; missing, duplicate, unknown, or Builder-self-reported results are rejected.
-5. Runtime moves to `pass`, returns to Build, or waits for a user resolution. The normal Archive path does not run the checks again.
+## Three-layer verification jointly establishes a credible conclusion
 
-The Verifier cannot use the Builder's context as its own endorsement. Hosts that can provide an independent subagent dispatch a new execution; when only Skill coordination is available, Runtime clearly marks semantic verification as unavailable and requires one user confirmation before Archive.
+|Verification layer|Main function|How to use the conclusion|
+| --- | --- | --- |
+| Reviewer Subagent |Identify issues at the code, test, and implementation levels before the Builder submits candidate results|Only after the review is passed can the candidate results enter Verify|
+|Runtime check|Actually run tests, builds, or other necessary commands|The result is the authoritative basis for whether an order is passed|
+| Verifier Subagent |Determine whether each acceptance item is met by referring to the requirements|The result determines whether to archive, return to Build, or wait for the user|
 
-## Checks and the report
+These three layers focus on different issues. The Reviewer focuses on code quality, the Runtime proves that the command is indeed executed, and the Verifier determines whether the functionality meets the requirements. No matter which layer passes through, it cannot replace the other two layers.
 
-Runtime resolves required checks from the project's formal content; an Agent's prose saying “passed” is not a substitute. Each result records command status, exit code, duration, and a readable summary. Full stdout/stderr stays in local logs; long output is preview-truncated and does not by itself invalidate a valid result.
+## The candidate results enter Verify with independent review
 
-When an additional check is genuinely needed, the Verifier requests it through `request-checks` in the current attempt. Runtime deduplicates equivalent plans, limits request rounds, and returns the results to the Verifier. The Agent must not fabricate a result or paste a third-party command's output into a pass field.
+After the Builder has completed one round of implementation, it must first start a new read-only Reviewer Subagent. The Reviewer examines the current round of code changes, related tests, and the current acceptance scope. When problems are found, the Builder needs to re-examine after fixing them.
 
-`verification.md` is a user report generated from `comet-state.yaml`. It contains checks, per-item acceptance results, limitations, and the conclusion. It can be rebuilt; a missing report is never a reason to bypass Verify.
+After the review is passed, the Builder submits a streamlined `handoff` to the Runtime, which includes:
 
-## How failures return to Build
+- What was accomplished in this round?
+- Which acceptance ids have been processed?
+- Which development period checks are actually running or not running at all?
+- Current known limitations;
+- The Reviewer's approval status, brief summary and execution mark.
 
-Any failed acceptance item, failed check, incomplete Verifier response, or invalid coverage writes a concrete gap into the next continuation and returns the change to Build. The next round repairs those gaps first, then submits a new Builder handoff and a new Verifier attempt. A stale attempt cannot be turned into a pass by resubmitting the same text.
+The execution identification of the Reviewer must be different from that of the Builder. The Runtime will save `handoff` to `comet-state.yaml` and bind the candidate ID, `iteration` and Builder identity. `handoff` is merely a status record of a candidate awaiting acceptance, not a proof of approval.
 
-The Loop counts substantive convergence as progress: unresolved acceptance items strictly shrink, a failed check becomes passing, or missing information is supplied. Rewriting explanations, rerunning the same command, or alternating between failure sets does not extend the Loop indefinitely.
+## The Runtime first performs the check, and then the Verifier accepts each item one by one
 
-After the Skill-coordinated Verifier passes, Runtime waits for one explicit user decision. The three options are mutually exclusive:
+After the candidate results enter Verify, the process proceeds in the following order:
 
-| Decision                   | Result                                                               |
-| -------------------------- | -------------------------------------------------------------------- |
-| `--accept-result`          | Accept the current Verify result and enter Archive.                  |
-| `--revise-implementation` | Keep the confirmed requirements and return to Build.                 |
-| `--revise-requirements`    | Return to Shape when the visible goal or acceptance criteria changed; update the formal artifacts and reconfirm. |
+1. Determine the scope of acceptance. The first round of Verify covers all acceptance items. The repair round only covers the unresolved items from the previous round and those that may be affected by the current modification.
+2. Carry out necessary checks. Runtime runs tests, builds, or other project commands, and records status, exit codes, time consumption, and summaries.
+3. Prepare the acceptance context. `verifierDispatch` provides the actual workspace, requirements and evidence locations, current `scopeIds`, Reviewer summary, and Runtime check results.
+4. Start the new Verifier Subagent. The Verifier remains read-only and provides a conclusion once for each acceptance ID within the current range.
+5. Verify and accept the result. The Runtime checks whether the candidate, identity, round, `attempt` and acceptance scope match, and then decides on the next step.
 
-Decision commands carry the `--expected-state-version` and `--expected-action` guards issued by the continuation. Expired state or a mismatched action is rejected; starting a new goal cycle invalidates old Archive authorization.
+The Verifier will first read the current acceptance scenario, `brief.md`, the complete target Specs, the actual implementation and the Runtime check results, and only then will it take the Builder `handoff` as the investigation clue. This sequence can reduce the impact of the Builder's self-statement on the acceptance judgment.
 
-The `--revise-requirements` option is also available when Archive is waiting at `archive-ready`, not only immediately after Verify. It returns the change to Shape, starts a new goal cycle, invalidates the previous verification and Archive authorization, and preserves the change workspace.
+Each `scopeId` must appear exactly once and can only be marked as:
 
-## Stagnation and error budgets
+- `passed`: The implementation has met this acceptance item.
+- `failed`: The implementation does not meet this acceptance item and needs to return to Build.
+- `blocked`: Due to the lack of user decision, external conditions or other necessary information, it is temporarily impossible to make a judgment.
 
-`comet-state.yaml` stores `iteration`, `attempt`, `no_progress_count`, `failed_iteration_count`, `execution_failure_count`, and bounded history. An unchanged or regressing unresolved set increases the stagnation count; repeated Runtime execution errors increase the execution count. Once a limit is reached, the state becomes `await-user` or `blocked` with a concrete `resolution_action` instead of consuming more time.
+Missing items, duplicate items, unknown ids, identity mismatch, or late old results will all be rejected by the Runtime. As long as there are still failed items in the Runtime check, the Verifier cannot submit an overall pass conclusion.
 
-The user may return to Shape when the requirement changed, or explicitly retry a Verifier when the implementation is unchanged and an external blocker has been resolved. An ordinary “try again” does not clear the history or carry an old pass into a new candidate.
+## Supplementary checks are still uniformly executed by the Runtime
 
-## Reliability boundary
+If the existing evidence is insufficient, the Verifier can request additional checks through `request-checks`. It only indicates what needs to be run. The actual commands are still executed and recorded by the Runtime.
 
-Runtime can ensure that the command actually ran, a non-zero exit cannot be treated as a pass, the acceptance list is covered, and matching checks are not needlessly repeated. It cannot decide whether a test is meaningful, nor observe background or IDE writes that the host does not expose. When an independent Verifier is unavailable, the Dashboard and report show the degraded status explicitly instead of presenting it as independent semantic verification.
+Supplementary checks belong to the current Verifier `attempt` and will not separately add `attempt`. The Runtime will reuse the same checks that have already been completed by the current candidate, filter out duplicate requests, and return the new results to the same Verifier. RC1 provides a maximum of `2` round supplementary inspection for each `attempt`, avoiding the acceptance of unlimited additional commands.
 
-Continue with [Native Loop](/en/native/native-loop), [Continuation](/en/native/continuation-and-checkpoints), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+The complete `stdout` and `stderr` are saved in the local log, and user reports only display conclusions and necessary summaries. Long output will truncate the preview, but a valid check will not be judged as a failure simply because the log is too long.
+
+## After partial repair, a full-scale acceptance must be conducted again
+
+When a failure check or `failed` entry occurs, the Runtime will write the explicit gap into the latest continuation and send the current change back to the Build. Builder modifies the implementation based on these gaps and then submits the candidate results that have undergone a new round of read-only review. When encountering the `blocked` entry, the Runtime will first wait for the user or external conditions to complete it, and will not mistake the missing information for a code defect and modify it directly.
+
+The acceptance scope of the repair wheel consists of two parts:
+
+- The acceptance items that remained unresolved in the previous round;
+- Builder declares the acceptance items that may be affected by this round of modifications.
+
+Projects that have been approved and are not affected do not need to be re-accepted in each repair round. However, once the local scope is fully approved, the Runtime will not directly allow archiving. It will reset the complete acceptance list to pending acceptance and start a new Verifier Subagent for the final full acceptance.
+
+This approach of "partial repair and final full confirmation" reduces repetitive work and prevents the introduction of new regressions when fixing a problem.
+
+## Different results lead to different processing paths
+
+|Verify result|"Runtime status"|Next step|
+| --- | --- | --- |
+|It can be proved that the final full acceptance of independent execution has been passed| `archive-ready` |Enter the Archive using the accepted verification results|
+|There are `failed` items| `repairing` |Return to Build, fix the clear gap and submit a new candidate|
+|There are `blocked` items| `await-user` |Supplement the user's decision or external information and then start the new Verifier|
+|The Verifier task execution error|`verify-ready` or `blocked`|The Runtime decides to retry. Pause when consecutive errors reach the upper limit|
+|The independent Verifier cannot be started| `await-user` |Clearly demonstrate the risk of degradation, and let the user decide whether to accept the result of only Runtime checks|
+
+"Failed acceptance" and "Verifier execution error" are not the same thing. The former indicates that there are still gaps in implementation or requirements, while the latter suggests that the acceptance task itself has not been completed normally. The Runtime will record them separately to avoid misjudging infrastructure failures as product failures.
+
+## The repair cycle has a clear upper limit on the number of times it can be used
+
+The Runtime determines progress by whether the unresolved acceptance items have truly decreased. Only when the current unsolved items are fewer than those of the previous round and no new unsolved items are added can it be considered reliable convergence.
+
+- When there is no reliable progress for two consecutive rounds, the Runtime will require the Builder to change the repair approach.
+- When there is still no progress after three consecutive rounds, the process enters `await-user`;
+- When the acceptance failure round reaches `native.max_verify_failures`, it enters `await-user`, and the default upper limit is `5`.
+- When the Verifier continuously executes the error `3` times, it enters `blocked` and waits for a clear retry action.
+
+These counts are all updated by the Runtime. Repeating the same command, rewriting the description text, or reporting the same cause again will not reset the failure history.
+
+## The user decides whether to accept the result or adjust the goal
+
+When the final Verifier of Skill startup has determined that all judgments have passed, but the host cannot prove to the Runtime that it and the Builder are executed independently, the Runtime will pause and provide three mutually exclusive options:
+
+|User selection|Actual result|
+| --- | --- |
+| `--accept-result` |Accept the current approved results and allow access to the Archive|
+| `--revise-implementation` |Retain the confirmed requirements and return to Build to modify the implementation|
+| `--revise-requirements` |Return the Shape, modify the user-visible target or acceptance criteria and reconfirm|
+
+If the platform is unable to start the Semantic Verifier at all, even if all Runtime checks pass, only a downgrade result can be obtained. The Runtime will clearly state that "there is only automatic checking, no independent semantic acceptance", and require users to explicitly accept the `--confirmed` action returned by the continuation. The user confirms that this result will not be disguised as an independent verification, and the report will still retain the downgrade mark.
+
+All decision commands come with `--expected-state-version` and `--expected-action`. If the status has changed, the operation comes from an old page or an old task, the Runtime will refuse to execute to avoid late decisions overwriting the current result.
+
+## Supervisor Change completes the final acceptance in the integrated workspace
+
+The sub-tasks of Supervisor Change must reach `active`, `verified` and `integrated` in sequence. The acceptance of a sub-task by itself does not mean that the entire Supervisor Change has been completed.
+
+After all sub-tasks are integrated, the Runtime will run at least one integration check in the Supervisor's integration worktree and perform the final Verify for the full acceptance scope. If the integrated result fails, the Runtime will retain the scene, supplement and fix the sub-tasks based on the actual failed items, and reconfirm the Shape. Sub-tasks that have been integrated will not be directly reopened due to the failure of their parent.
+
+## The verification report can be reconstructed and restored
+
+`verification.md` is a user-oriented acceptance report, which includes Runtime checks, item-by-item results, risks, limitations, and the final conclusion. The stable state is saved in `comet-state.yaml`, so when reports are missing, writes are interrupted, or versions are outdated, they can be regenerated based on the trusted state.
+
+After switching to another device, the local execution on the old device cannot be directly reused. Candidates at `verify-ready` will re-run the necessary checks and start a new Verifier; Candidates at `archive-ready` will also first return "Verify" to reconfirm the implementation after synchronization. The recovery process itself does not increase the number of failed rounds or the count of stops.
+
+## Native does not count content that cannot be confirmed as passed
+
+The Runtime can confirm whether the command is truly executed, whether the exit code is normal, whether the acceptance item is complete, and whether the returned result belongs to the current candidate and the current `attempt`. A normal Archive will use the verification results that have already been accepted and will not meaninglessly run the same batch of checks again.
+
+If a conclusion depends on whether the test itself is reasonable or on background processes, IDE writes, and external system states that the host does not provide, the Runtime cannot confirm it alone. When the platform is unable to provide an independent Verifier or complete semantic acceptance, the Dashboard and reports will directly indicate what is missing and return the decision on whether to accept the current result to the user.
+
+Continue reading [Native Loop](/en/native/native-loop) to learn about the complete Build ↔ Verify loop. Read [Continuous Advancement ](/en/native/continuation-and-checkpoints) and [Recovery Manual ](/en/native/recovery-playbook) to learn about state advancement and exception recovery.

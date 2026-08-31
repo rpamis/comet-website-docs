@@ -1,0 +1,186 @@
+---
+title: "Comet Native RC1 与 beta16 真实评估"
+description: "使用相同的 16 个任务和 pass@3 样本规模，对比 Native RC1 与 beta16 的严格通过率、重复运行稳定性、修正耗时和执行成本。"
+---
+
+import { RawHtmlReportFrame } from "/snippets/raw-html-report-frame.jsx";
+
+<Warning>
+  这是面向维护者的实验报告，不是普通用户的运行教程。复现实验需要对应的 Comet
+  源码、任务集、模型配置和报告快照；普通用户请使用[快速上手](/zh/eval/quickstart)。
+</Warning>
+
+<Note>
+  RC1 实验于 2026-08-28 运行。beta16 的 48 个 baseline 样本来自 2026-08-27—28
+  的已有实验，本次直接复用，没有重跑。两边使用相同的 16 个任务和 3 次重复，但
+  Native 产物与轨迹检查遵循各自版本的契约。
+</Note>
+
+这次实验回答一个具体问题：在固定业务任务和重复次数的前提下，RC1 的 Native 变化相对 beta16 是否改善了可靠性和执行成本？
+
+两边都使用相同的 16 个业务任务，每个任务重复 3 次：每个版本 48 次运行，比较合计 96 次运行。
+
+<Note>
+  最终 RC1 分析集是 48 个唯一的 `task + run` 记录。此前 4 个恢复尝试只产生了 `harness_trigger_suspect` / exit-125 的 Docker 噪声壳，因此排除；对应缺失 node 已由后续精确补跑替代。不会重复计数。
+
+原始 RC1 快照一度记录为 47/48，是因为 parser 把 `find ... -path '*/.claude/skills/*'` 中的 shell glob 识别成了名为 `*` 的意外 Skill。修复 parser 后重新读取同一份 raw stdout，显式调用只有 `comet-native`；因此本文使用校正后的 48/48 分析集，不修改原始快照。
+
+</Note>
+
+## 实验如何对齐
+
+业务任务和业务验证器保持一致；workflow 检查分别遵循 beta16 和 RC1 的真实 Native 契约。
+
+| 观察项        | RC1                                        | beta16                                              |
+| ------------- | ------------------------------------------ | --------------------------------------------------- |
+| 业务任务      | 相同的 16 个任务                           | 相同的 16 个任务                                    |
+| 重复次数      | 每任务 3 次，共 48 次                      | 每任务 3 次，共 48 次                               |
+| 业务验证      | 相同 task validator                        | 相同 task validator                                 |
+| workflow 验证 | RC1 Native Skill、产物、状态、loop、隔离性 | beta16 Native Skill、产物、状态、trajectory、隔离性 |
+| 模型选择      | `deepseek-v4-flash[1m]`                    | `deepseek-v4-flash[1m]`                             |
+| 交互模式      | `auto_user`，最多 12 轮                    | `auto_user`，最多 12 轮                             |
+| 实验标识      | `native_rc1_20260828_0952` + 精确补跑批次  | `native_beta16_20260827_2308`                       |
+| Analysis set  | 48/48 included，high confidence            | 48/48 included，high confidence                     |
+
+strict pass 表示业务验证器和对应版本的 Native workflow 检查都通过。业务验证单独列出，避免把 workflow 证据失败误认为代码或任务失败。
+
+## 核心结果
+
+| 指标          |            RC1 |         beta16 |          差异 |
+| ------------- | -------------: | -------------: | ------------: |
+| strict pass@1 | 48/48，100.00% |  46/48，95.83% |  RC1 +4.17 pp |
+| pass@3        | 16/16，100.00% | 16/16，100.00% |          持平 |
+| pass^3        | 16/16，100.00% |  14/16，87.50% | RC1 +12.50 pp |
+| 业务验证通过  |          48/48 |          47/48 |     RC1 +1 次 |
+| 修正平均耗时  |         391.3s |         503.6s |    RC1 −22.3% |
+| 修正中位耗时  |         369.1s |         476.5s |    RC1 −22.5% |
+
+两边的任务级 `pass@3` 都是 100%，即 16 个任务都至少成功过一次。RC1 多 2 次 strict pass，并多 2 个任务实现了三次全通过。耗时下降只能视为方向性证据，因为 beta16 使用复用的历史运行，两组样本并非同一时间窗口的受控重跑。
+
+## 为什么同时看 pass@3 和 pass^3
+
+`pass@3` 衡量三次尝试中至少一次成功，适合观察能力覆盖；`pass^3` 衡量三次观察运行全部成功，适合观察重复运行稳定性。
+
+这两个指标区分了“版本能够完成任务”和“版本每次都稳定完成任务”。本次两边都覆盖全部 16 个任务，但 RC1 有 16/16 个任务三次 strict pass，beta16 为 14/16。
+
+## 完成任务的执行效率
+
+效率主视图只统计两边都 strict pass 的 46 组相同任务重复，避免把提前失败误当成低消耗。模型启动/恢复次数表示评测器进入被测模型的次数；Agent 轮次是这些调用内部的累计轮次。
+
+| 指标                     |       RC1 |    beta16 | RC1 差异 |
+| ------------------------ | --------: | --------: | -------: |
+| 模型启动/恢复次数        |      1.15 |      1.89 |   −39.1% |
+| Agent 轮次               |     83.39 |     77.54 |    +7.5% |
+| 工具调用                 |     97.35 |     74.65 |   +30.4% |
+| 累计模型耗时             |    396.3s |    501.6s |   −21.0% |
+| 非缓存输入 Token         |    75,102 |    73,632 |    +2.0% |
+| 输出 Token               |    35,445 |    46,604 |   −23.9% |
+| 总 Token（包含缓存读取） | 4,474,779 | 3,730,902 |   +19.9% |
+| 模型成本                 |    $4.003 |    $3.348 |   +19.6% |
+
+在两边都 strict pass 的配对视图中，RC1 的模型进入次数更少、累计耗时更低；但完整表格也显示了代价：RC1 的 Agent 轮次、工具调用、总 Token 和平均成本都更高。因此这是“更短但不更便宜”的执行画像，不是所有效率指标都改善。
+
+两边 48/48 条轨迹都保留了峰值上下文遥测；峰值上下文平均为 RC1 102,470 Token、beta16 104,208 Token。本次结论不使用 LLM Judge 的定性文本替代硬检查。
+
+## 修正后的模型耗时
+
+耗时从 raw stdout 重新计算：累加每个样本的全部顶层 `result.duration_ms`。计算范围排除 Docker 准备和业务验证器运行时间。
+
+- RC1：48 个可观测样本，平均 391.260s，中位数 369.053s。
+- beta16：48 个可观测样本，平均 503.552s，中位数 476.481s。
+
+在这个口径下，RC1 平均模型耗时降低 22.3%，中位耗时降低 22.5%。这是两个运行窗口的比较，不是完全受控的因果结论。
+
+<Warning>
+  RC1 和 beta16
+  不在同一服务窗口运行。任务集、模型选择、交互模式和重复次数已对齐，但机器负载、服务商时延和版本特有的
+  workflow 契约没有完全受控。
+</Warning>
+
+## 任务级稳定性矩阵
+
+| 任务                         | RC1 | beta16 |
+| ---------------------------- | --: | -----: |
+| `agent-memory-routing`       | 3/3 |    3/3 |
+| `api-cache-ttl`              | 3/3 |    3/3 |
+| `cross-file-refactor`        | 3/3 |    2/3 |
+| `dependency-confusion`       | 3/3 |    3/3 |
+| `fix-median`                 | 3/3 |    3/3 |
+| `framework-selection`        | 3/3 |    3/3 |
+| `full-workflow`              | 3/3 |    3/3 |
+| `graph-execution-review`     | 3/3 |    3/3 |
+| `human-approval-flow`        | 3/3 |    3/3 |
+| `layered-streaming-fix`      | 3/3 |    3/3 |
+| `noise-distractor`           | 3/3 |    2/3 |
+| `observability-env-template` | 3/3 |    3/3 |
+| `perf-dedupe`                | 3/3 |    3/3 |
+| `persistence-threading`      | 3/3 |    3/3 |
+| `refactor-counter`           | 3/3 |    3/3 |
+| `robust-config`              | 3/3 |    3/3 |
+
+RC1 有 16/16 个任务三次 strict pass；beta16 为 14/16。两边都覆盖全部 16 个任务的至少一次成功。
+
+## 失败归因
+
+修正后的 RC1 分析没有剩余 strict failure；beta16 有 2 次。原始 RC1 快照中的 1 次失败已通过同一份 raw stdout 和修复后的 shell-glob parser 复核为误报：
+
+| 版本   | 任务 / 运行              | 失败信号                                                             | 业务验证 |
+| ------ | ------------------------ | -------------------------------------------------------------------- | -------- |
+| beta16 | `cross-file-refactor` r3 | 缺少 `.comet/config.yaml`、终态 archive 状态和完整 Native trajectory | 通过     |
+| beta16 | `noise-distractor` r2    | invoice 税率计算失败，同时缺少产物/状态/trajectory 证据              | 失败     |
+
+beta16 有 1 次纯 workflow 失败和 1 次业务与 workflow 同时失败。因此业务验证行分别是 RC1 48/48、beta16 47/48。
+
+## 关于 LLM Judge
+
+本次比较只采用确定性的任务与 workflow 验证、每次运行的最终 `passed` 状态，以及 raw result 耗时；不使用定性 LLM Judge 文本替代这些检查。
+
+## 如何解读这次结果
+
+1. **任务覆盖没有变化。** RC1 和 beta16 的任务级 `pass@3` 都是 16/16。
+2. **RC1 在这组样本中略微更稳定。** strict pass@1 高 4.17 个百分点，`pass^3` 高 12.50 个百分点。
+3. **RC1 更快但不是更便宜。** 配对成功样本中的平均成本和总 Token 上升，尽管 raw model duration 的平均值和中位数下降约 22%。这些是经验性 trade-off，不是单一的“全面更好”。
+
+这次实验支持把 RC1 理解为：在本任务集上更可靠、执行更短的 Native 版本，同时保留 beta16 作为有效历史 baseline。它不证明 RC1 在所有任务和运行窗口都全面占优，也不能替代同窗口受控复跑。
+
+## 关闭记忆与项目规则后的严格复测
+
+为排除上一轮模型规格不一致造成的偏差，补充复测只选择最难的 `comet-full-workflow`，运行 1 次。主模型固定为 `deepseek-v4-flash[1m]`，与 RC1-on 对照一致；同时关闭 `memory.learning`、`memory.retrieval`，并在启动快照中确认 `plugins: []`。复测通过 18/18 项检查，业务基线为 6/6。
+
+| 指标                 | RC1-on（三次平均） | RC1-off（一次） | 变化   |
+| -------------------- | -----------------: | --------------: | ------: |
+| Agent 轮次            |              92.00 |              91 |  −1.09% |
+| 工具调用              |             118.00 |             118 |   0.00% |
+| 非缓存输入 Token      |             75,644 |          79,670 |  +5.32% |
+| 输出 Token             |             45,193 |          39,737 | −12.07% |
+| 缓存读取 Token         |          5,349,675 |       4,894,464 |  −8.51% |
+| 总 Token（含缓存读取） |          5,470,512 |       5,013,871 |  −8.35% |
+| 模型成本               |            $4.7515 |         $4.4721 |  −5.88% |
+| 累计模型耗时           |           579.491s |        492.341s | −15.04% |
+
+这次结果没有支持“关闭记忆和规则后 Token 反而增加”的判断。之前的异常增幅来自把 `deepseek-v4-flash`（200K 上下文）与 `deepseek-v4-flash[1m]`（1M 上下文）混作对照；在模型规格校正后，RC1-off 样本的总 Token 和成本反而低于 RC1-on 三次平均。
+
+这仍然不是项目规则插件的因果成本实验：当前源码已经移除了 `comet.project-rules`，本次启动快照也没有加载插件，因此只能说明校正后的 RC1-off 参考值，不能从一个样本推导插件本身增加了多少 Token。完整证据和配置快照见下面的同格式 HTML 报告。
+
+<RawHtmlReportFrame
+  src="/assets/eval-reports/comet-native-vs-rc1-beta16-20260828/native-memory-disabled-followup-report.html"
+  title="关闭记忆与项目规则后的 RC1 严格复测报告"
+  height={760}
+/>
+
+## HTML 可视化报告
+
+下面的嵌入报告集中展示 headline metric、可靠性指标、配对执行效率、修正耗时、16 个任务的三次运行矩阵、失败归因和比较边界。
+
+<RawHtmlReportFrame
+  src="/assets/eval-reports/comet-native-vs-rc1-beta16-20260828/native-benchmark-report.json"
+  title="Comet Native RC1 与 beta16 对比报告"
+  height={860}
+/>
+
+## 下一步
+
+- 在同一服务窗口、相同并发条件下复跑 RC1 和 beta16，再加强耗时结论。
+- 单独跟踪 RC1 的工具调用、轮次、Token 和成本上升，与耗时下降分开评估。
+- [Comet 基线真实评估实验](/zh/eval/comet-baseline-experiment) - 查看较早的 Classic 基线对比。
+- [评分指标与双 Agent 评测](/zh/eval/scoring) - 理解 `pass@k`、`pass^k`、硬验证和 LLM Judge 的区别。

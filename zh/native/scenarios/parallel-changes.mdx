@@ -1,0 +1,166 @@
+---
+title: "并行推进多个独立 Native Change"
+description: "在隔离 worktree 中推进多个独立目标，管理写入归属、跨会话恢复和 capability 归档冲突。"
+---
+
+一个项目可以同时存在多个 active Native Change。每个 change 保留自己的目标、验收范围、分支和工作目录绑定。目标相互独立时，可以在多个会话和 worktree 中并行推进；出现共享规格时，Runtime 会在 Archive 前要求确定顺序。
+
+本页以两个目标为例：
+
+- `session-retry-policy`：调整登录会话的重试和锁定策略；
+- `dashboard-export`：为运营看板增加 CSV 导出。
+
+两个目标没有共同的最终验收结果，适合使用独立 change。
+
+![小鱼把两个独立 Change 放在各自工作区中推进，并分别完成交付](/assets/parallel-changes-illustrations/01-isolated-worktrees.png)
+
+## 独立 Change 与 Supervisor Change 的选择
+
+| 判断条件    | 独立 Change                  | Supervisor Change                         |
+| ----------- | ---------------------------- | ----------------------------------------- |
+| 产品目标    | 可以分别发布和验收           | 必须作为一个整体交付                      |
+| 验收范围    | 各自拥有完整验收项           | 父目标拥有完整验收，child 覆盖其中一部分  |
+| 依赖关系    | 没有依赖，或只依赖已发布行为 | Runtime 需要管理 child 的依赖与集成顺序   |
+| 最终 Verify | 每个 change 分别执行         | 所有 child 集成后，父 change 再做整体验收 |
+| 归档        | 各自归档                     | child 不单独归档，由 Supervisor 最终归档  |
+
+需求来自同一个会议或 PRD，不代表必须放进一个 change。决定因素是结果能否独立交付，以及是否存在共同的最终验收。
+
+## 为并行任务选择 worktree 隔离
+
+Native 创建 change 时支持三种工作区：
+
+| 隔离方式   | 适用场景                                  | 并行影响                           |
+| ---------- | ----------------------------------------- | ---------------------------------- |
+| `current`  | 串行完成一个 change，当前目录可以直接使用 | 多个会话会共享目录，不适合并行写入 |
+| `branch`   | 需要独立分支，但同一时间只在一个目录工作  | 切换分支会影响当前目录中的其他任务 |
+| `worktree` | 多会话、并行开发或当前目录已有未提交修改  | 每个 change 拥有独立目录和分支     |
+
+本案例为两个 change 分别选择 `worktree`。Runtime 会记录 change branch、目标 branch 和 worktree 类型，并在每次写入和恢复时检查绑定。
+
+```text
+项目主目录
+├── .worktrees/session-retry-policy
+└── .worktrees/dashboard-export
+```
+
+一个会话只在一个 change 的 worktree 中修改文件。不要把同一 change 复制到第二个 worktree，也不要让两个 change 共享同一个未提交工作目录。
+
+## 每个 Change 独立完成 Shape
+
+两个 change 分别确认自己的目标和验收范围。
+
+`session-retry-policy` 可以包含：
+
+- 连续失败 5 次后锁定账号 15 分钟；
+- 成功登录后清零失败次数；
+- 锁定状态在 API 和登录页面中保持一致。
+
+`dashboard-export` 可以包含：
+
+- 导出结果遵循当前筛选条件；
+- 大数据量导出以后台任务执行；
+- 导出失败时显示可重试状态。
+
+每个 change 都单独经历 Shape → Build → Verify → Archive。一个 change 的确认、失败或暂停不会自动推进另一个 change。
+
+## 当前选择确定写入归属
+
+`.comet/current-change.json` 记录下一次可观察写入属于哪个 workflow 和 change。项目中只有一个 active change 时，Hook Router 可以推断归属；存在多个 active change 时，需要明确选择。
+
+查看所有 change：
+
+```bash
+comet native status
+```
+
+在目标 worktree 中选择当前 change：
+
+```bash
+comet native select session-retry-policy
+```
+
+选择只确定当前写入归属，不会关闭其他 active change，也不会切换 Git 分支。选择的 change 已归档、状态不可读或工作区绑定不匹配时，Runtime 会拒绝写入。
+
+## 多个会话分别推进
+
+可以为两个 worktree 各使用一个会话：
+
+```text
+会话 A
+  worktree: .worktrees/session-retry-policy
+  change: session-retry-policy
+
+会话 B
+  worktree: .worktrees/dashboard-export
+  change: dashboard-export
+```
+
+每个会话只读取自己的最新 `continuation`，并分别提交 Builder handoff、运行 Runtime 检查和启动 Verifier。状态版本、候选 ID 和执行引用会阻止一个 change 的迟到结果写入另一个 change。
+
+主目录中的未提交文件属于用户或其他任务时，应保持原样。worktree 隔离可以减少目录冲突，但不会授权清理无关修改。
+
+## 工作区不匹配时返回正确目录
+
+如果在 `dashboard-export` 的 worktree 中尝试推进 `session-retry-policy`，Runtime 会比较：
+
+- 当前项目根目录；
+- change branch；
+- worktree 类型；
+- `comet-state.yaml` 保存的工作区绑定。
+
+绑定不一致时，恢复结果为 `await-user`，并返回预期分支或 worktree。进入正确目录后重新读取状态即可。不要在错误目录中重建同名 change，也不要通过手工修改 YAML 绕过绑定。
+
+## 独立目标仍可能出现 capability 冲突
+
+两个 change 的产品目标可以独立，但实现期间可能修改同一个 canonical capability。例如：
+
+- `session-retry-policy` 修改 `authentication` Spec；
+- 另一个并行 change `session-device-limit` 也修改 `authentication` Spec。
+
+Archive 会检查当前项目和已登记 Git worktree 中的其他 active change。发现相同 capability owner 时，当前 change 不能直接归档，Runtime 会返回 `capabilityPeers` 和串行处理要求。
+
+## 先归档一个 Change
+
+假设用户决定先归档 `session-retry-policy`：
+
+1. 按最新 `continuation` 确认归档顺序；
+2. Runtime 再次检查冲突列表和状态版本；
+3. `session-retry-policy` 更新 canonical `authentication` Spec；
+4. change 完成 Archive 和已授权的工作区收尾。
+
+串行决定必须指向当前正在归档的 change。冲突列表或状态已经变化时，旧决定会被拒绝。
+
+## 后续 Change 重新对齐并验收
+
+`session-device-limit` 随后读取最新 canonical Spec。它需要把自己的完整目标规格与新基线重新对齐，再检查实现是否仍然满足合并后的行为。
+
+重新对齐后：
+
+- 更新当前 change 的完整目标 Spec；
+- 根据最新行为修订实现；
+- 重新运行必要检查；
+- 由新的 Verifier 完成验收；
+- 使用新的结果进入 Archive。
+
+冲突前的通过结果不能直接复用，因为它验证的是旧 canonical Spec。
+
+## 跨会话和跨设备恢复
+
+恢复单个 change 时，先明确名称：
+
+```bash
+comet native status dashboard-export --details --json
+```
+
+跨设备需要同步项目代码、`.comet/config.yaml` 和 change 的用户可携带产物。`.comet/runtime/native/` 属于本机执行状态，由目标设备重建。
+
+多个 active change 同时存在且没有明确名称或有效选择时，环境感知恢复会返回 `ask_user`。它不会根据聊天内容猜测目标，也不会扫描并修改其他 change 的 Runtime。
+
+## 分别完成交付与清理
+
+每个独立 change 的 Archive 都有自己的交付选择：保留工作区、本地合并、推送分支或创建 PR。一个 change 的交付授权不适用于另一个 change。
+
+Runtime 只清理已经归档、没有未提交修改且不再使用的 worktree。仍在执行、存在用户修改或 Git 收尾被阻塞的目录会保留，并通过 `workspaceFinishResult` 和 `recoveryArgs` 返回下一步。
+
+继续阅读：[多 Change 与规格冲突](/zh/native/multi-change-and-conflicts)、[运行时保护与故障恢复](/zh/native/safety-and-recovery) 和 [连续推进与稳定恢复点](/zh/native/continuation-and-checkpoints)。

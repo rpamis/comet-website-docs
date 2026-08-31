@@ -1,0 +1,135 @@
+---
+title: "Supervisor Change: Enabling Large Tasks to Run in Parallel Safely"
+description: "Break down large targets into sub-tasks that can be completed independently, advance them in parallel in an isolated workspace, and finally verify and deliver them uniformly."
+---
+
+import { SupervisorVideo } from "/snippets/supervisor-video.jsx";
+
+Supervisor Change is a parallel delivery mode provided by Native for large tasks. It breaks down the overall goal into sub-tasks that can be independently achieved and verified in accordance with the acceptance requirements. The Runtime is responsible for managing dependencies, isolating workspaces, recording execution status, integrating results, and completing final acceptance.
+
+No matter how many sub-tasks it is split into, there is still only one final delivery. After all the results are integrated, the main task must re-verify the complete target. A single Agent reporting completion, a sub-task passing verification, or the code entering the integration branch does not mean that the entire task has been completed.
+
+## Unified management and delivery of sub-tasks
+
+|Product capability|Practical function|
+| -------------- | --------------------------------------------------------------------- |
+|Split by acceptance items|Each sub-task is responsible for a clear acceptance item, and the ambiguous division of labor such as "each doing a little at the front end and the back end" is not adopted|
+|Automatically advance by dependency|Runtime only arranges sub-tasks that have already met their dependencies to prevent tasks that have not yet met the conditions from starting ahead of schedule|
+|Independent workspace|Each sub-task only modifies the code within its own worktree to prevent multiple agents from overwriting each other|
+|The result will not be connected|Task packages, baseline submissions, and `runId` jointly identify the current execution. Late or duplicate results will be rejected|
+|Overall unified acceptance|After integrating all sub-tasks, conduct a final acceptance of the complete target once again|
+
+For example, a permission management objective can be broken down into a permission API, a permission configuration page, and an audit log. The three results can be independently achieved and verified, but they still belong to the same product objective and require unified integration and final acceptance. This type of task is suitable for using Supervisor Change.
+
+## Break down tasks according to the deliverables
+
+Comet will check whether it is worth splitting before the final Shape is confirmed. Supervisor Change is recommended only when the following conditions are met simultaneously:
+
+- At least two results can be independently implemented and verified;
+- Each acceptance item in the overall goal can be clearly assigned to a certain sub-task.
+- The dependencies among sub-tasks can be clearly expressed;
+- Parallel execution or phased delivery can indeed reduce the overall waiting time.
+
+A long demand text and numerous task items do not necessarily mean they are suitable for splitting. If multiple parts need to repeatedly modify the same core area, or the increased communication and integration costs after splitting are higher than the benefits of parallelism, it is more appropriate to continue using a single Native Change. If there is no common final acceptance target, multiple independent changes should be created.
+
+The split draft is recorded at `children.yaml`. RC1 uses `comet.native.children.v2`: `acceptance_index` to store the overall target acceptance ID, source, and complete text derived from `brief.md`. Each sub-task only declares a unique name, dependency, and its own overridden acceptance ID. The Runtime checks for name duplicates, unknown dependencies, dependency loops, and acceptance omissions.
+
+## The user selects the splitting plan and the advancement method
+
+Before confirmation, Comet will display the overall goal, sub-task list, dependencies, and acceptance mapping. Users can adjust the split, continue to use a single Native Change, or choose an advancement method:
+
+|Options|Promotion method|Actual impact|
+| ---- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| A    |Multi-session collaboration (Recommended|The current session is only responsible for overall planning. It is preferentially executed by Codex Independent Session or Claude Code Agent Teams. subagent is automatically switched when the host does not support it|
+| B    |Single-session advancement|Do not create independent sessions or Agent teams; The current session completes sub-tasks in sequence according to the same scope, dependencies, and acceptance requirements|
+
+The advancement mode only determines where sub-tasks are executed and does not change the split results, dependencies, acceptance criteria, or integration rules. When confirming the Supervisor split, the Runtime will write the selection as `coordination_mode` to `comet-state.yaml`. When restoring the process or re-entering Shape due to changes in requirements, this option will be continued without repeated inquiries. The process will only return the Shape when a new user-visible decision appears, asking the user to reconfirm.
+
+Before confirmation, the Runtime will not create sub-tasks, worktrees, or external sessions. When there are two or more sub-tasks involved, the ordinary "confirmation" cannot replace the selection of the advancement method.
+
+## Each sub-task has an independent workspace
+
+After the Shape is confirmed, the Runtime will first create a dedicated integration branch and integration worktree for the main task, and then, starting from the current commit of the integration branch, prepare independent worktrees and task packages for each sub-task.
+
+Each task package contains:
+
+- The roles and acceptance scope of sub-tasks;
+- The only working directory;
+- Current integration baseline submission;
+- `runId` for binding task reports;
+- Dependency conditions and stop conditions.
+
+The Runtime informs the main session through `readyChildren` which sub-tasks can start now. By default, the multi-session mode can start up to two independent sub-tasks simultaneously at most. The single-session mode is executed in sequence. When it is necessary to temporarily change to serial propulsion, the following can be used:
+
+```bash
+comet native next <supervisor-change> --max-parallel 1
+```
+
+This parameter only limits the number of tasks executed simultaneously and does not change the task dependencies or acceptance scope.
+
+## Adopt multi-session parallel advancement in Codex
+
+After selecting multi-session collaboration in Codex, the current session becomes the main session. It is responsible for assigning tasks, continuously checking progress, handling blockages, integrating verified results into the Runtime, and completing the final Verify of the main task. The main session does not directly enter the sub-task worktree to modify the code.
+
+Each sub-task in `readyChildren` will be assigned to an independent task visible to the user. Independent tasks continue to use the current project and directly enter the subtask directory already prepared by the Runtime, without the need to create a separate worktree. After the task is completed, the main session still needs to wait for the integration of the sub-tasks Verify and Runtime. The completion message of the independent task cannot be regarded as the delivery result.
+
+<SupervisorVideo
+  src="/vedio/codex.mp4"
+  width={1230}
+  height={858}
+label="Comet Supervisor Change executes subtasks through multiple independent sessions in Codex"
+fallback=" Your browser does not support HTML5 video"
+/>
+
+## In Claude Code, Agent Teams is adopted for parallel advancement
+
+In the interactive session of Claude Code, different subtasks can be run using Agent Teams. In PowerShell, it can be enabled through the following environment variables:
+
+```powershell
+$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
+```
+
+The current session acts as the team lead and assigns a clearly named teammate to each subtask in `readyChildren`. only works within the subtask worktree specified by the Runtime and cannot create new workspaces, claim subtasks with unfulfilled dependencies, integrate main task branches, or create nested teams on its own.
+
+Agent Teams is responsible for running multiple sessions, while Native Runtime is still responsible for the workspace, task status, validation, and integration. Messages from team members cannot override the Runtime state and cannot replace the final acceptance of the main task.
+
+<SupervisorVideo
+  src="/vedio/claude%20code.mp4"
+  width={1548}
+  height={1080}
+label="Comet Supervisor Change performs subtasks in Claude Code via Agent Teams"
+fallback=" Your browser does not support HTML5 video"
+/>
+
+## Verify first, then integrate
+
+Each sub-task must go through `active → verified → integrated`:
+
+1. The Builder completes the candidate implementation in the sub-task worktree and submits the result of binding the current `runId`.
+2. The independent Verifier checks the candidate submissions and the acceptance scope of sub-tasks;
+3. The Runtime only accepts rewards that match the role, `runId`, and the current task status.
+4. After verification is passed, the Runtime submits the verified information to the integration worktree of the Supervisor and runs the necessary integration checks.
+
+Sub-tasks do not execute Archive independently, nor can they merge the main task branches by themselves. The Agent's claim that "it has been completed" cannot be used as a basis for integration. When there are unsubmitted modifications in worktree, it also indicates that the result is not yet ready. Only when the Runtime records the status as `integrated` will subsequent sub-tasks that depend on it enter `readyChildren`.
+
+## After the integration is completed, a unified acceptance will be conducted
+
+After all sub-tasks enter `integrated`, the Runtime will immediately advance the final Verify of the main task without the need for the user to send "Continue" again. Ultimately, Verify runs at least one integration check in the integration worktree and covers the complete acceptance scope of the overall target.
+
+Only after the final verification is passed can the Supervisor Change enter the Archive. The user still decides to retain the workspace, merge locally, push or create a PR according to the normal delivery options of Native. The target branch will not be modified in advance before the final delivery.
+
+If the Verify fails in the end, the Runtime will retain the integration scene and will not reopen the sub-tasks that have already been integrated. The process will add a unique-named repair sub-task based on the actual failed acceptance items, supplement the acceptance mapping of the overall goal, and return a Shape for the user to confirm the new repair scope.
+
+## Recoverable task progress
+
+The main session can view sub-task summaries, `readyChildren`, integration status, and next steps through the following commands:
+
+```bash
+comet native status <supervisor-change> --details --json
+```
+
+When restoring tasks, Comet uses the `coordination_mode` persisted in the Runtime as the standard and does not repeatedly create existing sub-tasks or worktrees. `multi-session` continues to use multi-session collaboration, and `single-session` continues to advance in sequence from the current session.
+
+If the original Codex standalone session or Claude Code Agent Team no longer exists, Comet will re-read the Runtime and automatically switch to subagent under `multi-session`. Tasks that have been dispatched but lost will first inactivate the old `runId` through `supervisor-cancel`, and then be redispatched using the new task package and `runId`. The late results of the old execution will be rejected. When the subagent is also unavailable, Comet will report a real block and will not automatically switch to single-session advancement.
+
+Continue reading [Native Loop](/en/native/native-loop)] to understand the acceptance mechanism shared by the main task and sub-tasks. Read [Multiple Changes and Specification Conflicts ](/en/native/multi-change-and-conflicts)] and [Recovery Manual ](/en/native/recovery-playbook)] to learn about concurrent conflicts and interrupt recovery

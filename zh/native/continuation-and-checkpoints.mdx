@@ -1,53 +1,157 @@
 ---
-title: '连续推进与恢复'
-description: '理解 Native 如何用 Runtime continuation 推进 Build、Verify、Archive，并从稳定文件状态恢复。'
+title: '连续推进与稳定恢复点'
+description: '理解 Native 如何通过 continuation 推进工作，并依据 comet-state.yaml 中的稳定边界恢复中断的任务。'
 ---
 
-Native 不要求 Agent 记住上一轮对话，也不要求用户手动切换阶段。每次 Runtime 操作都会返回下一步；Skill 只执行当前 continuation 允许的动作，遇到用户决定或异常就停下来。
+Native 把“当前进展”和“下一步动作”保存在文件中。Agent 每完成一个 Runtime 动作，就读取最新的 `continuation`，继续实现、验收或归档。即使对话中断、Agent 更换或本机 Runtime 丢失，流程也能回到最近一个可信状态。
 
-## Continuation 结果
+本文中的“恢复点”指 `comet-state.yaml` 记录的稳定工作流边界。RC1 已不再提供公开的 `comet native checkpoint` 命令，也不要求你手工创建 checkpoint 文件。
 
-| `status` / `stage` | 含义                               | Skill 的动作                                       |
-| ------------------ | ---------------------------------- | -------------------------------------------------- |
-| `continue`         | 当前动作完成，下一步明确           | 读取 `continuation`，执行给出的命令或 handoff      |
-| `await-user`       | 需要用户决定、确认或解决外部阻塞   | 展示原因和选项，等待用户，不猜测                   |
-| `blocked`          | 状态损坏、并发冲突或错误预算已用尽 | 读取恢复动作，必要时运行 doctor 或回到 Shape/Build |
-| `done`             | 已完成归档                         | 结束当前 change                                    |
+## continuation 决定下一步
 
-正常的 Native Loop 是：
+`comet native new`、`status`、`next`、`archive` 和 `doctor` 等命令都会返回 `continuation.v2`。它同时描述流程状态、Agent 动作和用户需要知道的信息。
+
+| 字段 | 作用 | 使用方式 |
+| --- | --- | --- |
+| `disposition` | 说明当前应继续、等待用户、处理阻塞或结束 | 先判断流程能否自动推进 |
+| `action` | 指明当前动作，例如确认 Shape、提交 Builder handoff、启动 Verifier 或归档 | 只执行这一项动作 |
+| `commandArgs` | Runtime 生成的完整命令参数 | 原样保留状态保护参数，只填写占位值 |
+| `commandAlternatives` | 对应多个互斥用户决定的命令 | 用户决定后只选择其中一项 |
+| `inputOptions` | 说明命令需要的字段，并提供 JSON 模板 | 只填写模板公开的内容 |
+| `runnerAction` | 说明 Agent 应提交实现交接、启动 Verifier、等待结果或重试 | 用于协调 Builder 和 Verifier |
+| `userCommunication` | 说明当前是否必须向用户报告并等待回复 | `required: true` 时暂停推进 |
+
+`disposition` 有四种结果：
+
+| 结果 | 含义 | 后续处理 |
+| --- | --- | --- |
+| `continue` | 下一步已经明确 | 执行 `action`、`commandArgs` 或 `runnerAction` |
+| `await-user` | 需要用户确认、选择或补充外部信息 | 转述 Runtime 给出的说明并等待回复 |
+| `blocked` | 工作区、状态、并发关系或执行预算阻止继续 | 保留现场，按恢复动作或 `doctor` 结果处理 |
+| `done` | change 已完成归档 | 检查工作区收尾结果后结束 |
+
+`continue` 不一定对应一条 Shell 命令。进入 Build 后，`runnerAction` 可能要求 Builder 先完成实现；进入 Verify 后，它可能要求启动新的只读 Verifier。Agent 应同时读取这些字段，不能只看 `commandArgs`。
+
+## Native 如何连续推进
+
+普通 change 的主流程如下：
 
 ```text
-Shape → Build → Runtime checks → 新 Verifier →
-  通过 → Archive
-  失败 → Build（iteration + 1）
+确认 Shape
+  → Builder 完成实现和只读代码复核
+  → 提交 Builder handoff
+  → Runtime 执行必要检查
+  → 新的只读 Verifier 逐项验收
+  → 通过后进入 Archive
+  → 完成归档和工作区收尾
 ```
 
-Verify 期间的额外检查通过当前 attempt 的 `request-checks` 请求。相同且已完成的检查会复用；Archive 正常路径不重复执行验收。
+Verifier 发现实现缺口时，Runtime 返回 Build，并把未解决的验收项写入下一步。需求或验收标准发生变化时，Runtime 返回 Shape，开始新的目标周期。独立验收任务缺少外部信息、连续执行失败或达到 Loop 预算时，流程进入 `await-user` 或 `blocked`。
 
-## 稳定边界是什么
+对于由 Skill 协调、但 Runtime 无法确认独立身份的 Verifier，通过结果仍需要用户明确接受。此时 `commandAlternatives` 会分别提供：
 
-跨会话、跨设备真正需要同步的是：
+- 接受当前结果并准备归档；
+- 保留需求，回到 Build 修改实现；
+- 修改需求或验收标准，回到 Shape。
 
-- `.comet/config.yaml`；
-- change 的 `brief.md`、完整 Specs 和 `comet-state.yaml`；
-- 已生成的 `verification.md`（缺失或落后时可由 YAML 重建）。
+这三个决定互斥。Agent 只执行与用户选择一致的命令。
 
-`.comet/runtime/native/` 的 `state.json`、日志、锁和事务是本机 overlay。它缺失、版本落后或属于另一个 change 时，Runtime 会丢弃并重建，不会把它当成 portable 事实。正在执行的检查按中断处理；旧 Verify pass 在新设备上按恢复策略重新确认。
+## 稳定恢复点保存在哪里
 
-## Skill 如何继续
+一个 active change 的可携带状态保存在 change 目录中：
 
-先运行：
+- `brief.md`：目标、范围、用户决定和验收要求；
+- `specs/<capability>/spec.md`：归档后的完整目标行为；
+- `comet-state.yaml`：阶段、状态版本、验收结果、Loop 进度、Builder handoff、阻塞原因、有限历史和下一步；
+- `verification.md`：由 Runtime 生成的用户可读验收报告。
+
+其中，`comet-state.yaml` 是恢复流程的权威状态。`verification.md` 用于阅读，可以在缺失或版本落后时根据 YAML 重建。
+
+本机执行信息保存在 `.comet/runtime/native/`：
+
+```text
+.comet/runtime/native/
+├── changes/<change-name>/state.json
+├── logs/
+├── locks/
+└── transactions/
+```
+
+这些文件记录本机正在运行的检查、日志、锁和短期事务。它们可以被清理或重建，不作为跨设备同步依据，也不能覆盖更新版本的 `comet-state.yaml`。
+
+## 不同阶段如何恢复
+
+Runtime 会根据稳定状态和本机执行状态决定恢复位置。
+
+| 稳定边界 | 恢复行为 |
+| --- | --- |
+| Shape | 保持 Shape，继续澄清或执行尚未完成的确认 |
+| Build | 保留已确认需求和当前实现，继续 Builder 工作或提交 handoff |
+| Verify 的 `verify-ready` | 复用仍然有效的候选和检查信息，重新运行必要检查并启动新的 Verifier |
+| Verify 正在等待 Verifier | 原任务已丢失时，从稳定 Verify 边界启动新的 attempt |
+| Archive 的 `archive-ready` | 本机 Runtime 丢失或换设备时先回 Verify，重新验收同步后的实现 |
+| `await-user` / `blocked` | 保留原阻塞原因、处理责任和允许的动作 |
+| `done` | 以已归档状态展示，必要时完成确定性的目录或工作区清理 |
+
+恢复操作本身不会增加失败轮次或停滞计数。实际启动新的 Verifier 时，`attempt` 才会增加。
+
+## Runtime 如何处理本机状态异常
+
+每份本机 `state.json` 都关联 change 和 `state_version`。Runtime 读取它时会区分以下情况：
+
+- **状态匹配**：从当前稳定边界继续；
+- **文件缺失、无效或版本落后**：根据 `comet-state.yaml` 重建本机执行状态；
+- **检查执行中断**：把运行中的检查标记为中断；可安全重复的检查可以重新执行；
+- **不可重复检查中断**：返回 Build，要求 Builder 生成新的候选后再验收；
+- **Verifier 任务丢失**：保留候选和已完成检查，从 Verify 边界启动新的验收尝试；
+- **待归档结果失去本机执行依据**：撤销当前待归档结论，对同步后的实现重新做全量验收。
+
+旧设备上的进程、Agent 会话和日志连接不会跨设备延续。Runtime 只恢复已经写入稳定状态的事实。
+
+## 状态版本阻止过期操作
+
+每次稳定状态变化都会增加 `state_version`。涉及用户决定或阶段转换的命令会携带：
+
+```text
+--expected-state-version <version>
+--expected-action <action>
+```
+
+Runtime 会同时校验状态版本和预期动作。旧对话中的确认、迟到的 Verifier 返回或已经过期的命令无法覆盖新状态。命令被拒绝后，应重新读取最新 `continuation`，再按新的动作继续。
+
+`status --details` 的分页游标也绑定状态版本。状态已经变化时，旧游标会被拒绝，避免把不同版本的验收项、历史和工作区信息混在一起。
+
+## 跨会话与跨设备继续
+
+同一设备上的新会话通常可以直接继续当前需求。Comet 会先定位 active change，再返回工作区和下一步动作。需要手动查看时运行：
 
 ```bash
 comet native status <change-name> --details --json
 ```
 
-然后只使用输出中的 `continuation.commandArgs` 或 `inputOptions.template`。如果命令被拒绝、Verifier 不可用、执行错误、语义结果被阻塞或发生迁移/损坏，先查看 [Native status 命令](/zh/cli/status) 和 [恢复手册](/zh/native/recovery-playbook)，不要自行拼接内部 JSON。
+换设备前，需要同步以下内容：
 
-`await-user` 不是失败，也不是可以跳过的提示。用户确认后，Runtime 会创建新的状态版本；如果实现已改变，则必须回 Build，由新的 Builder 和新的 Verifier 重新开始。
+- 项目代码及对应分支或 worktree；
+- `.comet/config.yaml`；
+- change 目录中的 `brief.md`、Specs 和 `comet-state.yaml`；
+- 已生成的 `verification.md`，该文件也可以在目标设备重建。
 
-## 跨设备恢复
+目标设备不需要复制 `.comet/runtime/native/`。Runtime 会检查项目根目录、分支、worktree 和 change 绑定。绑定一致时，它从稳定边界重建本机执行状态；绑定不一致、代码未同步或同名 active/archive 目录冲突时，它会保持现有文件并等待处理。
 
-换设备后先确认代码、artifact root 和 branch/worktree 一致，再运行 `status`。如果目标不明确、代码未同步、active/archive 同名或 capability 有并行归档冲突，Runtime 会返回 `await-user`/`blocked`，而不是自动修改目录。没有 `verification.md` 的 Shape/Build 仍可恢复；Verify 和 `archive-ready` 会先重建必要的本机执行状态并重新确认。
+## 何时使用 doctor
 
-继续阅读：[验证与修复](/zh/native/verification-and-repair)、[产物与状态](/zh/native/artifacts-and-state) 和 [恢复手册](/zh/native/recovery-playbook)。
+日常推进以最新 `continuation` 为准。以下情况适合运行只读诊断：
+
+```bash
+comet native doctor <change-name>
+```
+
+- Runtime 文件缺失、无效或来自旧版本；
+- active change 需要迁移；
+- 归档或目录移动事务中断；
+- 状态、锁或工作区关系无法确定；
+- `continuation` 明确要求诊断。
+
+只有 `doctor` 明确给出安全修复动作时才运行 `--repair`。状态损坏、同名目录冲突或恢复来源不明确时，应保留现场并处理 Runtime 返回的阻塞原因。
+
+继续阅读：[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复手册](/zh/native/recovery-playbook)。

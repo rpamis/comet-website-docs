@@ -1,0 +1,143 @@
+---
+title: "Continue to Promote Native Change after Demand Changes"
+description: "Distinguish between implementation revisions, requirement changes, and out-of-scope new goals, and return the correct Native phase from Build, Verify, or Archive."
+---
+
+During the development process, three types of changes often occur: the implementation fails to meet the original requirements, confirmed user behaviors need to be adjusted, and new goals emerge beyond the current task. Native will return to Build, Shape, or a new change based on the type of change, retain the still valid state, and invalidate the expired validation results.
+
+This page takes "user login session" as an example to illustrate how to proceed without manually modifying the Runtime state.
+
+! The small fish was completed by filling in the original support and waited for the reconfirmation of the growth direction when the demand changed
+
+## Three types of changes correspond to three affiliations
+
+|Change type|Example|Processing result|
+| ------------ | ---------------------------------------------------- | ---------------------------------------------- |
+|Achieve revision|It has been confirmed that the session timeout is 30 minutes, but the code wrongly implemented it as 60 minutes|Retain the requirements and go back to Build to modify the candidates|
+|Demand changes|The product has decided to change the session timeout from 30 minutes to 2 hours|Back to Shape, update the brief, complete target Spec and acceptance items|
+|New targets outside the scope|After logging in, a new administrator session board was required to be added|Create an independent change to avoid expanding the current acceptance scope|
+
+The basis for judgment is whether the visible target of the user has changed. Modifying technical implementations, fixing omissions or completing tests usually fall under implementation revisions. Changes in behavior, acceptance criteria, scope and constraints are considered changes in requirements.
+
+## Directly converge the latest target in Shape
+
+When Change is still in Shape, the requirements have not yet entered the implementation stage. New or adjusted content will be directly written into:
+
+- Examples of the objectives, scope, decisions and acceptance of `brief.md`;
+- The complete target behavior of `specs/<capability>/spec.md`;
+- Blocking questions that require user answers.
+
+Before user confirmation, the Runtime maintains the Shape. The confirmation content should include the ultimate goal, non-goals, key decisions and complete acceptance items. Confirm before entering Build.
+
+## When a requirement change is found in the Build process, a Shape will be returned
+
+It is assumed that during the implementation, it was found that "after logging out, sessions on other devices should also simultaneously expire" has not yet been included in the objective. This will change the visible behavior of users and falls under the category of demand changes.
+
+The Agent should first stop implementing and update the formal requirements. When Native Guard observes the write of `brief.md` or the full target Spec, it will return the change to Shape and start a new target cycle. After the user reconfirms, enter the Build from the latest requirements.
+
+The original implementation files will be retained to facilitate the Builder's continued modification based on the new goals. The old candidates, old acceptance conclusions and old archiving authorizations will not be directly reused.
+
+Formal requirements and implementation files should be written separately. A single tool call that simultaneously modifies two types of files will be rejected to ensure that the requirement changes first form a confirmed stable boundary.
+
+## If the verification fails, revise the implementation first
+
+The first Verify found that the session timeout was still 60 minutes, while the confirmation requirement was 30 minutes. This is an implementation gap. The requirements themselves have not changed.
+
+The Runtime will write the failed acceptance items to `continuation` and return Build. For Verify results that require explicit user selection, select "Revise Implementation" corresponding to `--revise-implementation`:
+
+```text
+Verify
+Keep the brief, Spec and acceptance scope
+Clear the current candidate's qualification for passing
+→ Go back to Build to fix the implementation
+→ Submit a new Builder handoff
+Start the new Verifier
+```
+
+The repair round gives priority to handling the items that have not passed and the acceptance items affected by this modification. After the partial repair is passed, the Runtime will still arrange for the final full acceptance.
+
+## Modifying the requirements in Verify will start a new target cycle
+
+If the product decides to change the timeout to 2 hours during the Verify stage, the original acceptance conclusion has lost its applicable conditions. At this point, select "Revise Requirements", corresponding to `--revise-requirements`.
+
+Runtime will:
+
+1. Return Shape;
+2. Increase the target cycle;
+3. Clear the current verification results and report references;
+4. Invalidate the old candidate and archive authorizations;
+5. Wait for updates on the brief, complete target Spec and acceptance items;
+6. After the user reconfirms, enter Build.
+
+Demand changes cannot be expressed by rewriting `verification.md`. This file is generated by the Runtime based on `comet-state.yaml` and is only responsible for presenting the acceptance results.
+
+## Requirements can still be revised before archiving
+
+When Change has reached `archive-ready`, the code has passed the acceptance of the current target, but the archiving has not yet been completed. If it is decided at this point to add "Administrators can revoke all active sessions", it still falls under the category of requirement changes.
+
+The latest `continuation` of Archive will provide a revision option for returning the Shape. After execution:
+
+- The accepted Verify result is invalid.
+- The current archiving authorization has expired.
+- change workspace reserved;
+- After the new goal is confirmed and achieved, conduct a complete verification again.
+
+A normal Archive will not repeatedly run Verify. The process will only be re-accepted when the original result becomes invalid due to changes in the goal, implementation or recovery strategy.
+
+## Modifying the code directly in Verify or Archive will invalidate the candidate
+
+When Native Guard observes the implementation file writing during Verify or Archive, it will automatically return change to Build. This behavior indicates that the current candidate has changed, and the original Verifier conclusion can no longer represent the implementation on the disk.
+
+After returning to Build, the following is required:
+
+1. Complete the implementation modification;
+2. Run development period checks and new read-only code reviews;
+3. Submit the new Builder handoff;
+4. Necessary checks are performed by the Runtime;
+5. Start the new read-only Verifier.
+
+The results returned by the old task later will be constrained by the candidate ID, `state_version`, `iteration`, `attempt` and the execution reference, and cannot override the new state.
+
+## Out-of-range targets use independent changes
+
+Session kanban and login session timeout can be delivered separately, and there is no common final acceptance target. It is clearer to create a new Native change at this point:
+
+```text
+session-timeout
+Responsible for session timeout, renewal and invalidation semantics
+
+admin-session-dashboard
+Be responsible for the administrator to view and filter active sessions
+```
+
+Two changes can be advanced in parallel using independent Worktrees. If they modify the same capability, Archive will require the determination of the serial order. If there is no specification conflict, it can be completed independently.
+
+## Status protection prevents the execution of expired decisions
+
+Each user decision in `continuation.commandAlternatives` carries the current state version and the expected action:
+
+```text
+--expected-state-version <version>
+--expected-action <action>
+```
+
+After choosing to implement or revise the requirements, only the full `commandArgs` of the corresponding option will be executed. When the state has changed, the action does not match, or the command comes from an old conversation, the Runtime will reject the operation. Re-run at this point:
+
+```bash
+comet native status <change-name> --details --json
+```
+
+Then continue according to the new `continuation`.
+
+## The retention and invalidation rules after the change
+
+|Operation|Reserve|Failed or reset|
+| --------------------------- | -------------------------------------- | -------------------------------------- |
+|Revision and implementation|brief, Complete Target Spec, Acceptance scope, work area|The current candidate for acceptance qualification|
+|Revised requirements|change, Workspace and History|Current candidate, verification result, report citation, archiving authorization|
+|Create an independent change|The entire state of the original change|It does not affect the original change|
+|Modify the implementation in Verify/Archive|Formal requirements and workspaces|Current candidates and their verification results|
+
+Native retains facts that can still be proven to be valid and invalidates conclusions that rely on old goals or old implementations. This way, existing work can continue to be utilized while avoiding carrying outdated approval results into new deliveries.
+
+Continue reading: [Decision Attribution ](/en/native/decision-ownership), [Verification and Repair ](/en/native/verification-and-repair), and [Continuous Advancement and Stable Recovery Point ](/en/native/continuation-and-checkpoints).

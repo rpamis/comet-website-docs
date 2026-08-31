@@ -1,46 +1,174 @@
 ---
-title: 'Native safety and recovery'
-description: 'Understand write ownership, portable state, local Runtime, failure stops, and context-aware recovery in Native.'
+title: "Runtime Protection and Fault Recovery of Native"
+description: "Learn how Native ensures execution reliability through write attribution, state versions, atomic files, and recoverable transactions, and safely recovers from an interrupt state. "
 ---
 
-The Skill guides the model, while Runtime puts important boundaries into state and files that can be checked. The responsibilities are separate: prose cannot replace a Runtime check, and Runtime cannot decide whether a test is meaningful.
+Comet Native uses multi-layer mechanisms to protect the workflow. The Hook Router determines the ownership of the write before it occurs. The Native Guard handles the write according to the stage, and the Runtime then stabilizes the state with state versions, locks, atomic file operations, and transaction protection. The recovery process is based on the status of the order placement and does not rely on the previous round of dialogue or the Agent's self-description.
 
-## One write belongs to one change
+These mechanisms undertake different responsibilities. Hook is suitable for preventing erroneous writes that the host can observe. The Runtime is responsible for protecting the workflow state and file operations. The Verifier is responsible for determining whether the implementation meets the requirements. No layer can replace any other layer on its own.
 
-Comet attributes observable writes to the selected workflow/change, giving each write to at most one Guard. `.comet/current-change.json` selects ownership for the current request but does not limit the number of active changes. A legacy global Hook without trusted project context stays neutral instead of applying another project's change.
+## Layered runtime protection
 
-This protects only writes the host exposes. A shell, IDE, background process, or platform without Hook visibility may not be attributed immediately; the next Runtime state check still rejects an inconsistent result and returns to Build, Shape, or the user.
+|Hierarchy|Main responsibilities|Typical result|
+| --- | --- | --- |
+|Hook Router and Native Guard|Determine which workflow and change a write belongs to and apply the phase rules|Allow, reject, return to Shape or invalidate the candidate and return to Build|
+| Native Runtime |Protect state transitions, check executions, workspace bindings, and archive conditions|Reject expired operations, pause conflicts, and rebuild the local execution state|
+|File and Transaction layer|Protect YAML, Spec, reports, directory movement and Archive|Atomic submission, content verification, continuation of unfinished transactions or retention on-site|
 
-## Portable state versus local Runtime
+## Deterministic write attribution
 
-The cross-device boundary is `comet-state.yaml`, the brief, Specs, and the rebuildable `verification.md`. Together they record the phase, Loop, acceptance, handoff, required checks, Verifier verdict, blockers, and next action.
+`.comet/current-change.json` uses `comet.selection.v2` to record the workflow and change to which the current write belongs. It is only responsible for the current attribution and does not limit the number of active changes in the project.
 
-`.comet/runtime/native/` stores only local `state.json`, logs, short-lived locks, and transactions. When moving devices, when files are missing, or when an overlay version does not match, Runtime rebuilds from YAML; an old machine's execution state is never completion proof.
+Hook Router determines the write attribution in the following order:
 
-## Build and Verify boundaries
+1. Locate the Comet project based on the working directory provided by the Hook request;
+2. Read the workflow enabled by the project and the current selection;
+3. Enumerate the active changes corresponding to the workflow;
+4. After determining the unique owner, only the Guard of that owner is called.
 
-- A Builder submits a handoff and cannot write a passing verdict directly;
-- Runtime executes required checks, and a non-zero exit or timeout cannot pass;
-- a fresh Verifier must cover every A1…An item; missing, duplicate, and unknown items are rejected;
-- Verify failure returns to Build, and the new implementation gets a new Verifier attempt;
-- normal Archive does not rerun Verify; it applies Specs, writes the report, and moves the change;
-- without an independent Verifier execution, the report and Dashboard show degraded assurance and Archive requires user confirmation.
+When there is only one active change and no current selection, the Router can infer that it is the owner. When there are multiple candidates, the Router will refuse to write until a clear selection is made through `comet native select <change-name>`. When the selected file is damaged, the target has been archived, the workflow has been disabled, or the change status cannot be read, the Router will also stop writing.
 
-## Context-aware recovery
+In the old version of the global Hook, if there is no trusted request working directory, it will remain neutral to avoid inferring the current change from the Hook installation directory or other items. When an anomaly is detected in the project or during the target range check, the Router will handle it as a failed shutdown.
 
-`comet resume-probe` is read-only and inspects only the workflow selected by project defaults:
+## Stage-aware change control
 
-| Result         | Meaning                                                       |
-| -------------- | ------------------------------------------------------------- |
-| `auto_resume`  | One target is unambiguous and the request intends to continue |
-| `ask_user`     | Several candidates exist or ownership is unclear              |
-| `out_of_scope` | The request does not intend to enter a resumable workflow     |
-| `none`         | No resumable change exists                                    |
+Native Guard divides the goals within the project into formal requirements, implementation files, and Runtime management files.
 
-When configuration is damaged, code is unsynced, the branch/worktree mismatches, or active/archive layout conflicts, the probe stops with a reason instead of scanning another workflow or guessing a directory. `ambient_resume: false` disables automatic probing for ordinary requests; explicit `/comet` is unaffected.
+|Write type| Shape | Build | Verify / Archive |
+| --- | --- | --- | --- |
+| `brief.md`、`children.yaml`、`specs/**` |Allow editing|First return the Shape, and then allow editing|First, return the Shape, start a new target cycle, and then allow editing|
+|Common implementation file|Reject. Wait for Shape's confirmation|"Allowed|Invalidate the current candidate and return to Build, then allow modifications|
+|Runtime files within `comet-state.yaml`, `verification.md` and other changes|Managed by the Runtime, Agent writes will be rejected|The same as left|The same as left|
+|The implementation file of Supervisor's parent change|Driven by child change, direct writes from the parent will be rejected|The same as left|The same as left|
 
-## Dashboard responsibility
+Formal requirements and implementation files must be written separately. When a single tool call modifies two types of files simultaneously, Guard will reject the operation to prevent the sharing of a state transition that cannot be accurately attributed between requirement changes and implementation changes.
 
-Dashboard is read-only. It shows portable YAML phase, Loop, acceptance, checks, blockers, history, and user documents, adding a matching local overlay when available. It does not progress, repair, or Archive, and it does not expose raw logs or execution identity; all writes go through Native CLI/Runtime.
+During the Verify or Archive period, when it is observed that the implementation is written, RC1 will not continue to use the original candidate. The Runtime will increase the implementation rounds, clear invalid acceptance conclusions, and return to the Build. When the formal requirements change, the Runtime will return to Shape and invalidate the validation results and archiving authorizations in the old target cycle.
 
-Continue with [Verification and repair](/en/native/verification-and-repair), [Artifacts and state](/en/native/artifacts-and-state), and [Recovery and troubleshooting](/en/native/recovery-playbook).
+## Pre-protection for observable writing
+
+Hook Router can only handle events where the host provides the write intent and the destination path. The following writes may not go through phase guarding:
+
+- The IDE or background process directly modifies the file;
+- The host does not expose any Shell or file operations to the Hook;
+- The Hook request has no attributable target path.
+- Clarify the goals that lie outside the current project.
+
+Therefore, Hook is an engineering protection before writing, not an operating system-level sandbox. The subsequent Runtime will still verify the status version, workspace, candidate, check and archive conditions. The Verifier will also read the actual implementation. Unexposed writes by the host need to be detected through subsequent checks and acceptance. Comet cannot guarantee immediate interception.
+
+## Versioned state consistency
+
+In `comet-state.yaml`, starting from `1`, each stable state transition can only increase once. Before writing a new state, the Runtime compares the disk version:
+
+- The current version must be equal to the expected version of the operation.
+- The new version must be exactly the current version plus one.
+- Before submission, the disk state will be read again to prevent another process from modifying it first.
+
+Commands involving user decisions will also be carried:
+
+```text
+--expected-state-version <version>
+--expected-action <action>
+```
+
+These two protections can reject confirmations in old conversations, late Verifier results, and expired commands. When a version conflict occurs, the correct action is to re-read the latest `continuation` and then perform the operations allowed by the current state.
+
+## Project-level concurrent mutual exclusion
+
+The state modification, selection, migration and Archive of Native are all executed through project-level change locks. Only one controlled change operation can enter the critical section at the same time.
+
+After obtaining the lock, the Runtime will also check:
+
+- Is artifact root moving?
+- Whether there are uncommitted, unrolled or unidentifiable transactions;
+- Is the current operation exactly the recovery action that the transaction allows to continue?
+
+When an unfinished transaction is detected, the new change operation will be stopped and an error that requires the transaction to be restored first will be returned. Both the lock and transaction directories are managed by the Runtime. Manual deletion may cause the file status and transaction records to lose their correspondence.
+
+## Path and file identity verification
+
+RC1 employs restricted reads and atomic writes for stable files.
+
+When reading the official product, the Runtime will check:
+
+- A reference is a standardized relative path within a project;
+- The path has not entered a sensitive directory or the local Runtime.
+- The file is an ordinary file, and the parent directory is not a symbolic link.
+- The file size is within the corresponding upper limit, and the text is valid UTF-8.
+- It remains the same file object before opening, during reading and after reading.
+- The real path is always located in the managed root directory.
+
+When content identity is required, the Runtime will simultaneously record SHA-256. If a file is replaced during the read process, the parent directory points to changes, or the content exceeds the upper limit, this read will fail.
+
+When writing to a stable file, the Runtime first creates an exclusive temporary file in the target directory, writes and synchronizes the content, then verifies the identity of the parent directory chain and the temporary file, and finally commits through renaming or an exclusive link. When changes are detected in the path, directory or file object during the submission process, the operation will stop and the current path will no longer be written.
+
+## Recoverable transactional archiving
+
+Archive will update the canonical Spec, final status and reports, and move the active change into archive. RC1 records these actions as transactions instead of a set of unrelated file commands.
+
+The transaction will record the expected content hash and the identity of the file object. Before replacing or deleting an existing target, the Runtime will place the original content in a controlled isolation area and verify that the isolated object is still consistent with the transaction record. After an interruption, the Runtime can continue the confirmed steps based on the log. When the content, path or object identity changes, the transaction will stop.
+
+The following situations need to be handled first before continuing with the Archive:
+
+- Both the active and archive directories exist simultaneously.
+- The transaction log is damaged or inconsistent with the actual directory;
+- canonical Spec changes during a transaction;
+- Another active change declares the same capability in any registered Git worktree.
+
+When there are multiple owners for the same capability, Archive requires the user to determine the serial order. The first archived change becomes the new canonical Spec. Subsequent changes need to be re-aligned and re-accepted. The Runtime will not automatically overwrite the specifications of another change.
+
+## Breakpoint recovery based on stable states
+
+The authoritative status for cross-session and cross-device recovery is `comet-state.yaml` in the change directory. `.comet/runtime/native/changes/<change-name>/state.json` only records the execution status of this machine.
+
+The Runtime will select the recovery behavior based on the scene:
+
+|"On-site|Restore the result|
+| --- | --- |
+|Local machine status matching|Continue from the current stable boundary|
+|The status of this machine is missing, invalid or the version is outdated|Rebuild the execution status of this machine based on YAML|
+|The binding between branch or worktree and change is inconsistent|Return to `await-user` and keep the existing file|
+|The repeatable check was interrupted|Mark it as an interruption and re-execute according to the latest continuation|
+|The non-repeatable check was interrupted|Return to Build and request a new implementation candidate|
+|The Verifier task is lost|Retain the candidates and start a new attempt from the stable Verify boundary|
+|`archive-ready` has lost the local execution basis|Return to Verify and conduct a full acceptance of the synchronized implementation again|
+|`verification.md` is missing or lagging behind|According to the YAML reconstruction report of the same version|
+
+The recovery operation itself is not counted towards the number of acceptance failures or suspensions. The new device cannot continue the processes, Agent sessions and log connections on the old device, but can only restore the facts that have been written to the stable state.
+
+## Zero-write environment-aware recovery
+
+`comet resume-probe` finds the recovery target based on the default workflow specified by `.comet/config.yaml`. It does not modify change, nor does it switch branches or workspaces.
+
+|Result|Meaning|
+| --- | --- |
+| `auto_resume` |The request clearly indicates continuation and the target is unique or has been clearly selected|
+| `ask_user` |Multiple targets, status damage or workspace mismatch require the user to make a decision|
+| `out_of_scope` |The current request is not related to recovery, the user has exited, or is already in the Comet process|
+| `none` |The current workflow has no recoverable changes|
+
+`ambient_resume: false` will disable the environment-aware recovery of ordinary requests. When explicitly entering Comet, it is still processed according to the entry command. When multiple active changes exist, the probe uses an explicit name or the current selection; When the unique owner is missing, return `ask_user`.
+
+## Unified diagnosis and recovery entry
+
+For daily progress, only the latest `continuation` is executed. When troubleshooting is needed, read the status in the following order:
+
+```bash
+comet status
+comet native status <change-name> --details --json
+comet native doctor <change-name>
+```
+
+|Abnormal|Processing method|
+| --- | --- |
+|The write was rejected due to multiple active changes|After clearly stating "change", execute `comet native select <change-name>`|
+|The operation was rejected due to the expiration of the status version|Re-read `status` and the latest `continuation`|
+|The workspace binding does not match|Return to the branch or worktree returned by the Runtime and continue|
+|The migration or Archive transaction is not completed|First, run the read-only `doctor` and only perform the recovery actions explicitly provided by it|
+|active/archive coexist or the source of the transaction is unknown|Keep both sides of the site and wait for the determined repair path|
+|Implementation modifications occur after verification|Resubmit the candidate and accept it according to the returned Build status|
+|The formal requirements have changed|Update the brief and the complete target Spec, and reconfirm the Shape|
+
+`doctor --repair` is only applicable to states that have been recognized by the Runtime and supported for recovery. When the config, YAML, transaction or directory ownership cannot be determined, it is safer to keep the on-site state than the manual splicing state.
+
+Continue reading: [Continuous Advancement and Stable Recovery Point ](/en/native/continuation-and-checkpoints), [Product and State ](/en/native/artifacts-and-state) and [Recovery and Fault Handling ](/en/native/recovery-playbook).

@@ -1,50 +1,138 @@
 ---
-title: 'Native Loop principles'
-description: 'Understand how Runtime checks, a fresh Verifier, and bounded counters turn self-reported completion into a recoverable acceptance loop.'
+title: "Native Loop: From Implementation to Trusted Delivery"
+description: "Understand how Native coordinates Builder, Runtime, and independent Verifier to deliver trusted results through a bounded implementation and acceptance loop."
 ---
 
-An ordinary Agent loop lets the model decide “am I done?”. Native Loop gives that verdict to Runtime: the model understands and implements, while Runtime runs checks, dispatches review, records gaps, and decides when to stop.
+Just because a model can write code doesn't mean the result meets the requirements. It may miss an acceptance item or mistake "the test command has been run" for "the function has passed".
 
-## One Loop
+Native Loop addresses precisely the gap between "complete implementation" and "trusted delivery". The Builder is responsible for implementation, the Runtime is responsible for controlling the process and saving evidence, and the brand-new read-only Verifier Subagent independently judges based on `brief.md`, Specs and acceptance items. Only when both the necessary inspections and the final full acceptance are passed can the current change be filed.
+
+This article takes the implementation of Comet RC1 as the standard. Native Loop is not about making the model reflect on itself infinitely, but rather a set of engineering processes with clear input, complete evidence, limited budget and knowing when to stop.
+
+## Closed-loop implementation and acceptance
 
 ```text
-Shape → Builder handoff → Runtime checks → fresh Verifier
-                              ↑                 ↓
-                         repair gaps ← fail     pass → Archive
+Shape has been confirmed.
+    ↓
+Builder implementation → New read-only Reviewer Subagent reviews code → Submit candidate results
+    ↓
+Runtime runs necessary checks → New read-only Verifier Subagent accepts item by item
+    ↓                         ↓
+Need to be fixed ← Failed all passed → Archived
+    ↓
+Focus on repair → Partial acceptance passed → Final full acceptance
 ```
 
-Every round uses the complete A1…An acceptance list. A Builder's self-report is context, not proof. Missing, duplicate, or unknown Verifier IDs and failed checks are rejected by Runtime and become concrete input for the next Build round.
+When entering Verify for the first time, the Verifier will check the complete acceptance range. If only a few projects fail, the next round of Build only needs to focus on fixing these projects and pay attention to other projects that may be affected by this modification. After the partial acceptance is passed, the Runtime will still arrange A final full acceptance to prevent the damage to the already passed B when repairing A.
 
-## How progress is judged
+Therefore, Native Loop takes into account two things simultaneously: it does not repeat irrelevant work during the repair stage and does not lower the acceptance standards before delivery.
 
-Runtime stores bounded history and counters:
+## Independent role division of labor
 
-- `iteration`: one implementation repair round;
-- `attempt`: the current Verify attempt;
-- `no_progress_count`: times the unresolved acceptance set did not strictly shrink;
-- `failed_iteration_count`: implementation-failure rounds;
-- `execution_failure_count`: Runtime or Verifier execution errors.
+|Participants|Main responsibilities|Irreplaceable work|
+| --- | --- | --- |
+| Builder |Read `brief.md`, Specs and acceptance items, complete the implementation and fix the gaps|It cannot be declared approved merely based on one's own summary|
+| Reviewer Subagent |Review the candidate implementations in the new read-only task to identify code-level issues|It does not replace the final acceptance oriented towards requirements|
+| Runtime |Run necessary checks, save status and evidence, control rounds, budgets and the next steps|Do not implement business logic for the model|
+| Verifier Subagent |In the brand-new read-only task, provide `passed`, `failed` or `blocked` item by item according to the requirements|Acceptance items cannot be skipped, nor can the code be modified by oneself|
 
-Fewer unresolved items, a failed check becoming passing, or clearly missing information being supplied counts as real progress. Rewriting explanations, rerunning the same command, or shuffling the same failures does not reset stagnation. Repeated errors or no progress at the limit returns `await-user` or `blocked`.
+The Builder submits the "candidate results", not the proof of "passed". Before each new candidate result enters Verify, it must first be handed over to a new read-only Reviewer Subagent for code review. Subsequently, the Runtime will run the necessary checks and start another brand-new read-only Verifier Subagent to determine whether the implementation truly meets the requirements. Neither the Reviewer nor the Verifier is the Builder itself, and they are not the same task.
 
-## Only necessary checks run
+The Verifier will first read the acceptance items, `brief.md`, Specs, actual implementation and inspection results, and only then take the Builder's summary as an auxiliary clue. This reading sequence can reduce the impact of the Builder's self-description on the acceptance judgment, truly separating implementation from acceptance.
 
-Runtime resolves and executes the required checks. A completed matching plan for the same candidate is reused; extra checks are requested through `request-checks` in the current attempt with round and duplicate budgets. stdout/stderr streams to local logs and the report keeps a summary; a long log does not invalidate the result by itself. The normal Archive path does not rerun checks.
+## The acceptance process led by Runtime
 
-## State and recovery
+1. Lock the candidate results. The Runtime records the candidate ID, the current implementation round, and the scope of this acceptance to ensure that subsequent results correspond to the correct code version.
+2. Run necessary checks. The Runtime executes test, build, or other project commands. The check results provided by Builder are only for reference and cannot replace the actual execution results of Runtime.
+3. Start the new Verifier Subagent. The Verifier checks the code in read-only mode and gives a conclusion only once for each acceptance ID within the current range.
+4. Verify the returned result. If the result contains missing items, duplicates, unknown acceptance ids, expired responses or identity mismatches, the Runtime will directly reject it and will not mistakenly mark it as passed.
+5. Decide on the next step. After the full acceptance is passed, it can be filed. Return Build when there is an implementation gap; Pause when product decisions or external information are needed and return the decision-making power to the user.
 
-`comet-state.yaml` stores the stable Loop summary and next action, while `verification.md` is the user-readable report. Local `state.json`, logs, locks, and transactions live under `.comet/runtime/native/`. On another device, local execution is treated as interrupted and Runtime rebuilds what it needs from YAML; neither model memory nor an old local overlay is treated as completion proof.
+If the existing evidence is insufficient, the Verifier can request supplementary examination. The Runtime will perform checks and save the results, and then proceed with the current acceptance to prevent the Verifier from relying on guesswork to draw conclusions when there is insufficient evidence.
 
-## When Runtime stops
+## Partial repair and final full acceptance
 
-Runtime stops with a concrete action when:
+Assuming the complete acceptance range is A1 to A8, the first Verify found that A3 and A7 failed. After the Builder completes the repair, the Runtime will hand over A3, A7, and other acceptance items declared by the Builder that may be affected by this modification to the next Verifier.
 
-- a product decision still needs the user;
-- code, branch/worktree, or artifact root does not match;
-- acceptance coverage is incomplete or a required check fails;
-- the Verifier is unavailable, execution errors reach their limit, or a semantic result needs user resolution;
-- parallel changes target the same capability and an archive order must be chosen.
+- If the local scope still fails to pass, the Runtime will return the explicit gap to the Build.
+- If a partial range passes, the Runtime will not directly archive but restore all A1 to A8 to the pending acceptance state.
+- The current change is only ready for archiving after the new Verifier has completed the final full acceptance.
 
-The Loop therefore does not run indefinitely: once every acceptance item passes, the change archives; any remaining decisions and risks return to the user instead of consuming more Agent turns.
+This approach of "partial repair and final full confirmation" reduces meaningless repetitive checks while maintaining a complete defense line against regression issues.
 
-Continue with [Verification and repair](/en/native/verification-and-repair) and [Continuation](/en/native/continuation-and-checkpoints).
+For the same candidate result, the Runtime can reuse the checks that have been completed in the current acceptance attempt to avoid duplicate execution. When the Verifier requests additional checks through `request-checks`, the Runtime will limit the number of request rounds and filter out duplicate items.
+
+The complete log will be saved on the local machine, and user-readable reports will only present conclusions and necessary summaries. This way, not only the details needed for troubleshooting are retained, but also the truly important acceptance results will not be drowned out by a large number of `stdout` and `stderr`.
+
+## Separate implementation rounds and acceptance attempts
+
+The Native Loop uses two dimensions to locate the current progress:
+
+|Field|When will it change?|What does it represent?|
+| --- | --- | --- |
+| `iteration` |When the Builder modifies the implementation and submits new candidate results|Which round is implemented or fixed|
+| `attempt` |When the Runtime starts a new Verifier for the same candidate result|The number of acceptance attempts of this candidate result|
+
+For instance, when the Runtime starts a new Verifier acceptance attempt for the same candidate result, `attempt` will increase, but `iteration` remains unchanged. The Verifier requests supplementary checks in the current attempt and does not add `attempt` separately. Only after the Builder modifies the code and submits new candidate results will `iteration` proceed to the next round.
+
+The Runtime will bind the candidate ID, Verifier identity, `iteration`, `attempt` and acceptance scope together. Even if the old task returns the result later, it cannot overwrite the current state. This constraint is particularly important for long-term operation, task recovery, and parallel execution.
+
+## Progress judgment based on the acceptance gap
+
+The Runtime does not assume that progress has been made just because "a lot of code has been changed this time". It will compare the acceptance items that remain unresolved for two consecutive rounds: only when the unresolved items are indeed reduced and no new unresolved items are added can it be considered that reliable progress has been made. In terms of set relations, this means that the current unsolved item must be a strict subset of the previous round.
+
+RC1 will record the following counts:
+
+- `no_progress_count`: The number of times that have not been strictly reduced for unresolved acceptance.
+- `failed_iteration_count`: Realize the rounds that have not passed the acceptance.
+- `execution_failure_count`: The number of times the Verifier task itself fails to execute.
+
+When there is no reliable progress for two consecutive rounds, the Runtime will require the Builder to adopt a different approach to the repair. If there is still no progress in the third round, the Loop will be paused, allowing the user to decide on the next step. The number of failed acceptance rounds is also subject to the `native.max_verify_failures` limit, with a default maximum of `5` rounds.
+
+"Failed acceptance" and "Verifier task execution error" are two different types of issues. The former indicates that there is still a gap in implementation or requirements, while the latter suggests that the Verifier has not completed the task properly. RC1 allows a maximum of `3` consecutive execution errors, and each acceptance attempt can accept a maximum of `2` rounds of additional inspection requests. When the upper limit is reached, the Runtime will explicitly pause and will not retry indefinitely, nor will it treat an exception as a pass.
+
+## Fall back precisely according to the type of problem
+
+The issues exposed by Verify are not necessarily all code errors. The Runtime will return the corresponding stage based on the type of problem:
+
+- ** Implementation omissions or code defects ** : Go back to Build and fix the existing implementation;
+- ** Changes in user-visible behavior or acceptance criteria ** : Return to Shape, update the requirements and ask the user to reconfirm;
+- ** New requirements that are not related to the current change ** : Create another change to avoid expanding the current acceptance scope;
+- ** Lack of user decision or external conditions ** : Enter `await-user` and specify what information needs to be supplemented.
+
+In this way, Loop will not rewrite the confirmed goals at will just to "run the process smoothly".
+
+## A persistent state that can be recovered across tasks
+
+The Native Loop does not rely on a certain model and always remembers the entire context. The Runtime will save the states for different purposes separately:
+
+- `comet-state.yaml` saves a stable state that is synchronizable and recoverable, as well as the next step.
+- `verification.md` saves user-readable acceptance reports;
+- `.comet/runtime/native/` saves the running status, logs, locks and transaction information of this machine.
+
+After a task is interrupted or switched to another device, the Runtime will rebuild the process based on a trusted YAML state. Unfinished local tasks will be regarded as interrupted. Even if the current change has entered the "archivable" state on another device, it still needs to be re-verified after changing devices and cannot directly follow the execution conclusion on the original device. The recovery process itself will not be counted towards the number of acceptance failures or halts.
+
+## Automatic propulsion with clear boundaries
+
+The Runtime will stop the automatic advancement in the following situations and return a clear action:
+
+- There are still product decisions, external conditions or `blocked` acceptance items that need to be handled by users.
+- The current code, branch, worktree or artifact root is inconsistent with the Runtime record;
+- There is no reliable progress, failed rounds or execution errors reaching the budget;
+- The Verifier is unavailable, or the current host cannot prove that it is independent of the Builder.
+- When multiple parallel changes modify the same capability, the archiving sequence needs to be determined first.
+
+Some hosts can start the Verifier but cannot prove to the Runtime that it is indeed running in an independent task. In such cases, the Runtime will truthfully mark this reliability limit and require the user to confirm the result. It will not package "has been isolated as much as possible" as "has completed independent acceptance".
+
+## The core value of Native Loop
+
+- ** Completion of standard credibility ** : Whether archiving is allowed depends on Runtime checks and item-by-item acceptance, rather than the Builder's own statement.
+- ** Mutual checks and balances of responsibilities ** : Implementation, code review, inspection of execution, and requirement acceptance are handled by different roles.
+- ** Controllable repair cost ** : After failure, focus on the unresolved issues and conduct a full confirmation at the end.
+- ** No infinite idling ** : There are clear budgets for stagnation, failure, execution errors, and additional checks.
+- ** Can be safely restored ** : The state is recorded to the disk, the old response is subject to version constraints, and it does not rely on model memory to continue after an interruption.
+- ** Transparent boundaries to users ** : When there are changes in requirements, external blockages, or insufficient independence, the process will stop to explain the reasons.
+
+The value of Native Loop does not lie in "running several more rounds", but in having verifiable goals, evidence and exit conditions for each round. The model continues to be responsible for understanding and implementing what it excels at, while the Runtime transforms the delivery process into a verifiable, recoverable, and auditable workflow.
+
+Continue reading [Verification and Repair ](/en/native/verification-and-repair) to learn about the Verifier protocol and failure handling. Read [Continuous Advancement ](/en/native/continuation-and-checkpoints) to learn about continuation, Checkpoints and Recovery Mechanisms

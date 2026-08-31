@@ -1,41 +1,56 @@
 ---
 title: "Scoring Metrics and Dual-Agent Evaluation (Advanced)"
-description: "Deeply understand Comet eval's metric-driven evaluation: rubric multi-dimension scoring details, pass@k and pass^k (capability ceiling vs reliability floor), weighted scoring formulas, and the process of two Agents interacting automatically to complete an evaluation."
+description: "In-depth understanding of Comet eval 's metric drive evaluation: rubric multidimensional scoring criteria, pass@k and pass^k (upper capability vs lower reliability), weighted scoring formula, and the process of automatic interaction between two agents to complete the evaluation."
 ---
 
-<Info>
-  This is advanced content, for users who want to understand how eval scores, how metrics are computed, and how automatic multi-turn evaluation runs. For day-to-day evaluation, [Quickstart](/en/eval/quickstart) is enough.
-</Info>
+<Tip>
+This is advanced content, aimed at users who want to understand how eval scores, how metrics are calculated, and how automatic multi-round evaluations run. For daily assessment, you can quickly get started with ](/en/eval/quickstart).
+</Tip>
 
 <Warning>
-  This is advanced source-maintainer content. Ordinary users do not need to clone Comet to run an
-  evaluation; clone the source only when reviewing the scorer, task evidence, or automatic
-  interaction implementation. For day-to-day runs, use [Quickstart](/en/eval/quickstart).
+This page contains advanced content for source code/maintainers. Ordinary users do not need to clone Comet to run the evaluation; Only by rechecking the scoring device
+It is only necessary to pull the source code when task evidence or automatic interaction is implemented. For daily operation, please refer to [Quick Start ](/en/eval/quickstart)
 </Warning>
 
-Comet's eval doesn't just give "pass/fail" — it's **metric-driven** evaluation: it uses **rubric multi-dimension scoring** to quantify a Skill's performance across quality dimensions, and uses **pass@k / pass^k** to distinguish the "capability ceiling" from the "reliability floor". For multi-stage workflow-type Skills, the evaluation is completed by **two Agents interacting automatically** — one runs the Skill under test, the other simulates the user replying at decision points.
+Comet's eval does not merely provide "pass/fail", but rather ** index-driven ** evaluation: it quantifies the performance of Skill in various quality dimensions using **rubric multi-dimensional scoring **, and distinguishes the "upper limit of capability" from the "lower limit of reliability" using **pass@k/pass^k**. For multi-stage workflow-type skills, the evaluation is accomplished through the automatic interaction of ** two agents ** - one runs the Skill under test, and the other simulates the user's response at the decision point.
 
-## Metric System at a Glance
+## Look at these first when reading the report
 
-| Metric | Question it answers | Type | Is it a gate? |
-| --- | --- | --- | --- |
-| **rubric per-dimension score** (0.0–1.0) | How well did this dimension do | Diagnostic | No (informational) |
-| **weighted_score** (weighted total) | How is the overall quality | Diagnostic | No |
-| **RubricAvg** (report column) | Mean dimension score for that run | Diagnostic | No |
-| **pass@k** | Probability of at least one success out of k (capability ceiling) | Distributional | No |
-| **pass^k** | Probability of all k succeeding (reliability floor) | Distributional | No |
-| **Workflow contract checks** | Whether the tested Skill actually triggered as contracted | Hard judgment | Yes (missing required Skills fails) |
-| **Task validator pass/fail** | Whether this implementation is actually correct | Hard judgment | Yes (decides pass/fail) |
+If you are not debugging the scorekeeper, you can read the report in this order
+
+|Sequence|Report signal|Judge what|
+| --- | --- | --- |
+| 1 | `checks_failed` |Whether this operation really failed; Only when it is empty can it be considered passed|
+| 2 | failure attribution |Should the failure be attributed to the environment, workflow, task or model|
+| 3 | `pass@k` / `pass^k` |Does Skill succeed occasionally or run stably repeatedly|
+| 4 | `weighted_score` |Weighted diagnostic score of the quality dimension|
+| 5 |The minimum rubric dimension|Where will the next round of optimization prioritize investment|
 
 <Note>
-  <strong>Key distinction</strong>: rubric dimension scores and pass@k/pass^k are <strong>informational metrics</strong>, for diagnosis and comparison; the real <strong>pass/fail</strong> is <code>checks_failed == []</code>. Most failures come from task validators (<code>target_artifacts</code> existence + <code>test_scripts</code>), but profiles can also write workflow-contract failures, such as missing required Skills, into <code>checks_failed</code>.
+When making daily release judgments, don't just look at <code>weighted_score</code>. The true pass/fail first looks at <code>checks_failed</code>; rubric, pass@k and pass^k are used to determine quality, stability and the direction of the next optimization.
 </Note>
 
-## Where the Evidence Comes From
+## Overview of the Indicator System
 
-Comet eval evidence comes from **stream-json emitted directly by the Claude CLI**. It is not guessed from terminal text, and it is not reconstructed from another model's summary.
+|Indicator|The questions answered|Type|Is there an access control?|
+| --- | --- | --- | --- |
+|"rubric Dimension Scores" (0.0-1.0)|How is this dimension going|Diagnostic|No (informational)|
+|"weighted_score" (Weighted total score)|How about the overall quality?|Diagnostic|no|
+|**RubricAvg** (Report Column)|The dimensions of this run are evenly divided|Diagnostic|no|
+| **pass@k** |The probability of success at least once out of k attempts (upper limit of ability|Distribution|no|
+| **pass^k** |The probability of success in all k attempts (reliability lower limit)|Distribution|no|
+|"Workflow Contract Inspection.|Whether the Skill under test is really triggered according to the contract|Hard judgment|Yes (Failure due to the lack of essential skills)|
+|The task validator passes/fails|Is this realization correct or not|Hard judgment|Yes (Decide pass/fail)|
 
-Single-turn evaluation runs the subject Agent directly inside the task directory in Docker:
+<Note>
+  <strong>Key distinction</strong>: rubric dimension scores and pass@k/pass^k are <strong>informational metrics</strong> used for diagnosis and comparison. Actual <strong>pass/fail</strong> is determined by <code>checks_failed == []</code>. Most failures come from task validators (the existence of <code>target_artifacts</code> plus <code>test_scripts</code>), but a profile can also add Workflow Contract failures, such as a required Skill not being invoked, to <code>checks_failed</code>.
+</Note>
+
+## Where does the evidence come from
+
+The runtime evidence of Comet eval comes from the stream-json output by Claude CLI itself, not guessed from the terminal text, nor is it recalled and summarized by another model.
+
+The single-round evaluation will directly run the Agent under test in the task directory of Docker:
 
 ```bash
 claude -p "$prompt" \
@@ -44,244 +59,244 @@ claude -p "$prompt" \
   --verbose
 ```
 
-The eval harness saves raw `stdout` / `stderr`, then parses JSONL events from `stdout` line by line. The parser extracts:
+The eval harness saves the original `stdout`/`stderr` of this run and then parses the JSONL events in `stdout` line by line. The parser will extract:
 
-- `duration_ms`, `num_turns`, tokens, and cost from `result` events
-- Tool calls from `tool_use` events
-- `Bash` commands as `commands_run`
-- `Write` / `Edit` paths as `files_created` / `files_modified`
-- `Skill` calls as `skills_invoked`
-- Matching `tool_result` output attached back to the original tool call
+- The `duration_ms`, `num_turns`, token and cost in the `result` event
+- Tool calls in the `tool_use` event
+- The `Bash` command, as `commands_run`
+- The file path of `Write`/`Edit`, as `files_created`/`files_modified`
+- The `Skill` call, as `skills_invoked`
+- The corresponding `tool_result` output is hung back to the original tool call
 
-So report fields such as `Skills invoked`, `commands_run`, `tool_calls`, `files_created`, token/cost, and duration are organized from Claude CLI's structured event stream.
+So the `Skills invoked`, `commands_run`, `tool_calls`, `files_created`, token/cost, etc. in the report are all observable behavior logs sorted out from the structured event stream of Claude CLI.
 
 <Warning>
-  stream-json is still an <strong>observable behavior log</strong>. It is good for counting tool calls, commands, Skill invocations, file changes, and cost; it does not contain the model's private reasoning, and it cannot prove the causal chain behind an internal decision. Schema changes, malformed JSON lines, or CLI version changes can affect parsing, so raw stdout/stderr are retained for audit.
+stream-json is still just the observable behavior log <strong> </strong>. It is suitable for statistics on tool calls, commands, Skill calls, file changes and costs. It does not contain internal reasoning of the model and cannot prove the causal chain of a certain internal decision. schema changes, bad JSON lines, and CLI version changes may all affect parsing, so raw stdout/stderr will be retained for auditing.
 </Warning>
 
-### Trajectory and Event Stream Are Different
+### Trajectories and event streams are not the same thing
 
-The Comet Classic runtime also writes `.comet/trajectory*.jsonl`, recording state progression such as `state_transitioned`. That trajectory is one piece of recovery evidence, and the rubric checks for it under `recovery_resilience`.
+Comet Classic runtime itself also writes `.comet/trajectory*.jsonl` to record state progress, such as `state_transitioned`. This type of trajectory is one of the pieces of evidence of recovery ability. rubric will check whether it exists in `recovery_resilience`.
 
-But pass@k / pass^k are not computed from trajectory, and most rubric dimensions do not rely only on trajectory. The main evidence sources are Claude CLI stream-json, artifacts in the task directory, task validator results, and state files left by the Comet runtime.
+But pass@k/pass^k does not calculate from the trajectory, and most of the dimensions of rubric do not look only at the trajectory. The main sources of evidence are Claude CLI stream-json, the products in the task directory, the results of the task validator, and the status files left by Comet runtime.
 
-## rubric Scoring
+## rubric score
 
-The rubric breaks a Skill's quality down into multiple dimensions, each dimension composed of several **binary (pass/fail) check items**. The dimension score = passed items / total items (0.0–1.0). Each dimension outputs a line `[RUBRIC] <dimension>: <score> - <reason>`.
+rubric breaks down the quality of Skill into multiple dimensions,    each of which consists of several binary (pass/fail) checkitems. The dimension score = the number of passed items/the  total number of items (0.0-1.0). Output a line of `[RUBRIC] < Dimension >: < Fraction > - < Cause >` for each dimension.
 
-Scoring methodology (aligned with industry practices like Galileo, Hebbia, τ-bench):
+Scoring methodology (aligning with industry practices such as Galileo, Hebbia, and τ-bench) :
 
-- Each dimension contains N binary check items
-- Dimension score = passed / total (0.0–1.0)
-- Weighted total = Σ(dimension score × weight) / Σ(weights)
-- Weights reflect the dimension's importance to workflow quality
+- Each dimension contains N binary checkitems
+- Dimension score = passed/total (0.0-1.0)
+- Weighted total score = Σ(Dimension score × weight)/Σ(weight)
+- The weight reflects the importance of dimensions to the quality of the workflow
 
-### Three Rubrics
+### Three sets of rubric
 
-eval has three built-in rubrics, corresponding to three profiles:
+eval comes with three sets of rubric, corresponding to three profiles:
 
-| Profile | Dimensions | Weight sum | Interaction mode | Suitable for |
+| Profile |Dimension number|"Weights and|Interactive mode|Suitable|
 | --- | --- | --- | --- | --- |
-| `generic` | 7 | 7.7 | `none` (single-turn) | Generic Skill smoke testing |
-| `comet-workflow` | 9 | 11.0 | `auto_user` (multi-turn) | Classic `/comet` five-phase |
-| `authoring-skill` | 11 | 13.8 | `auto_user` (multi-turn) | `/comet-any` artifacts |
+| `generic` | 7 | 7.7 |`none` (Single Wheel)|General Skill is smoking.|
+| `comet-workflow` | 9 | 11.0 |`auto_user` (Multi-wheel)|The classic `/comet` five-stage|
+| `authoring-skill` | 11 | 13.8 |`auto_user` (Multi-wheel)|Products of `/comet-any`|
 
-### comet-workflow rubric (9 dimensions)
+### comet-workflow rubric (9-dimensional)
 
-Evaluates the classic five-phase workflow. The nine `[RUBRIC]` dimension scores are diagnostic, but the profile still checks the workflow contract: if `comet`, nested Comet stage Skills, OpenSpec dependency Skills, or Superpowers dependency Skills were not actually triggered, the run gets a hard failure.
+Evaluate the classic five-stage workflow. The nine `[RUBRIC]` dimension scores themselves are diagnostic scores; However, the profile will still check the Workflow Contract: if `comet`, nested Comet stage skills, OpenSpec dependent skills, or Superpowers dependent skills are not actually triggered, a hard failure will occur.
 
-| Dimension | Weight | What it checks |
+|"Dimension"|"Weight|Check what|
 | --- | --- | --- |
-| `completion` | **2.0** (highest) | Baseline validator pass ratio (did the task actually get done right) |
-| `main_flow` | 1.5 | How many of the five phases (open→design→build→verify→archive) left evidence |
-| `gate_guard` | 1.5 | Whether `comet-guard` / `transition` / `--apply` were used |
-| `artifact_quality` | 1.2 | Whether proposal/design/tasks/test have substantive content (proposal≥10 lines, design contains tradeoff keywords, tasks≥3 checkable items, has assertion tests) |
-| `skill_invocation` | 1.0 | Whether the comet entry, nested Comet stage Skills, OpenSpec dependency Skills, and Superpowers dependency Skills were actually observed, with the entry before stage Skills |
-| `spec_drift` | 1.0 | Whether the delta spec changed during build is reconciled before archiving (neutral 1.0 if spec untouched) |
-| `decision_point_compliance` | 1.0 | Whether it pauses at decision points to ask the user rather than deciding automatically (ask calls ≥ half of mutation count) |
-| `recovery_resilience` | 1.0 | Whether state is correctly preserved and recovered after interruption (five items: checkpoint/trajectory/context/pending/.comet.yaml) |
-| `efficiency` | **0.8** (lowest) | Cost normalization (three items: turns≤80, tools≤150, duration≤600s) |
+| `completion` |**2.0** (maximum|The baseline validator passes the proportion (whether the task is done correctly or not)|
+| `main_flow` | 1.5 |How many stages of the five phases (open→design→build→verify→archive) leave evidence|
+| `gate_guard` | 1.5 |Have you used `comet-guard`/`transition`/`--apply`|
+| `artifact_quality` | 1.2 |Proposal/design/tasks/test whether substance (proposal contains 10 lines, the design trade-offs or keywords, the tasks of three or more check the item, have asserted test)|
+| `skill_invocation` | 1.0 |Whether the comet entry, nested Comet stage skills, OpenSpec dependency skills, and Superpowers dependency skills are truly observed, and whether the entry precedes the stage skills|
+| `spec_drift` | 1.0 |Is the delta spec modified during the build period reconcile before archiving (neutral 1.0 if the spec is not modified)?|
+| `decision_point_compliance` | 1.0 |Whether to pause at the decision point and ask the user instead of making an automatic decision (the number of ASK calls ≥ half of the number of mutations)|
+| `recovery_resilience` | 1.0 |After the interruption is properly retained and restoring the state (checkpoint/trajectory/context/pending/.com et. Yaml five)|
+| `efficiency` |"0.8 (minimum)|Cost normalization (turns≤80, tools≤150, duration≤600 seconds)|
 
-### generic rubric (7 dimensions)
+### generic rubric (7-dimensional)
 
-Evaluates generic Skills. Unlike comet-workflow, **it produces a hard failure for "required Skill not invoked"** (when `require_skill_invocation: true`); the other dimensions are informational.
+Evaluate general skills. Unlike comet-workflow, ** It causes a hard failure when "the required Skill is not called" ** (when `require_skill_invocation: true`), while the rest of the dimensions are informative.
 
-| Dimension | Weight | What it checks |
+|"Dimension"|"Weight|Check what|
 | --- | --- | --- |
-| `completion` | **2.0** | Baseline validator pass ratio |
-| `safety_boundary` | 1.2 | Whether there are dangerous commands (`rm -rf`, `git reset --hard`, `curl ... \| sh`) |
-| `skill_invocation` | 1.0 | Whether all required skills were invoked (neutral 1.0 if not configured) |
-| `artifact_presence` | 1.0 | Whether expected_artifacts exist (supports glob) |
-| `instruction_following` | 1.0 | Whether any failed check mentions "constraint" |
-| `interaction_compliance` | 0.8 | Whether outer round-trips under auto_user exceed max_turns |
-| `efficiency` | 0.7 | Same thresholds as comet's efficiency |
+| `completion` | **2.0** |The baseline validator passes the proportion|
+| `safety_boundary` | 1.2 |Are there any dangerous commands (`rm -rf`, `git reset --hard`, 'curl... \| sh`） |
+| `skill_invocation` | 1.0 |Whether all required skills are invoked (neutral 1.0 if not configured)|
+| `artifact_presence` | 1.0 |Does expected_artifacts exist (supporting glob)?|
+| `instruction_following` | 1.0 |Is there a failure check that mentions "constraint"?|
+| `interaction_compliance` | 0.8 |Whether the outer round trip exceeds max_turns in auto_user mode|
+| `efficiency` | 0.7 |The same as the efficiency threshold of comet|
 
-### authoring-skill rubric (11 dimensions)
+### authoring-skill rubric (11-dimensional)
 
-Evaluates `/comet-any` generated Skill bundles. It first inherits four shared dimensions from generic, then adds seven bundle-specific checks. **Missing SKILL.md, missing resolved-skills.json, missing workflow-protocol.json, missing Engine files, missing authoring-lanes.json, and missing skill-review.md all produce hard failures**.
+Evaluate the Skill package generated by `/comet-any`. It first inherits the four shared dimensions of generic and then adds seven package-specific checks. Missing SKILL.md, missing resolven-skills.json, missing workflow-protocol.json, missing Engine file, missing authoring-lanes.json, missing skill-review.md All of them will result in hard failures.
 
-| Dimension | Weight | What it checks |
+|"Dimension"|"Weight|Check what|
 | --- | --- | --- |
-| `workflow_route_conformance` | **1.5** (tied for highest with completion) | Whether the protocol route order matches the expected node sequence, whether internal Node Skill files are complete, whether `comet/eval.yaml` lists the route |
-| `completion` | 1.5 | Inherited from generic |
-| `generated_package` | 1.4 | Bundle exists + SKILL.md contains route/pause-points/workflow and resolved-skill references/recovery guidance |
-| `resolved_skill_evidence` | 1.2 | `reference/resolved-skills.json` exists and `sourceSummaries` is non-empty |
-| `engine_contract` | 1.2 | `comet/` contains `skill.yaml`/`guardrails.yaml`/`checks.yaml`/`eval.yaml` (neutral 1.0 for lightweight bundles without Engine) |
-| `authoring_lanes` | 1.2 | `reference/authoring-lanes.json` contains the 6 required lanes (skill-core/script-contract/reference/pause-points/eval/skill-review) and review passes |
-| `safety_boundary` | 1.2 | Inherited from generic |
-| `skill_invocation` | 1.0 | Inherited from generic |
-| `artifact_presence` | 1.0 | Inherited from generic |
-| `review_gate` | **0.8** | `reference/skill-review.md` report passes, authoring-lanes review passes, no blocking findings |
-| `review_readiness` | **0.8** (lowest) | 1.0 if the generic layer has no hard failure |
+| `workflow_route_conformance` |**1.5** (tied for the highest with completion)|Whether the protocol routing order is consistent with the expected Node order, whether the internal Node Skill files are complete, and whether `comet/eval.yaml` lists the routes|
+| `completion` | 1.5 |Inherited from generic|
+| `generated_package` | 1.4 |The package contains + skill.md with routes/pause points/workflows and resolved-skill references/recovery guidelines|
+| `resolved_skill_evidence` | 1.2 |`reference/resolved-skills.json` exists and `sourceSummaries` is non-empty|
+| `engine_contract` | 1.2 |Under `comet/` `skill.yaml`/`guardrails.yaml`/`checks.yaml`/`eval.yaml` (1.0) Engine is lightweight package neutral|
+| `authoring_lanes` | 1.2 |`reference/authoring-lanes.json` contains 6 required lanes (skill-core/script-contract/reference/pause-points/eval/skill-review) and the review is passed|
+| `safety_boundary` | 1.2 |Inherited from generic|
+| `skill_invocation` | 1.0 |Inherited from generic|
+| `artifact_presence` | 1.0 |Inherited from generic|
+| `review_gate` | **0.8** |`reference/skill-review.md` report passed, authoring-lanes review passed, no blocking finding|
+| `review_readiness` |"0.8 (minimum)|If there are no hard failures in the generic layer, it is 1.0|
 
-### Weighted Total Formula
+### Weighted total score formula
 
 ```text
-weighted_score = Σ(dimension score × weight) / Σ(weights)
+weighted_score = Σ(Dimension score × weight) / Σ(weight)
 ```
 
-Each dimension outputs a line `[RUBRIC] <dim>: <score> - <reason>`, and finally a line `[RUBRIC] weighted_score: <score>`.
+Output one line of `[RUBRIC] <dim>: <score> - <reason>` for each dimension, and finally output one line of `[RUBRIC] weighted_score: < points >`.
 
-### RubricAvg (report column)
+### RubricAvg (Report Column)
 
-The `RubricAvg` column in the report is the **simple mean** (sum/len) of all dimension scores for that run (including the `weighted_score` row). Across multiple runs it's the mean of each run's mean. It's a summary for quick horizontal comparison, computed differently from a single rubric's `weighted_score` (which uses its own weights).
+The `RubricAvg` column in the report is the ** simple average score ** (sum/len) of all dimension scores (including the `weighted_score` row) of this run. When running across multiple runs, it is the average of the average scores of each run. It is a summary of rapid horizontal comparison, which is different from the single rubric `weighted_score` (using their respective weights) algorithm.
 
-### LLM-as-judge Override (Optional)
+### LLM-as-judge coverage (Optional)
 
-Enable by setting `BENCH_LLM_JUDGE=1`. By default, Comet's final `weighted_score` is a rule score, not LLM-as-judge. Rule-based rubrics can catch structural signals (file existence, command execution) but can't catch the **substantive depth** of artifacts — did the agent actually produce meaningful output, or just generate a stub? The LLM judge lets a judge model read workspace artifacts and re-score, outputting `[RUBRIC-JUDGE]` lines (distinct from the rule score's `[RUBRIC]`). Best-effort: on failure it falls back to the rule score without affecting the run.
+Enable `BENCH_LLM_JUDGE=1`. By default, Comet's final `weighted_score` is a rule score, not an LLM-as-judge. Rule-based rubric can capture structural signals (file existence, command execution), but it cannot grasp the substantive depth of the product - has the agent really made meaningful output, or has it only generated a stub? The LLM judge has a judging model read the workspace artifacts and re-score them, then output the `[RUBRIC-JUDGE]` line (distinguished from the `[RUBRIC]` line scored by the rules). best-effort: If it fails, it will fall back to the rule score without affecting the operation.
 
-The judge runs on the host (not inside Docker) by reusing the `claude` CLI, introducing no new dependencies. Judge configuration is **intentionally isolated** from the subject Agent configuration: when `BENCH_LLM_JUDGE=1` is enabled, `BENCH_JUDGE_MODEL` must be set explicitly, and the judge does not fall back to the subject model from `ANTHROPIC_MODEL`.
+judge runs on the host machine (not within Docker) by reusing the `claude` CLI without introducing new dependencies. However, the configuration of the referee and the configuration of the Agent under test are deliberately isolated: when `BENCH_LLM_JUDGE=1` is enabled, `BENCH_JUDGE_MODEL` must be explicitly set, and it is not possible to fall back and reuse the `ANTHROPIC_MODEL` of the main model.
 
-When `BENCH_JUDGE_BASE_URL` and `BENCH_JUDGE_AUTH_TOKEN` / `BENCH_JUDGE_API_KEY` are configured, the judge first calls Anthropic Messages HTTP directly (`/v1/messages`). Without a dedicated judge endpoint, it falls back to the host `claude` CLI, clears inherited subject `ANTHROPIC_*` provider settings, then maps the dedicated judge settings into its own CLI invocation:
+If `BENCH_JUDGE_BASE_URL` and `BENCH_JUDGE_AUTH_TOKEN`/`BENCH_JUDGE_API_KEY` are configured, judge will give priority to directly invoking Anthropic Messages HTTP (`/v1/messages`). When there is no dedicated judge endpoint, roll back to the host `claude` CLI, clear the inherited main `ANTHROPIC_*` provider Settings in the child process, and then map the independent judge configuration to your own CLI call:
 
-| Environment variable | Purpose |
+|Environmental variable|Purpose|
 | --- | --- |
-| `BENCH_JUDGE_MODEL` | Required. Judge model; used as the request model for direct HTTP, or passed to `claude --model` and subprocess `ANTHROPIC_MODEL` for CLI fallback |
-| `BENCH_JUDGE_AUTH_TOKEN` | Optional. Judge-only Anthropic-compatible proxy token; takes precedence over `BENCH_JUDGE_API_KEY` |
-| `BENCH_JUDGE_BASE_URL` | Optional. Judge-only Anthropic-compatible proxy URL |
-| `BENCH_JUDGE_API_KEY` | Optional. Judge-only Anthropic API key; not passed to the subprocess when an auth token is set |
+| `BENCH_JUDGE_MODEL` |Required. Referee model It serves as the request model during direct HTTP and is passed to `claude --model` and the child process `ANTHROPIC_MODEL` during CLI fallback|
+| `BENCH_JUDGE_AUTH_TOKEN` |Optional. The Anthropic compatible proxy token for referees takes precedence over `BENCH_JUDGE_API_KEY`|
+| `BENCH_JUDGE_BASE_URL` |Optional. Anthropic compatible proxy address for referees|
+| `BENCH_JUDGE_API_KEY` |Optional. Anthropic API key for referees; When setting the auth token, no child process will be passed in|
 
-This avoids the "same model as both contestant and judge" problem: the subject Agent can keep using its own `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, and token, while the judge must declare its model and provider separately. The direct HTTP path also avoids strict Anthropic-compatible proxies rejecting extra request parameters emitted by Claude CLI. If `BENCH_LLM_JUDGE=1` is enabled without `BENCH_JUDGE_MODEL`, the report records:
+This design is to avoid the situation where "the same model acts as both the player and the judge" : the main Agent can continue to use its own `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL` and token, while the judge must declare the model and provider separately. The direct HTTP path can also avoid the problem that some strictly Anthropic compatible proxies do not accept additional request parameters from the Claude CLI. If `BENCH_LLM_JUDGE=1` is enabled but `BENCH_JUDGE_MODEL` is missing, the report will be written as
 
 ```text
 [RUBRIC-JUDGE] status: skipped - BENCH_JUDGE_MODEL is required when BENCH_LLM_JUDGE=1
 ```
 
-That skipped state is not marked as `enabled_and_successful`, and the judge model is not invoked.
+This skipped state will not be marked as `enabled_and_successful`, nor will the referee model be invoked.
 
 Different profiles cover different dimensions:
 
-| Profile | Covered dimensions | Description |
+| Profile |Coverage dimension|Explanation|
 | --- | --- | --- |
-| `comet-workflow` | `artifact_quality`, `spec_drift`, `main_flow` | Re-scores the three qualitative dimensions where rules are weak (`llm_judge.py`) |
-| `generic` / `authoring-skill` | `task_completion`, `output_quality`, `instruction_adherence` | Three generic dimensions, plus the task's `rubric_criteria` declared in `task.toml` as `custom_N` dimensions (`generic_llm_judge.py`) |
+| `comet-workflow` | `artifact_quality`、`spec_drift`、`main_flow` |Three qualitative dimensions with relatively weak re-scoring rules (`llm_judge.py`)|
+| `generic` / `authoring-skill` | `task_completion`、`output_quality`、`instruction_adherence` |General three dimensions, plus the `rubric_criteria` declared in the `task.toml` task as the `custom_N` dimension (`generic_llm_judge.py`)|
 
-generic/authoring three-dimension scoring criteria:
+The three-dimensional scoring criteria of generic/authoring:
 
-| Dimension | 1.0 (full) | 0.5 | 0.0 |
+|"Dimension"|1.0 (Full marks| 0.5 | 0.0 |
 | --- | --- | --- | --- |
-| `task_completion` | All requirements met, artifacts exist and are correct, baseline checks pass | Partially complete | Critical artifacts missing or empty |
-| `output_quality` | Well-structured, complete, non-trivial, shows thought | Exists but shallow, barely meets the bar | Missing, empty, obvious stub |
-| `instruction_adherence` | Fully follows instructions and constraints, no forbidden patterns, sound tool usage | Minor deviation but core intent preserved | Severe violation, dangerous commands, constraint failure |
+| `task_completion` |All requirements are met, the product exists and is correct, and the baseline check is passed|Partially completed|The key products are missing or empty|
+| `output_quality` |Well-structured, complete, extraordinary and with traces of thought|It exists but is shallow and barely meets the standards|Missing, empty, obvious stub|
+| `instruction_adherence` |Fully comply with instructions and constraints, have no prohibited modes, and use tools properly|Slightly deviated but with the core intention retained|Serious violation, dangerous order, constraint failure|
 
-When collecting workspace files, the judge skips `.git`, `node_modules`, `.comet` and similar directories, with a 3000-character per-file cap and a 20000-character total budget; large files (>50KB) and binary files are skipped to keep the prompt under control. The judge must output line by line in `[RUBRIC-JUDGE] <dim>: <score> - <reason>` format, with each reason ≤25 words and citing specific content.
+When judge collects workspace files, it skips directories such as `.git`, `node_modules`, and `.comet`. The upper limit for a single file is 3,000 characters, and the total budget is 20,000 characters. Large files (>50KB) and binary files will be skipped to ensure that the prompt does not get out of control. The referee must output line by line in the `[RUBRIC-JUDGE] <dim>: <score> - <reason>` format, with each reason no more than 25 words and specific content cited.
 
 ## pass@k and pass^k
 
-These two metrics measure **capability vs reliability** and are key to evaluating whether a Skill can run stably and repeatedly. They are computed from the pass/fail sequence of **multiple repeated runs** (produced by `--count N`).
+These two indicators measure "ability vs. reliability" and are the key to evaluating whether a Skill can run stably and repeatedly. They are calculated based on the pass/fail sequence of ** repeated runs ** (generated by `--count N`).
 
-### Definitions
+### Definition
 
-| Metric | Formula | Meaning |
+|Indicator|Formula|Meaning|
 | --- | --- | --- |
-| **pass@k** (capability ceiling) | `1 - C(n-c, k) / C(n, k)` | Probability of **at least one** success in k independent attempts (HumanEval unbiased estimate) |
-| **pass^k** (reliability floor) | `1.0` if and only if `c == n`, else `0.0` | Probability that **all** k attempts succeed |
+|**pass@k** (upper capacity)| `1 - C(n-c, k) / C(n, k)` |The probability of success at least once out of k independent attempts (HumanEval unbiased estimation)|
+|**pass^k** (Lower reliability limit)|`1.0` if and only if `c == n`, otherwise `0.0`|The probability of success in all k attempts|
 
-Where n = total runs, c = successful runs. "Success" = that run's task validator had zero failures.
+Here, n = total number of runs, and c = number of successful runs. "Success "= Zero failure of the task validator in this run.
 
-### Why Both Are Needed
+### Why do we need two?
 
 ```mermaid
 flowchart LR
-    subgraph Cap["Capability ceiling pass@k"]
+    subgraph Cap["Upper capacity pass@k"]
         A1["Attempt 1 failed"] --- A2["Attempt 2 succeeded"]
     end
-    subgraph Rel["Reliability floor pass^k"]
+    subgraph Rel["The lower limit of reliability passes ^k"]
         B1["Attempt 1 succeeded"] --- B2["Attempt 2 succeeded"]
     end
-    Cap -->|"High pass@k but low pass^k"| Gap["gap = unstable<br/>can do it but result varies each time"]
-    Rel -->|"High pass^k"| Trust["Trustworthy: gets it right every time"]
+    Cap -->|"High pass@k but low pass^k"| Gap["gap = unstable <br/> can be done, but the result may not be the same each time"]
+    Rel -->|"High pass^k"| Trust["Trustworthy: Always get it right"]
 ```
 
 <p align="center">
-  <img src="/assets/eval-scoring-illustrations/01-pass-k-reliability.png" alt="Little fish comparing pass@k's at least one success with pass^k's stable success every time" width="800" />
+  <img src="/assets/eval-scoring-illustrations/01-pass-k-reliability.png" alt="Xiaoyu compares at least one success of pass@k with each stable success of pass^k" width="800" />
 </p>
 
-<p align="center">pass@k looks at the capability ceiling, pass^k looks at the reliability floor — the larger the gap, the more unstable</p>
+<p align="center">pass@k check the upper limit of capacity, pass^k check the lower limit of reliability. The greater the gap between the two, the more unstable it is. </p>
 
-- **High pass@k, low pass^k**: capability is sufficient, but **unstable** — "can do it, but can't guarantee doing it right every time". For a Skill that users run repeatedly, this is a danger signal.
-- **Both high**: can do it and **gets it right every time** — trustworthy.
+- **pass@k high, pass^k low ** : Sufficient ability, but ** unstable ** - "Can do it, but cannot guarantee to do it right every time". Repeatedly running a Skill to a user is a danger signal.
+- Both are high: they can do it and do it right every time - reliable.
 
-**The gap (pass@k − pass^k) quantifies instability.** The report explicitly highlights this gap.
+**gap (pass@k − pass^k) quantified instability **. The report will explicitly indicate this gap.
 
-### How to Get Multiple Runs
+### How can I get multiple runs
 
-`--count N` (a pytest option) repeats each `(task, treatment)` combination N times, producing N independent pass/fail results. The comparison report first filters to the analysis set: clear environment or runner noise is excluded, while flagged runs still participate in the main statistics and are called out. Those N booleans in the analysis set are the input to pass@k/pass^k.
+`--count N` (pytest option) repeats each `(task, treatment)` combination N times to generate N independent pass/fail results. The comparison report first filters out the analysis set: explicit environment or runner noise will be excluded, and flagged run still enters the main statistics but will be marked. The N Boolean values in the analysis set are the input of pass@k/pass^k.
 
 ```bash
 # Repeat 5 times to make pass@k/pass^k meaningful
-# (actually driven indirectly via comet eval; equivalent to --count 5 under the hood)
+# (Actually driven indirectly through comet eval, the underlying equivalent is --count 5)
 ```
 
 <Warning>
-  The report warns when there aren't enough runs: <em>"Only N run per treatment — pass@k/pass^k for k&gt;1 need ≥2 runs to be meaningful. Use <code>--count 5</code>."</em> A single run can only compute pass@1/pass^1; k&gt;1 metrics require multiple repeats.
+The report warns when running is insufficient: <em>"Only N run per treatment - pass@k/pass^k for k> 1 need ≥2 runs to be meaningful. Use <code>--count 5</code>." a single run of </em> counts as pass@1/pass^1, k> The indicator of 1 needs to be repeated many times.
 </Warning>
 
-### How to Choose k
+### How to choose k
 
-The report takes k values from `{1, 2, 5}` that **don't exceed the actual number of runs n** (k is clamped to n), falling back to `[1]` when insufficient. Report columns: `pass@1 [pass@2 pass@5]` and `pass^1 [pass^2 pass^5]`.
+The report takes the k value from `{1, 2, 5}` that does not exceed the actual running number n (k is clamp-down to n), and if it is insufficient, it reverts to `[1]`. Report columns: `pass@1 [pass@2 pass@5]` and `pass^1 [pass^2 pass^5]`.
 
-### Where They Appear
+### Where is it?
 
-pass@k/pass^k are not in `summary.md` but in the **comparison report** (produced by `compare_baselines.py` as `comparison_report.md`) in the `## pass@k / pass^k — capability vs reliability` section. They are **informational**, not gates.
+pass@k/pass^k is not in `summary.md`, but in the `## pass@k/pass^k — capability vs reliability` section of the ** Comparative report ** (`comparison_report.md` produced by `compare_baselines.py`). They are informative, not access control.
 
-## Dual-Agent Automatic Interaction Evaluation
+## Dual-agent automatic interaction evaluation
 
-For multi-stage workflow-type Skills (`comet-workflow` and `authoring-skill` profiles), the evaluation is completed by **two Agents interacting automatically**, with no human involvement needed.
+For multi-stage workflow skills (`comet-workflow` and `authoring-skill` profiles), the evaluation is completed by the automatic interaction of ** two agents **, without the need for human intervention.
 
-### Two Roles
+### Two roles
 
-| Role | What it does | Session |
+|"Role"|What to do|Conversation|
 | --- | --- | --- |
-| **Subject Agent (subject)** | Runs the Skill under test (e.g. the `/comet` five-phase) | A single continuous session, resumed with `--resume` each turn |
-| **User simulator Agent (simulator)** | Simulates user replies at decision points (approves reasonable proposals, picks reasonable defaults, clarifies only when truly ambiguous) | A one-shot `claude -p` call per decision point, stateless |
+|The tested Agent (subject)|Run the Skill under test (such as `/comet` five stages)|Single continuous session, with `--resume` continuing in each round|
+|"User Simulation Agent (simulator)|Simulate user responses at the decision point (approve reasonable plans, select reasonable defaults, and clarify only when there is real ambiguity)|A one-time `claude -p` call at each decision point, stateless|
 
-### Interaction Loop
+### Interactive loop
 
 ```mermaid
 flowchart TD
-    Start["Turn 1: subject Agent receives task prompt<br/>runs the Skill in a new session"] --> Parse["Parse output, extract session_id and result text"]
-    Parse --> Decision{"Is it a decision point?<br/>(? / confirm / choose /<br/>approve / which ... )"}
-    Decision -->|Yes| Sim["User simulator Agent generates reply<br/>approve proposal / pick default / move forward"]
-    Decision -->|No| Complete{"Workflow complete?<br/>(archive complete /<br/>all 5 phases / done)"}
-    Sim --> Resume["Next turn: subject Agent --resume same session<br/>feed in the simulated user reply"]
+    Start["Round 1: The tested Agent receives the task prompt<br/> and runs the Skill for the new session"] --> Parse["Parse the output and extract the session_id and the result text"]
+    Parse --> Decision{"Is it a decision point? <br/>(? /confirm/choose /<br/>approve/which ... )"}
+    Decision -->|is| Sim["The user simulates the Agent to generate the reply <br/> to approve the plan/select default/push forward"]
+    Decision -->|no| Complete{"Workflow completed? <br/>(archive complete /<br/>all 5 phases/done)"}
+    Sim --> Resume["Next round: The tested Agent --resume the same session <br/> feed in the simulated user response"]
     Resume --> Parse
-    Complete -->|Yes| End["End loop"]
-    Complete -->|No| Nudge["Send continue prompt to push forward"]
+    Complete -->|is| End["End the loop"]
+    Complete -->|no| Nudge["Send a "continue" prompt to advance"]
     Nudge --> Resume
 ```
 
-The loop runs up to `max_turns` outer round-trips (comet-workflow typically 12, authoring-skill typically 8), ending early when "complete" is hit (`archive complete` / `workflow complete` / `all 5 phases`, etc.).
+The loop has a maximum of `max_turns` outer round trips (comet-workflow usually 12 times, authoring-skill usually 8 times), and if it hits "Complete" (`archive complete`/`workflow complete`/`all 5 phases`, etc.), it ends prematurely.
 
-Every subject Agent turn also runs with `--output-format stream-json --verbose`. The loop driver only concatenates the subject Agent's stream-json stdout for the harness to parse; the user simulator Agent's one-shot replies do not enter the main event stream. As a result, event statistics reflect the subject Agent's observable behavior, not the simulator's behavior.
+Each round of the tested Agent is run with `--output-format stream-json --verbose`. The loop driver only concatenates the stream-json stdout of each round of the Agent under test for harness parsing. One-time responses from the user simulation Agent will not enter the main event stream. Therefore, event statistics only reflect the observable behavior of the subject Agent.
 
 <Note>
-  <code>max_turns</code> is not the number of real internal working turns of the subject Agent, nor the number of tool calls. One outer round-trip means: the subject Agent runs to a decision point, the user simulator Agent replies, then the subject Agent continues with <code>--resume</code>. Within the same round-trip there may still be multiple assistant messages, tool calls, and file operations.
+<code>max_turns</code> is neither the actual number of working rounds within the Agent under test nor the number of tool calls. An outer round trip refers to: the Agent under test runs to the decision point, the user simulates the Agent's response, and then the Agent under test continues with <code>--resume</code>. The same round trip may still contain multiple assistant messages, tool calls, and file operations internally.
 </Note>
 
-### Decision Point Detection
+### Decision point detection
 
-The subject Agent's output text is judged as a decision point when it matches any of these signals (case-insensitive):
+If the output text of the Agent under test matches these signals, it is determined as a decision point (case-insensitive) :
 
 ```text
 ? | confirm | choose | proceed | continue | approve | select an option |
@@ -289,78 +304,78 @@ which (option|approach|name) | enter the | provide | would you | shall we |
 do you want | preferred
 ```
 
-Custom `--decision-pattern` is also supported.
+It also supports custom `--decision-pattern`.
 
-### User Simulator Agent Instructions
+### The user simulates the instructions of the Agent
 
-The simulator Agent receives the simulator prompt + the subject Agent's last message, and is asked to:
+The simulated Agent received the simulator prompt + the last message of the Agent under test, and was required to:
 
-- When asked to confirm, **approve** the proposed plan/name/approach
-- When asked to choose, **pick the most reasonable default**
-- Ask for clarification only when the question is genuinely ambiguous about "what to do"
-- **Never refuse**; always let the workflow move forward
-- **Don't write code or files**
+- When asked to confirm, ** approve ** the proposed scheme/name/plan
+- When asked to choose, ** select the most reasonable default **
+- Only ask for clarification when the question is truly ambiguous about "what to do"
+- Never refuse, always keep the workflow moving forward
+- "Do not write code or files.
 
-comet-workflow uses `COMET_SIMULATOR_PROMPT`; generic/authoring uses `GENERIC_SIMULATOR_PROMPT` (slightly simpler wording). When the simulated reply is empty, it falls back to `"Yes, please proceed with the recommended option."`.
+comet-workflow uses `COMET_SIMULATOR_PROMPT`, and generic/authoring uses `GENERIC_SIMULATOR_PROMPT` (the wording is slightly simplified). When the simulation response is empty, roll back to `"Yes, please proceed with the recommended option."`.
 
-#### Customizing the Simulator Prompt
+#### Customize the simulator prompt word
 
-The simulator instructions for auto_user evaluation can be overridden. By default it reads from `eval/simulator-instruction.md`, whose content is the standard template of the principles above. Two override methods (from highest to lowest priority):
+The simulator instructions evaluated by auto_user can be overridden. By default, it reads from `eval/simulator-instruction.md`, and its content is the standard template of the above principles. Two coverage methods (priority from high to low) :
 
-| Method | How to set | Scope |
+|"Method"|How to set|Scope of application|
 | --- | --- | --- |
-| `--simulator-prompt "..."` | pytest command-line argument | Single run |
-| `BENCH_SIMULATOR_PROMPT_FILE=<path>` | Environment variable (can be written into the user-level `.env`) | All auto_user runs |
+| `--simulator-prompt "..."` |pytest command-line parameter|Single run|
+| `BENCH_SIMULATOR_PROMPT_FILE=<path>` |Environment variables (can be written into user-level `.env`)|All auto_user runs|
 
-Relative paths for `BENCH_SIMULATOR_PROMPT_FILE` are resolved from `eval/`, with a default value of `simulator-instruction.md`; the file is read only if it exists. This lets you swap in a different user behavior profile (e.g. more demanding, asks for more clarification) to stress-test how the workflow behaves under a "demanding user" without changing harness code.
+The relative path of `BENCH_SIMULATOR_PROMPT_FILE` is parsed from `eval/`, with the default value being `simulator-instruction.md`. The file will only be read if it exists. This enables you to change the user behavior profile (such as being more picky and asking for more clarification) to stress test the performance of the workflow under "difficult users" without having to harness the code.
 
-### Why It's Designed This Way
+### Why is it designed this way?
 
-Workflow-type Skills pause at decision points waiting for user confirmation. If the evaluation only ran a single turn, the Skill would get stuck at the first decision point. The dual-agent loop lets the evaluation **automatically run the entire workflow** (open→...→archive), while ensuring the user input at decision points is "reasonable and forward-moving" rather than hardcoded replies. This way the rubric scores and pass/fail measured reflect real usage scenarios.
+Workflow skills will pause at the decision point and wait for user confirmation. If the evaluation only runs a single round, Skill will get stuck at the first decision point. The dual-agent loop enables the evaluation to automatically run the entire workflow (open→...) →archive), and the user simulates the Agent to generate reasonable decision point inputs that can drive the process. Only in this way can the rubric score and pass/fail measured reflect the real usage scenarios.
 
-### Single-turn vs Multi-turn
+### Single round vs. multiple rounds
 
-- **`generic` profile** (`interaction.mode: none`): single-turn; the subject Agent runs to completion in one go (suitable for smoke tasks that don't need interaction).
-- **`comet-workflow` / `authoring-skill` profile** (`interaction.mode: auto_user`): multi-turn; enables the dual-agent loop.
+- **`generic` profile** (`interaction.mode: none`) : Single-round, the Agent under test runs all at once (suitable for smoking tasks that do not require interaction).
+- **`comet-workflow`/`authoring-skill` profile** (`interaction.mode: auto_user`) : Multi-round, enabling dual-agent loop.
 
-Tasks starting with `comet-*` or with `category: comet` are **automatically inferred** as the `comet-workflow` profile and enable `auto_user`.
+Tasks starting with `comet-*` or `category: comet` will be automatically inferred as `comet-workflow` profile and `auto_user` will be enabled.
 
-## The Three Axes of Evaluation: treatment × task × reps
+## The three axes of evaluation: treatment × task × reps
 
-An evaluation is the Cartesian product of three axes:
+One evaluation is the Cartesian product of three axes:
 
-| Axis | Meaning | Example |
+|shaft|Meaning|Example|
 | --- | --- | --- |
-| **task** | An evaluation task (directory, with instruction/environment/validation) | `comet-fix-median` (the bug-fix dimension) |
-| **treatment** | Experimental condition (which Skills / CLAUDE.md to inject) | `CONTROL` (no-Skill baseline), `COMET_FULL` (inject comet) |
-| **reps** | Number of repeats (`--count N`) | `--count 5` runs each (task,treatment) 5 times |
+| **task** |A review task (directory, including instruction/environment/validation)|`comet-fix-median` (bug Fixing Dimension)|
+| **treatment** |Experimental conditions (which skills/CLAUDE.md to inject)|`CONTROL` (baseline without Skill), `COMET_FULL` (Injected with comet)|
+| **reps** |Repetition count (`--count N`)|`--count 5` run each (task,treatment) five times|
 
-### treatment Enables A/B Comparison
+### The treatment achieves A/B comparison
 
-Running multiple treatments on the same task lets you measure the **marginal effect of the Comet Skill**:
+Running multiple treatments for the same task can measure the marginal effect of Comet Skill:
 
-| Treatment | Injects | Purpose |
+| Treatment |Injection|Purpose|
 | --- | --- | --- |
-| `CONTROL` | No-Skill baseline | Control |
-| `COMET_FULL` | comet main + 7 phase sub-Skills + brainstorming (v3, `.mjs` runtime) | Current version |
-| `COMET_FULL_039` | 0.3.9 frozen baseline (`.sh` runtime) | Regression comparison |
+| `CONTROL` |No Skill baseline|"Comparison"|
+| `COMET_FULL` |comet main + 7 stage sub-skills + brainstorming (v3, `.mjs` runtime)|Current version|
+| `COMET_FULL_039` |0.3.9 Freeze Baseline (`.sh` runtime)|Regression comparison|
 
-The comparison report (`compare_baselines.py`) compares `COMET_FULL` (WORKFLOW) and `COMET_FULL_039` (BASELINE) across rubric dimensions; CONTROL is only context.
+The comparison report (`compare_baselines.py`) compares `COMET_FULL` (WORKFLOW) and `COMET_FULL_039` (BASELINE) across rubric dimensions, with CONTROL only serving as the context.
 
-## How Metrics Get Into the Report
+## How can indicators be included in the report
 
-| Report location | Content |
+|Report location|"Content|
 | --- | --- |
-| `summary.md` Results table | One row per treatment: Checks + each rubric dimension column + RubricAvg + Turns/Duration/Tools/Tokens/Cost |
-| `summary.md` Aggregated by Treatment (when reps>1) | Reps Passed, Checks, Avg Turns/Duration, Tokens, Cost, Skills, Scripts |
-| Per-run `report.json` | passed, checks_passed[], checks_failed[], events_summary (including failure_attribution), rubric scores |
-| `comparison_report.md` | pass@k/pass^k table (capability vs reliability) + rubric dimension cross-treatment comparison |
+|The Results table of `summary.md`|Each treatment line: Checks column + RubricAvg + + the rubric dimension Turns/Duration/Tools/Tokens/Cost|
+|`summary.md` Aggregated by Treatment (when reps>1)| Reps Passed、Checks、Avg Turns/Duration、Tokens、Cost、Skills、Scripts |
+|Each time `report.json`|passed, checks_passed[], checks_failed[], events_summary (including failure_attribution), rubric points|
+| `comparison_report.md` |pass@k/pass^k table (capability vs reliability) + rubric dimension cross-treatment comparison|
 
-See [Reading Evaluation Reports](/en/eval/reports).
+For details, please refer to [Read the Evaluation Report ](/en/eval/reports)]
 
-## Next steps
+## Next step
 
-- [Reading Evaluation Reports](/en/eval/reports) — report structure and failure attribution
-- [Eval harness](/en/eval/harness) — collect/run internal mechanism and environment variables
-- [Evaluation System Overview](/en/eval/overview) — where eval fits in the publish workflow
-- [comet eval command](/en/cli/eval) — complete options reference
+- [Read the evaluation report ](/en/eval/reports) - Report structure and failure attribution
+- [Eval harness](/en/eval/harness) - collect/run internal mechanism and environment variables
+- Overview of the Evaluation System ](/en/eval/overview)-Eval in the release process
+- [comet eval command ](/en/cli/eval) - Complete options reference

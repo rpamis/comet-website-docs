@@ -1,32 +1,102 @@
 ---
-title: 'Native 与 Classic 如何选择'
-description: '对比 Native 与 Classic 的完成判定、执行开销、阶段取舍和适用场景。'
+title: "Native 还是 Classic：如何选择"
+description: "根据模型能力、流程约束和协作方式，在 Native 与 Classic 工作流之间快速做出选择。"
 ---
 
-Native 和 Classic 不是轻重档位，也不是同一个工作流的两个版本。Native 面向能自主规划、实现和修复的强模型（Fable 5、GPT-5.6 及同档）：方法由模型自己选，Runtime 只强制 Shape、必要检查、新 Verifier、Loop 和安全归档，portable 状态和用户文档可跨设备恢复。Classic 面向需要更细阶段约束的任务，用 OpenSpec 与 Superpowers 提供 open → design → build → verify → archive 五阶段治理，明确组织设计、计划、TDD、调试和 review。
+如果你的模型能力基线等价于 Fable 5、GPT-5.6 或同档模型，选择 **Native**。如果你希望 Comet 明确规定设计、计划、TDD 和审查步骤，选择 **Classic**。
 
-## 谁负责完成判定
+Native 和 Classic 不是高级版与基础版，也不是同一套流程的不同档位。它们面向两种不同的开发方式：Native 管住目标和完成标准，把实现方法交给模型；Classic 同时管理目标、实现过程和阶段产物。
 
-Native 不信任 Builder 的“完成”声明。Build 只提交 handoff，Runtime 运行必要检查，再分派新的只读 Verifier 覆盖全部验收项；失败回 Build，达到上限就等待用户。Classic 则用各阶段 Guard 和正式任务/报告推动流程。
+## 30 秒完成选择
 
-## 执行开销
+| 你的情况 | 建议 | 原因 |
+| --- | --- | --- |
+| 使用 Fable 5、GPT-5.6 或同档强模型 | **Native** | 模型可以自主选择实现和测试方法，不需要固定工程流程 |
+| 希望减少阶段切换、过程文档和 Agent 轮次 | **Native** | 只强制目标确认、实现、独立验收和归档 |
+| 希望每次需求都经过明确的设计、计划、TDD 和审查 | **Classic** | 五个阶段会固定这些工程步骤和交付物 |
+| 模型需要更细的步骤指导 | **Classic** | 阶段 Guard 和 Skill 会持续约束执行过程 |
+| 同一项目里两种需求都有 | **同时启用** | 每个新 change 可以使用适合它的工作流 |
 
-Native 不在 Verify 阶段扫描或指纹化整个项目，也不在 Archive 正常路径重复检查。相同候选下已完成的检查会复用，长命令输出流入本机日志。Classic 的优势是方法更明确，代价是需要更多阶段上下文和过程产物。
+<Tip>
+  如果模型能力足够，而且团队没有必须遵守的固定开发流程，优先选择 Native。如果你更看重过程一致性，或需要模型严格执行指定方法，选择 Classic。
+</Tip>
 
-## 产物和恢复
+## 什么时候选择 Native
 
-Native change 的主要用户产物是 brief、完整 Specs、`comet-state.yaml` 和 `verification.md`；本机执行状态、日志、锁和事务放在 `.comet/runtime/native/`。换设备时从 portable YAML 恢复，缺失的本机 overlay 会重建。
+Native 适合你把重点放在“最终要得到什么”，并愿意让模型自己决定“具体怎么做”的情况。
 
-Classic 继续使用自己的 `.comet.yaml`、OpenSpec 目录、Superpowers 计划和 Classic Runtime。两边的 change、Guard 和目录不会混用。
+选择 Native，通常意味着：
 
-## 选择建议
+- 你只需要确认目标、范围和真正影响结果的决定。
+- 模型自主选择设计方式、测试策略和相关工程 Skill。
+- Runtime 管理工作区、状态、中断恢复和阶段推进。
+- Builder 只提交候选结果，不能自行宣布完成。
+- Runtime 运行必要检查后，会启动一个全新的只读 Verifier Subagent，逐项核对验收标准。
+- 验收失败会带着具体缺口返回 Build，修复后重新验证。
 
-| 场景                               | 建议                                                               |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| 主力模型是 Fable 5、GPT-5.6 及同档，能自主调查、实现并判断测试   | Native                                                             |
-| 模型能力档低于这一档，需要逐阶段指导、TDD、计划和 review | Classic                                                            |
-| 同一项目两种任务都有               | `comet init --workflow both`，由 `.comet/config.yaml` 选择默认入口 |
+Native 的主流程是：
 
-模型名称只是便于选择的能力档参考，不是 Runtime 的检测条件：Comet 不读取模型名称切换工作流，最终由项目配置决定。
+```text
+Shape → Build → Verify → Archive
+          ↑         |
+          └─ 未通过 ┘
+```
 
-继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native Loop](/zh/native/native-loop) 和 [Classic 工作流](/zh/concepts/workflow)。
+它不会强制模型使用固定的设计模板、实施计划或 TDD 流程。需要这些方法时，模型可以按任务选择对应 Skill。
+
+## 什么时候选择 Classic
+
+Classic 适合你不仅关心结果，还希望每次开发都遵循明确、可复查的工程过程。
+
+选择 Classic，通常意味着：
+
+- 需求先进入 Open 阶段，建立正式 change。
+- Design 阶段整理规格、设计和任务边界。
+- Build 阶段按照计划执行，并根据配置使用 TDD、调试和审查方法。
+- Verify 阶段检查实现与规格是否一致。
+- 每个阶段都有明确产物和 Guard，不能随意跳过。
+
+Classic 的主流程是：
+
+```text
+Open → Design → Build → Verify → Archive
+```
+
+这些约束让过程更统一，也会带来更多阶段上下文、过程产物和交互轮次。
+
+## 两种工作流的实际区别
+
+假设你要为用户资料页增加头像上传能力。
+
+使用 **Native** 时，Comet 会先确认文件限制、失败行为等关键决定，再让模型自主完成实现和测试。Runtime 随后运行必要检查，并交给新的只读 Verifier Subagent 对照完整验收列表判断。发现缺口就返回 Build；全部通过后归档。
+
+使用 **Classic** 时，同一需求会依次经过 Open、Design、Build、Verify 和 Archive。设计文档、任务计划、实现方式和审查过程都有明确边界，模型按阶段完成对应产物后才能继续。
+
+| 对比项 | Native | Classic |
+| --- | --- | --- |
+| 主要控制对象 | 目标、验收和完成判定 | 目标、工程过程和阶段产物 |
+| 实现方法 | 模型自主选择 | 按配置和阶段规则执行 |
+| 完成判定 | Runtime 检查 + 独立只读 Verifier Subagent | Verify 阶段检查实现与规格 |
+| 用户参与 | 主要确认目标和关键决定 | 还可能确认设计、计划和阶段结果 |
+| 执行开销 | 更少的阶段和过程上下文 | 更多阶段、产物和约束 |
+| 适合的模型 | 能自主完成复杂开发任务的强模型 | 需要细化指导或必须遵守固定流程的模型 |
+
+## 同一项目可以同时使用
+
+如果不同任务需要不同方式，可以同时启用两套工作流：
+
+```bash
+comet init --workflow both
+```
+
+`.comet/config.yaml` 中的 `default_workflow` 决定 `/comet` 默认进入哪套工作流。这个设置只影响新入口，不会把已有 change 从 Native 转成 Classic，也不会把 Classic change 转成 Native。两边分别管理自己的 change、状态、Guard 和产物。
+
+## 仍然拿不准怎么办
+
+- **模型能力足够，想更快得到经过独立验收的结果**：选择 Native。
+- **团队要求固定设计、计划、TDD 或审查流程**：选择 Classic。
+- **项目里两种情况都会出现**：同时启用，把更常用的一种设为默认。
+
+模型名称只是能力参考。Comet 不会读取模型名称并自动切换工作流，最终选择由项目配置决定。
+
+继续阅读：[Native 快速开始](/zh/native/quickstart)、[Native 工作流](/zh/concepts/native-workflow) 和 [Classic 工作流](/zh/concepts/workflow)。
