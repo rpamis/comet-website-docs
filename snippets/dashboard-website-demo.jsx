@@ -36,11 +36,39 @@ export const DashboardWebsiteDemo = () => {
 
     let cancelled = false;
     let unmountDashboard;
-    const scriptUrl = '/assets/dashboard-website-demo/dashboard-website-demo.js?v=rc1-website-10';
-    const stylesheetUrl =
-      '/assets/dashboard-website-demo/dashboard-website-demo.css?v=rc1-website-10';
 
-    const loadDashboardBundle = () => {
+    // Mintlify 部署会丢弃 .js/.css 静态文件（.json/.png 正常），因此资产以 JSON 包装下发，
+    // 浏览器端还原成 Blob URL 后再注入。资产解析结果缓存在 globalThis 上，SPA 内页切换时避免重复拉取。
+    const loadDashboardAssets = () => {
+      const cache = globalThis.__cometDashboardWebsiteDemoAssets;
+      if (cache) return cache;
+
+      const fetchPayload = (url) =>
+        fetch(url)
+          .then((response) => {
+            if (!response.ok) throw new Error(`Dashboard 预览静态资源加载失败（${response.status}）。`);
+            return response.json();
+          });
+
+      globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
+        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=rc1-website-11'),
+        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=rc1-website-11'),
+      ])
+        .then(([jsPayload, cssPayload]) => ({
+          scriptUrl: URL.createObjectURL(
+            new Blob([jsPayload.js], { type: 'text/javascript' }),
+          ),
+          stylesheetUrl: URL.createObjectURL(new Blob([cssPayload.css], { type: 'text/css' })),
+        }))
+        .catch((error) => {
+          delete globalThis.__cometDashboardWebsiteDemoAssets;
+          throw error;
+        });
+
+      return globalThis.__cometDashboardWebsiteDemoAssets;
+    };
+
+    const loadDashboardBundle = ({ scriptUrl }) => {
       if (globalThis.CometDashboardWebsiteDemo) {
         return Promise.resolve(globalThis.CometDashboardWebsiteDemo);
       }
@@ -51,7 +79,7 @@ export const DashboardWebsiteDemo = () => {
           if (globalThis.CometDashboardWebsiteDemo) resolve(globalThis.CometDashboardWebsiteDemo);
           else reject(new Error('Dashboard 预览加载完成，但没有找到挂载入口。'));
         };
-        const handleError = () => reject(new Error('Dashboard 预览静态资源加载失败。'));
+        const handleError = () => reject(new Error('Dashboard 预览脚本执行失败。'));
 
         if (!script) {
           script = document.createElement('script');
@@ -66,10 +94,11 @@ export const DashboardWebsiteDemo = () => {
       });
     };
 
-    loadDashboardBundle()
-      .then((dashboard) => {
+    loadDashboardAssets()
+      .then((assets) => loadDashboardBundle(assets).then((dashboard) => ({ dashboard, assets })))
+      .then(({ dashboard, assets }) => {
         if (cancelled) return;
-        unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl });
+        unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: assets.stylesheetUrl });
       })
       .catch((error) => {
         if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
