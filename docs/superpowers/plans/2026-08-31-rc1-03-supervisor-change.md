@@ -4,7 +4,7 @@
 
 **Goal:** Replace `img/rc1-highlights-v2/03-supervisor-change.png` with a pure-white 3:4 abstract infographic showing one complex goal splitting into independently verified child streams and reuniting in a final verified delivery.
 
-**Architecture:** Generate one image from the approved light-splitting concept while using the current 03 and 08 images only as exclusion references and the repository favicon as the brand reference. Copy the selected PNG into the stable 03 path, normalize neutral near-white background pixels to exact white, then verify geometry, visual semantics, copy, and Git scope before committing and pushing.
+**Architecture:** Generate one image from the approved flat orchestration-track concept while using 02, 06, and 07 as positive v2 style references, the current 03 as the replacement target, 08 as an exclusion reference, and the repository favicon as the brand reference. Copy the selected PNG into the stable 03 path, normalize neutral near-white background pixels to exact white, then verify geometry, visual semantics, copy, and Git scope before committing and pushing.
 
 **Tech Stack:** Built-in OpenAI image generation, PNG, PowerShell, .NET `System.Drawing`, Git.
 
@@ -16,6 +16,8 @@
 - Reuse `logo/favicon.png` without changing its aspect ratio.
 - Primary copy is `Supervisor Change`, `复杂目标，一次统筹交付`, and `拆分独立成果 · 管理依赖 · 并行验证 · 汇聚验收`.
 - The visual reads as one goal, three independently progressing child streams, dependency-aware verification, convergence, and final verification.
+- Use v2's flat blue outlines, white interiors, circular status nodes, restrained arrows, deep-navy typography, and a small green final-verification accent.
+- Do not use glow, volumetric light, floating rings, 3D spheres or cubes, glass effects, or conceptual technology-poster styling.
 - Do not use platform icon rings, Skills/Rules/Hooks layers, a dark lower-right planet, pixel dispersion, dashboard cards, or four repeated child process columns.
 - Do not add Agent counts, speed claims, success rates, or other unsupported metrics.
 
@@ -27,6 +29,9 @@
 - Read: `logo/favicon.png`
 - Read: `img/rc1-highlights-v2/03-supervisor-change.png`
 - Read: `img/rc1-highlights-v2/08-platforms.png`
+- Read: `img/rc1-highlights-v2/02-native-eval.png`
+- Read: `img/rc1-highlights-v2/06-skill-eval-loop.png`
+- Read: `img/rc1-highlights-v2/07-recoverable-runtime.png`
 - Modify: `img/rc1-highlights-v2/03-supervisor-change.png`
 
 **Interfaces:**
@@ -44,15 +49,15 @@ Use the built-in image generation tool with this exact prompt:
 ```text
 Use case: infographic-diagram
 Asset type: Comet RC1 release highlight, portrait product infographic
-Primary request: Create an abstract, elegant Chinese product infographic for Comet Supervisor Change. Show one complex product goal entering a restrained Supervisor core, splitting into three flowing blue light ribbons that progress independently, cross a small number of dependency gates, each reach a verification point, then weave back together into one stable luminous geometric delivery marked Final Verify. The visual should communicate decomposition, dependency-aware parallel progress, independent verification, integration, and one final acceptance result without looking like a conventional flowchart.
-Input images: Image 1 is the current 03 replacement target. Image 2 is 08 and is an exclusion reference: do not repeat its orbital platform network, central number, pixel planet, or lower-right dark arc. Image 3 is the exact Comet logo reference; preserve its identity and aspect ratio.
+Primary request: Create a flat, productized Chinese infographic for Comet Supervisor Change in the same visual family as the approved v2 release images. Show one complex Goal entering a wide flat Supervisor band, splitting into three clean two-dimensional execution tracks for Child A, Child B, and Child C. Use staggered starts and one or two short cross-track connectors to communicate dependency order. Each track reaches a flat outlined verification node, then the three tracks merge into one complete delivery band ending in a flat outlined Final Verify symbol. The image must look like a refined product architecture graphic, not a science-fiction concept poster.
+Input images: Image 1 is the current 03 replacement target and should be fully replaced. Image 2 is 08 and is an exclusion reference: do not repeat its orbital platform network, central number, pixel planet, or lower-right dark arc. Images 3, 4, and 5 are positive v2 style references: match their flat blue outlines, deep-navy typography, white modules, circular nodes, restrained arrows, and small green verification accents. Image 6 is the exact Comet logo reference; preserve its identity and aspect ratio.
 Scene/backdrop: exact pure white #FFFFFF canvas.
-Composition: strict 3:4 portrait. Small Comet logo at upper left. At the top, place “Supervisor Change”, then “复杂目标，一次统筹交付” and the concise line “拆分独立成果 · 管理依赖 · 并行验证 · 汇聚验收”. Use the middle and lower area for a spacious top-to-bottom split-and-converge light composition. The final converged result should sit near the lower center, not the lower right. Optional small structural labels are “Goal”, “Child A”, “Child B”, “Child C”, and “Final Verify”.
-Style/medium: minimal flat editorial infographic with refined vector-like light ribbons, clean geometry, subtle depth only within the ribbons, generous whitespace, premium software launch aesthetic.
-Color palette: deep ink typography, Comet blue, cyan-blue, muted pale blue-gray, and one restrained cyan-green highlight for final verification.
+Composition: strict 3:4 portrait. Small Comet logo at upper left. At the top, place “Supervisor Change”, then “复杂目标，一次统筹交付” and the concise line “拆分独立成果 · 管理依赖 · 并行验证 · 汇聚验收”. Use the middle and lower area for a spacious top-to-bottom flat orchestration map. Place Goal and Supervisor as compact flat modules, branch into three offset tracks, and merge near the lower center. Optional small structural labels are “Goal”, “Supervisor”, “Child A”, “Child B”, “Child C”, “Verified”, and “Final Verify”.
+Style/medium: minimal flat editorial product infographic, crisp vector-like strokes, consistent line weight, white interiors, subtle local blue fills only, generous whitespace, premium software product launch aesthetic aligned with images 3, 4, and 5.
+Color palette: deep navy typography, Comet blue outlines and tracks, pale blue-gray supporting lines, and one restrained green final-verification accent.
 Text (verbatim): “Supervisor Change”; “复杂目标，一次统筹交付”; “拆分独立成果 · 管理依赖 · 并行验证 · 汇聚验收”; optional “Goal”; optional “Child A”; optional “Child B”; optional “Child C”; optional “Final Verify”.
 Constraints: all text must be exact and legible; natural-width sans-serif typography; keep every letter horizontally aligned; exact white background; no non-uniform scaling; no vertically stretched text; no unsupported numbers or claims.
-Avoid: rhetorical questions, negative comparison copy, “不是……而是……”, platform logos, orbit rings, Skills/Rules/Hooks, dark planet or dark lower-right mass, pixel-square dispersion, dashboard cards, repeated child columns, dense arrow-node networks, glassmorphism, warm beige, ivory, warm gray background, watermark.
+Avoid: glow, luminous tubes, volumetric light, floating halos, floating rings, 3D spheres, 3D cubes, translucent glass, heavy shadows, science-fiction concept art, rhetorical questions, negative comparison copy, “不是……而是……”, platform logos, orbit rings, Skills/Rules/Hooks, dark planet or dark lower-right mass, pixel-square dispersion, dashboard cards, repeated child columns, dense arrow-node networks, warm beige, ivory, warm gray background, watermark.
 ```
 
 - [ ] **Step 3: Copy the newest generated PNG into the target path**
@@ -90,7 +95,7 @@ Load the target through `System.Drawing.Bitmap` and print format, width, height,
 
 - [ ] **Step 3: Perform final original-detail visual review**
 
-Confirm exact primary copy, natural typography, a clear one-to-many-to-one narrative, visible dependency and verification cues, balanced whitespace, and no visual vocabulary copied from 08.
+Confirm exact primary copy, natural typography, a clear one-to-many-to-one narrative, visible dependency and verification cues, balanced whitespace, visual consistency with v2, no glow or 3D effect, and no visual vocabulary copied from 08.
 
 - [ ] **Step 4: Verify repository scope**
 
