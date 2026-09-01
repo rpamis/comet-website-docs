@@ -18,17 +18,12 @@ description: '用户调用 /comet 并进入 Classic 后，内部路由如何识�
 </p>
 
 <p align="center">
-  路由上下文把原话、仓库状态和风险信号整理成可复核证据，再交给运行时决定最终 route
+  路由上下文记录用户请求、仓库状态和风险信号，运行时据此计算 route
 </p>
 
-## 为什么需要路由上下文
+## 路由上下文解决的问题
 
-<Note>
-  一句话概括：路由上下文让 <code>/comet-classic</code> 的路由<strong>可解释、可复核、可恢复</strong>
-  ，整个判定过程都有证据可查。
-</Note>
-
-在路由上下文之前，`/comet-classic` 入口靠的是 Skill 正文里的一段自然语言规则——"如果是 bug 就走 hotfix，如果是文案改动就走 tweak……"。这种做法有三个问题：
+在路由上下文之前，`/comet-classic` 入口靠的是 Skill 正文里的一段自然语言规则——"如果是 bug 就走 hotfix，如果是文案改动就走 tweak……"。这种做法有三个问题
 
 | 问题         | 表现                                                           |
 | ------------ | -------------------------------------------------------------- |
@@ -46,12 +41,12 @@ description: '用户调用 /comet 并进入 Classic 后，内部路由如何识�
 | -------------- | ------------------------------------------------ | ---------------------- | -------- |
 | `full`         | 走完整五阶段（open→design→build→verify→archive） | `comet-open`           | 否       |
 | `hotfix`       | 快速修复已有行为，跳过头脑风暴                   | `comet-hotfix`         | 否       |
-| `tweak`        | OpenSpec 链路的中等改动，delta spec 是一等公民   | `comet-tweak`          | 否       |
+| `tweak`        | 使用 OpenSpec 的中等改动，delta spec 是正式产物  | `comet-tweak`          | 否       |
 | `resume`       | 恢复一个进行中的变更                             | 由该变更的当前阶段决定 | 否       |
 | `ask_user`     | 证据不足或有冲突，停下来问你                     | 无                     | **是**   |
 | `out_of_scope` | 你只是在提问，没要求执行工作流                   | 无                     | **是**   |
 
-注意两点：
+其中：
 
 - 只有 `ask_user` 和 `out_of_scope` 需要**显式确认**——证据不足时，Comet 会暂停并等待你选择。
 - `full`/`hotfix`/`tweak` 各自映射到一个确定的入口 Skill，而 `resume` 的下一步取决于你要恢复的那个变更当前停在哪一阶段。
@@ -197,7 +192,7 @@ flowchart TD
 
 → 路由 **`out_of_scope`**。你在提问，没要求执行工作流，Comet 会保持在信息查询范围。
 
-## 这套机制对用户意味着什么
+## 使用时需要知道什么
 
 对普通用户，你**不需要手写路由上下文**。调用 `/comet` 后，配置选择 Classic，再由 `/comet-classic` 在内部自动完成上下文整理和评分。你只需要知道：
 
@@ -224,7 +219,7 @@ node "$COMET_INTENT" route --stdin < frame.json
 
 - **`/comet`**：正常用户入口，按项目配置选择 Native 或 Classic。
 - **`/comet-classic`**：Classic 内部永久入口，由路由上下文决定走 `full`/`hotfix`/`tweak`/`resume`；通常由 `/comet` 转发进入。
-- **`/comet-tweak`**：**tweak 专用**的 OpenSpec action 路径。你已经明确知道要做一次 OpenSpec 链路的中等改动，直接走它更快。
+- **`/comet-tweak`**：**tweak 专用**的 OpenSpec action 路径。适用于已经确认范围的中等改动。
 
 换句话说，`/comet-classic` 是"在 Classic 内帮我判断该走哪条"，`/comet-tweak` 是"我已经知道要走 tweak"。完整的五阶段 `full` 仍然走 Superpowers 的 design/plan/build 路径。
 

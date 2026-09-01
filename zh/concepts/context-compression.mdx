@@ -24,30 +24,30 @@ design 阶段结束时，需要把 OpenSpec 的需求规格（proposal、design�
 
 ### off 模式
 
-生成完整但可追溯的摘要：
+该模式生成以下文件：
 
 - `design-context.json` — 机器索引（change、phase、canonical spec、源文件路径、per-file sha256、context_hash）
-- `design-context.md` — Superpowers 可读上下文，每文件带源路径、行范围、sha256 和确定性摘要。超过 80 行的文件截断，带 `[TRUNCATED]` 标记和 `Full source:` 指针。
+- `design-context.md` — 供 Superpowers 读取。每个文件带源路径、行范围、sha256 和摘要。超过 80 行的文件会截断，并带有 `[TRUNCATED]` 标记和 `Full source:` 指针。
 
 用 `--full` 标志可以输出未截断的 verbatim 完整内容。
 
 ### beta 模式
 
-生成结构化 spec 投影：
+该模式生成以下文件：
 
 - `spec-context.json` — 机器索引，每文件标 `role: spec`（delta spec）或 `role: supporting`（proposal/design/tasks）
-- `spec-context.md` — 紧凑上下文：**delta spec 文件 verbatim 投影**（完整保留验收场景），proposal/design/tasks 只存 hash 引用
+- `spec-context.md` — 原样投影 delta spec，包括验收场景；proposal、design 和 tasks 只记录 hash 引用
 
 <Note>
   beta 模式下 <code>--full</code> 被忽略（会输出 warning）。beta 只对 delta spec 做 verbatim 投影，其他文件靠 hash 引用，所以节省来自不重复传输 proposal/design/tasks 的全文。
 </Note>
 
-## 为什么 delta spec 要完整保留
+## delta spec 的处理方式
 
-OpenSpec 的 delta spec（`specs/<capability>/spec.md`）包含验收场景，是实现正确性的关键依据。beta 模式**完整保留 delta spec 内容**（verbatim 投影），只对 proposal/design/tasks 用 hash 引用。这保证：
+OpenSpec 的 delta spec（`specs/<capability>/spec.md`）包含本次变更的需求和验收场景。beta 模式原样写入 delta spec，对 proposal、design 和 tasks 使用 hash 引用：
 
-- 验收场景零漂移——不管 spec 是中文还是英文，投影都完整保留。
-- proposal/design/tasks 的完整性由 sha256 验证；需要时按 hash 回查原文件，Agent 摘要只用于快速阅读。
+- delta spec 的正文不经过摘要。
+- proposal、design 和 tasks 通过 sha256 关联源文件，需要时可以回读原文。
 
 <Warning>
   OpenSpec delta spec 始终是权威来源。beta 投影缺失或过期时，必须重新生成或直接读源 spec，绝不能用 Agent 摘要替代。
@@ -74,9 +74,9 @@ design 守卫会检查交接包的存在和有效性：`handoff_context`/`handof
 
 design 阶段在写完 `brainstorm-summary.md` 后、创建 Design Doc 之前，会触发平台原生的 compact/compaction 机制（如果平台支持），或暂停让你手动执行。压缩后重新加载交接文件。这是独立于 `context_compression` 的运行时优化。
 
-## 性能数据
+## 当前基准数据
 
-来自 Comet 的 benchmark 测试：
+下表记录当前 Comet benchmark 的结果。数据只适用于该任务集和测试配置：
 
 | 指标 | off | beta |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ design 阶段在写完 `brainstorm-summary.md` 后、创建 Design Doc 之前，
 | token 节省 | 基线 | 约 25–30% |
 | 大型任务节省 | — | 最多约 15,000 tokens |
 
-beta 模式在保持 100% 测试通过率的同时节省约 25–30% token，代价是 spec 覆盖率从 100% 降到 95%（因为部分 supporting 文件靠 hash 引用而非全文）。
+在该基准中，beta 模式的 token 使用量降低约 25–30%，spec 覆盖率从 100% 变为 95%。原因是 supporting 文件只保留 hash 引用。
 
 ## 怎么启用 beta
 
