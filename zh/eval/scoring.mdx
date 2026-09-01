@@ -12,11 +12,11 @@ description: "深入理解 Comet eval 的指标驱动评测：rubric 多维评�
   任务证据或自动交互实现时，才需要拉取源码。日常运行请看[快速上手](/zh/eval/quickstart)。
 </Warning>
 
-Comet 的 eval 不只给出"通过/失败"，而是**指标驱动**的评测：用 **rubric 多维评分**量化 Skill 在各个质量维度的表现，用 **pass@k / pass^k** 区分"能力上限"和"可靠性下限"。对于多阶段工作流类 Skill，评测由**两个 Agent 自动交互**完成——一个跑被测 Skill，另一个模拟用户在决策点回复。
+Comet eval 使用任务检查结果决定一次运行是否通过，并提供 rubric、pass@k、pass^k 和加权分数作为诊断信息。多阶段工作流任务可以由被测 Agent 和用户模拟 Agent 完成交互。
 
 ## 读报告时先看这些
 
-如果你不是在调试评分器，读报告时按这个顺序看即可：
+阅读报告时按以下顺序检查：
 
 | 顺序 | 报告信号 | 判断什么 |
 | --- | --- | --- |
@@ -27,10 +27,10 @@ Comet 的 eval 不只给出"通过/失败"，而是**指标驱动**的评测：�
 | 5 | 最低 rubric 维度 | 下一轮优化优先投到哪里 |
 
 <Note>
-  日常发布判断不要只看 <code>weighted_score</code>。真正的通过/失败先看 <code>checks_failed</code>；rubric、pass@k 和 pass^k 用来判断质量、稳定性和下一步优化方向。
+  发布判断不能只看 <code>weighted_score</code>。一次运行是否通过由 <code>checks_failed</code> 决定；rubric、pass@k 和 pass^k 用于诊断和比较。
 </Note>
 
-## 指标体系一览
+## 评分指标
 
 | 指标 | 回答的问题 | 类型 | 是否门禁 |
 | --- | --- | --- | --- |
@@ -43,12 +43,12 @@ Comet 的 eval 不只给出"通过/失败"，而是**指标驱动**的评测：�
 | **任务校验器通过/失败** | 这次实现到底对不对 | 硬判定 | 是（决定 pass/fail） |
 
 <Note>
-  <strong>关键区分</strong>：rubric 的维度分和 pass@k/pass^k 都是<strong>信息性指标</strong>，用于诊断和对比；真正的<strong>通过/失败</strong>看 <code>checks_failed == []</code>。大多数失败来自任务校验器（<code>target_artifacts</code> 存在性 + <code>test_scripts</code>），但 profile 也会把必需 Skill 未触发这类工作流契约问题写入 <code>checks_failed</code>。
+  rubric 和 pass 指标用于诊断和比较。通过条件是 <code>checks_failed == []</code>。大多数失败来自任务校验器，但 profile 也会把必需 Skill 未触发等工作流契约问题写入 <code>checks_failed</code>。
 </Note>
 
 ## 证据从哪里来
 
-Comet eval 的运行证据来自 **Claude CLI 自己输出的 stream-json**，不是从终端文本里猜，也不是让另一个模型回忆总结。
+Comet eval 从 Claude CLI 的 stream-json、任务产物、校验器结果和 Runtime 状态中收集运行证据。
 
 单轮评测会在 Docker 里的任务目录直接运行被测 Agent：
 
@@ -237,7 +237,7 @@ flowchart LR
 - **pass@k 高、pass^k 低**：能力够，但**不稳定**——"能做，但不能保证每次都做对"。对一个用户反复运行的 Skill，这是危险信号。
 - **两者都高**：既能做，又**每次都做对**——可信赖。
 
-**gap（pass@k − pass^k）量化不稳定性**。报告里会显式提示这个 gap。
+报告会显示 `pass@k − pass^k` 的差值，供比较重复运行结果。
 
 ### 怎么得到多次运行
 
@@ -327,9 +327,9 @@ auto_user 评测的模拟器指令可被覆盖。默认从 `eval/simulator-instr
 | `--simulator-prompt "..."` | pytest 命令行参数 | 单次运行 |
 | `BENCH_SIMULATOR_PROMPT_FILE=<path>` | 环境变量（可写进用户级 `.env`） | 所有 auto_user 运行 |
 
-`BENCH_SIMULATOR_PROMPT_FILE` 的相对路径从 `eval/` 解析，默认值 `simulator-instruction.md`，文件存在才会被读取。这让你能换一套用户行为画像（比如更挑剔、会要求澄清更多）来压力测试工作流在"难缠用户"下的表现，而不必改 harness 代码。
+`BENCH_SIMULATOR_PROMPT_FILE` 的相对路径从 `eval/` 解析，默认值为 `simulator-instruction.md`，文件存在时才会读取。通过替换该文件，可以测试不同用户行为配置，而不需要修改 harness 代码。
 
-### 为什么这样设计
+### 设计目的
 
 工作流类 Skill 会在决策点暂停等用户确认。如果评测只跑单轮，Skill 会卡在第一个决策点。双 Agent 循环让评测**自动跑完整条工作流**（open→...→archive），并由用户模拟 Agent 生成合理、能推动流程的决策点输入。这样测出来的 rubric 分和 pass/fail 才反映真实使用场景。
 

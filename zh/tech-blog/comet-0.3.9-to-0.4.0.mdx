@@ -1,39 +1,37 @@
 ---
-title: "从 0.3.9 到 0.4.0：Comet 怎么从工作流层长成 Skill 平台"
-description: "0.4.0-beta.1 不只是把 Bash 换成 Node。它一次性补上了三个全新系统——/comet-any 让你造出和 Comet 一样好用的 Skill、comet eval 让 Skill 效果可量化并决定演进方向、comet dashboard 让产物管理有可视化平台。这篇文章讲清楚每一项改动背后的原因。"
+title: "Comet 0.4.0：运行时与产品入口变化"
+description: "回顾 0.4.0-beta.1 的 Node 运行时、路由上下文、Skill Creator、Eval、Dashboard 和状态分层。"
 ---
 
-0.3.9 的 Comet 是一个优秀的"五阶段工作流层"——它把 OpenSpec 和 Superpowers 串成一条可恢复的开发流水线，靠 Bash 脚本守护阶段边界。但用着用着，两类限制越来越明显：
+0.3.9 使用 Bash 脚本连接 OpenSpec 与 Superpowers，并保存五阶段状态。0.4.0 主要处理两类问题。
 
-一类是**已有能力的硬伤**——
+第一类来自现有运行时：
 
-- Windows 用户必须装 Git Bash 或 WSL 才能跑完整流程；
-- `/comet` 的路由全靠 Agent 重新读提示词"猜"一次，错了无从复查；
-- 中断后回来，所有状态挤在一个 `.comet.yaml` 里，机器字段和人类字段互相污染。
+- Windows 需要 Git Bash 或 WSL；
+- `/comet` 依靠 Agent 读取自然语言规则选择路由，缺少结构化诊断记录；
+- `.comet.yaml` 同时保存用户可读字段和机器运行状态。
 
-另一类是**根本不存在的空白**——
+第二类是尚未提供的产品入口：
 
-- 用户只能消费 Comet 预置的 `/comet` 系列命令，**没办法自己造 Skill**，更别说把任意 Skill 组合成一个和 `/comet` 一样好用的可复用包；
-- 没有任何手段量化"这个 Skill 到底好不好"，改进全凭感觉；
-- 一个变更跑到一半，想看它产出了什么、卡在哪，只能去翻文件。
+- 缺少创建、组合和分发自定义 Skill 的入口；
+- 缺少统一的 Skill 评估命令和发布证据；
+- change 的产物和状态需要分别查看多个目录。
 
-0.4.0-beta.1 针对第一类做了一次系统重构，针对第二类**一次性补上了三个全新系统**。这篇文章不讲功能清单（见 [changelog](/zh/changelog)），而是讲**每个决策背后的原因**。
+0.4.0-beta.1 重写运行时，并增加 Skill Creator、Eval 和 Dashboard。完整功能清单见 [Changelog](/zh/changelog)，本文记录各项改动的背景和边界。
 
 <p align="center">
   <img src="/assets/tech-blog-0-4-0-illustrations/01-runtime-rebuild-workbench.png" alt="小鱼在改造工作台上把 0.3.9 的 Bash 脚本换成 0.4.0 的 Node runtime，并挂上意图路由、状态分层、Skill 平台、eval 和 Dashboard 模块" width="800" />
 </p>
 
-<p align="center">0.4.0 把 Comet 从 Bash 工作流层改造成跨平台运行时，并长出 Skill 创作、评估、可视化三个新系统</p>
+<p align="center">0.4.0 改用 Node 运行时，并增加 Skill Creator、Eval 和 Dashboard</p>
 
-## 一、为什么把 Bash 运行时换成 Node
+## 一、Node 运行时
+
+0.3.9 的状态机、阶段守卫、交接和归档逻辑由 7 个 Bash 脚本承担。Windows 需要 Git Bash 或 WSL，同时需要处理路径转义、CRLF、shell 差异和可执行权限。
+
+0.4.0 将脚本改写为 Node `.mjs` 启动器，由共享的 TypeScript 运行时（`domains/comet-classic/`）提供实现。每个 `.mjs` 都是 esbuild 生成的单文件包，`yaml` 等依赖一并内联。
 
 这是 0.4.0 最大的重构，也是最受 Windows 用户欢迎的改动。
-
-**0.3.9 的状态**：状态机、阶段守卫、交接、归档这些核心逻辑由 7 个 Bash 脚本承担。逻辑本身没问题，但"必须有一个兼容 Bash 的 shell"这个前提，把相当一部分用户挡在了门外。Windows 上要么装 Git Bash，要么用 WSL；路径转义、shell 差异、可执行权限丢失（macOS 上那个经典的 `100644` → `100755` 问题）都是反复出现的隐患。
-
-**0.4.0 的决策**：把所有脚本重写为 Node `.mjs` 启动器，背后由一份共享的 TypeScript 运行时（`domains/comet-classic/`）支撑。每个 `.mjs` 都是 esbuild 生成的单文件包，`yaml` 等依赖一并内联。
-
-**为什么这样改**：
 
 | 动机 | 0.3.9 | 0.4.0 |
 | --- | --- | --- |
@@ -41,45 +39,45 @@ description: "0.4.0-beta.1 不只是把 Bash 换成 Node。它一次性补上了
 | 路径可靠性 | shell 转义、CRLF、可执行位 | Node 原生处理 |
 | 实现一致性 | 散落的 shell 逻辑 | 单一 TypeScript 转移语义表 |
 
-关键在于"单一转移语义表"：`comet-state transition` 和 `comet-guard --apply` 现在共享同一份 `classic-transitions.ts`，所以两条推进路径的行为完全一致，不会再出现"guard 放行了但 state 拒绝"这种不一致。
+`comet-state transition` 和 `comet-guard --apply` 共享同一份 `classic-transitions.ts`，避免两条推进路径使用不同的阶段条件。
 
 <Info>
-  对老用户来说最重要的承诺：<strong>所有 <code>/comet*</code> 命令的行为不变</strong>。你不需要改用法，底层从 Bash 换成了 Node，但工作流还是那条工作流。
+  <code>/comet*</code> 入口保持不变；这次修改替换底层运行时，不要求用户改用新的工作流命令。
 </Info>
 
-## 二、为什么做路由上下文（Routing Context）
+## 二、路由上下文（Routing Context）
 
-**0.3.9 的状态**：`/comet` 入口靠 Skill 正文里一段自然语言规则判断该走 `full`/`hotfix`/`tweak`。问题是这段规则**不可解释、不可复核、不可恢复**。路由错了，你不知道是哪个信号出了问题；中断后重新进来，Agent 只能重新猜一次。
+0.3.9 的 `/comet` 入口根据 Skill 正文中的自然语言规则选择 `full`、`hotfix` 或 `tweak`，没有保存分类信号和评分结果。
 
-**0.4.0 的决策**：把"用户想干什么"变成一份结构化路由上下文（实现类型名为 `CometIntentFrame`），再由运行时按固定优先级重新评分，给出可解释的最终路由。
+0.4.0 将请求转换为结构化路由上下文（实现类型名为 `CometIntentFrame`），再由运行时按固定优先级重新评分。
 
-**为什么这样改**：核心矛盾是"信任问题"。旧做法信任 Agent 自己提的路由建议；新做法**不信任建议，只信任证据**——运行时拿路由上下文里的置信度、风险信号、仓库上下文重新算一遍，和 Agent 的建议不一致时，把分歧写进诊断日志。
+路由上下文保存置信度、风险信号和仓库状态。运行时重新评分后，如结果与 Agent 建议不一致，会将分歧写入诊断日志。
 
-最体现这个设计的是**风险信号优先于口头流程**：你说"走 hotfix"，但如果命中了 `public_api_change`，运行时会暂停并请你确认是否继续这条会影响外部契约的轻量流程。这是 Comet 的安全底线：高风险近路始终需要你明确确认。
+风险信号优先于用户指定的轻量预设。例如，请求指定 hotfix 但命中 `public_api_change` 时，运行时会暂停并请你确认是否继续。
 
 详见[意图识别与路由](/zh/concepts/intent-routing)。
 
-## 三、为什么要有 `/comet-any`：让每个人都能造出好用的 Skill
+## 三、Skill Creator
 
-前面两项是把已有能力改得更稳。从这一节开始，是 **0.4.0 全新补上的能力**。
+下面三节介绍 0.4.0 新增的产品入口。
 
-**0.3.9 的状态**：用户只能消费 Comet 预置的 `/comet` 系列命令。你想做一个自己的工作流 Skill？做不了。想把 `brainstorming` + `writing-plans` + `systematic-debugging` + `verification-before-completion` 这几个 Skill 组合成一个"团队 PR 评审助手"打包分发？**Comet 完全没有这条路径**——它只是一个被消费的工作流，不是一个能产出 Skill 的工厂。
+0.3.9 只提供预置的 `/comet` 系列命令，没有创建、组合和分发自定义工作流 Skill 的入口。
 
-**0.4.0 的决策**：将 `/comet-any` 定位为一个完整的 **Skill 创作平台**。它通过组合任意 Skill，帮助用户创建具备稳定运行、分发和评审能力的 Skill。
+0.4.0 增加 `/comet-any`，用于创建、优化或组合 Skill，并生成包含运行、评审和分发产物的 Bundle。
 
-**为什么要做成平台**：创建一个可复用、可分发、可评审的 Skill 包，需要比生成一段提示词更完整的工具链。一个能和 `/comet` 平起平坐的 Skill，需要：
+一个可评估、评审和分发的 Skill 包包含以下内容：
 
 1. **确定性骨架**——路由表、运行时脚本、manifest 必须可复现，不能每次生成都变；
 2. **可评审的创作内容**——入口的决策核心、节点的指导是 LLM 写的，但必须能被人审、被证据门禁；
 3. **发布证据链**——eval 证据绑定当前 draft hash，人工批准绑定当前 hash，分发前强制预览。
 
-所以 `/comet-any` 产出一个包含多类产物的**稳定组合 Skill Bundle**：
+`/comet-any` 生成以下 Skill Bundle：
 
 ```text
 <bundle-draft>/
   bundle.yaml
   skills/<entry-skill>/
-    SKILL.md                    # 用户真正调用的入口
+    SKILL.md                    # 用户调用的入口
     comet/
       skill.yaml                # 内部运行计划
       guardrails.yaml           # 由偏好和风险策略生成的约束
@@ -93,7 +91,7 @@ description: "0.4.0-beta.1 不只是把 Bash 换成 Node。它一次性补上了
   hooks/
 ```
 
-这条主线普通用户只需要记住一句话：
+常用流程如下：
 
 ```text
 /comet-any 创建 -> comet eval 验证 -> comet creator status/next
@@ -101,19 +99,19 @@ description: "0.4.0-beta.1 不只是把 Bash 换成 Node。它一次性补上了
   -> comet publish distribute
 ```
 
-`/comet-any` 还会读取项目级偏好（`.comet/skill-preferences.yaml`）：你希望优先复用哪些 Skill、缺失和歧义时怎么办、允不允许 scripts/hooks。它必须先展示组合方案给你确认，你点头之后才写 Bundle draft——这是"可评审"的起点。
+`/comet-any` 还会读取项目级偏好（`.comet/skill-preferences.yaml`），包括优先复用的 Skill、缺失和歧义策略，以及 scripts/hooks 策略。写入 Bundle draft 前会展示组合方案并等待确认。
 
 详见[Skill Creator 完整流程](/zh/skill-creator/workflow)。
 
-## 四、为什么 eval 是整个演进方向的决定者
+## 四、Eval
 
-`/comet-any` 解决了"造得出来"，但造得出来不等于造得好。如果没人能量化一个 Skill 到底好不好，改进就只能凭感觉，Skill 就没有可靠的演进方向。**`comet eval` 就是补上这块空白的新系统，它是 Comet 的 Skill 能否发布、该往哪个方向演化的决定者。**
+`/comet-any` 生成 Skill 后，还需要检查它在任务中的行为。`comet eval` 运行任务校验器，生成 rubric、pass 指标和失败归因，并将结果绑定到发布候选的 hash。
 
-**0.3.9 的状态**：Skill 好不好全凭感觉。你写了个工作流 Skill，团队成员用不用得上、稳不稳定、token 花得值不值——没有量化手段，也没有"能不能发布"的客观门槛。
+0.3.9 没有统一的 Skill 评估命令，也没有与发布状态绑定的量化结果。
 
-**0.4.0 的决策**：`comet eval` 是基于 pytest 的 Skill 评估框架，它不只是"跑一下看通不通过"，而是用一套指标体系把"好不好"这件事拆成可对比的数字。
+0.4.0 的 `comet eval` 使用 pytest 驱动任务，并保存可比较的检查结果和诊断指标。
 
-**为什么 eval 决定演进方向**：因为 eval 的结果直接绑进发布门禁——**没有当前 draft hash 的 eval 证据、eval 失败、或 eval 证据对的是旧 hash，都不得 publish**。换句话说，eval 是 Skill 从草稿走向分发的必经关卡，它的打分维度就是 Skill 该往哪使劲的罗盘。
+评估结果会进入发布门禁：缺少当前 draft hash 的 eval 证据、eval 失败或证据对应旧 hash 时，均不能 publish。rubric 和失败归因用于确定后续修改范围。
 
 eval 用两个关键指标区分"能力"和"可靠性"：
 
@@ -122,7 +120,7 @@ eval 用两个关键指标区分"能力"和"可靠性"：
 | `pass@k`（能力上限） | k 次独立尝试里**至少成功一次**的概率 | "这个 Skill 能不能做到？" |
 | `pass^k`（可靠性下限） | k 次独立尝试里**全部成功**的概率 | "能不能每次都做到？" |
 
-为什么两个都要？因为对工作流类 Skill——用户会反复跑的东西——**可靠性比能力更重要**。`pass@k` 高、`pass^k` 低意味着 Skill 偶尔能做对，但单次结果仍然难以预期。这个间隙（`pass@k − pass^k`）就是最关键的质量信号：高能力 + 低可靠性的 Skill，下一步应优先投入稳定性。
+两个指标一起使用，可以区分“多次尝试中能够成功”和“每次尝试都成功”。`pass@k − pass^k` 的差值用于观察重复运行差异，但仍需结合任务数和检查结果解释。
 
 为了让不同类型的 Skill 按匹配的维度打分，eval 提供三套 rubric：
 
@@ -148,15 +146,15 @@ comet eval ./generated-skill/comet/eval.yaml --html
 
 详见[评估任意 Skill](/zh/eval/quickstart)。
 
-## 五、为什么要有 Dashboard：让产物管理看得见
+## 五、Dashboard：查看产物和状态
 
-Skill 造出来了、也评估过了，但一个变更在跑的过程中会产出大量产物——proposal、design、tasks、plan、verifyReport、handoff、checkpoint……0.3.9 时这些东西散落在 `openspec/changes/`、`docs/superpowers/`、`.comet/` 不同目录里，想看一个变更现在到哪一步、产出了什么、是不是卡住，只能去翻文件。**`comet dashboard` 就是补上这个空白的新系统：给产物的文档管理一个可视化平台。**
+一次 change 会在 `openspec/changes/`、`docs/superpowers/` 和 `.comet/` 中生成 proposal、design、tasks、plan、verifyReport、handoff 和 checkpoint。`comet dashboard` 在本地只读界面中汇总这些产物和状态。
 
-**0.3.9 的状态**：没有可视化手段。诊断一个卡住的变更意味着逐个打开 YAML、找到指针、跳到对应目录自己拼出全貌。
+0.3.9 需要逐个打开 YAML 和关联目录查看 change 状态。
 
-**0.4.0 的决策**：`comet dashboard` 启动一个本地只读浏览器界面，把每个变更的**全貌**放进一块面板。
+0.4.0 的 `comet dashboard` 启动本地只读界面，集中显示每个 change 的产物、阶段和检查结果。
 
-**为什么是"产物管理可视化"**：dashboard 把所有产物按来源分成三组，让你一眼看清一个变更该有什么、已经有了什么、还缺什么：
+dashboard 将产物按来源分成三组，并显示已生成、未生成或不适用：
 
 | 分组 | 产物 | 来源 |
 | --- | --- | --- |
@@ -164,7 +162,7 @@ Skill 造出来了、也评估过了，但一个变更在跑的过程中会产�
 | **Superpowers** | designDoc、plan、verifyReport | `docs/superpowers/` 下的设计/计划/审查证据 |
 | **Comet** | `.comet.yaml`、handoff、checkpoint、brainstorm、subagentProgress | `.comet/` 里的中间产物 |
 
-每个产物会标记状态——**已生成**（可预览）、**未生成**（预期但还没创建）、**无需生成**（当前模式/阶段不适用）。这把"这个变更的产物齐不齐"从翻文件变成了看面板。
+每个产物会标记为**已生成**（可预览）、**未生成**（预期但还没创建）或**无需生成**（当前模式或阶段不适用）。
 
 除了产物，dashboard 还在同一块面板上呈现阶段进度、任务进度、verify 状态、下一步动作建议、风险信号和 Git 上下文。同一份快照还能被脚本和 CI 消费：
 
@@ -174,15 +172,15 @@ comet dashboard . --port 4399     # 指定端口
 GET /api/dashboard                # HTTP 接口，同一份快照
 ```
 
-eval 和 dashboard 共享同一个运行时证据路径——`comet status`、`comet doctor` 报告的问题，就是脚本实际会拦截的问题。这让 Comet 的"可恢复性""可观测性"从口号变成了可验证的承诺。
+eval、dashboard、`comet status` 和 `comet doctor` 读取同一套运行时状态与检查结果，避免界面和命令使用不同判断口径。
 
 详见 [Dashboard 概览](/zh/dashboard/overview)。
 
-## 六、状态为什么拆成三层
+## 六、状态分层
 
-**0.3.9 的状态**：所有状态塞在一个 `.comet.yaml` 里——用户可读的工作流字段和机器管理的运行态检查点混在一起。结果是用户容易误改机器字段，机器字段变化也污染了人类可读的投影。
+0.3.9 的 `.comet.yaml` 同时保存用户可读的工作流字段和机器管理的运行态检查点。
 
-**0.4.0 的决策**：每个变更的状态拆成三层：
+0.4.0 将每个 change 的状态拆成三层：
 
 | 文件 | 归属 | 内容 |
 | --- | --- | --- |
@@ -190,22 +188,19 @@ eval 和 dashboard 共享同一个运行时证据路径——`comet status`、`c
 | `.comet/run-state.json` | 机器管理 | 运行态检查点：当前步骤、迭代、待处理动作 |
 | `.comet/state-events.jsonl` | 追加式审计 | 成功转移的完整记录 |
 
-**为什么这样改**：单一职责。用户能直接看懂"现在在哪个阶段"，但碰不到机器字段；机器字段由运行时原子写入，`comet-state set` 会拒绝直接写它们；审计日志只追加不覆盖，给你一条可追溯的状态历史。旧变更首次读取时自动迁移，无需手动处理。
+三层文件分别承担用户投影、机器状态和审计记录。机器字段由运行时原子写入，`comet-state set` 会拒绝直接修改；审计日志只追加不覆盖。旧 change 首次读取时自动迁移。
 
-## 这一切指向什么
+## 版本范围
 
-如果把这六项放在一起看，0.4.0 的主线很清晰：**Comet 从一个"工作流层"变成了一个"工作流 + Skill 平台"**，而这三件事互为支撑、形成闭环：
+0.4.0 的范围从 Classic 五阶段运行时扩展到 Skill 创建、评估和状态查看：
 
-- **造得出**——`/comet-any` 让每个人都能把任意 Skill 组合成和 Comet 一样好用的可复用包；
-- **量得出**——`comet eval` 让 Skill 效果可量化，并作为发布门禁决定 Skill 往哪个方向演化；
-- **看得见**——`comet dashboard` 让产物的文档管理有了一块可视化面板。
+- `/comet-any` 生成可评估和分发的 Skill 包；
+- `comet eval` 生成评估结果并接入发布门禁；
+- `comet dashboard` 汇总 change 的产物和状态；
+- Node 运行时提供跨平台命令；
+- 路由上下文记录分类依据；
+- 分层状态支持恢复和审计。
 
-下面三件事把平台托稳：
-
-- 运行时跨平台了（Node），所以平台能落地到更多环境；
-- 路由可解释了（路由上下文），所以平台的行为可信任；
-- 状态分层了，所以平台可恢复、可审计。
-
-0.3.9 解决了"怎么让一条工作流可恢复"；0.4.0 解决了"怎么让工作流和 Skill 成为一个能创作、能量化、能看清、可信赖、可扩展的平台"。这是这一次大版本跃迁真正想做的事。
+这些入口共享 Bundle hash、评估证据和运行时状态，但各自承担不同职责。后续版本的行为以当前文档和 Changelog 为准。
 
 > 想看完整的逐条变更，见 [0.4.0-beta.1 changelog](/zh/changelog)。

@@ -1,6 +1,6 @@
 ---
 title: "Scoring Metrics and Dual-Agent Evaluation (Advanced)"
-description: "In-depth understanding of Comet eval 's metric drive evaluation: rubric multidimensional scoring criteria, pass@k and pass^k (upper capability vs lower reliability), weighted scoring formula, and the process of automatic interaction between two agents to complete the evaluation."
+description: "Understand Comet eval scoring: rubric dimensions, pass@k, pass^k, weighted scores, and two-agent interaction."
 ---
 
 <Tip>
@@ -12,7 +12,7 @@ This page contains advanced content for source code/maintainers. Ordinary users 
 It is only necessary to pull the source code when task evidence or automatic interaction is implemented. For daily operation, please refer to [Quick Start ](/en/eval/quickstart)
 </Warning>
 
-Comet's eval does not merely provide "pass/fail", but rather ** index-driven ** evaluation: it quantifies the performance of Skill in various quality dimensions using **rubric multi-dimensional scoring **, and distinguishes the "upper limit of capability" from the "lower limit of reliability" using **pass@k/pass^k**. For multi-stage workflow-type skills, the evaluation is accomplished through the automatic interaction of ** two agents ** - one runs the Skill under test, and the other simulates the user's response at the decision point.
+Comet eval uses task checks to determine whether a run passes. Rubric, pass@k, pass^k, and weighted scores provide diagnostic information. Multi-stage workflow tasks can be driven by a subject Agent and a user-simulator Agent.
 
 ## Look at these first when reading the report
 
@@ -30,7 +30,7 @@ If you are not debugging the scorekeeper, you can read the report in this order
 When making daily release judgments, don't just look at <code>weighted_score</code>. The true pass/fail first looks at <code>checks_failed</code>; rubric, pass@k and pass^k are used to determine quality, stability and the direction of the next optimization.
 </Note>
 
-## Overview of the Indicator System
+## Scoring metrics
 
 |Indicator|The questions answered|Type|Is there an access control?|
 | --- | --- | --- | --- |
@@ -48,7 +48,7 @@ When making daily release judgments, don't just look at <code>weighted_score</co
 
 ## Where does the evidence come from
 
-The runtime evidence of Comet eval comes from the stream-json output by Claude CLI itself, not guessed from the terminal text, nor is it recalled and summarized by another model.
+Comet eval collects runtime evidence from Claude CLI stream-json, task artifacts, validator results, and Runtime state.
 
 The single-round evaluation will directly run the Agent under test in the task directory of Docker:
 
@@ -237,7 +237,7 @@ flowchart LR
 - **pass@k high, pass^k low ** : Sufficient ability, but ** unstable ** - "Can do it, but cannot guarantee to do it right every time". Repeatedly running a Skill to a user is a danger signal.
 - Both are high: they can do it and do it right every time - reliable.
 
-**gap (pass@k − pass^k) quantified instability **. The report will explicitly indicate this gap.
+The report shows `pass@k − pass^k` as a comparison of repeated-run results.
 
 ### How can I get multiple runs
 
@@ -327,9 +327,9 @@ The simulator instructions evaluated by auto_user can be overridden. By default,
 | `--simulator-prompt "..."` |pytest command-line parameter|Single run|
 | `BENCH_SIMULATOR_PROMPT_FILE=<path>` |Environment variables (can be written into user-level `.env`)|All auto_user runs|
 
-The relative path of `BENCH_SIMULATOR_PROMPT_FILE` is parsed from `eval/`, with the default value being `simulator-instruction.md`. The file will only be read if it exists. This enables you to change the user behavior profile (such as being more picky and asking for more clarification) to stress test the performance of the workflow under "difficult users" without having to harness the code.
+The relative path of `BENCH_SIMULATOR_PROMPT_FILE` is resolved from `eval/`, with the default value `simulator-instruction.md`. When the file exists, replacing it lets you test different user behavior profiles without modifying the harness.
 
-### Why is it designed this way?
+### Design purpose
 
 Workflow skills will pause at the decision point and wait for user confirmation. If the evaluation only runs a single round, Skill will get stuck at the first decision point. The dual-agent loop enables the evaluation to automatically run the entire workflow (open→...) →archive), and the user simulates the Agent to generate reasonable decision point inputs that can drive the process. Only in this way can the rubric score and pass/fail measured reflect the real usage scenarios.
 
