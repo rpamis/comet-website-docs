@@ -53,7 +53,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | **重读文件状态，不依赖对话** | 每次恢复都重新执行发现活跃 change + 读 `.comet.yaml`，不靠聊天历史猜阶段                                                                  |
 | **文件状态优先，自愈元数据** | 如果 `.comet.yaml` 和实际文件冲突，以文件为准，Comet 自动修正 `.comet.yaml` 后继续                                                        |
-| **按阶段确定性路由**         | 根据 `phase`/`workflow`/`verify_result` 等字段，路由到对应的阶段 Skill（含预设：build 阶段 hotfix→`/comet-hotfix`、tweak→`/comet-tweak`） |
+| **按阶段固定规则路由**       | 根据 `phase`/`workflow`/`verify_result` 等字段，路由到对应的阶段 Skill（含预设：build 阶段 hotfix→`/comet-hotfix`、tweak→`/comet-tweak`） |
 
 恢复时的路由（命中即停，以文件状态为准）：
 
@@ -70,7 +70,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 
 只要有**一个**活跃 Classic change，`/comet-classic` 会自动选中它；有**多个**时列出清单让你选一个。
 
-如果通过自然语言恢复，多个 active change 不会被自动猜测；恢复探测会返回 `ask_user`，等待你点名目标。
+如果通过自然语言恢复，有多个 active change 时 Comet 不会替你自动选定；恢复探测会返回 `ask_user`，等待你点名目标。
 
 ### Classic Change 的工作区复用
 
@@ -88,11 +88,11 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
   <code>tasks.md</code> 的勾选状态仍然有效）。
 </Note>
 
-### 跨设备 0 上下文断点恢复现场
+### 跨设备零上下文恢复断点
 
 下图展示跨设备的断点恢复：只要仓库一致，不管在哪台设备、哪个平台，`/comet` 都能从文件状态重建断点继续，无需额外操作或上下文传递。
 
-<img src="/img/comet-zero-resume.png" alt="跨设备 0 上下文断点恢复现场" />
+<img src="/img/comet-zero-resume.png" alt="跨设备零上下文断点恢复" />
 
 ## 上下文压缩后怎么办
 
@@ -102,7 +102,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 
 Classic 正常恢复使用 `/comet`。阶段和预设入口只用于手动控制或调试：`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
 
-这是 0.4.0-beta.1 渐进式加载带来的确定性保证：每个子 Skill 进入时都会先通过 `comet/reference/scripts.md` 定位脚本，然后跑自己那个阶段的**入口检查或恢复检查**。阶段以当前文件状态为准。
+这里有一层确定性保证：每个阶段 Skill 进入时都会先定位自己的脚本，再执行该阶段的**入口检查或恢复检查**；阶段始终以当前文件状态为准。
 
 ```bash
 comet state check <change-name> <phase> --recover
@@ -122,7 +122,7 @@ flowchart TD
 ```
 
 <Tip>
-  已知当前阶段时，可以跳过统一入口和 Classic 内部路由，直接进入对应阶段。入口检查会拦截与文件状态不匹配的进入。
+  已知当前阶段时，可以跳过统一入口和 Classic 内部路由，直接进入对应阶段。入口检查会拦截与文件状态不匹配的调用。
 </Tip>
 
 ## build 阶段恢复的特殊情况
@@ -131,7 +131,7 @@ build 阶段的恢复最复杂，但大多数情况 `/comet-classic` 也能自�
 
 | 情况                                                                     | 行为                                                                |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `build_pause: plan-ready` 但 `isolation`/`build_mode` 已设               | **自动清除** stale pause，继续执行（你无需操作）                    |
+| `build_pause: plan-ready` 但 `isolation`/`build_mode` 已设               | **自动清除**残留的暂停标记（stale pause），继续执行（你无需操作）  |
 | `build_pause: plan-ready` 且 plan 存在，但 `isolation`/`build_mode` 未设 | 回到 plan-ready 恢复点，**让你选**隔离和执行方式（不重新生成 plan） |
 | `build_pause: plan-ready` 但 plan 文件缺失                               | 状态损坏，回 `/comet-build` 修复或重新生成 plan                     |
 | `isolation`/`build_mode`/`tdd_mode` 未设                                 | 回 `/comet-build` 对应步骤**让你补选**                              |
@@ -150,7 +150,7 @@ subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会
 构建产物（`node_modules/`、`dist/` 等 `.gitignore` 的）会自动排除，不当用户改动。
 
 <Warning>
-  dirty worktree 只代表代码事实，<strong>不会自动推进</strong>{" "}
+  未提交改动（dirty worktree）只代表代码事实，<strong>不会自动推进</strong>{" "}
   <code>.comet.yaml</code> 的 <code>phase</code> 或勾选 <code>tasks.md</code>
   ，只有完成归因、验证、过阶段 guard 后才推进状态。
 </Warning>
@@ -173,7 +173,7 @@ subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会
 
 | 命令           | 什么时候用                                                                          |
 | -------------- | ----------------------------------------------------------------------------------- |
-| `comet status` | 想看"我在哪个阶段、声明的产物是否都还在"：`/comet-classic` 路由不对、或证据对不上时 |
+| `comet status` | 想看“我在哪个阶段、声明的产物是否都还在”：`/comet-classic` 路由不对、或证据对不上时 |
 | `comet doctor` | 环境或安装出问题：CLI/Skill 缺失、`.comet.yaml` 格式坏掉、`/comet-classic` 起不来时 |
 
 ```bash

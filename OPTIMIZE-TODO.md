@@ -108,4 +108,32 @@
 - 理念段落：concepts/intent-routing、context-compression、native-workflow、native/native-loop、native/scenarios/supervisor-change-delivery、eval/why-eval、eval/eval-driven-evolution、tech-blog/comet-vs-industry
 - 直译句修复：cli/update、cli/resume-probe、guides/classic-layout-migration、guides/existing-project、changelog 0.3.x 段
 - 格式清洗：guides/mid-workflow-changes（全篇标点）、guides/install-and-update（第 3 节）、native/faq（孤儿段落收进 Accordion）
-- 全局：home 页 3 处、"失败闭合"→"失败关闭"统一、AGENTS.md 补"改写保留强调标记"规则
+- 全局：home 页 3 处、“失败闭合”→“失败关闭”统一、AGENTS.md 补“改写保留强调标记”规则
+
+## 已完成记录（第二轮，2026-09-02）
+
+- P0 六篇整节改写：concepts/faq、tech-blog/comet-beyond-skill（校对）、plugins/project-knowledge-principles、concepts/auto-transition（半角标点）、concepts/workflow、concepts/review-mode
+- P1 十一篇中等改写全部完成（含 guides/resuming-workflow、prd-splitting、plugins/project-rules、eval/scoring、tech-blog/comet-0.3.9-to-0.4.0、eval/comet-baseline-experiment、plugins/agent-learning-loop、skill-creator/engine、concepts/decision-points、guides/existing-project）
+- P2 直译词、GPT 腔、格式笔误全部处理（约 25 篇点改）
+- 全局统一：“一等产物”→“正式产物”、“归档授权”→“归档批准”、“实质深度”→“是否有实质内容”、“制品”→“产物”、eval 四篇 Windows 路径双反斜杠改单反斜杠
+- 复核修正三处过度弱化：scoring 恢复“产物是否有实质内容”加粗、workflow“按项目配置固定进入”、resuming-workflow“确定性保证”
+- AGENTS.md 新增“AI 味与直译防护”和“亮点与强调保留（改写红线）”两节
+- 本轮共 68 个文件，改后经 git diff 加粗短语对比复查，卖点句与强调标记无丢失
+
+## 已完成记录（第三轮，2026-09-02）
+
+- 四路并行全站复审（guides/presets/phases、concepts/native、cli/scripts/skill-creator/plugins、eval/tech-blog/门面页），共处理约 70 条问题
+- 门面页（home/overview/quickstart）：Loop Engineering、HITL、Rubric/Pass@k、DAG、Rule/Router/Guard 等内部术语改为白话或首现加解释
+- 重写 concepts/native-workflow“让 Skill 回归本质”一节（原 AGENTS 反例句）；清理 concepts 页内部标识符（CometIntentFrame、classic-state-command.ts、REQUIRED_CLASSIC_KEYS）
+- 术语统一：machine-owned 首现加“由 Comet 自动维护”、tripwire→文件数阈值、stale pause→残留的暂停标记、dirty worktree→未提交改动、verbatim→原样写入、portable→可跨设备同步、canonical Spec→主 Spec、readiness→发布就绪状态、lane→创作通道（三名归一）、正文 artifacts→产物、事实来源→唯一可信来源/依据、冲突雷达→冲突检测
+- 删除正文中的源码标识符（resolveSkill、reviewBundle、buildEvalArgs、manifests.py、compare_baselines.py 等），eval 入门页为 harness/treatment/analysis set/Judge 补中文解释
+- 引号批量清理：guides/presets/phases 半角引号与 tweak 直角引号改中文弯引号
+- AGENTS.md 术语对照表扩充（新增第三轮 12 个词条）并补“源码标识符不入正文”规则
+- 复核修正：首页被误删的行业通用术语已恢复（Loop Engineering 驱动、更多 HITL、Rubric 多维评分 + Pass@k / Pass^k、Harness / Workflow / Task / Model、通过 DAG 统一管理、ReAct 解决单轮推理）；AGENTS.md 补“行业通用术语保留原文，内部自造词才翻译”的分界规则
+
+## 中英同步（2026-09-02）
+
+- 用户确认后执行：按当前未提交中文 diff 同步英文，四路并行（guides/presets/phases、concepts/native、cli/scripts/skill-creator/plugins、eval/tech-blog/门面页），共改 en 57 个文件
+- 同步原则：仅中文表达类修复（直译、空格、引号、中文选词）不动英文；事实/结构/术语类修正做语义等价同步（决策点编号 4、preferences 键数、eval 路径双反斜杠、first-class→formal artifact、源码标识符删除、machine-owned 补说明、beyond-skill 博客错拼等）
+- 用户回退的四处中文（workflow“以下”、intent-routing CometIntentFrame 句、native-workflow 整节）对应英文保持不动，两侧一致
+- en/home 顺带修复原文错拼 "Loop Engineer"→"Loop Engineering"

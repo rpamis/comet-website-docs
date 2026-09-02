@@ -163,7 +163,7 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 
 ### LLM-as-judge 覆盖（可选）
 
-设 `BENCH_LLM_JUDGE=1` 启用。默认情况下，Comet 的最终 `weighted_score` 是规则分，不是 LLM-as-judge。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物的实质深度**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
+设 `BENCH_LLM_JUDGE=1` 启用。默认情况下，Comet 的最终 `weighted_score` 是规则分，不是 LLM-as-judge。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物是否有实质内容**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
 
 judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**故意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
 
@@ -196,7 +196,7 @@ generic/authoring 的三维度评分标准：
 | 维度 | 1.0（满分） | 0.5 | 0.0 |
 | --- | --- | --- | --- |
 | `task_completion` | 全部需求满足、产物存在且正确、基线检查通过 | 部分完成 | 关键产物缺失或为空 |
-| `output_quality` | 结构良好、完整、非平凡、有思考痕迹 | 存在但浅薄、勉强达标 | 缺失、空、明显 stub |
+| `output_quality` | 结构良好、完整、非平凡、有思考痕迹 | 存在但内容单薄、勉强达标 | 缺失、空、明显 stub |
 | `instruction_adherence` | 完全遵守指令和约束、无违禁模式、工具使用得当 | 轻微偏离但核心意图保留 | 严重违反、危险命令、约束失败 |
 
 judge 收集 workspace 文件时跳过 `.git`、`node_modules`、`.comet` 等目录，单文件上限 3000 字符、总预算 20000 字符，大文件（>50KB）和二进制文件会被跳过，保证 prompt 不失控。裁判必须按 `[RUBRIC-JUDGE] <dim>: <score> - <reason>` 格式逐行输出，每个 reason ≤25 词并引用具体内容。
@@ -241,7 +241,7 @@ flowchart LR
 
 ### 怎么得到多次运行
 
-`--count N`（pytest 选项）把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果。对比报告先过滤出 analysis set：明确的环境或运行器噪声会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
+`--count N`（pytest 选项）把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
 
 ```bash
 # 重复 5 次，让 pass@k/pass^k 有意义
@@ -258,7 +258,7 @@ flowchart LR
 
 ### 出现在哪
 
-pass@k/pass^k 不在 `summary.md`，而在**对比报告**（`compare_baselines.py` 产出的 `comparison_report.md`）的 `## pass@k / pass^k — capability vs reliability` 章节。它们是**信息性**的，不是门禁。
+pass@k/pass^k 不在 `summary.md`，而在**对比报告**（`comparison_report.md`）的 `## pass@k / pass^k — capability vs reliability` 章节。它们是**信息性**的，不是门禁。
 
 ## 双 Agent 自动交互评测
 
@@ -308,10 +308,10 @@ do you want | preferred
 
 ### 用户模拟 Agent 的指令
 
-模拟 Agent 收到的是 simulator prompt + 被测 Agent 的最后一条消息，被要求：
+模拟 Agent 收到的是 simulator prompt + 被测 Agent 的最后一条消息，指令要求它：
 
-- 被要求确认时，**批准**提出的方案/名字/计划
-- 被要求选择时，**选最合理的默认**
+- 收到确认请求时，**批准**提出的方案/名字/计划
+- 需要做选择时，**选最合理的默认**
 - 只在问题对"做什么"真正有歧义时才要求澄清
 - **永不拒绝**，永远让工作流前进
 - **不写代码或文件**

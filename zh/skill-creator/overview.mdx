@@ -7,7 +7,7 @@ description: "了解 /comet-any 的三种起点、Workflow Contract、生成产�
   创建、优化或组合 Skill 时，通常只需要在 Agent 里调用 <code>/comet-any</code> 并按提示确认。评估、发布、分发和恢复会由流程引导；除非排障或自动化集成，不需要先关心底层命令、内部状态或生成物结构。本页是进阶内容，如果只想快速创建一个 Skill，先看[快速上手：组合任意 Skill](/zh/skill-creator/getting-started)。
 </Tip>
 
-`/comet-any`（也叫 **Skill Creator**）是 Comet 的 Skill Creator。你描述想要的工作流，它读取真实本地 Skill、把目标编译成一份 **Workflow Contract**，再生成**可验证、可评审、可分发**的 Skill Bundle，并把后端复杂度（Bundle、Factory、composition、resolved-skills）隐藏在内部。
+`/comet-any` 是 Comet 的 Skill 创建入口，也叫 **Skill Creator**。你描述想要的工作流，它读取真实本地 Skill、把目标编译成一份 **Workflow Contract**，再生成**可验证、可评审、可分发**的 Skill Bundle，并把后端复杂度（Bundle、Factory、composition、resolved-skills）隐藏在内部。
 
 ## 核心设计原则
 
@@ -37,7 +37,7 @@ description: "了解 /comet-any 的三种起点、Workflow Contract、生成产�
   → comet publish distribute（真实分发）
 ```
 
-`comet creator` 是 `/comet-any` 的恢复和创建状态表面；`comet bundle` 是高级 Bundle 后端；`comet skill` 是底层 Skill 工具，适合本地调试和 Engine Run。它们都**不是**日常创建 Skill 的主入口。
+`comet creator` 负责查看和恢复 `/comet-any` 的创建流程；`comet bundle` 是高级 Bundle 后端；`comet skill` 是底层 Skill 工具，适合本地调试和 Engine Run。它们都**不是**日常创建 Skill 的主入口。
 
 ## 三种起点
 
@@ -62,7 +62,7 @@ description: "了解 /comet-any 的三种起点、Workflow Contract、生成产�
 | **Output Schema** | 节点必须产出的文件、状态或 evidence。脚本、eval、readiness 只认 Output Schema，不认 Skill 名字 |
 | **Guardrail** | 阻断或放行节点推进的检查 |
 | **Handoff** | 子代理或跨节点交接时必须带回的 evidence |
-| **workflow-protocol.json** | 生成包的**唯一运行事实源**，runtime / eval / review / readiness 都读它 |
+| **workflow-protocol.json** | 生成包运行状态的**唯一可信来源**，runtime / eval / review / readiness 都读它 |
 
 <p align="center">
   <img src="/assets/skill-creator-overview-illustrations/01-workflow-contract.png" alt="小鱼把新建、升级和组合三种起点整理到同一份 Workflow Contract 模板" width="800" />
@@ -245,13 +245,13 @@ flowchart TD
       checks.yaml                     # runtime check（运行期）
       eval.yaml                       # 创建期评估 manifest（发布前证据）
     reference/
-      workflow-protocol.json          # 唯一运行事实源（runtime/eval/review/readiness 共用）
+      workflow-protocol.json          # 运行状态唯一可信来源（runtime/eval/review/readiness 共用）
       resolved-skills.json            # 真实 Skill 来源证据 + workflow 节点信息
       composition-report.md           # 组合方案和偏离解释
       decision-points.md              # 决策点
       recovery.md                     # 恢复路径
       skill-review.md                 # 作者自审
-      authoring-lanes.json            # 创作车道记录（含 protocolHash）
+      authoring-lanes.json            # 创作通道记录（含 protocolHash）
       subagents/                      # 便携子代理角色说明
     scripts/                          # required control plane
       workflow-state.mjs
@@ -270,7 +270,7 @@ flowchart TD
 | 文件 | 生命周期 | 职责 |
 | --- | --- | --- |
 | `SKILL.md` | 创建期 + 运行期 | 用户调用的入口 |
-| `reference/workflow-protocol.json` | 创建期 + 运行期 | **唯一运行事实源**：节点、边、Output Schema、state、evals |
+| `reference/workflow-protocol.json` | 创建期 + 运行期 | **运行状态唯一可信来源**：节点、边、Output Schema、state、evals |
 | `reference/resolved-skills.json` | 创建期 | 真实 Skill 来源、hash、workflow 节点绑定、偏好证据 |
 | `reference/composition-report.md` | 创建期 | 组合方案、偏离解释、风险和 review evidence |
 | `comet/skill.yaml` | 运行期 | 内部运行计划（goal、orchestration、steps），不是用户手写入口 |
@@ -287,14 +287,14 @@ flowchart TD
 稳定组合 Skill Bundle 的 required capability set 是 `skills / scripts / rules / hooks / references / agents`：
 
 - `skills`：入口 Skill 和各节点内部 Skill。
-- `scripts / rules / hooks`：**required control plane**，不是可随意删除的附属文件。它们负责状态推进、守卫、移交的确定性。
+- `scripts / rules / hooks`：**required control plane**，不是可随意删除的附属文件。它们以确定性方式负责状态推进、守卫和移交。
 - `references`：真实来源证据和创作审计。
 - `agents`：平台原生 agent 定义。Claude Code 分发会把生成的 custom agents 写到目标平台预览里。
 
 `hooks/*.yaml` 是 **Comet portable hook descriptor**，只有通过 `comet publish distribute` 编译到目标平台配置后才会生效。
 
 <Warning>
-  <code>/comet-any</code> 不应把手动 <code>comet bundle</code> 命令当成用户主流程。Bundle 是确定性后端，由 <code>/comet-any</code> 在内部调用。
+  <code>/comet-any</code> 不应把手动 <code>comet bundle</code> 命令当成用户主流程。Bundle 是内部使用的确定性后端，由 <code>/comet-any</code> 自动调用。
 </Warning>
 
 ## 硬规则（hard gates）

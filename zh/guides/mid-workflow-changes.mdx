@@ -7,7 +7,7 @@ description: '写了代码不满意、中途要改 spec、验证不通过要回 
 
 ## 先理解：phase 不能手动改
 
-`.comet.yaml` 的 `phase` 是 machine-owned。你不能直接 `set phase build` 回退——会被状态机硬拒绝。回退只能通过**合法的 transition 事件**，每个事件都有守卫检查。
+`.comet.yaml` 的 `phase` 由 Comet 自动维护（machine-owned）。你不能直接 `set phase build` 回退，状态机会拒绝。回退只能通过**合法的 transition 事件**，每个事件都有守卫检查。
 
 紧急修复状态时可以使用 `COMET_FORCE_PHASE=1`，命令会输出 `WARNING`：
 
@@ -126,7 +126,7 @@ hotfix 或 tweak 执行过程中命中升级信号，并确认升级到 full 时
 node "$COMET_STATE" transition <change-name> preset-escalate
 ```
 
-该事件会将 `workflow` 和 `classic_profile` 设为 `full`，将 `phase` 返回 `design`，并清空 `design_doc`。随后加载 `comet-design` 创建 Design Doc。
+该事件会将 `workflow` 和 `classic_profile` 设为 `full`，将 `phase` 回退到 `design`，并清空 `design_doc`。随后加载 `comet-design` 创建 Design Doc。
 
 <Warning>
   <code>preset-escalate</code> 只对 hotfix/tweak 有效，full workflow 不能用。这是预设→full 升级的
@@ -141,16 +141,16 @@ design 阶段 brainstorming 时可能需要写 Spec Patch（补充验收场景�
 node "$COMET_HANDOFF" <change-name> design --write
 ```
 
-否则 guard 在离开 design 时会发现 hash 漂移而 FATAL。
+否则离开 design 阶段的守卫会发现交接包校验值与文件不一致，直接中止（FATAL）。
 
 ## 场景六：恢复时发现工作区有未提交改动
 
-恢复 `/comet` 时，如果工作区存在未提交改动，按 dirty-worktree 协议处理：
+恢复 `/comet` 时，如果工作区存在未提交改动，先按未提交改动的归因规则处理：
 
 | 归因                          | 处理                                                           |
 | ----------------------------- | -------------------------------------------------------------- |
 | 属于当前 change               | 折叠进当前任务，不重复编辑                                      |
-| 不属于当前 change（用户改动） | 暂停询问：折叠进当前 change / 拆新 change / 保留不动 / 授权丢弃 |
+| 不属于当前 change（用户改动） | 暂停询问：折叠进当前 change / 拆新 change / 保留不动 / 丢弃（需你确认） |
 | 来源不确定                    | 暂停，报告文件列表和推理，不推进 phase                           |
 
 <Warning>
@@ -164,7 +164,7 @@ node "$COMET_HANDOFF" <change-name> design --write
 
 | 状态                                         | 恢复行为                                         |
 | -------------------------------------------- | ------------------------------------------------ |
-| isolation/build_mode 已设但 build_pause 还在 | stale pause，自动清除，继续执行                    |
+| isolation/build_mode 已设但 build_pause 还在 | 残留的暂停标记（stale pause），自动清除后继续执行 |
 | isolation/build_mode 未设                    | 回到 plan-ready 恢复点让你选择（不重新生成计划） |
 | plan 文件缺失                                | 回到 `/comet-build` 处理损坏或重新生成           |
 | 所有任务已完成                               | 清除 build_pause，走 guard 到 verify              |
@@ -225,6 +225,6 @@ flowchart LR
 
 - [自动推进机制](/zh/concepts/auto-transition) — transition 事件和 next 命令
 - [状态管理](/zh/concepts/state-management) — 状态机硬约束
-- [恢复中断的工作](/zh/guides/resuming-workflow) — stale pause 和 dirty worktree 恢复
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 残留暂停标记和未提交改动的恢复
 - [build 阶段](/zh/phases/build) — spec 增量更新三档
 - [verify 阶段](/zh/phases/verify) — verify-fail 决策

@@ -39,7 +39,7 @@ description: '了解 review_mode 的三种模式、审查触发条件、预算�
 
 ## 与 Superpowers SDD 的边界
 
-Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开的 task reviewer 合同：实现者完成任务后，协调者按任务材料、真实 diff、测试证据和风险信号决定是否派审查者。Comet 不读取、不写入、也不要求 Superpowers `subagent-driven-development` 的内部脚本名、workspace 路径或私有实现细节。
+Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开的 task reviewer 契约：实现者完成任务后，协调者按任务材料、真实 diff、测试证据和风险信号决定是否派审查者。Comet 不读取、不写入、也不要求 Superpowers `subagent-driven-development` 的内部脚本名、workspace 路径或私有实现细节。
 
 这意味着：
 
@@ -48,7 +48,7 @@ Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开
 - 文档、恢复和测试都以公开行为为准，不把 shipped Skill 文案绑定到 Superpowers 内部目录结构。
 
 <Info>
-  在 build 阶段选择 `off`、`standard` 或 `thorough`。Superpowers SDD 可以独立升级实现，但需要继续满足公开的 task reviewer 合同。
+  在 build 阶段选择 `off`、`standard` 或 `thorough`。Superpowers SDD 可以独立升级实现，但需要继续满足公开的 task reviewer 契约。
 </Info>
 ## build 阶段审查预算表
 
@@ -184,7 +184,7 @@ thorough 的开销是**结构性**的：N 个任务就会派 N 个每任务审�
 <Tip>
   <strong>经验法则</strong>：如果变更涉及安全、认证、数据迁移、跨模块 API 或架构调整，用{' '}
   <code>thorough</code>；否则 <code>standard</code> 足够。<code>thorough</code>{' '}
-  它是有代价的强审查：会明显拖慢 build 并增加 token 消耗，因此不适合作为默认值。
+  是有代价的强审查：会明显拖慢 build 并增加 token 消耗，因此不适合作为默认值。
 </Tip>
 
 ## standard 和 thorough 的核心差异
@@ -223,7 +223,7 @@ thorough 的开销是**结构性**的：N 个任务就会派 N 个每任务审�
 
 - **`review_mode: off`**：不做自动代码审查，不加载 `requesting-code-review`。在验证报告草稿或 tasks.md 记录跳过原因。
 - **`review_mode: standard`**：全部任务完成后、build → verify phase guard 之前，用 Skill 工具加载 `requesting-code-review` 做一次轻量代码审查（正确性、安全、边界），范围是整个变更。
-- **`review_mode: thorough`**：除最终一次审查外，每 3 个任务做一次**分段代码审查**（按该段 diff 范围）。总任务 ≤ 3 时跳过中间分段，只做最终审查。每段审查用 `requesting-code-review` 针对该段 commit 区间。这是 `executing-plans` 能提供的、最接近 `subagent-driven-development` 每任务审查的等价物，因为它没有隔离实现者可逐任务审查。
+- **`review_mode: thorough`**：除最终一次审查外，每 3 个任务做一次**分段代码审查**（按该段 diff 范围）。总任务 ≤ 3 时跳过中间分段，只做最终审查。每段审查用 `requesting-code-review` 针对该段 commit 区间。这是 `executing-plans` 下最接近每任务审查的做法：主会话没有隔离的实现者子代理，无法逐任务派发审查者。
 
 **要求**（standard 和 thorough 适用）：
 
@@ -258,8 +258,7 @@ change 的 .comet.yaml  >  COMET_REVIEW_MODE 环境变量  >  .comet/config.yaml
   从 0.4.0-beta.1 起，运行时 fallback 从 <code>null</code>（关闭）改为 <code>standard</code>
   。也就是说，当 change 的 <code>.comet.yaml</code>、环境变量和项目配置都没有显式设置{' '}
   <code>review_mode</code> 时，默认按 <code>standard</code>
-  （风险触发的每任务审查）处理，而不再是无审查。这适用于 init 模板、
-  <code>classic-state-command.ts</code> 运行时 fallback 和冻结的 0.3.9 契约 fixture。
+  （风险触发的每任务审查）处理，而不再是无审查。这一默认值统一作用于初始化模板、运行时兜底和旧版本的兼容路径。
 </Note>
 
 ### 项目默认值
@@ -303,9 +302,8 @@ export COMET_REVIEW_MODE=standard
 两层都必须通过才能离开 build。hotfix/tweak 豁免这个检查（它们默认 `off`）。
 
 <Note>
-  <code>review_mode</code> 不在 <code>REQUIRED_CLASSIC_KEYS</code> 里，这样 0.4.0 之前的{' '}
-  <code>.comet.yaml</code> 文件不用迁移就能解析。强制检查发生在 build→verify 的 transition
-  guard，旧文件缺少该字段时走兼容路径，恢复时应回填。非法值（非 <code>off</code>/
+  <code>review_mode</code> 不是必填字段，0.4.0 之前的{' '}
+  <code>.comet.yaml</code> 文件不用迁移就能解析。强制检查发生在 build→verify 的阶段守卫上，旧文件缺少该字段时走兼容路径，恢复时应回填。非法值（非 <code>off</code>/
   <code>standard</code>/<code>thorough</code>）会被枚举校验拒绝。
 </Note>
 
