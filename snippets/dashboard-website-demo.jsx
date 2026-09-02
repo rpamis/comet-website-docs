@@ -37,6 +37,20 @@ export const DashboardWebsiteDemo = () => {
     let cancelled = false;
     let unmountDashboard;
 
+    // 预览 bundle 约 5.9MB（gzip 后 1.7MB），与首屏渲染同时请求会抢占带宽。
+    // 等浏览器空闲（至多 1.2s）再拉取，首屏文字与 CTA 先行渲染。
+    const startLoading = (load) => {
+      if (typeof window === 'undefined') {
+        load();
+        return;
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(load, { timeout: 1200 });
+      } else {
+        window.setTimeout(load, 300);
+      }
+    };
+
     // Mintlify 部署会丢弃 .js/.css 静态文件（.json/.png 正常），因此资产以 JSON 包装下发，
     // 浏览器端还原成 Blob URL 后再注入。资产解析结果缓存在 globalThis 上，SPA 内页切换时避免重复拉取。
     const loadDashboardAssets = () => {
@@ -94,15 +108,17 @@ export const DashboardWebsiteDemo = () => {
       });
     };
 
-    loadDashboardAssets()
-      .then((assets) => loadDashboardBundle(assets).then((dashboard) => ({ dashboard, assets })))
-      .then(({ dashboard, assets }) => {
-        if (cancelled) return;
-        unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: assets.stylesheetUrl });
-      })
-      .catch((error) => {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
-      });
+    startLoading(() => {
+      loadDashboardAssets()
+        .then((assets) => loadDashboardBundle(assets).then((dashboard) => ({ dashboard, assets })))
+        .then(({ dashboard, assets }) => {
+          if (cancelled) return;
+          unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: assets.stylesheetUrl });
+        })
+        .catch((error) => {
+          if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+        });
+    });
 
     return () => {
       cancelled = true;
