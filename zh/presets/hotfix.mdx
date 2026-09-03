@@ -122,9 +122,10 @@ hotfix 会在入口暂停一次，让你显式选择当前分支、创建分支�
 
 使用默认值 `build_mode: direct`、`tdd_mode: direct`、`review_mode: off`，并沿用入口时已确认的 `isolation`。跳过 `brainstorming` 和 `writing-plans`。逐任务执行：
 
-1. 读 tasks.md 未完成任务
-2. 每个任务：改代码 → 格式化 → 跑测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
-3. 全部完成后显式运行项目测试和构建命令
+1. **先复现、后修复**：改代码前必须先复现 bug 并记录失败证据；可以自动化时先添加一个能失败的回归测试。没有复现证据不得修改代码；无法自动化复现时，把手动复现步骤和结果记入 proposal 或验证报告。
+2. 读 tasks.md 未完成任务
+3. 每个任务：改代码 → 格式化 → 跑测试 → 勾选 `- [x]` → 提交（`fix: <简述修复>`）
+4. 全部完成后显式运行项目测试和构建命令
 
 <Warning>
   执行中出现崩溃、测试失败、构建失败时，<strong>强制加载</strong> <code>systematic-debugging</code>
@@ -132,7 +133,7 @@ hotfix 会在入口暂停一次，让你显式选择当前分支、创建分支�
   build/hotfix/tweak 共享的<a href="/zh/concepts/decision-points">异常调试协议</a>。
 </Warning>
 
-**任务超过 3 个**时转入 `/comet-build` 的计划与执行方式选择（注意：这**不触发 full 升级**，只切换执行方式，`workflow` 仍是 `hotfix`）。**修复影响已有 spec 验收场景**时，创建 delta spec（仅 `## MODIFIED Requirements`）。
+任务数量本身**不会**切换执行方式：任务再多也按顺序在当前 hotfix 内推进，只有命中质变信号或文件数阈值才暂停询问升级。**修复影响已有 spec 验收场景**时，创建 delta spec（仅 `## MODIFIED Requirements`）。
 
 ### Step 3：根因消除检查（hotfix 专属）
 
@@ -142,7 +143,7 @@ hotfix 会在入口暂停一次，让你显式选择当前分支、创建分支�
 2. 搜索验证问题代码不再存在
 3. 根因未消除 → 回 Step 2 继续修复（仍在 build 阶段，无需状态回退）
 
-这一步本身也是升级信号来源：根因消除检查发现**深层架构问题**，或修复需要**额外接口变更**，命中质变信号，暂停交你决定。
+这一步本身也是升级信号来源：根因消除检查发现**深层架构问题**，或修复需要**额外接口变更**，命中质变信号，暂停并交给你决定。
 
 ```bash
 node "$COMET_GUARD" <change-name> build --apply
@@ -206,16 +207,15 @@ hotfix 的范围判定采用三层分工，避免“用纯文件数当硬性升�
 node "$COMET_STATE" transition <name> preset-escalate
 ```
 
-它**原子地**设 `workflow: full`、`classic_profile: full`、`phase` 回退到 `design`、清空 `design_doc`，然后加载 `/comet-design` 补 Design Doc。已完成的代码、tasks 和 OpenSpec 产物都保留——你只补一个 Design Doc，不是从头来。`preset-escalate` 只能从 `phase: build` 的 hotfix/tweak 触发，其他情况会报错。
+它**一次性**设 `workflow: full`、`classic_profile: full`、`phase` 回退到 `design`、清空 `design_doc`，然后加载 `/comet-design` 补 Design Doc。已完成的代码、tasks 和 OpenSpec 产物都保留——你只补一个 Design Doc，不是从头来。`preset-escalate` 只能从 `phase: build` 的 hotfix/tweak 触发，其他情况会报错。
 
 ## 连续执行和必停点
 
 hotfix 默认**一次性连续执行**——调用后自动推进，不主动停顿。但无论 `auto_transition` 取何值，以下情况**必须暂停**等你确认：
 
-1. 命中升级判定信号
-2. 任务超过 3 个转入 `/comet-build` 时的工作区和执行方式选择
-3. 验证阶段的验证失败决策，以及 Archive 阶段的归档与交付确认
-4. 归档前最终确认
+1. 命中升级判定信号或文件数阈值
+2. 验证阶段的验证失败决策
+3. 归档与交付最终确认（含仅本地归档选项）
 
 `auto_transition: false` 时降级为逐阶段手动推进（每个 phase 边界停下，由你手动运行下一阶段命令）。
 

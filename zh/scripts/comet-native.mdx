@@ -10,17 +10,18 @@ description: 'Native 工作流的公开命令：创建、查看、选择、推�
 | 命令                          | 做什么                                                     |
 | ----------------------------- | ---------------------------------------------------------- |
 | `comet native init`           | 初始化或整理 Native 项目配置                               |
-| `comet native root show/move` | 查看或事务化移动产物根目录                                 |
+| `comet native root show/move` | 查看或以事务方式移动产物根目录                             |
 | `comet native new`            | 创建 change 并准备 `current`、`branch` 或 `worktree`       |
 | `comet native show`           | 查看 brief、Specs 和 portable 状态                         |
-| `comet native status`         | 查看 change、Loop、验收、检查和下一步                      |
-| `comet native select`         | 多个 change 并存时选择写入归属                             |
+| `comet native status`         | 查看 change、Loop、验收、检查和下一步（`--cursor` 分页、`--details` 看完整 continuation） |
+| `comet native select`         | 多个 change 并存时选择写入目标                             |
 | `comet native spec remove`    | 记录 capability 删除意图                                   |
 | `comet native next`           | 按 continuation 确认或恢复边界、提交 handoff/Verifier 输入 |
-| `comet native archive`        | 预览或执行归档和工作区收口                                 |
+| `comet native archive`        | 预览或执行归档和工作区收尾                                 |
+| `comet native check`          | 对指定 change 运行只读的 Native 验证检查                   |
 | `comet native doctor`         | 诊断、迁移和重建本机 Runtime                               |
 
-新的 Native 流程不再公开 `checkpoint`、`check`、`evidence` 或 `receipt` 命令；检查由 Runtime 在 Verify 中执行，结果进入 portable 状态和用户报告。
+新的 Native 流程不再公开 `checkpoint`、`evidence` 或 `receipt` 命令；验收检查由 Runtime 在 Verify 中执行（可用 `comet native check` 随时只读复跑），结果进入 portable 状态和用户报告。
 
 ## 创建和查看
 
@@ -45,9 +46,16 @@ comet native next add-user-avatar --summary "Acceptance criteria changed" --revi
 comet native next add-user-avatar --runner-input <temporary-json-file>
 ```
 
-Verify 后的用户决策用 `--accept-result`、`--revise-implementation` 和 `--revise-requirements` 表达；`--confirmed` 只确认 Shape 或明确降级的 verifier-unavailable 回退，不用于接受通过结果。
+Verify 后的用户决策用 `--accept-result`、`--revise-implementation` 和 `--revise-requirements` 表达；`--confirmed` 只确认 Shape 或明确降级的 verifier-unavailable 回退，不用于接受通过结果。Verifier 不可用时的两个选择对应：
 
-正常输入模板和字段以 `comet native status <name> --details --json` 返回的 `continuation.inputOptions.template` 为准。`request-checks` 只能由当前 Verifier 请求 Runtime 执行；Builder 自报通过不会直接进入 Archive。
+```bash
+comet native next add-user-avatar --summary "Retry verifier" --retry-verifier
+comet native next add-user-avatar --summary "Accept degraded result" --confirmed
+```
+
+`--retry-verifier` 保留当前候选和已完成检查，只发起新的验收尝试。Supervisor 并行推进相关的 `next` 还有 `--coordination-mode` 和 `--max-parallel`（默认 2）；带恢复上下文的调用需要 `--expected-state-version` / `--expected-action` 防止旧响应覆盖新状态。
+
+正常输入模板和字段以 `comet native status <name> --details --json` 返回的 `continuation.inputOptions.template` 为准。`request-checks` 只能由当前 Verifier 请求 Runtime 执行；Builder 自行报告通过不会直接进入 Archive。
 
 ## 归档
 
@@ -58,7 +66,7 @@ comet native archive add-user-avatar --dry-run
 comet native archive add-user-avatar --confirmed
 ```
 
-Archive 应用完整 target Specs、生成 `verification.md`、移动 change 并清理本机 Runtime；正常路径不重新执行 Verify。并行 capability 冲突时，根据 `continuation` 先选择串行顺序。
+Archive 应用完整 target Specs、生成 `verification.md`、移动 change 并清理本机 Runtime；正常路径不重新执行 Verify。branch/worktree 隔离的交付方式用 `--finish keep|merge|push|pull-request` 指定（选项语义见[产物与状态的交付表](/zh/native/artifacts-and-state)）；并行 capability 冲突时，根据 `continuation` 先用 `--serial-first` 选择串行顺序。
 
 ## 诊断、迁移和恢复
 
@@ -68,6 +76,6 @@ comet native doctor add-user-avatar
 comet native doctor add-user-avatar --repair
 ```
 
-`doctor --repair` 只做可确定的迁移、事务收口和本机 overlay 重建，不替用户改需求、Spec 或代码。跨设备恢复缺少 `verification.md` 不会阻止 Shape/Build；遇到错误的 branch/worktree 或混合 active/archive 布局时会暂停，等待你处理。
+`doctor --repair` 只做可确定的迁移、未完成事务的收尾和本机 overlay 重建，不替用户改需求、Spec 或代码。跨设备恢复缺少 `verification.md` 不会阻止 Shape/Build；遇到错误的 branch/worktree 或混合 active/archive 布局时会暂停，等待你处理。
 
 用户可读产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；`.comet/runtime/native/` 只放本机 state、日志、锁和事务。

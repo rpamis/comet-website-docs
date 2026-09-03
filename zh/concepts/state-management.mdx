@@ -3,7 +3,7 @@ title: '状态管理'
 description: '理解 .comet.yaml 字段全表、Run state、状态机硬约束和状态转换审计日志，以及 Classic 的文件化状态如何支撑恢复。'
 ---
 
-Comet 的恢复能力来自文件化状态。理解用户可读状态、机器运行状态和追加审计日志，你就能知道 Classic 在每个阶段读什么、以及阶段推进为什么发生。项目级配置（`.comet/config.yaml`）见 [Classic 配置](/zh/classic/configuration)。
+Comet 的恢复能力来自文件化状态。理解用户可读状态、机器运行状态和追加审计日志，你就能知道 Classic 在每个阶段读什么，以及阶段为什么会推进。项目级配置（`.comet/config.yaml`）见 [Classic 配置](/zh/classic/configuration)。
 
 下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。实际位置由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
 
@@ -27,7 +27,7 @@ comet state clear-selection
 
 ```mermaid
 flowchart LR
-  A[".comet.yaml<br/>每个 change 一个"] --> B["用户可见工作流投影<br/>phase / build_mode / verify_result"]
+  A[".comet.yaml<br/>每个 change 一个"] --> B["用户可见的工作流状态<br/>phase / build_mode / verify_result"]
   C[".comet/run-state.json<br/>每个 change 或 run 一个"] --> D["machine-owned Run state<br/>currentStep / pending / artifacts"]
   E[".comet/state-events.jsonl<br/>每个 change 一个"] --> F["追加式转换审计<br/>event / source / effects"]
   B --> G["status / doctor / guard"]
@@ -49,7 +49,7 @@ flowchart LR
 
 | 文件                        | 位置                                            | 谁管理                                        | 作用                                                           |
 | --------------------------- | ----------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------- |
-| `.comet.yaml`               | `<classic-root>/changes/<name>/.comet.yaml`     | 用户可见，通过 `/comet` 和 guard 流转         | 工作流投影：阶段、执行方式、验证结果                           |
+| `.comet.yaml`               | `<classic-root>/changes/<name>/.comet.yaml`     | 用户可见，通过 `/comet` 和 guard 流转         | 工作流状态：阶段、执行方式、验证结果                           |
 | `.comet/run-state.json`     | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | machine-owned（由 Comet 自动维护），不需要手动编写，运行时自动写入 | Engine Run 细节：currentStep、pending、trajectory              |
 | `.comet/state-events.jsonl` | `<classic-root>/changes/<name>/.comet/`         | Comet 追加写入，用户可读                      | 成功 state transition 的审计日志                               |
 
@@ -124,7 +124,7 @@ flowchart LR
 | `classic_migration` | Classic 迁移版本（当前为 `1`）  | **不能**（machine-owned）                  |
 | `run_id`            | 链接到 Engine Run state         | **不能**（machine-owned）                  |
 
-`classic_profile`、`classic_migration`、`run_id` 是 machine-owned 字段，`set` 会被硬拒绝（报错 "is a machine-owned Run field and cannot be set directly"）。它们只由状态机的 transition 事件和归档流程写入，例如 `preset-escalate` 会原子地把 `classic_profile` 设为 `full`。
+`classic_profile`、`classic_migration`、`run_id` 是 machine-owned 字段，`set` 会被硬拒绝（报错 "is a machine-owned Run field and cannot be set directly"）。它们只由状态机的 transition 事件和归档流程写入，例如 `preset-escalate` 会一次性把 `classic_profile` 设为 `full`。
 
 ## 状态机硬约束
 
@@ -154,7 +154,7 @@ flowchart LR
 
 hotfix/tweak 命中升级信号（跨模块、新 API、schema 变更等）时，通过 `preset-escalate` 转换升级到 full：
 
-- 原子地设置 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`，清除 `design_doc`。
+- 一次性设置 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`，清除 `design_doc`。
 - 这是预设→full 升级的**唯一合法通道**——直接 `set phase design` 被硬阻止，`set classic_profile` 是 machine-owned 也被硬阻止。
 
 ## 状态转换审计日志
@@ -174,12 +174,12 @@ Classic 状态转换共用同一套语义。成功的 `comet state transition`�
 | `change`        | change 名称                                                 |
 | `event`         | `open-complete`、`build-complete`、`verify-pass` 等转换事件 |
 | `source`        | `comet state`、`comet guard` 或 `comet archive`             |
-| `from` / `to`   | 转换前后的 Classic 状态投影                                 |
+| `from` / `to`   | 转换前后的 Classic 状态                                         |
 | `effects`       | 实际变更的字段列表，例如 `phase: build -> verify`           |
 
 ## 状态和 Run state 的边界
 
-`.comet.yaml` 保存用户可理解的工作流投影。Engine 运行细节放在 `.comet/run-state.json`。两者通过 `run_id` 链接。
+.comet.yaml 保存用户可理解的工作流状态。Engine 运行细节放在 `.comet/run-state.json`。两者通过 `run_id` 链接。
 
 | 你想知道的                       | 看哪里                                              |
 | -------------------------------- | --------------------------------------------------- |

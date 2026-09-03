@@ -36,7 +36,7 @@ Reviewer 的执行标识必须与 Builder 不同。Runtime 会把 `handoff` 保�
 候选结果进入 Verify 后，流程按以下顺序推进：
 
 1. **确定验收范围。** 首轮 Verify 覆盖全部验收项；修复轮只覆盖上一轮未解决项和本次修改可能影响的项目。
-2. **执行必要检查。** Runtime 运行测试、构建或其他项目命令，并记录状态、退出码、耗时和摘要。
+2. **执行必要检查。** Runtime 运行测试、构建或其他项目命令，并记录状态、退出码、耗时和摘要。项目策略携带的验证命令（见[项目知识](/zh/plugins/project-rules)）也会作为必要检查在这里执行，只有真实通过才能把对应策略升级为 enforced。
 3. **准备验收上下文。** `verifierDispatch` 提供实际工作区、需求和证据位置、当前 `scopeIds`、Reviewer 摘要以及 Runtime 检查结果。
 4. **启动新的 Verifier Subagent。** Verifier 保持只读，对当前范围内的每个验收 ID 给出一次结论。
 5. **校验并接受结果。** Runtime 检查候选、身份、轮次、`attempt` 和验收范围是否匹配，再决定下一步。
@@ -72,7 +72,7 @@ Verifier 会先阅读当前验收场景、`brief.md`、完整目标 Specs、实�
 
 这种“**局部修复，最终全量确认**”的方式减少了重复工作，同时防止修复一个问题时引入新的回归。
 
-## 不同结果进入不同处理路径
+## 不同结果的处理方式
 
 | Verify 结果 | Runtime 状态 | 下一步 |
 | --- | --- | --- |
@@ -80,7 +80,7 @@ Verifier 会先阅读当前验收场景、`brief.md`、完整目标 Specs、实�
 | 存在 `failed` 项 | `repairing` | 返回 Build，修复明确缺口并提交新候选 |
 | 存在 `blocked` 项 | `await-user` | 补充用户决定或外部信息，再启动新的 Verifier |
 | Verifier 任务执行出错 | `verify-ready` 或 `blocked` | Runtime 决定重试；连续出错达到上限后暂停 |
-| 无法启动独立 Verifier | `await-user` | 明确展示降级风险，由用户决定是否接受只有 Runtime 检查的结果 |
+| 无法启动独立 Verifier | `await-user` | 返回"重试验收"和"接受降级结果"两个选项，由用户选择（见下文） |
 
 “验收未通过”和“Verifier 执行出错”不是一回事。前者说明实现或需求仍有缺口，后者说明验收任务本身没有正常完成。Runtime 会分别记录，避免把基础设施故障误判为产品失败。
 
@@ -105,7 +105,7 @@ Runtime 通过未解决验收项是否真正减少来判断进展。只有当前
 | `--revise-implementation` | 保留已确认需求，返回 Build 修改实现 |
 | `--revise-requirements` | 返回 Shape，修改用户可见目标或验收标准并重新确认 |
 
-如果平台根本无法启动语义 Verifier，即使所有 Runtime 检查都通过，也只能得到降级结果。Runtime 会明确说明“只有自动检查，没有独立语义验收”，并要求用户使用 continuation 返回的 `--confirmed` 动作明确接受。用户确认不会把这份结果伪装成独立验证，报告仍会保留降级标记。
+如果平台根本无法启动语义 Verifier，即使所有 Runtime 检查都通过，也只能得到降级结果。此时 Runtime 会暂停并给出两个选项：**重试验收**（`comet native next <change> --retry-verifier`，保留当前候选和已完成的检查，只发起新的验收尝试）或**接受降级结果**（在明确确认后用 continuation 返回的 `--confirmed` 动作接受）。用户确认不会把这份结果伪装成独立验证，报告仍会保留降级标记。
 
 所有决定命令都带有 `--expected-state-version` 和 `--expected-action`。如果状态已经变化、操作来自旧页面或旧任务，Runtime 会拒绝执行，避免迟到决定覆盖当前结果。
 
@@ -117,7 +117,7 @@ Supervisor Change 的子任务必须依次达到 `active`、`verified` 和 `inte
 
 ## 验证报告可以重建和恢复
 
-`verification.md` 是面向用户的验收报告，包含 Runtime 检查、逐项结果、风险、限制和最终结论。稳定状态保存在 `comet-state.yaml`，因此报告缺失、写入中断或版本落后时，可以根据可信状态重新生成。
+`verification.md` 是面向用户的验收报告，包含 Runtime 检查、逐项结果、风险、限制和最终结论。验收结论同时记录在 `comet-state.yaml`，因此报告缺失、写入中断或版本落后时，可以根据记录的结论重新生成。
 
 换到另一台设备后，旧设备上的本机执行不能直接沿用。处于 `verify-ready` 的候选会重新运行必要检查并启动新的 Verifier；处于 `archive-ready` 的候选也会先返回 Verify，重新确认同步后的实现。恢复过程本身不会增加失败轮次或停滞计数。
 

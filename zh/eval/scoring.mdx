@@ -34,13 +34,13 @@ Comet eval 使用任务检查结果决定一次运行是否通过，并提供 ru
 
 | 指标 | 回答的问题 | 类型 | 是否门禁 |
 | --- | --- | --- | --- |
-| **rubric 各维度分**（0.0–1.0） | 这个维度做得怎么样 | 诊断性 | 否（信息性） |
-| **weighted_score**（加权总分） | 综合质量如何 | 诊断性 | 否 |
-| **RubricAvg**（报告列） | 该次运行的维度均分 | 诊断性 | 否 |
-| **pass@k** | k 次里至少成功一次的概率（能力上限） | 分布性 | 否 |
-| **pass^k** | k 次全部成功的概率（可靠性下限） | 分布性 | 否 |
-| **工作流契约检查** | 被测 Skill 是否真的按契约触发 | 硬判定 | 是（缺必需 Skill 会失败） |
-| **任务校验器通过/失败** | 这次实现到底对不对 | 硬判定 | 是（决定 pass/fail） |
+| **rubric 各维度分**（0.0–1.0） | 这个维度做得怎么样 | 诊断参考 | 否（不作为门禁） |
+| **weighted_score**（加权总分） | 综合质量如何 | 诊断参考 | 否 |
+| **RubricAvg**（报告列） | 该次运行的维度均分 | 诊断参考 | 否 |
+| **pass@k** | k 次里至少成功一次的概率（能力上限） | 跨多次运行统计 | 否 |
+| **pass^k** | k 次全部成功的概率（可靠性下限） | 跨多次运行统计 | 否 |
+| **工作流契约检查** | 被测 Skill 是否真的按契约触发 | 硬性判定 | 是（缺必需 Skill 会失败） |
+| **任务校验器通过/失败** | 这次实现到底对不对 | 硬性判定 | 是（决定 pass/fail） |
 
 <Note>
   rubric 和 pass 指标用于诊断和比较。通过条件是 <code>checks_failed == []</code>。大多数失败来自任务校验器，但 profile 也会把必需 Skill 未触发等工作流契约问题写入 <code>checks_failed</code>。
@@ -71,7 +71,7 @@ eval harness 保存这次运行的原始 `stdout` / `stderr`，再逐行解析 `
 所以报告里的 `Skills invoked`、`commands_run`、`tool_calls`、`files_created`、token/cost 等，都是从 Claude CLI 的结构化事件流整理出来的可观测行为日志。
 
 <Warning>
-  stream-json 仍然只是<strong>可观测行为日志</strong>。它适合统计工具调用、命令、Skill 调用、文件变化和成本；它不包含模型内部推理，也不能证明某个内部决策的因果链。schema 变化、坏 JSON 行、CLI 版本变化都可能影响解析，因此 raw stdout/stderr 会保留下来供审计。
+  stream-json 仍然只是<strong>可观测行为日志</strong>。它适合统计工具调用、命令、Skill 调用、文件变化和成本；它不包含模型内部推理，也不能证明某个内部决策的因果链。schema 变化、损坏的 JSON 行、CLI 版本变化都可能影响解析，因此 raw stdout/stderr 会保留下来供审计。
 </Warning>
 
 ### 轨迹和事件流不是一回事
@@ -98,16 +98,17 @@ eval 内置三套 rubric，对应三种 profile：
 | Profile | 维度数 | 权重和 | 交互模式 | 适合 |
 | --- | --- | --- | --- | --- |
 | `generic` | 7 | 7.7 | `none`（单轮） | 通用 Skill 冒烟 |
-| `comet-workflow` | 9 | 11.0 | `auto_user`（多轮） | 经典 `/comet` 五阶段 |
-| `authoring-skill` | 11 | 13.8 | `auto_user`（多轮） | `/comet-any` 生成物 |
+| `comet-workflow` | 10 | 12.0 | `auto_user`（多轮） | 经典 `/comet` 五阶段 |
+| `authoring-skill` | 11 | 12.8 | `auto_user`（多轮） | `/comet-any` 生成物 |
 
-### comet-workflow rubric（9 维）
+### comet-workflow rubric（10 维）
 
-评估经典五阶段工作流。九个 `[RUBRIC]` 维度分本身是诊断性分数；但 profile 仍会检查工作流契约：如果没有真实触发 `comet`、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill 或 Superpowers 依赖 Skill，会产生硬失败。
+评估经典五阶段工作流。十个 `[RUBRIC]` 维度分本身只作诊断参考；但 profile 仍会检查工作流契约：如果没有真实触发 `comet`、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill 或 Superpowers 依赖 Skill，会产生硬失败。
 
 | 维度 | 权重 | 检查什么 |
 | --- | --- | --- |
-| `completion` | **2.0**（最高） | 基线校验器通过比例（任务到底做对没） |
+| `business_completion` | **2.0**（最高） | 基线校验器通过比例（业务任务到底做对没） |
+| `workflow_completion` | 1.0 | 工作流自身步骤的完成度 |
 | `main_flow` | 1.5 | 五阶段（open→design→build→verify→archive）有多少阶段留下证据 |
 | `gate_guard` | 1.5 | 是否用了 `comet-guard` / `transition` / `--apply` |
 | `artifact_quality` | 1.2 | proposal/design/tasks/test 是否有实质内容（proposal≥10 行、design 含权衡关键词、tasks≥3 个勾选项、有断言测试） |
@@ -119,7 +120,7 @@ eval 内置三套 rubric，对应三种 profile：
 
 ### generic rubric（7 维）
 
-评估通用 Skill。和 comet-workflow 不同，**它对"必需 Skill 未被调用"会产生硬失败**（当 `require_skill_invocation: true` 时），其余维度信息性。
+评估通用 Skill。和 comet-workflow 不同，**它对"必需 Skill 未被调用"会产生硬失败**（当 `require_skill_invocation: true` 时），其余维度仅提供诊断信息。
 
 | 维度 | 权重 | 检查什么 |
 | --- | --- | --- |
@@ -165,7 +166,7 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 
 设 `BENCH_LLM_JUDGE=1` 启用。默认情况下，Comet 的最终 `weighted_score` 是规则分，不是 LLM-as-judge。规则型 rubric 能抓结构信号（文件存在、命令执行），但抓不到**产物是否有实质内容**——agent 是真做了有意义的输出，还是只生成了一个 stub？LLM judge 让一个裁判模型读取 workspace artifacts 后重新打分，输出 `[RUBRIC-JUDGE]` 行（和规则分的 `[RUBRIC]` 区分）。best-effort：失败则回退到规则分，不影响运行。
 
-judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**故意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
+judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**有意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
 
 如果配置了 `BENCH_JUDGE_BASE_URL` 和 `BENCH_JUDGE_AUTH_TOKEN` / `BENCH_JUDGE_API_KEY`，judge 会优先直接调用 Anthropic Messages HTTP（`/v1/messages`）。没有专用 judge endpoint 时，才回退到宿主机 `claude` CLI，并在子进程里清除继承来的主 `ANTHROPIC_*` provider 设置，再把独立裁判配置映射给自己的 CLI 调用：
 
@@ -203,7 +204,7 @@ judge 收集 workspace 文件时跳过 `.git`、`node_modules`、`.comet` 等目
 
 ## pass@k 与 pass^k
 
-这两个指标衡量**能力 vs 可靠性**，是评估 Skill 能否反复稳定运行的关键。它们基于**多次重复运行**（由 `--count N` 产生）的通过/失败序列计算。
+这两个指标衡量**能力 vs 可靠性**，是评估 Skill 能否反复稳定运行的关键。它们基于**多次重复运行**产生的通过/失败序列计算。
 
 ### 定义
 
@@ -241,15 +242,15 @@ flowchart LR
 
 ### 怎么得到多次运行
 
-`--count N`（pytest 选项）把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
+重复运行由 eval harness 内部的 pytest 选项 `--count N` 驱动：它把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果（`comet eval` 单次运行只产出 pass@1/pass^1）。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
 
 ```bash
 # 重复 5 次，让 pass@k/pass^k 有意义
-# （实际通过 comet eval 间接驱动，底层等价于 --count 5）
+# （重复运行在 eval harness 内部由 pytest --count 5 驱动）
 ```
 
 <Warning>
-  报告在运行数不足时会警告：<em>"Only N run per treatment — pass@k/pass^k for k&gt;1 need ≥2 runs to be meaningful. Use <code>--count 5</code>."</em> 单次运行只能算 pass@1/pass^1，k&gt;1 的指标需要多次重复。
+  报告在运行数不足时会警告重复次数不够（pass@k/pass^k 的 k&gt;1 至少需要 2 次运行才有意义）。单次运行只能算 pass@1/pass^1，k&gt;1 的指标需要多次重复。
 </Warning>
 
 ### k 怎么选
@@ -348,7 +349,7 @@ auto_user 评测的模拟器指令可被覆盖。默认从 `eval/simulator-instr
 | --- | --- | --- |
 | **task** | 一个评测任务（目录，含 instruction/environment/validation） | `comet-fix-median`（修 bug 维度） |
 | **treatment** | 实验条件（注入哪些 Skill / CLAUDE.md） | `CONTROL`（无 Skill 基线）、`COMET_FULL`（注入 comet） |
-| **reps** | 重复次数（`--count N`） | `--count 5` 每个 (task,treatment) 跑 5 次 |
+| **reps** | 重复次数（harness 内部 `--count N`） | `--count 5` 每个 (task,treatment) 跑 5 次 |
 
 ### treatment 实现 A/B 对比
 

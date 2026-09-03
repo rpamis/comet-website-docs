@@ -1,15 +1,17 @@
 ---
 title: '连续推进与稳定恢复点'
-description: '理解 Native 如何通过 continuation 推进工作，并依据 comet-state.yaml 中的稳定边界恢复中断的任务。'
+description: '理解 Native 如何通过 continuation 推进工作，以及中断后如何从 comet-state.yaml 记录的进度恢复。'
 ---
 
-Native 把“当前进展”和“下一步动作”保存在文件中。Agent 每完成一个 Runtime 动作，就读取最新的 `continuation`，继续实现、验收或归档。即使对话中断、Agent 更换或本机 Runtime 丢失，流程也能回到最近一个可信状态。
+Native 把“当前进展”和“下一步动作”写进 `comet-state.yaml`。Agent 每完成一个动作，就读取最新的 `continuation`，继续实现、验收或归档。即使对话中断、Agent 更换或本机 Runtime 丢失，也能从文件里记录的进度接着做。
 
-本文中的“恢复点”指 `comet-state.yaml` 记录的稳定工作流边界。RC1 已不再提供公开的 `comet native checkpoint` 命令，也不要求你手工创建 checkpoint 文件。
+Shape 确认、每轮验收、归档批准这些关键节点，Comet 都会把当前阶段和结果写进 `comet-state.yaml`，这就是**恢复点**。中断后从最近一个恢复点继续，不需要手工创建 checkpoint 文件（`comet native checkpoint` 命令已移除）。
 
 ## continuation 决定下一步
 
 `comet native new`、`status`、`next`、`archive` 和 `doctor` 等命令都会返回 `continuation.v2`。它同时描述流程状态、Agent 动作和用户需要知道的信息。
+
+对用户来说，先看 `disposition` 就知道现在要不要动手：`continue` 表示流程自动推进、不用管；`await-user` 表示需要你回复一个选择（比如接受结果或修订需求）；`blocked` 表示按提示运行 `doctor` 或补充信息；`done` 表示收尾。以下字段表主要供 Agent 和自动化程序使用。
 
 | 字段 | 作用 | 使用方式 |
 | --- | --- | --- |
@@ -81,14 +83,14 @@ Verifier 发现实现缺口时，Runtime 返回 Build，并把未解决的验收
 
 ## 不同阶段如何恢复
 
-Runtime 会根据稳定状态和本机执行状态决定恢复位置。
+Runtime 会根据 `comet-state.yaml` 记录的阶段和本机执行状态决定从哪里恢复。
 
-| 稳定边界 | 恢复行为 |
+| 中断时所处的阶段 | 恢复行为 |
 | --- | --- |
 | Shape | 保持 Shape，继续澄清或执行尚未完成的确认 |
 | Build | 保留已确认需求和当前实现，继续 Builder 工作或提交 handoff |
 | Verify 的 `verify-ready` | 复用仍然有效的候选和检查信息，重新运行必要检查并启动新的 Verifier |
-| Verify 正在等待 Verifier | 原任务已丢失时，从稳定 Verify 边界启动新的 attempt |
+| Verify 正在等待 Verifier | 原任务已丢失时，回到 Verify 记录的进度启动新的 attempt |
 | Archive 的 `archive-ready` | 本机 Runtime 丢失或换设备时先回 Verify，重新验收同步后的实现 |
 | `await-user` / `blocked` | 保留原阻塞原因、处理责任和允许的动作 |
 | `done` | 以已归档状态展示，必要时完成确定性的目录或工作区清理 |
@@ -99,7 +101,7 @@ Runtime 会根据稳定状态和本机执行状态决定恢复位置。
 
 每份本机 `state.json` 都关联 change 和 `state_version`。Runtime 读取它时会区分以下情况：
 
-- **状态匹配**：从当前稳定边界继续；
+- **状态匹配**：从当前记录的进度继续；
 - **文件缺失、无效或版本落后**：根据 `comet-state.yaml` 重建本机执行状态；
 - **检查执行中断**：把运行中的检查标记为中断；可安全重复的检查可以重新执行；
 - **不可重复检查中断**：返回 Build，要求 Builder 生成新的候选后再验收；
@@ -136,7 +138,7 @@ comet native status <change-name> --details --json
 - change 目录中的 `brief.md`、Specs 和 `comet-state.yaml`；
 - 已生成的 `verification.md`，该文件也可以在目标设备重建。
 
-目标设备不需要复制 `.comet/runtime/native/`。Runtime 会检查项目根目录、分支、worktree 和 change 绑定。绑定一致时，它从稳定边界重建本机执行状态；绑定不一致、代码未同步或同名 active/archive 目录冲突时，它会保持现有文件并等待处理。
+目标设备不需要复制 `.comet/runtime/native/`。Runtime 会检查项目根目录、分支、worktree 和 change 绑定。绑定一致时，它按 `comet-state.yaml` 记录的进度重建本机执行状态；绑定不一致、代码未同步或同名 active/archive 目录冲突时，它会保持现有文件并等待处理。
 
 ## 何时使用 doctor
 

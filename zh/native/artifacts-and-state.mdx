@@ -50,9 +50,11 @@ Native 把用户需要阅读和同步的内容放在 change 目录，把执行�
 
 brief 说明目标、范围、非目标、已确认的用户决定、未解决问题、验收示例和验证期望。它是 Shape 阶段的工作说明，用户能直接阅读和修改需求。
 
+手工编辑 brief 或 Spec 时注意验收项的生成规则：Runtime 只把 **brief 顶层的验收示例**和 **Spec 中以 `Scenario:` 标题开头的完整场景**识别为验收项；描述性文字、普通列表和单独的 WHEN/THEN 行不会生成额外验收项。想扩大或缩小验收范围，按这两种格式编写。
+
 ### `specs/<capability>/spec.md`
 
-每个 Spec 描述归档后 capability 的完整行为。归档时 Runtime 会按声明执行 `create`、`modify` 或 `remove`：创建、完整替换，或在受控路径内删除。并行 change 如果都要改同一 capability，会先停下来要求确定归档顺序，不会自动覆盖。
+每个 Spec 描述归档后 capability 的完整行为。归档时 Runtime 会按声明执行 `create`、`modify` 或 `remove`：创建、完整替换，或在受控路径内删除。要声明移除一个 capability，运行 `comet native spec remove` 表达删除意图——只删除 Spec 文件不会被当作移除声明，归档时该 Spec 仍按存在处理。并行 change 如果都要改同一 capability，会先停下来要求确定归档顺序，不会自动覆盖。
 
 ### `comet-state.yaml`
 
@@ -70,11 +72,11 @@ brief 说明目标、范围、非目标、已确认的用户决定、未解决�
 
 ## 跨设备恢复
 
-你不需要手工执行恢复命令。在目标设备拉取或同步项目代码后，像平时一样告诉 Agent 继续当前需求即可。Comet 会先尝试通过环境感知恢复找到 active change，再由 Agent 根据 Runtime 返回的工作区和下一步动作，自动完成状态读取、change 选择和流程推进。
+你不需要手工执行恢复命令。在目标设备拉取或同步项目代码后，像平时一样告诉 Agent 继续当前需求即可。Comet 会先尝试通过自动恢复探测找到 active change，再由 Agent 根据 Runtime 返回的工作区和下一步动作，自动完成状态读取、change 选择和流程推进。
 
 需要同步的是项目代码、`.comet/config.yaml`、`brief.md`、Specs 和 `comet-state.yaml`。如果已经生成 `verification.md`，可以一并同步；即使缺失，Runtime 也能根据 `comet-state.yaml` 重建，不会阻止 Shape 或 Build 恢复。`.comet/runtime/native/` 属于本机执行状态，不需要跨设备复制。
 
-目标设备缺少 Runtime，或本机执行状态已经过期时，Runtime 会以 `comet-state.yaml` 中记录的稳定边界为准自动重建。执行到一半的检查会按中断处理；需要重新运行的检查会再次执行，不能安全复用的 Verifier 或 `archive-ready` 结果会重新验证。恢复不会依赖旧设备的 `state.json`，也不会因为复制了旧 Runtime 文件就直接归档。
+目标设备缺少 Runtime，或本机执行状态已经过期时，Runtime 会按 `comet-state.yaml` 里记录的进度自动重建。执行到一半的检查会按中断处理；需要重新运行的检查会再次执行，不能安全复用的 Verifier 或 `archive-ready` 结果会重新验证。恢复不会依赖旧设备的 `state.json`，也不会因为复制了旧 Runtime 文件就直接归档。
 
 只有代码未同步、当前分支或 worktree 与 change 不匹配、存在多个同样匹配的工作区，或 active/archive 目录冲突时，Comet 才会停下来请你选择或修正。
 
@@ -84,6 +86,23 @@ brief 说明目标、范围、非目标、已确认的用户决定、未解决�
 comet native status <change-name> --details
 comet native doctor <change-name>
 ```
+
+## 归档与交付选项
+
+进入 Archive 时，交付方式取决于 open 阶段选择的工作区：
+
+- **current 工作区**：不需要再选交付方式。Comet 会展示当前分支和目录，说明归档不做任何 merge、push 或 PR，确认后直接完成归档。
+- **branch / worktree 隔离**：Comet 会展示实际的 change 分支、目标分支和目录，把以下五个互斥选项作为一次决策提供：
+
+| 选项 | 命令 | 实际效果 |
+| --- | --- | --- |
+| A 仅保留工作区 | `keep` | 完成归档并在 change 分支创建归档提交；不合并、不推送、不建 PR，保留当前分支和目录 |
+| B 本地合并 | `merge` | 完成归档并创建归档提交，然后把 change 分支本地合并进目标分支；不推送、不建 PR |
+| C 归档并推送 | `push` | 完成归档并创建归档提交，然后推送 change 分支；不合并进目标分支、不建 PR |
+| D 推送并创建 PR | `pull-request` | 完成归档并创建归档提交，推送 change 分支，然后以目标分支为 base 创建 PR |
+| E 暂缓归档 | — | 不执行归档和交付，保留 active change 和工作区，稍后再来 |
+
+选择 A–D 时，Comet 用对应参数执行归档命令（`--finish keep|merge|push|pull-request`）；选 E 则到此为止。选 A 保留的 worktree 不会在本次归档中移除；其他选项归档后如 worktree 无未提交改动，Comet 会提议清理，由你确认。
 
 ## 归档后
 

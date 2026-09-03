@@ -87,7 +87,7 @@ Comet 用 treatment 体系做有/无 Skill 对照：`CONTROL`（无 Skill 基线
 
 ## 绑定 Skill 的评测，目前还没有金标准
 
-评估模型的评测（SWE-bench、HumanEval）已较成熟。但评估"绑定到 Agent 上的 Skill 是否有效"，业界还没有公认的金标准。
+评测模型能力的基准（SWE-bench、HumanEval）已较成熟。但评估"绑定到 Agent 上的 Skill 是否有效"，业界还没有公认的金标准。
 
 学术论文 SkillsBench<sup>[1]</sup> 针对这个空白，把 Skill 作为直接评测对象，用配对实验（paired evaluation）测量"加 Skill vs 不加 Skill"的增量，并指出：传统的 agent benchmark "measure raw capability in isolation... do not answer the deployment question: will adding this Skill help my agent on this task, and by how much?"
 
@@ -125,7 +125,7 @@ Comet 的做法是可选的 LLM-as-judge：由裁判模型读取 workspace 产�
 - **要求引用证据**。输出格式为 `[RUBRIC-JUDGE] <维度>: <分数> - <原因>`，原因不超过 25 词且需引用具体产物内容。
 - **补充而非替代**。judge 分以 `[RUBRIC-JUDGE]` 标识，与规则分的 `[RUBRIC]` 区分，只补充不替代规则分，也不构成硬失败。
 
-SkillsBench 出于确定性，未采用 LLM-as-judge 打分。Comet 的取舍是：确定性测试承担"是否正确"的硬判定，LLM judge 补充"是否深入"的定性判断，两者分工互补。
+SkillsBench 出于确定性，未采用 LLM-as-judge 打分。Comet 的取舍是：确定性测试承担"是否正确"的硬性判定，LLM judge 补充"是否深入"的定性判断，两者分工互补。
 
 源码位置：`eval/scaffold/python/llm_judge.py`（comet-workflow）、`generic_llm_judge.py`（通用）。judge 复用被测 Agent 相同的 `claude` CLI，不引入额外依赖。
 
@@ -135,7 +135,7 @@ SkillsBench 出于确定性，未采用 LLM-as-judge 打分。Comet 的取舍是
 
 | 指标层 | 回答的问题 | 类型 |
 | --- | --- | --- |
-| 任务校验器（产物存在 + 验证脚本零失败） | 这次是否正确 | 硬判定（决定 pass/fail）|
+| 任务校验器（产物存在 + 验证脚本零失败） | 这次是否正确 | 硬性判定（决定 pass/fail）|
 | rubric 多维分（7/9/11 维，加权汇总） | 哪里强、哪里弱、差距多少 | 信息性（诊断）|
 | pass@k / pass^k | 能否做到 / 能否每次做到 | 信息性（分布）|
 
@@ -163,7 +163,7 @@ Comet 的做法是为每个任务提供独立的隔离 Docker 容器：
 
 Comet 通过多层机制确保模型实际使用 Skill：
 
-1. **写入 `CLAUDE.md` 契约**。评测 comet-workflow 时，在容器 workspace 写入强制 `CLAUDE.md`，要求"先调用 `/comet` Skill""用 Skill 工具调用嵌套阶段 Skill""不用散文模拟工作流"。`CLAUDE.md` 是始终加载的上下文。
+1. **写入 `CLAUDE.md` 契约**。评测 comet-workflow 时，在容器 workspace 写入强制 `CLAUDE.md`，要求"先调用 `/comet` Skill""用 Skill 工具调用嵌套阶段 Skill""不用纯文字模拟工作流"。`CLAUDE.md` 是始终加载的上下文。
 2. **契约同时注入任务 prompt**。触发指令同时出现在系统上下文（CLAUDE.md）和第一条用户消息中。
 3. **PreToolUse hook 守护**。将 Skill 自带的 `comet-hook-guard.mjs` 注册为 `Write|Edit|MultiEdit` 前置 hook，每次写文件前运行阶段守卫，使模型持续按 Skill 的阶段逻辑执行。
 4. **Skill 调用证据作为硬门禁**。评测从 `stream-json` 输出中解析真实的 `Skill` tool_use 事件来验证调用（不从产物文件名反推）。如果 comet 入口、至少一个嵌套阶段 Skill、OpenSpec 和 Superpowers 依赖 Skill 未全部作为真实工具调用出现，运行判定失败。
@@ -191,10 +191,10 @@ Comet 的 LangSmith 集成复用同一套本地任务套件，把评估跑进真
 
 ## 小结
 
-评估模型已有较成熟的金标准；评估"绑定到 Agent 上的 Skill 是否有效"目前仍是开放问题。Comet eval 的做法是：
+评测模型能力已有较成熟的金标准；评估"绑定到 Agent 上的 Skill 是否有效"目前仍是开放问题。Comet eval 的做法是：
 
 - 把 Skill 评测作为多轮交互问题处理，用双 Agent 自动交互跑完整条工作流，而非单轮执行；
-- 把确定性测试和定性判断分工，任务校验器承担硬判定，LLM judge 补充深度评估；
+- 把确定性测试和定性判断分工，任务校验器承担硬性判定，LLM judge 补充深度评估；
 - 用 pass@k/pass^k 区分能力与可靠性，使演进有明确方向；
 - 用 Docker 隔离、只读挂载、密钥白名单保证环境可复现；
 - 用 CLAUDE.md 契约和调用证据硬门禁确保 Skill 被真实调用；

@@ -5,18 +5,18 @@ description: "理解 context_compression 的 off 和 beta 模式如何减少 des
 
 上下文压缩（context compression）控制 design→build 阶段交接时，有多少 OpenSpec 上下文传给 Superpowers。它是一个 beta 功能，目的是在不损失实现正确性的前提下减少 token 消耗。
 
-它和传统的摘要式压缩不同。摘要式压缩把重点内容总结后传递，在 Spec 任务上容易漏掉任务和细节，导致 Spec 漂移，进而影响下游 Agent 的实现。Comet 的做法是结构化投影加 hash 引用：delta spec 原样保留，其余文件用 hash 关联源文件，需要时回读原文，在保证 Spec 完整的同时减少 token 消耗。
+它和传统的摘要式压缩不同。摘要式压缩把重点内容总结后传递，在 Spec 任务上容易漏掉任务和细节，导致 Spec 漂移，进而影响下游 Agent 的实现。Comet 的做法是结构化摘录加 hash 引用：delta spec 原样保留，其余文件用 hash 关联源文件，需要时重新读取原文，在保证 Spec 完整的同时减少 token 消耗。
 
 ## 它解决什么问题
 
-design 阶段结束时，需要把 OpenSpec 的需求规格（proposal、design、tasks、delta spec）交给 build 阶段作为实现依据。默认模式下这些内容完整传入，token 开销大。上下文压缩通过 hash 引用和结构化投影减少冗余传输。
+design 阶段结束时，需要把 OpenSpec 的需求规格（proposal、design、tasks、delta spec）交给 build 阶段作为实现依据。默认模式下这些内容完整传入，token 开销大。上下文压缩通过 hash 引用和结构化摘录减少冗余传输。
 
 ## 两种模式
 
 | 模式 | 行为 | token 节省 | 状态 |
 | --- | --- | --- | --- |
 | `off`（默认） | 生成可追溯的完整摘要（截断超过 80 行的文件） | 基线 | 稳定 |
-| `beta` | 结构化 spec 投影，delta spec 原样保留，proposal/design/tasks 只存 hash 引用 | 约 25–30% | beta |
+| `beta` | 结构化 spec 摘录，delta spec 原样保留，proposal/design/tasks 只存 hash 引用 | 约 25–30% | beta |
 
 <p align="center">
   <img src="/assets/context-compression-illustrations/01-off-beta-handoff-modes.png" alt="小鱼对比 off 的完整摘要手账和 beta 的 delta 完整保留加 hash 引用薄文件夹" width="800" />
@@ -38,7 +38,7 @@ design 阶段结束时，需要把 OpenSpec 的需求规格（proposal、design�
 该模式生成以下文件：
 
 - `spec-context.json` — 机器索引，每文件标 `role: spec`（delta spec）或 `role: supporting`（proposal/design/tasks）
-- `spec-context.md` — 原样投影 delta spec，包括验收场景；proposal、design 和 tasks 只记录 hash 引用
+- `spec-context.md` — 原样摘录 delta spec，包括验收场景；proposal、design 和 tasks 只记录 hash 引用
 
 <Note>
   beta 模式下 <code>--full</code> 被忽略（会输出 warning）。beta 只对 delta spec 原样写入，其他文件靠 hash 引用，所以节省来自不重复传输 proposal/design/tasks 的全文。
@@ -49,10 +49,10 @@ design 阶段结束时，需要把 OpenSpec 的需求规格（proposal、design�
 OpenSpec 的 delta spec（`specs/<capability>/spec.md`）包含本次变更的需求和验收场景。beta 模式原样写入 delta spec，对 proposal、design 和 tasks 使用 hash 引用：
 
 - delta spec 的正文不经过摘要。
-- proposal、design 和 tasks 通过 sha256 关联源文件，需要时可以回读原文。
+- proposal、design 和 tasks 通过 sha256 关联源文件，需要时可以重新读取原文。
 
 <Warning>
-  OpenSpec delta spec 始终是权威来源。beta 投影缺失或过期时，必须重新生成或直接读源 spec，绝不能用 Agent 摘要替代。
+  OpenSpec delta spec 始终是权威来源。beta 摘录缺失或过期时，必须重新生成或直接读源 spec，绝不能用 Agent 摘要替代。
 </Warning>
 
 ## 何时触发
@@ -67,7 +67,7 @@ flowchart LR
   C -->|beta| E["spec-context.json/md"]
   D --> F["handoff_hash 写入 .comet.yaml"]
   E --> F
-  F --> G["build 阶段消费"]
+  F --> G["build 阶段使用"]
 ```
 
 design 守卫会检查交接包的存在和有效性：`handoff_context`/`handoff_hash` 必须写入 `.comet.yaml`，markdown 包必须带 `Generated-by:` 标记和可追溯的源/hash 引用。beta 模式下 `spec-context.json` 还必须结构有效并引用当前源文件。

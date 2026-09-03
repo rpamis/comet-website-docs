@@ -69,7 +69,7 @@ Comet 负责对齐两类产物：
 | design  | Superpowers | 做深度技术设计                                  | `docs/superpowers/specs/...-design.md`、handoff 包                                         |
 | build   | Superpowers | 写计划并执行                                    | `docs/superpowers/plans/...md`、代码改动、测试证据                                         |
 | verify  | 双方        | 验证实现符合设计和 spec                         | 验证报告；`branch_status` 保持 `pending`                                                   |
-| archive | OpenSpec    | 合并 delta spec 并归档，给 Superpowers 文档打标 | `<classic-root>/changes/archive/YYYY-MM-DD-name/`、design doc/plan 的 `archived-with` 标注 |
+| archive | OpenSpec    | 合并 delta spec 并归档，为 Superpowers 文档添加归档标注 | `<classic-root>/changes/archive/YYYY-MM-DD-name/`、design doc/plan 的 `archived-with` 标注 |
 
 ### open — OpenSpec 记录 WHAT
 
@@ -140,7 +140,7 @@ base-ref: <实现前的 git HEAD>
 ---
 ```
 
-计划输入是 Design Doc（Superpowers）+ `tasks.md`（OpenSpec 任务边界）。Design Doc 已经在 design 阶段消化了 proposal、原始 design 和 delta spec，所以 build 阶段不必回读这些原始产物；`tasks.md` 则作为活文档持续核对任务边界。执行方式由用户选择：`subagent-driven-development` 或 `executing-plans`，配合 `isolation`（branch/worktree）、`tdd_mode`、`review_mode`。
+计划输入是 Design Doc（Superpowers）+ `tasks.md`（OpenSpec 任务边界）。Design Doc 已经在 design 阶段把 proposal、原始 design 和 delta spec 的内容吸收进去，所以 build 阶段不必重新读取这些原始产物；`tasks.md` 会持续更新，用来核对任务边界。执行方式由用户选择：`subagent-driven-development` 或 `executing-plans`，配合 `isolation`（branch/worktree）、`tdd_mode`、`review_mode`。
 
 ### verify — 双方都查，用 hash 检测漂移
 
@@ -221,10 +221,10 @@ flowchart TD
 
 | 模式           | 产出文件                                    | 内容                                                                    |
 | -------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
-| `off`（默认）  | `design-context.json` + `design-context.md` | 完整产物内容，每文件带 SHA256                                    |
+| `off`（默认）  | `design-context.json` + `design-context.md` | 可追溯摘要（超 80 行的文件截断，`--full` 输出原文），每文件带 SHA256 |
 | `beta`（压缩） | `spec-context.json` + `spec-context.md`     | spec 文件原样写入 + 辅助文件只存 hash，节省约 25–30% token |
 
-JSON 包含 `change`、`phase`、`mode`、`canonical_spec: openspec`、`context_hash` 和 `files` 数组。guard 会额外验证 markdown 包带有 `Generated-by:` 标记和每个文件的 `Source:`/`SHA256:` 引用，保证 Superpowers 消费的上下文可追溯。
+JSON 包含 `change`、`phase`、`mode`、`canonical_spec: openspec`、`context_hash` 和 `files` 数组。guard 会额外验证 markdown 包带有 `Generated-by:` 标记和每个文件的 `Source:`/`SHA256:` 引用，保证 Superpowers 使用的上下文可追溯。
 
 <Tip>
   beta 压缩模式是 Comet 的上下文压缩 beta 功能在 handoff 环节的体现——两种模式的原理、token
@@ -242,21 +242,21 @@ Comet **不做 spec 去重或重叠检测**。它处理 spec 范围问题的方�
 
 ### delta spec 语义
 
-delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 **OpenSpec 原生概念**，不是 Comet 发明的。Comet 消费但不重写这些语义：
+delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 **OpenSpec 原生概念**，不是 Comet 发明的。Comet 使用但不重写这些语义：
 
 - open 阶段创建 delta spec，描述本次变更对哪些能力的增删改。
-- build 阶段把 delta spec 当作**活文档**——小修直接改，中改重新 brainstorming，大改通过 `/comet-open` 开新 change。
+- build 阶段把 delta spec 当作**持续维护的文档**——小修直接改，中改重新 brainstorming，大改通过 `/comet-open` 开新 change。
 - archive 阶段由 OpenSpec CLI 按 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 语义合并 delta 到主 spec。
 
 ### verify 的 spec 漂移决策
 
-build 阶段允许小改 delta spec（补充验收场景、边界条件等），这些改动不一定同步回 Design Doc。verify 阶段会把 delta spec 和 Design Doc 放在一起查——如果发现 delta spec 里有内容、Design Doc 没反映（即 spec 漂移），**这是一个需要你做决策的阻塞点**，Comet 不会自动选，会暂停等你三选一：
+build 阶段允许小改 delta spec（补充验收场景、边界条件等），这些改动不一定同步回 Design Doc。verify 阶段会把 delta spec 和 Design Doc 放在一起查——如果发现 delta spec 里有内容、Design Doc 没反映（即 spec 漂移），**这是一个需要你决策的停顿点**，Comet 不会自动选，会暂停等你三选一：
 
 | 选项 | 适用场景                               | 做什么                                                                         | 之后                                                                |
 | ---- | -------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| A    | 偏差合理但 Design Doc 漏了，想留个说明 | 在 Design Doc 追加 "Implementation Divergence" 段，记录偏差原因                | 继续验证，不再触发改动归因                                          |
+| A    | 偏差合理但 Design Doc 漏了，想留个说明 | 在 Design Doc 追加 "Implementation Divergence" 段，记录偏差原因                | 继续验证，不再重新判定改动归属                                      |
 | B    | 偏差较大，设计没跟上                   | `verify-fail` 回 build，加载 `brainstorming` 重新对齐 Design Doc 和 delta spec | 修完重新走 build→verify                                             |
-| C    | 偏差可接受，不想补 Design Doc          | 确认接受，继续验证                                                             | 归档时 Design Doc 自动标记 `superseded-by-main-spec`，让位给主 spec |
+| C    | 偏差可接受，不想补 Design Doc          | 确认接受并继续验证；接受原因记录在验证产物中                                   |
 
 判断口径：偏差是**说明性问题**（Design Doc 漏记，但实现没问题）选 A；是**设计性问题**（Design Doc 跟不上现实）选 B；偏差无关紧要、不值得回头补，选 C。
 
@@ -341,11 +341,11 @@ flowchart TD
 
 ## 用户会在哪些地方参与
 
-Comet 会自动推进无歧义阶段，并把产品或风险决策交给你。常见阻塞点包括：
+Comet 会自动推进无歧义阶段，并把产品或风险决策交给你。常见的停顿点包括：
 
 - open 阶段确认 proposal、design 和 tasks（大型需求还会遇到 PRD 拆分，见[大型 PRD 拆分](/zh/guides/prd-splitting)）。
 - design 阶段确认方案，以及是否写 Spec Patch。
-- build 阶段选择隔离方式和执行方式。
+- open 阶段确定工作区隔离方式；build 阶段联合选择执行方式、TDD 和审查模式。
 - verify 失败后选择修复或接受偏差（A/B/C）。
 - archive 前做最终确认。
 - hotfix/tweak 命中升级信号时选择继续轻量路径或升级 full。

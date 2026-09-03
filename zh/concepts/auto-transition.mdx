@@ -60,7 +60,7 @@ description: '理解 /comet 进入 Classic 后，内部路由如何自动检测�
 | ---------------------------------------------- | ----------------------------------------------------------------- |
 | `archived: true` 或已移入 archive              | 流程已完成                                                        |
 | `verify_result: pass`                          | `/comet-archive`（先做归档前确认）                                |
-| `verify_result: fail`                          | 验证失败决策阻塞点                                                |
+| `verify_result: fail`                          | ≤3 次失败自动回 build 修复，第 4 次暂停等你决策                    |
 | `phase: verify` 或 tasks 全部勾选              | `/comet-verify`                                                   |
 | `phase: build` 或有 Design Doc 但执行未完成    | hotfix→`/comet-hotfix`、tweak→`/comet-tweak`、full→`/comet-build` |
 | `phase: design` 或有 change 无 Design Doc      | `/comet-design`                                                   |
@@ -176,7 +176,7 @@ hotfix 或 tweak 执行过程中命中升级信号时，会暂停并提供两个
 | 继续预设轻量流程            | 继续当前预设                                                                |
 | 升级为完整 `/comet-classic` | `transition preset-escalate` → 回退到 design → 补 Design Doc → 回到完整流程 |
 
-`preset-escalate` 是预设→full 升级的唯一合法通道——原子地设 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`，清除 `design_doc`。
+`preset-escalate` 是预设→full 升级的唯一合法通道——一次性设置 `workflow`/`classic_profile` 为 `full`、把 `phase` 回退到 `design`、清除 `design_doc`，三步要么全部生效、要么都不执行。
 
 ## 断点恢复
 
@@ -184,10 +184,10 @@ hotfix 或 tweak 执行过程中命中升级信号时，会暂停并提供两个
 
 | 场景                                                                   | 恢复行为                          |
 | ---------------------------------------------------------------------- | --------------------------------- |
-| `phase: build` + `build_pause: plan-ready` + 已设 isolation/build_mode | 残留的暂停标记（stale pause），自动清除后继续 |
-| `phase: build` + `build_pause: plan-ready` + 未设 isolation/build_mode | 回到 plan-ready 恢复点            |
+| `phase: build` + `build_pause: plan-ready`（配置已齐全） | 重新发起同一次联合决策，你补全配置后才清除暂停标记并继续 |
+| `phase: build` + `build_pause: plan-ready`（配置未齐全） | 回到 plan-ready 联合决策，等你补选执行方式、TDD 和审查模式 |
 | `phase: build` + `build_pause: plan-ready` + plan 缺失                 | 状态损坏，重新生成 plan            |
-| `phase: verify` + `verify_result: fail`                                | 进入验证失败决策阻塞点            |
+| `phase: verify` + `verify_result: fail`                                | ≤3 次失败自动回 build 修复；第 4 次暂停等你决策     |
 | `phase: open` + 产物已完整                                       | 先 guard `--apply` 修正状态再判定 |
 | `phase: archive`                                                       | 只允许调用 `/comet-archive`       |
 
@@ -202,7 +202,7 @@ Comet 的自动推进有明确的边界。以下想法出现时必须停下检�
 | "用户应该会同意这个方案"    | 不能替用户决策，必须等待明确选择         |
 | "这只是个小改动，不需要确认" | 决策点无大小之分                        |
 | "用户之前选过 A，这次也选 A" | 历史偏好不能替代当前确认                |
-| "流程走到这里应该没问题了"  | 验证不通过不等于通过，检查 verify_result |
+| "流程走到这里应该没问题了"  | 流程走完不等于验证通过，检查 verify_result |
 
 ## 下一步
 

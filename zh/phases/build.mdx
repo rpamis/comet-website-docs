@@ -33,7 +33,7 @@ design 阶段退出后（`phase: build`），`/comet-classic` 会自动衔接调
 
 ## 你会经历什么
 
-build 阶段有 4 个停顿点（全局编号 6-9，整个五阶段工作流共 13 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）。下面按发生顺序讲。
+build 阶段有 2 个停顿点（全局编号 6-7，整个五阶段工作流共 10 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）。下面按发生顺序讲。
 
 ```mermaid
 flowchart TD
@@ -41,8 +41,7 @@ flowchart TD
     S1 --> Stop2["停顿点 6：plan-ready 暂停<br/>继续 / 暂停切换模型"]
     Stop2 -->|继续| Stop3["停顿点 7：一次性选定<br/>执行 + TDD + 审查"]
     Stop2 -->|暂停切换模型| PauseDone["本次停止，稍后恢复"]
-    Stop3 --> StopBranch["停顿点 8：确认分支名<br/>（isolation=branch 时）"]
-    StopBranch --> Exec["按 build_mode 逐任务执行"]
+    Stop3 --> Exec["按 build_mode 逐任务执行"]
     Exec --> Debug{"崩溃/测试失败/构建失败?"}
     Debug -->|是| DebugGate["强制加载 systematic-debugging<br/>先定位根因再修复"]
     DebugGate --> Exec
@@ -87,7 +86,7 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 ---
 ```
 
-### 停顿点 6：plan-ready 暂停
+### 停顿点 6：build 联合决策（plan-ready）
 
 计划写好后，Comet **暂停等你选**：
 
@@ -106,19 +105,7 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 
 ### 停顿点 7：一次性选定三种执行模式
 
-确认继续后，Comet **一次性问你三个执行选择**（不是分三次问）：下面先说明已在 Open 阶段确定的工作区绑定，再列出这三个执行选择。
-
-#### 工作区绑定（isolation）
-
-Classic 的新 change 已在 Open 阶段选择并准备工作区。下面的值用于说明 change 的工作区绑定；恢复或检查时，Comet 会验证当前目录和分支是否匹配，不会在 build 阶段静默换目录。
-
-| 选项                   | 说明                                | 推荐                           |
-| ---------------------- | ----------------------------------- | ------------------------------ |
-| **A 当前分支直接工作** | 不创建新分支，如实绑定当前 Git 分支 | 当前分支就是 change 的目标分支 |
-| **B 创建分支**         | 当前仓库创建分支，简单快速          | 变更 ≤ 3 个文件                |
-| **C 创建 worktree**    | 独立工作区，可并行开发              | 并行开发或当前分支有未提交改动 |
-
-创建时选择 `branch`，Comet 会在 Open 阶段让你确认或覆盖分支名，命名规则：`feature/YYYYMMDD/<name>`（full）、`hotfix/...`（hotfix）、`tweak/...`（tweak）。三种隔离方式都适用于 full、hotfix 和 tweak；选择结果会写入 `isolation`，并把实际执行目录的当前分支记录为 `bound_branch`，后续入口检查会阻止意外切换分支。
+确认继续后，Comet **一次性问你三个执行选择**（不是分三次问）。工作区隔离不在其中——它已在 open 阶段的工作区决策（停顿点 3）确定：选择结果写入 `isolation`，实际执行目录的当前分支记录为 `bound_branch`，build 阶段只验证当前目录和分支是否匹配，不会静默换目录。选择 `branch` 时的分支名在 open 阶段一并确认（hotfix/tweak 预设默认使用 `hotfix/YYYYMMDD/<name>`、`tweak/YYYYMMDD/<name>`）。
 
 #### 1. 执行方式（build_mode）
 
@@ -146,8 +133,8 @@ Classic 的新 change 已在 Open 阶段选择并准备工作区。下面的值�
 | 选项           | 说明                                                                             | 推荐                           |
 | -------------- | -------------------------------------------------------------------------------- | ------------------------------ |
 | `off`          | 不自动审查                                                                       | 文档、配置、文案、小范围低风险 |
-| **`standard`** | 默认不派每任务审查者；只在任务命中风险信号时派每任务审查者，外加一次最终轻量审查 | **默认推荐**，大多数普通改动   |
-| `thorough`     | 每个任务都派一个每任务审查者（spec + 质量），外加一次最终完整审查                | 高风险、多模块、架构/安全      |
+| **`standard`** | 默认不逐任务派审查者；只在任务命中风险信号时才派；最终综合审查在 verify 阶段 | **默认推荐**，大多数普通改动   |
+| `thorough`     | 每个任务都派审查者（spec + 质量）；最终综合审查在 verify 阶段                   | 高风险、多模块、架构/安全      |
 
 详见[代码审查机制](/zh/concepts/review-mode)。
 
@@ -159,8 +146,8 @@ Classic 的新 change 已在 Open 阶段选择并准备工作区。下面的值�
 | -------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | 谁写代码 | 主会话直接做                                                                          | 主会话**只协调**，后台子代理实现（禁止主会话直接写代码）                           |
 | 任务推进 | 顺序执行，逐个勾选                                                                    | 每个任务派新子代理，通过验收后立即派下一个，**不停下问你要不要继续**               |
-| 审查     | review gate 按 `review_mode` 缩放（standard=一次最终；thorough=每 3 任务分段 + 最终） | 按 review_mode 派每任务审查者 + 修复 agent（thorough=每任务；standard=仅风险任务） |
-| 模型选择 | 主会话直接执行                                                                        | **每次派发必须显式指定模型**（实现者/修复者/审查者各自缩放）                       |
+| 审查     | 强度随 `review_mode` 调整（standard=不做 build 内整变更审查；thorough=每 3 任务分段审查）；最终综合审查在 verify | 按 review_mode 派任务级审查者 + 修复 agent（thorough=每任务；standard=仅风险任务） |
+| 模型选择 | 主会话直接执行                                                                        | **每次派发必须显式指定模型**（实现者/修复者/审查者分别指定）                       |
 | 进度可见 | 对话里直接看到                                                                        | 维护 `.comet/subagent-progress.md` 检查点                                          |
 
 <Tip>
@@ -221,7 +208,7 @@ Classic 的新 change 已在 Open 阶段选择并准备工作区。下面的值�
 | 小     | 遗漏验收场景、边界条件         | 直接编辑 delta spec + design.md，追加 tasks 任务                           |
 | 中     | 接口变更、新增组件、数据流变化 | **暂停等你确认**，加载 `brainstorming` 更新 Design Doc + delta spec        |
 | 大     | 全新 capability                | **暂停等你确认拆分**，通过 `/comet-open` 开新 change（不能用 `/opsx:new`） |
-| 超 50% | 新增任务数超初始任务总数一半   | **停顿点 9**：拆分为新 change / 继续在当前 change 内完成                   |
+| 超 50% | 新增任务数超初始任务总数一半   | **停顿点 7**：拆分为新 change / 继续在当前 change 内完成                   |
 
 ### Step 5：勾选 + 提交
 
@@ -251,7 +238,7 @@ node "$COMET_GUARD" <change-name> build --apply
 | `executing-plans`             | 轻量执行计划       | Step 3，`build_mode: executing-plans`                                                                                    |
 | `subagent-driven-development` | 子代理驱动执行     | Step 3，`build_mode: subagent-driven-development`                                                                        |
 | `test-driven-development`     | 强制 TDD           | Step 3，`tdd_mode: tdd` 时                                                                                               |
-| `requesting-code-review`      | 代码审查门禁       | Step 3，`review_mode: standard`/`thorough` 时（executing-plans 按 review_mode 缩放；subagent 模式按每任务/风险派审查者） |
+| `requesting-code-review`      | 代码审查门禁       | Step 3，`review_mode: standard`/`thorough` 时（executing-plans 随 review_mode 调整强度；subagent 模式按任务/风险派审查者） |
 | `systematic-debugging`        | 异常调试           | Step 3b，崩溃/测试失败/构建失败时强制加载                                                                                |
 | `dispatching-parallel-agents` | 多失败并行排查     | Step 3b，≥ 3 个独立失败时加载（仅排查，修复串行）                                                                        |
 | `brainstorming`               | 中等规模 spec 更新 | Step 4，发现接口/组件/数据流变化时                                                                                       |
@@ -273,13 +260,13 @@ node "$COMET_GUARD" <change-name> build --apply
 - `isolation` 是 `current`、`branch` 或 `worktree`，且当前 Git 分支与 `bound_branch` 一致
 - `build_mode` 已选（subagent 模式需 `subagent_dispatch: confirmed`）
 - `tdd_mode` 已选
-- `review_mode` 已选（按 executing-plans review gate 完成：standard/thorough 已请求审查并修复 CRITICAL 或记录非 CRITICAL 接受原因；off 已记录跳过原因）
+- `review_mode` 已选（thorough 已按每 3 个任务完成分段审查并修复 CRITICAL/IMPORTANT，或记录非 CRITICAL 接受原因；standard/off 已记录对应原因）
 
-guard 会自动探测项目构建入口（例如 `npm run build`、Maven 或 Cargo）并把失败输出作为证据。`.comet.yaml` 和仓库根配置不再支持 `build_command` / `verify_command`；需要固定团队级验证流程时，请把它放进项目自己的构建脚本。
+guard 会自动识别项目构建入口（例如 `npm run build`、Maven 或 Cargo）并把失败输出作为证据。`.comet.yaml` 和仓库根配置不再支持 `build_command` / `verify_command`；需要固定团队级验证流程时，请把它放进项目自己的构建脚本。
 
 ## 恢复
 
-build 阶段幂等。恢复时 `grep -n '\- \[ \]' tasks.md | head -1` 找第一个未完成任务继续。`build_pause: plan-ready` 的恢复见[停顿点 6](#停顿点-6-plan-ready-暂停)。上下文压缩后用 `comet-state check <name> build --recover` 拿恢复上下文；subagent 模式重读 `.comet/subagent-progress.md` 恢复当前任务和审查轮数，**不能在主会话直接执行任务**。`full` workflow 如果停在 plan-ready，恢复动作必须先确认已有的工作区绑定，再补齐或确认三个执行选择：`build_mode`、`tdd_mode` 和 `review_mode`。
+build 阶段幂等。恢复时 `grep -n '\- \[ \]' tasks.md | head -1` 找第一个未完成任务继续。`build_pause: plan-ready` 的恢复见[停顿点 6](#停顿点-6-build-联合决策plan-ready)。上下文压缩后用 `comet-state check <name> build --recover` 拿恢复上下文；subagent 模式重读 `.comet/subagent-progress.md` 恢复当前任务和审查轮数，**不能在主会话直接执行任务**。`full` workflow 如果停在 plan-ready，恢复动作必须先确认已有的工作区绑定，再补齐或确认三个执行选择：`build_mode`、`tdd_mode` 和 `review_mode`。
 
 ## 推荐路径
 

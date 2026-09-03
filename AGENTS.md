@@ -65,6 +65,8 @@
   - ground truth → 真实状态（首次出现可附英文）；制品 / artifacts（正文语境）→ 产物；fail closed → 失败关闭（首次出现附英文注释）
   - machine-owned → “由 Comet 自动维护”（首次出现附英文）；tripwire → 文件数阈值；stale pause → 残留的暂停标记；dirty worktree → 未提交改动（首次出现附英文）；verbatim → 原样写入 / 完整原文；projection → 状态汇总；conflict radar → 冲突检测
   - portable 状态 → 可跨设备同步的状态；canonical Spec → 主 Spec；readiness → 发布就绪状态；lane / authoring lane → 创作通道；harness → 评测框架（eval 语境）；treatment → 实验条件；child → 子任务 / 子变更；analysis set → 进入统计的运行样本
+  - projection / 工作流投影 → 工作流状态；spec 投影 / structured projection → spec 摘录 / 结构化摘录；read model / 读模型 → 索引；stable boundary / trusted state / 可信状态 / 稳定边界 → 记录的进度 / 状态；semantic identity / 内容身份 → 按内容判断是否同一记录
+  - 事务化 → 事务式 / 以事务方式；活文档（living document）→ 持续维护的文档；多票评审 → 多轮投票评审；语义归纳 → 归纳总结；路径逃逸 → 路径穿越；常驻上下文 → 注入的上下文；勾选验证 → 核验后勾选；协调会话 → 主会话；恢复锚点 → 恢复检查点 / 恢复依据；原子地（atomically）→ 一次性（并说明要么全部生效、要么不执行）；自愈 → 自动修正；分布性 → 跨多次运行统计；诊断性 → 诊断参考；硬判定 → 硬性判定
 - 源码标识符（`.ts` 文件名、函数名、类型名，如 `CometIntentFrame`、`resolveSkill`、`reviewBundle`）不出现在面向用户的正文；确需引用时先说明它承担的作用，再附标识符。进阶页也遵守“先中文作用、后英文标识”。
 - “确定性”只用于固定搭配（确定性测试、确定性验证、确定性保证、确定性状态机）；其余场景改写为“固定”“自动”“可复现”“有明确规则”。
 - “授权”只用于权限语境；流程中的确认动作写“确认”“批准”。归档场景统一用“归档批准”，不写“归档授权”。

@@ -131,6 +131,22 @@
 - AGENTS.md 术语对照表扩充（新增第三轮 12 个词条）并补“源码标识符不入正文”规则
 - 复核修正：首页被误删的行业通用术语已恢复（Loop Engineering 驱动、更多 HITL、Rubric 多维评分 + Pass@k / Pass^k、Harness / Workflow / Task / Model、通过 DAG 统一管理、ReAct 解决单轮推理）；AGENTS.md 补“行业通用术语保留原文，内部自造词才翻译”的分界规则
 
+## 文档对照源码核对与修正（2026-09-03，第四轮）
+
+- 四路并行对照 D:\Project\Comet（v0.4.0-rc.3）核对全部中文页面，共处理约 45 条问题
+- 可信度硬伤：`--count` 改为说明“重复运行由 eval harness 内部 pytest 驱动，`comet eval` 单次只出 pass@1”（why-eval/overview/reports/scoring）；首页演示终端两条虚构命令改真实命令（`--skill-path`/`--profile`、`publish approve`）；creator/publish 示例输出 `Requires confirmation: yes`、Action/Reason 用源码真实文案；skill 页 action id 改 16 位 hash 形式、`--confirm <ref>`；intent 枚举 `start_change`；dashboard schema v2；Node 22+；classic 28 步；rubric 10 维/12.0、authoring 12.8
+- Classic 行为模型：审查预算按源码重写（build 只保留任务级/分段审查，最终综合审查归 verify；executing-plans+standard 不做整变更审查；审查 skill 加载失败=停止报告）；停顿点统一为 10 个（open 增加“工作区决策”，build 联合决策去掉隔离/分支名，归档补“仅本地归档”共 5 选项，design 压缩改非阻塞）；hotfix 删“任务超 3 个转 /comet-build”并补“先复现后修复”硬规则；plan-ready 恢复改“重新发起联合决策”；verify 失败 ≤3 次自动回 build；handoff off 模式=截断摘要；subagent-progress 阶段枚举改源码 5 值；review_mode 默认值只作用于 init（存量 change 缺字段=守卫拦截）
+- 删除未实现承诺（用户确认）：`superseded-by-main-spec` 归档标记、`feature/YYYYMMDD/` 分支命名规则
+- Native：新增“归档与交付选项”节（current 无 Git 动作 + A-E 五选项表，含 `--finish` 语义）；Verifier 不可用补 `--retry-verifier`/接受降级两选项；验收项生成规则（brief 顶层验收示例 + `Scenario:` 标题）；策略验证命令并入 Verify 并两页互链；`comet native spec remove`；Verifier 取证顺序统一（实现优先、handoff 最后）；comet-native 命令页补 `check`、retry/coordination/max-parallel/finish/serial-first/cursor 等 flag
+- plugins：personal-memory 补 `memory remote/sync/pause` 跨设备同步与暂停、默认启用；project-rules 补默认状态与停用入口
+- 产品化：eval/overview 受众改普通提示；cli/eval 补三种目标方式表；comet-state 补使用时机与真实 NEXT 示例；overview 定位改“强调完整阶段治理的 Classic”；safety-and-recovery 机制段压缩为“现象→动作”；continuation 补 disposition 用户视角导读
+- rc.3 同步（已发布）：Windsurf→Devin Desktop（.devin，legacy .windsurf）；update 补 `--classic-layout`；supervisor 终验 rc.3 行为（父级小修复+中断记录自动补全）；native-loop 版本指称改“0.4.0-rc 系列”
+- 未同步（rc.4 未发布）：archive 前置 dry-run 流程为 rc.4 行为，暂不入文
+
+产品缺口（建议在 Comet 源码仓库跟进）：
+1. `comet eval` CLI 无 `--count` 透传，pass@k/pass^k 的多次重复运行只能进 harness 内部驱动
+2. comet-verify SKILL.md 仍承诺 `superseded-by-main-spec` 归档标记，脚本未实现（文档侧已删除该承诺）
+
 ## 中英同步（2026-09-02）
 
 - 用户确认后执行：按当前未提交中文 diff 同步英文，四路并行（guides/presets/phases、concepts/native、cli/scripts/skill-creator/plugins、eval/tech-blog/门面页），共改 en 57 个文件

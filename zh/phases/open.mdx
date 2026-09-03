@@ -59,15 +59,14 @@ open 阶段通过**多轮对话 + 多个停顿点**逐步生成文档。全程�
 flowchart TD
     Start["你说出想法"] --> S1["加载 openspec-explore<br/>反复提问澄清"]
     S1 --> S1a{"大型 PRD /<br/>多个独立能力?"}
-    S1a -->|是| Stop1["停顿点 1：PRD 拆分预检<br/>三选一"]
+    S1a -->|是| Stop1["停顿点 2：PRD 拆分预检查<br/>三选一"]
     S1a -->|否| S1sum["生成澄清摘要<br/>5 个必备部分"]
     Stop1 --> S1sum
-    S1sum --> Stop2["停顿点 2：确认需求澄清完成"]
-    Stop2 --> Stop3["停顿点 3：确认 change 名称"]
-    Stop3 --> S2["加载 openspec-new-change<br/>逐个生成 proposal → design → tasks"]
-    S2 --> S3["入口状态验证 + 内容完整性检查"]
+    S1sum --> S2["加载 openspec-new-change<br/>推导唯一的 change 名并告诉你"]
+    S2 --> S2b{"停顿点 3：工作区决策<br/>current / branch / worktree"}
+    S2b --> S3["入口状态验证 + 内容完整性检查"]
     S3 --> Stop4["停顿点 4：审视三个文档并确认"]
-    Stop5 --> Exit["comet-guard open --apply<br/>推进到下一阶段"]
+    Stop4 --> Exit["comet-guard open --apply<br/>推进到下一阶段"]
 ```
 
 <p align="center">
@@ -92,7 +91,7 @@ Comet 加载 `openspec-explore`，**围绕你的想法持续提问**，直到能
 | **关键未知项**         | 假设、风险、依赖                    |
 | **验收场景草案**       | 核心成功场景 + 关键边界场景         |
 
-### 停顿点 1：PRD 拆分预检（条件触发）
+### 停顿点 2：PRD 拆分预检查（条件触发）
 
 如果你的输入是一个**大型 PRD、路线图或完整产品计划**，或者澄清摘要里出现了**多个独立能力**，Comet 会在这里暂停，给你一份**候选拆分清单**（每个拆分项含建议名称、目标范围、非目标、依赖顺序、核心验收场景），然后让你三选一：
 
@@ -108,17 +107,19 @@ Comet 加载 `openspec-explore`，**围绕你的想法持续提问**，直到能
   <code>/comet</code> 恢复。
 </Tip>
 
-### 停顿点 2：确认需求澄清完成
+### 停顿点 3：工作区决策
 
-在创建任何文档之前，Comet 把完整的澄清摘要（五个部分）摆给你看，**等你明确确认**。确认前不会创建 proposal/design/tasks，也不会用 `openspec-propose` 一次性生成。
+创建产物和 `.comet.yaml` 之前，Comet 让你确定工作区隔离方式（这一步不能推迟到 build）：
 
-### 停顿点 3：确认 change 名称
+| 选项       | 说明                                         |
+| ---------- | -------------------------------------------- |
+| `current`  | 在当前分支直接工作，如实绑定当前 Git 分支    |
+| `branch`   | 在当前仓库创建新分支，并确认分支名           |
+| `worktree` | 独立工作区，可并行开发（你明确要并行时直接用） |
 
-在 `openspec new change` 之前，Comet 让你定名字。**名字必须是 kebab-case 英文**（小写字母、数字、连字符，例如 `refine-requirements-doc`）。它会：
+选择结果写入 `isolation`，实际目录的当前分支记录为 `bound_branch`，后续入口检查会阻止意外切换分支。hotfix/tweak 预设默认 `current`。
 
-- 推荐 2-3 个 kebab-case 英文名，每个带一行范围说明
-- 让你**自行输入名称**——如果你输入的是中文或非合规文本，它会转换成合规 kebab-case 并**回显让你确认**
-- 如果名字和已有 change 冲突，报告冲突让你换一个
+需求澄清和命名是**非阻塞**的：范围和命名都明确时，Comet 从需求推导**唯一的 kebab-case 英文名**（如 `refine-requirements-doc`）并直接展示；只有存在会改变范围或 change 身份的互斥选择、或名字与已有 change 冲突时才单独询问。确认前不会创建 proposal/design/tasks，也不会用 `openspec-propose` 一次性生成。
 
 ### 第二步：创建 change 结构
 
@@ -203,16 +204,17 @@ node "$COMET_STATE" init <name> full
 
 open 阶段所有操作都可以安全重复执行。如果 `.comet.yaml` 已经在 `phase: open` 且三个产物都已存在，Comet 会**跳过已完成步骤**，从第一个缺失的步骤继续。这让你在中断后重新调用 `/comet` 也不会搞乱状态。
 
-## 四个停顿点一览
+## 停顿点一览
 
-open 阶段有 4 个停顿点（全局编号 1-4，整个五阶段工作流共 13 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
+open 阶段有 3 个停顿点（全局编号 2-4，整个五阶段工作流共 10 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
 
-| 停顿点         | 何时出现                    | 你要做什么             |
-| -------------- | --------------------------- | ---------------------- |
-| 1 PRD 拆分     | 输入是大 PRD 或多个独立能力 | 拆分 / 不拆 / 调整方案 |
-| 2 需求澄清完成 | 澄清摘要生成后              | 确认理解对了           |
-| 3 change 名称  | 创建 change 前              | 选名 / 自定义名        |
-| 4 文档审视     | 三文档生成后                | 确认 / 要调整          |
+| 停顿点          | 何时出现                                | 你要做什么                              |
+| --------------- | --------------------------------------- | --------------------------------------- |
+| 2 PRD 拆分      | 输入是大 PRD 或多个独立能力             | 拆分 / 不拆 / 调整方案                  |
+| 3 工作区决策    | 创建产物和 `.comet.yaml` 前             | current / branch / worktree             |
+| 4 文档审视      | proposal/design/tasks 生成后            | 确认名称、范围和三个文档 / 要调整       |
+
+需求澄清和命名默认**非阻塞**：范围和命名都明确时直接继续，Comet 从需求推导唯一的 kebab-case 英文名并直接展示；只有存在会改变范围或 change 身份的互斥选择时才单独询问。
 
 所有停顿点都遵循[决策点协议](/zh/concepts/decision-points)——Comet 不能用推荐规则、默认值或"用户应该会同意"来代替你的明确选择。
 
@@ -225,7 +227,7 @@ open 阶段有 4 个停顿点（全局编号 1-4，整个五阶段工作流共 1
 
 <Accordion title="change 名称有什么限制">
   必须是 kebab-case 英文（小写字母、数字、连字符）。中文或非合规名称会被转换成
-  kebab-case 并回显让你确认。和已有 change 冲突会报告让你换一个。
+  kebab-case；只有一个名字时直接使用并展示，存在多个候选或与已有 change 冲突时才报告让你选择。
 </Accordion>
 
 <Accordion title="openspec instructions 失败了怎么办">
@@ -235,13 +237,13 @@ open 阶段有 4 个停顿点（全局编号 1-4，整个五阶段工作流共 1
 </Accordion>
 
   <Accordion title="大型 PRD 一定要拆吗">
-    不一定。拆分预检会给你三选一（拆分 / 保持一个 / 调整方案），你可以选择保持为一个 change，但要把不拆的原因记进文档。
+    不一定。拆分预检查会给你三选一（拆分 / 保持一个 / 调整方案），你可以选择保持为一个 change，但要把不拆的原因记进文档。
   </Accordion>
 </AccordionGroup>
 
 ## 下一步
 
 - [design 阶段](/zh/phases/design) — open 完成后进入深度设计
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的 4 个停顿点详解
-- [大型 PRD 拆分](/zh/guides/prd-splitting) — Step 1a 的完整机制
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的停顿点详解
+- [大型 PRD 拆分](/zh/guides/prd-splitting) — 拆分预检查的完整机制
 - [自动推进机制](/zh/concepts/auto-transition) — open 完成后如何自动衔接 design

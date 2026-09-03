@@ -35,7 +35,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 | 只是问问题、明确不走 Comet，或当前已在 Comet 流程内 | 返回 `out_of_scope`，不重复进入 workflow |
 | 没有 active Comet change                            | 返回 `none`，不执行恢复                  |
 
-这段说明只约束 Comet 的恢复探测，并会保留文件中已有的用户规则。探针先解析配置，再只检查一套工作流；配置损坏时不会回退。`.comet/config.yaml` 中的 `ambient_resume: false` 可以关闭普通请求触发的探针。它不会影响显式 `/comet`，也不会绕过已有决策点。
+这段说明只约束 Comet 的恢复探测，并会保留文件中已有的用户规则。探测命令先解析配置，再只检查一套工作流；配置损坏时不会回退。`.comet/config.yaml` 中的 `ambient_resume: false` 可以关闭普通请求触发的自动检查。它不会影响显式 `/comet`，也不会绕过已有决策点。
 
 详见[恢复探测命令](/zh/cli/resume-probe)。
 
@@ -52,7 +52,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 | 机制                         | 说明                                                                                                                                      |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | **重读文件状态，不依赖对话** | 每次恢复都重新执行发现活跃 change + 读 `.comet.yaml`，不靠聊天历史猜阶段                                                                  |
-| **文件状态优先，自愈元数据** | 如果 `.comet.yaml` 和实际文件冲突，以文件为准，Comet 自动修正 `.comet.yaml` 后继续                                                        |
+| **文件状态优先，自动修正元数据** | 如果 `.comet.yaml` 和实际文件冲突，以文件为准，Comet 自动修正 `.comet.yaml` 后继续                                                        |
 | **按阶段固定规则路由**       | 根据 `phase`/`workflow`/`verify_result` 等字段，路由到对应的阶段 Skill（含预设：build 阶段 hotfix→`/comet-hotfix`、tweak→`/comet-tweak`） |
 
 恢复时的路由（命中即停，以文件状态为准）：
@@ -61,7 +61,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 | ----------------------------------------- | -------------------------------------------------------------- |
 | `archived: true`                          | 流程已完成                                                     |
 | `verify_result: pass`                     | `/comet-archive`（先做归档前确认）                             |
-| `verify_result: fail`                     | 验证失败决策阻塞点（等你选修复或接受偏差）                     |
+| `verify_result: fail`                     | 验证失败暂停点（需要你选修复或接受偏差）                       |
 | `phase: verify` 或 tasks 全勾             | `/comet-verify`                                                |
 | `phase: build`                            | 按 workflow：`/comet-hotfix` / `/comet-tweak` / `/comet-build` |
 | `phase: design` 或有 change 无 Design Doc | `/comet-design`                                                |
@@ -102,7 +102,7 @@ Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.ya
 
 Classic 正常恢复使用 `/comet`。阶段和预设入口只用于手动控制或调试：`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
 
-这里有一层确定性保证：每个阶段 Skill 进入时都会先定位自己的脚本，再执行该阶段的**入口检查或恢复检查**；阶段始终以当前文件状态为准。
+这里有一条确定性保证：每个阶段 Skill 进入时都会先定位自己的脚本，再执行该阶段的**入口检查或恢复检查**；阶段始终以当前文件状态为准。
 
 ```bash
 comet state check <change-name> <phase> --recover
@@ -131,13 +131,13 @@ build 阶段的恢复最复杂，但大多数情况 `/comet-classic` 也能自�
 
 | 情况                                                                     | 行为                                                                |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `build_pause: plan-ready` 但 `isolation`/`build_mode` 已设               | **自动清除**残留的暂停标记（stale pause），继续执行（你无需操作）  |
-| `build_pause: plan-ready` 且 plan 存在，但 `isolation`/`build_mode` 未设 | 回到 plan-ready 恢复点，**让你选**隔离和执行方式（不重新生成 plan） |
+| `build_pause: plan-ready` 且配置齐全                                    | 重新发起同一次联合决策确认，你确认后清除暂停标记并继续            |
+| `build_pause: plan-ready` 且 plan 存在，但执行配置未设                   | 回到 plan-ready 联合决策，**让你补选**执行方式、TDD 和审查模式（不重新生成 plan） |
 | `build_pause: plan-ready` 但 plan 文件缺失                               | 状态损坏，回 `/comet-build` 修复或重新生成 plan                     |
 | `isolation`/`build_mode`/`tdd_mode` 未设                                 | 回 `/comet-build` 对应步骤**让你补选**                              |
 | 都已设，有未完成任务                                                     | 读 tasks.md 下一个未勾选任务继续执行                                |
 
-subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会话**不会**直接执行任务，它会回到后台子代理调度规则，由主会话只做协调。
+subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会话**不会**直接执行任务，而是重新按后台子代理调度规则推进，只负责协调。
 
 ## 有未提交改动时
 
@@ -147,7 +147,7 @@ subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会
 - 和当前 change 无关 → 暂停问你怎么处理（并入 / 拆新 change / 保留 / 丢弃）
 - 来源不确定 → 暂停汇报文件列表和判断依据
 
-构建产物（`node_modules/`、`dist/` 等 `.gitignore` 的）会自动排除，不当用户改动。
+构建产物（`node_modules/`、`dist/` 等 `.gitignore` 的）会自动排除，不视为用户改动。
 
 <Warning>
   未提交改动（dirty worktree）只代表代码事实，<strong>不会自动推进</strong>{" "}
