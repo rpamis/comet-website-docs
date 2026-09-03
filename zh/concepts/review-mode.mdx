@@ -11,62 +11,35 @@ description: '了解 review_mode 的三种模式、审查触发条件、预算�
   <code>review_mode</code>，也不推进工作流。它只报告实现 diff 中的正确性、安全、边界和覆盖问题，不修改文件、更新状态或替代 Verify。
 </Note>
 
-## 模式选择
+## 怎么选 review_mode
 
-| 模式       | 适合                        | 成本 | 建议           |
-| ---------- | --------------------------- | ---- | -------------- |
-| `off`      | 文档、低风险 hotfix / tweak | 最低 | 只在低风险时用 |
-| `standard` | 日常 full workflow          | 中等 | 默认推荐       |
-| `thorough` | 安全、架构、多模块变更      | 最高 | 高风险时用     |
+选哪一档，先看变更的风险面，再确认你能接受的时间与 token 开销。hotfix / tweak 默认 `off`，新建 full workflow change 默认 `standard`；具体设置与生效范围见「怎么设置」。
 
-<Tip>
-  不确定时选 <code>standard</code>。它只给风险任务派任务级审查者，最终综合审查由 verify 阶段执行。
-</Tip>
+| 场景                  | 推荐模式        | 成本与速度  | 理由                                         |
+| --------------------- | --------------- | ----------- | -------------------------------------------- |
+| hotfix / tweak、文档等低风险小改 | `off`（默认） | 最低 / 最快 | 不需要强审查；只在低风险时用                 |
+| 日常 full workflow    | `standard`（默认） | 中等    | 低风险任务跳过审查，风险任务即时审查，开销可控 |
+| 安全、认证、数据迁移  | `thorough`      | 最高 / 最慢 | 每个任务即时审查，覆盖高风险面               |
+| 跨模块 / 架构变更     | `thorough`      | 最高 / 最慢 | 逐任务审查能抓住跨模块问题                   |
 
-## review_mode 接管自动审查流
+三种模式的总对比：
 
-<Warning>
-  Superpowers 的 <code>subagent-driven-development</code>{' '}
-  默认流程要求"每个任务后派一个任务审查者"。Comet 的 <code>review_mode</code>{' '}
-  <strong>接管这一阶段</strong>，决定哪些任务拿到任务级审查者。
-  <strong>
-    不要派发 <code>review_mode</code> 规定之外的审查者。
-  </strong>
-  拿不到审查者的任务（<code>off</code>：全部；<code>standard</code>
-  ：非风险任务）直接走任务勾选并派发下一个任务。一个变更的审查总数
-  <strong>仅由下方预算表决定</strong>。
-</Warning>
+| 维度             | `off`                        | `standard`                                   | `thorough`                                  |
+| ---------------- | ---------------------------- | -------------------------------------------- | ------------------------------------------- |
+| **任务级审查者** | 0                            | 仅风险任务                                   | **每个任务**                                |
+| **审查时机**     | —                            | 命中风险信号的任务即时                       | 每个任务即时                                |
+| **审查范围**     | —                            | 风险任务：spec 合规 + 代码质量               | 每个任务：spec 合规 + 代码质量              |
+| **自动修复上限** | 0 轮                         | 风险任务的单次审查 **最多 1 轮** + 复审      | 单次审查 **最多 2 轮** + 复审               |
+| **BLOCKED 触发** | —                            | 审查修复 1 轮未通过 → BLOCKED                | 审查修复 2 轮未通过 → BLOCKED               |
+| **最终综合审查** | verify 跳过                  | 在 verify 阶段执行                           | 在 verify 阶段执行                          |
+| **执行速度**     | 最快                         | 中等（低风险任务跳过审查）                   | **最慢**（每个任务都审查）                  |
+| **token 消耗**   | 最低                         | 中等                                         | **最高**                                    |
+| **适合场景**     | hotfix/tweak、低风险小改     | 日常 full workflow                           | 高风险、多模块、架构/安全变更               |
+| **默认值**       | hotfix/tweak 默认            | full workflow 默认（含运行时 fallback）      | —                                           |
 
-## 与 Superpowers SDD 的边界
+### 成本差异来自哪里
 
-Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开的 task reviewer 契约：实现者完成任务后，协调者按任务材料、真实 diff、测试证据和风险信号决定是否派审查者。Comet 不读取、不写入、也不要求 Superpowers `subagent-driven-development` 的内部脚本名、workspace 路径或私有实现细节。
-
-这意味着：
-
-- Superpowers 仍提供连续任务调度、预检查 plan review、文件型 handoff、reviewer 中立提示、"材料不足无法验证" 的反馈语义，以及 progress reconciliation。
-- Comet 只接管 reviewer 触发策略和 review-fix 预算，也就是 `review_mode` 决定哪些任务要 task reviewer。
-- 文档、恢复和测试都以公开行为为准，不把 shipped Skill 文案绑定到 Superpowers 内部目录结构。
-
-<Info>
-  在 build 阶段选择 `off`、`standard` 或 `thorough`。Superpowers SDD 可以独立升级实现，但需要继续满足公开的 task reviewer 契约。
-</Info>
-## build 阶段审查预算表
-
-这张表**只覆盖 build 阶段的任务级审查**，且只派这些审查者，不额外增加。全部任务完成后不追加最终审查者，直接进入 verify：
-
-| `review_mode` | 任务级审查者（build）            |
-| ------------- | -------------------------------- |
-| `off`         | 0                                |
-| `standard`    | 仅风险任务（见下方规则）         |
-| `thorough`    | 每个任务（spec 合规 + 代码质量） |
-
-<Note>
-  <strong>verify 阶段的审查不在这张表里。</strong>verify 阶段的审查由 <code>verify_mode</code>
-  （light/full）驱动，<code>review_mode</code> 只决定 verify 是否触发自动代码审查（<code>off</code>{' '}
-  跳过；<code>standard</code>/<code>thorough</code> 在 light 验证下跑一次轻量代码审查，在 full
-  验证下依赖 <code>openspec-verify-change</code>）。verify 阶段没有单独的 per-
-  <code>review_mode</code>"完整"代码审查——权威行为见 verify 阶段文档。
-</Note>
+三档的成本差异是结构性的。`off` 的 N 个任务一个任务级审查者都不派，最快也最省 token。`standard` 只给命中风险信号的任务派审查者，每个此类任务最多 1 轮自动修复。`thorough` 的开销是**结构性**的：N 个任务就会派 N 个任务级审查者，每个审查者都可能触发最多 2 轮修复。对 12 个任务的变更，`standard` 可能只给少数风险任务派审查者，而 `thorough` 会跑 12 次逐任务审查——审查 + 修复的 agent 数量是 `standard` 的数倍。
 
 <p align="center">
   <img
@@ -78,7 +51,52 @@ Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开
 
 <p align="center">off、standard 和 thorough 对应不同的审查次数与 token 成本</p>
 
+<Tip>
+  不确定时选 <code>standard</code>。它只给风险任务派任务级审查者，开销可控。
+</Tip>
+
+## 一次任务会经历什么
+
+`review_mode` 决定的是 build 阶段每个任务是否、在何时拿到任务级审查者，以及审查发现问题后能自动修几轮。三个模式共享同一个任务基线：实现者自测、提交、报告证据（包括主动上报的风险信号），coordinator 核验通过后勾选任务并派发下一个。下面按 `subagent-driven-development` 的流程描述；`executing-plans` 由主会话直接执行任务，审查形态不同，见「最终综合审查（verify 阶段）」与后文「与 build_mode 的配合」。
+
+### standard：命中风险信号才审查
+
+选 `standard` 的任务默认**不派发任务级审查者**。coordinator 读完实现者主动上报的内容并审查 diff 后，**只有当上报内容命中风险信号，或 diff 审查发现风险信号时**，才给这个任务派 1 个任务级审查者，审查范围是 spec 合规 + 代码质量（风险信号清单见后文）。审查没有 CRITICAL/IMPORTANT 发现时，任务核验通过后直接勾选、进入下一个；发现 CRITICAL/IMPORTANT 则进入 review-fix，**最多 1 轮**，每轮修复后复审。复审仍未通过 → 标记 **BLOCKED**，暂停并交给你处理。
+
+### thorough：每个任务都审查
+
+`thorough` 下每个任务都会被派一个全新的后台任务级审查者，审查范围同样是 spec 合规 + 代码质量。它不做按批次的合并审查——高风险变更需要对每个任务做即时、聚焦的审查，把问题拖到批次边界再抓代价太大。CRITICAL/IMPORTANT 发现进入 review-fix，**最多 2 轮**；复审仍未通过 → 标记 **BLOCKED**，暂停并交给你处理。
+
+### off：没有自动审查，靠实现证据
+
+`off` 在 build 阶段**不派发任何**自动 spec 审查者、代码质量审查者或审查修复 agent。任务是否完成，由实现者的自测、构建/测试证据、当前 worktree 确认和勾选前的核验决定。off 模式必须在**持久化产物**（tasks.md、commit body、验证报告草稿等）里记录跳过自动代码审查的原因。
+
+- hotfix 和 tweak 预设默认 `off`。
+- full workflow 也可以显式选 `off`，但离开 build 前必须确认这个选择并记录原因。
+
+<Warning>
+  <code>off</code> 只跳过<strong>自动代码审查</strong>，<strong>不跳过</strong>
+  构建、测试、安全检查和 debug gate 协议。如果执行中出现测试失败、构建失败或异常行为，仍然必须走
+  debug gate——<code>off</code> 不能用来绕过真实问题。
+</Warning>
+
+## 最终综合审查（verify 阶段）
+
+整个变更的**最终综合代码审查只在 verify 阶段执行**。build 完成全部任务后**不追加最终审查者**，直接进入 verify。`review_mode` 决定 verify 是否执行这次最终综合审查：`off` 跳过并记录原因；`standard` 和 `thorough` 都会执行。
+
+`executing-plans` 的边界：主会话直接执行任务，没有 `subagent-driven-development` 那样的任务级审查者，代码审查针对已完成 diff，强度随 `review_mode` 调整。`standard` 在 build 内不请求整变更审查，任务全部验收后直接进入 verify；`thorough` 每完成 3 个任务做一次分段审查（总任务 ≤3 时 build 内无审查），分段审查只覆盖该段 diff，整个变更的最终综合审查仍由 verify 阶段执行。
+
+<Note>
+  <strong>verify 阶段的审查由 <code>verify_mode</code>（light/full）驱动，不占 build 的审查预算。</strong>{' '}
+  <code>review_mode</code> 只决定 verify 是否触发自动代码审查（<code>off</code>{' '}
+  跳过；<code>standard</code>/<code>thorough</code> 在 light 验证下跑一次轻量代码审查，在 full
+  验证下依赖 <code>openspec-verify-change</code>）。verify 阶段没有单独的 per-
+  <code>review_mode</code>“完整”代码审查——权威行为见 verify 阶段文档。
+</Note>
+
 ## 三种模式一图看懂
+
+下面这张流程图汇总 build 阶段三种模式的任务级审查与修复流程。build 只按下图分支派发审查者，**不额外增加**；分支内标注的修复轮数就是该模式的自动修复上限。
 
 ```mermaid
 flowchart TD
@@ -108,49 +126,9 @@ flowchart TD
     THFINAL --> DONE["build 任务级审查完成"]
 ```
 
-## 三种模式对比
+## 风险信号清单
 
-| 维度             | `off`                    | `standard`                                    | `thorough`                                  |
-| ---------------- | ------------------------ | --------------------------------------------- | ------------------------------------------- |
-| **任务级审查者** | 0                        | 仅风险任务                                    | **每个任务**                                |
-| **最终综合审查** | verify 跳过              | 在 verify 阶段执行                            | 在 verify 阶段执行                          |
-| **审查范围**     | —                        | 风险任务：spec 合规 + 代码质量               | 每个任务：spec 合规 + 代码质量              |
-| **自动修复上限** | 0 轮                     | 风险任务的单次审查 **最多 1 轮** + 复审       | 单次审查 **最多 2 轮** + 复审                |
-| **执行速度**     | 最快                     | 中等（低风险任务跳过审查）                    | **最慢**（每个任务都审查）                  |
-| **token 消耗**   | 最低                     | 中等                                          | **最高**                                    |
-| **适合场景**     | hotfix/tweak、低风险小改 | 日常 full workflow                            | 高风险、多模块、架构/安全变更               |
-| **默认值**       | hotfix/tweak 默认        | full workflow 默认（含运行时 fallback）       | —                                           |
-
-## off 模式（最低强度）
-
-**不派发任何**自动 spec 审查者、代码质量审查者或审查修复 agent（verify 阶段的最终综合审查也会跳过）。任务是否完成，由实现者的自测、构建/测试证据、当前 worktree 确认和勾选前的核验决定。
-
-<Warning>
-  <code>off</code> 只跳过<strong>自动代码审查</strong>，<strong>不跳过</strong>
-  构建、测试、安全检查和 debug gate 协议。如果执行中出现测试失败、构建失败或异常行为，仍然必须走
-  debug gate——<code>off</code> 不能用来绕过真实问题。
-</Warning>
-
-off 模式必须在**持久化产物**（tasks.md、commit body、验证报告草稿等）里记录跳过自动代码审查的原因。
-
-- hotfix 和 tweak 预设默认 `off`。
-- full workflow 也可以显式选 `off`，但离开 build 前必须确认这个选择并记录原因。
-
-## standard 模式（中等强度）
-
-standard 不再是"只在最后审一次"。它形成**风险触发**的逐任务审查组合，最终综合审查交给 verify 阶段。
-
-### build 阶段
-
-1. 默认**不派发任务级审查者**。实现者自测、提交、报告证据（包括**主动上报的风险信号**）；coordinator 核验通过后才勾选任务。
-2. **风险触发**：读完实现者主动上报的内容 + 审 diff 后，**只有当实现者主动上报的内容命中任何风险信号，或 coordinator 的 diff 审查发现任何风险信号时**，才给这个任务派一个任务级审查者，同时检查 spec 合规和代码质量。
-3. 风险任务的 CRITICAL/IMPORTANT 发现进入 **1 轮** review-fix（最多 1 轮），复审未通过 → 标记 **BLOCKED**，暂停交给用户。
-4. 命中风险信号的任务核验通过后直接勾选。
-5. 全部任务完成后**不追加最终审查者**，直接进入 verify。整个变更的最终综合代码审查由 verify 阶段按 review_mode 执行（见 verify 阶段文档）。
-
-### 风险信号列表
-
-命中以下**任意一条**即标记为风险任务（实现者主动上报 + coordinator diff 审查共同判定）：
+命中以下**任意一条**即标记为风险任务（实现者主动上报 + coordinator diff 审查共同判定）。这是 `standard` 模式下派发任务级审查者的触发依据：
 
 - 跨模块 / 跨子系统协调改动
 - 安全敏感面：认证、授权、加密、SQL、外部输入处理、密钥/凭据
@@ -160,41 +138,31 @@ standard 不再是"只在最后审一次"。它形成**风险触发**的逐任�
 - 实现者返回 `DONE_WITH_CONCERNS`
 - 单任务 diff 超过 200 行
 
-## thorough 模式（最高强度）
+## 与 Superpowers SDD 的边界
 
-thorough 不再做"按批次合并审查"。高风险变更要求**每个任务都拿到即时的、聚焦的审查**——拖到批次边界才抓问题代价太大。
+<Warning>
+  Superpowers 的 <code>subagent-driven-development</code>{' '}
+  默认流程要求“每个任务后派一个任务审查者”。Comet 的 <code>review_mode</code>{' '}
+  <strong>接管这一阶段</strong>，决定哪些任务拿到任务级审查者。
+  <strong>
+    不要派发 <code>review_mode</code> 规定之外的审查者。
+  </strong>
+  拿不到审查者的任务（<code>off</code>：全部；<code>standard</code>
+  ：非风险任务）直接走任务勾选并派发下一个任务。一个变更的审查总数
+  <strong>仅由各模式对应的任务级审查者与修复轮数决定</strong>，不额外增加。
+</Warning>
 
-### build 阶段关键规则
+Comet 的 `subagent-driven-development` 扩展现在只依赖 Superpowers 公开的 task reviewer 契约：实现者完成任务后，协调者按任务材料、真实 diff、测试证据和风险信号决定是否派审查者。Comet 不读取、不写入、也不要求 Superpowers `subagent-driven-development` 的内部脚本名、workspace 路径或私有实现细节。
 
-1. **每个任务都派审查者**（spec 合规 + 代码质量）：实现者自测、提交、报告证据后，coordinator 给这个任务派一个全新后台审查者。
-2. CRITICAL/IMPORTANT 发现进入 review-fix（**最多 2 轮**）；仍未通过 → 标记 **BLOCKED**，暂停交给用户。
-3. 全部任务完成后**不追加最终审查者**，直接进入 verify；最终综合审查由 verify 阶段执行。
+这意味着：
 
-<Note>
-  thorough 不跑批次审查——高风险变更需要对<strong>每个任务</strong>
-  做即时、聚焦的审查。把问题拖到批次边界再抓代价太高。
-</Note>
+- Superpowers 仍提供连续任务调度、预检查 plan review、文件型 handoff、reviewer 中立提示、“材料不足无法验证” 的反馈语义，以及 progress reconciliation。
+- Comet 只接管 reviewer 触发策略和 review-fix 预算，也就是 `review_mode` 决定哪些任务要 task reviewer。
+- 文档、恢复和测试都以公开行为为准，不把 shipped Skill 文案绑定到 Superpowers 内部目录结构。
 
-### 为什么 thorough 慢且费 token
-
-thorough 的开销是**结构性**的：N 个任务就会派 N 个任务级审查者，每个审查者都可能触发最多 2 轮修复。对于 12 个任务的变更，standard 可能只给少数风险任务派审查者，而 thorough 会跑 12 次逐任务审查——审查 + 修复的 agent 数量是 standard 的数倍。
-
-<Tip>
-  <strong>经验法则</strong>：如果变更涉及安全、认证、数据迁移、跨模块 API 或架构调整，用{' '}
-  <code>thorough</code>；否则 <code>standard</code> 足够。<code>thorough</code>{' '}
-  是有代价的强审查：会明显拖慢 build 并增加 token 消耗，因此不适合作为默认值。
-</Tip>
-
-## standard 和 thorough 的核心差异
-
-| 维度         | standard                 | thorough                     |
-| ------------ | ------------------------ | ---------------------------- |
-| 任务级审查者 | 仅风险任务               | **每个任务**                 |
-| 审查时机     | 风险任务即时             | 每个任务即时                 |
-| 最终综合审查 | 在 verify 阶段执行       | 在 verify 阶段执行           |
-| 自动修复上限 | 逐任务审查 **1 轮**      | 逐任务审查 **2 轮**          |
-| BLOCKED 触发 | 任何审查 1 轮修复未通过  | 任何审查 2 轮修复未通过      |
-| 执行开销     | 中等                     | **最高**                     |
+<Info>
+  在 build 阶段选择 `off`、`standard` 或 `thorough`。Superpowers SDD 可以独立升级实现，但需要继续满足公开的 task reviewer 契约。
+</Info>
 
 ## 派发模型的选择规则（强制）
 
@@ -219,8 +187,8 @@ thorough 的开销是**结构性**的：N 个任务就会派 N 个任务级审�
 
 `executing-plans` 下主会话直接执行任务（没有隔离的实现者子代理），所以没有 `subagent-driven-development` 那样的任务级审查者。代码审查针对已完成 diff，强度随 `review_mode` 调整：
 
-- **`review_mode: off`**：不做自动代码审查，不加载 `requesting-code-review`。在验证报告草稿或 tasks.md 记录跳过原因，任务验收后进入 verify（verify 阶段也会按 off 跳过最终综合审查）。
-- **`review_mode: standard`**：build 内不请求整变更审查，任务全部验收后直接进入 verify。整个变更的最终综合审查由 verify 阶段执行。
+- **`review_mode: off`**：不做自动代码审查，不加载 `requesting-code-review`。在验证报告草稿或 tasks.md 记录跳过原因，任务验收后进入 verify。
+- **`review_mode: standard`**：build 内不请求整变更审查，任务全部验收后直接进入 verify。
 - **`review_mode: thorough`**：每完成 3 个任务做一次**分段代码审查**（仅针对该段 diff），用 `requesting-code-review` 针对该段 commit 区间；总任务 ≤ 3 时 build 内不做任何审查，直接进入 verify。这是 `executing-plans` 下最接近逐任务审查的做法：主会话没有隔离的实现者子代理，无法逐任务派发审查者。
 
 **要求**（thorough 适用）：
@@ -313,15 +281,6 @@ export COMET_REVIEW_MODE=standard
 - `build-complete` → 调用 `requireBuildDecisions`（含 review_mode 检查），通过后 `phase: verify, verify_result: pending`。
 - `verify-pass` → 要求 `verification_report` 存在且 `branch_status: pending`，然后写入 `phase: archive, verify_result: pass`；`handled` 由 Archive 在最终交付确认后写入。
 - `verify-fail` → `verify_result: fail, phase: build`（回滚，下次 build-complete 时 review_mode 必须再次满足）。
-
-## 怎么选
-
-| 场景               | 推荐模式      | 理由                                           |
-| ------------------ | ------------- | ---------------------------------------------- |
-| hotfix / tweak     | `off`（默认） | 低风险小改，不需要强审查                       |
-| 日常功能开发       | `standard`    | 低风险任务跳过审查，风险任务即时审查，开销可控 |
-| 安全/认证/数据迁移 | `thorough`    | 每个任务都拿到即时审查，覆盖高风险面           |
-| 跨模块 / 架构变更  | `thorough`    | 逐任务审查能抓住跨模块问题                     |
 
 ## 下一步
 
