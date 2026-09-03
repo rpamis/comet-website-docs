@@ -126,7 +126,7 @@ node "$COMET_STATE" check <name> open
 node "$COMET_GUARD" <change-name> open --apply
 ```
 
-open guard 对 tweak **不要求** `design.md`（只对 full 要求），所以 open 完成后直接跳到 build，**跳过 design 阶段**。`init` 写入和 hotfix 相同的轻量执行默认值（`build_mode: direct`、`tdd_mode: direct`、`review_mode: off`、`verify_mode: light`），但 `isolation` 保持 `null`，入口会让你显式选择当前分支、创建分支或创建 worktree。确认后记录 `isolation` 和 `bound_branch`，后续意外切换分支会被阻止。详见 [hotfix 预设 · 初始化的默认值](/zh/presets/hotfix#hotfix-初始化的默认值)。
+open guard 对 tweak **不要求** `design.md`（只对 full 要求），所以 open 完成后直接跳到 build，**跳过 design 阶段**。`init` 写入的默认值和入口的隔离选择机制（`isolation` 默认 `null`，由你显式选择当前分支、创建分支或创建 worktree，确认后记录 `isolation` 和 `bound_branch`）与 hotfix 相同，默认值表和说明见 [hotfix 预设 · 初始化的默认值](/zh/presets/hotfix#hotfix-初始化的默认值)。
 
 ### Step 2：OpenSpec apply 构建（tweak 专属 build）
 
@@ -180,70 +180,26 @@ node "$COMET_STATE" set <name> review_mode standard
 
 ## 升级判定（三层分工）
 
-和 hotfix 一样的三层分工，但**文件数阈值更高**（超过 6 个文件，因为 tweak 本身可能触及更多文件）：
+tweak 的三层升级判定与 hotfix 共用同一套机制：命中质变信号或超过文件数阈值时，Comet 会**暂停让你二选一**（继续 tweak 或升级 full）；文件数只是提示触发器、不会自动升级，`comet-state scale` 只决定 `verify_mode`、不卡流程。选升级时只能走 `preset-escalate` 合法通道，不能自行升级或手工编辑 `.comet.yaml`。完整机制（信号列表、升级决策和 `preset-escalate` 的一次性效果）见 [hotfix 预设 · 升级判定](/zh/presets/hotfix)。
 
-### 1. 质变信号（命中任一即暂停）
+tweak 与 hotfix 只有两点差异：
 
-| 质变信号                        | 说明                                           |
-| ------------------------------- | ---------------------------------------------- |
-| 跨模块协调修改                  | 需要跨组件、跨层协同改动                       |
-| 需要拆分为多个 OpenSpec changes | 单一 change 已无法承载，需拆多个能力或交付单元 |
-| 数据库 schema 变更              | 结构性调整                                     |
-| 引入新的 public API             | 产生新的对外接口                               |
-| 触及深层架构问题                | 需要架构层面方案，非局部改动                   |
-
-<Note>
-  注意 tweak 的第二个信号是“需要拆分为多个 OpenSpec change”，而 hotfix 是“需要新增
-capability”——这反映了两者适用条件的差异（tweak 要求单一 change）。
-</Note>
-
-### 2. 文件数阈值（用户拍板）
-
-改动文件数超过 **6 个**时暂停交你决定。文件数是**提示触发器**，不是硬性升级条件——文件多不等于有质变。
-
-### 3. 验证级别（scale 脚本判定）
-
-`comet-state scale` 只决定 `verify_mode`，不卡流程、不触发升级。
-
-### 升级决策（停顿点）
-
-命中升级信号或文件数阈值时，Comet **暂停让你二选一**（不能自行升级或自行判定可继续）：
-
-| 选项             | 结果                                           |
-| ---------------- | ---------------------------------------------- |
-| **A 继续 tweak** | 你确认范围可控，继续 open→build→verify→archive |
-| **B 升级 full**  | 你认为需要深度设计                             |
-
-选 B 后用合法升级通道（**不能手工编辑 `.comet.yaml`**）：
-
-```bash
-node "$COMET_STATE" transition <name> preset-escalate
-```
-
-它**一次性**设 `workflow: full`、`classic_profile: full`、`phase` 回退到 `design`、清空 `design_doc`，然后加载 `/comet-design` 补 Design Doc。已完成的代码、tasks 和 OpenSpec artifacts 都保留——你只补一个 Design Doc。`preset-escalate` 只能从 `phase: build` 的 hotfix/tweak 触发。
+1. **质变信号第 2 条不同**：tweak 是“需要拆分为多个 OpenSpec change”，hotfix 是“需要新增 capability”——因为 tweak 要求收敛为单一 change，hotfix 不新增能力。其余信号（跨模块协调修改、数据库 schema 变更、引入新的 public API、触及深层架构问题）两页一致。
+2. **文件数阈值更高**：改动文件数超过 **6 个**时暂停交你决定（hotfix 是超过 4 个），因为 tweak 本身可能触及更多文件。文件数是**提示触发器**，不是硬性升级条件——文件多不等于有质变。
 
 ## 连续执行和必停点
 
-tweak 默认**一次性连续执行**——调用后自动推进，不主动停顿。但无论 `auto_transition` 取何值，以下情况**必须暂停**等你确认：
+默认行为和必停点与 hotfix 相同：tweak 默认**一次性连续执行**——调用后自动推进，不主动停顿；无论 `auto_transition` 取何值，命中升级判定信号或文件数阈值、遇到验证失败决策、需要归档与交付确认时都**必须暂停**等你确认；`auto_transition: false` 时降级为逐阶段手动推进。必停点的完整清单见 [hotfix 预设 · 连续执行和必停点](/zh/presets/hotfix#连续执行和必停点)。
 
-1. 命中升级判定信号
-2. 验证阶段的验证失败决策，以及 Archive 阶段的归档与交付确认
-3. 归档前最终确认
-
-（tweak 始终用 OpenSpec apply 执行，任务数量不改变执行方式，也不会因此停下来确认。）
-
-`auto_transition: false` 时降级为逐阶段手动推进。
+一处执行方式上的差异：tweak 始终用 OpenSpec apply 执行，**任务数量不改变执行方式**，也不会因此停下来确认。
 
 ## 退出条件
 
-- 变更已完成，测试通过
-- change 已归档
-- 如有 spec 变更，已同步到 main spec
-- 阶段守卫：build→verify 前 `comet-guard <name> build --apply`，verify→archive 前 `comet-guard <name> verify --apply`
+与 hotfix 相同，只有对象表述不同：tweak 是“变更已完成，测试通过”，hotfix 是“Bug 已修复，测试通过”。其余条件——change 已归档、spec 变更已同步到 main spec、build→verify 与 verify→archive 前的阶段守卫——见 [hotfix 预设 · 退出条件](/zh/presets/hotfix#退出条件)。
 
 ## 恢复
 
-tweak 幂等。中断后用 `/comet` 恢复；配置进入 Classic 后，内部 `/comet-classic` 读取 `.comet.yaml` 的 `workflow` 字段，并在 `phase: build` 时路由回 `/comet-tweak`。`comet-state check <name> build --recover` 给出恢复上下文，从 tasks.md 第一个未勾选任务继续。
+恢复机制与 hotfix 相同：tweak 幂等，中断后从 tasks.md 第一个未勾选任务继续，`comet-state check <name> build --recover` 会给出恢复上下文。中断后的阶段路由说明见 [hotfix 预设 · 恢复](/zh/presets/hotfix#恢复)，tweak 自己的路由入口在本文「怎么触发」。
 
 ## 下一步
 
