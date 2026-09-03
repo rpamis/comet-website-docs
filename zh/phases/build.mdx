@@ -38,10 +38,9 @@ build 阶段有 2 个停顿点（全局编号 6-7，整个五阶段工作流共 
 ```mermaid
 flowchart TD
     Entry["入口状态验证"] --> S1["子代理写实施计划<br/>（失败回退主会话）"]
-    S1 --> Stop2["停顿点 6：plan-ready 暂停<br/>继续 / 暂停切换模型"]
-    Stop2 -->|继续| Stop3["停顿点 7：一次性选定<br/>执行 + TDD + 审查"]
+    S1 --> Stop2["停顿点 6：build 联合决策<br/>plan-ready 继续 / 暂停切换模型"]
+    Stop2 -->|继续| Exec["停顿点 6 内一次选定<br/>执行 + TDD + 审查，再按 build_mode 执行"]
     Stop2 -->|暂停切换模型| PauseDone["本次停止，稍后恢复"]
-    Stop3 --> Exec["按 build_mode 逐任务执行"]
     Exec --> Debug{"崩溃/测试失败/构建失败?"}
     Debug -->|是| DebugGate["强制加载 systematic-debugging<br/>先定位根因再修复"]
     DebugGate --> Exec
@@ -86,13 +85,13 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
 ---
 ```
 
-### 停顿点 6：build 联合决策（plan-ready）
+### 停顿点 6：build 联合决策
 
 计划写好后，Comet **暂停等你选**：
 
 | 选项               | 行为                                                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| **A 继续执行**     | 保持在当前模型，进入 Step 3 选择执行、TDD 和审查模式                                                                |
+| **A 继续执行**     | 保持在当前模型，接着在下方一次选定执行方式、TDD 和审查模式                                                                |
 | **B 暂停切换模型** | 记录 `build_pause: plan-ready`，本次 `/comet-build` 停止；换模型后正常用 `/comet` 恢复，也可手动调用 `/comet-build` |
 
 <Tip>
@@ -103,9 +102,9 @@ base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规
   ，直接进入工作模式选择。
 </Tip>
 
-### 停顿点 7：一次性选定三种执行模式
+#### 同一次决策里再选三种工作模式
 
-确认继续后，Comet **一次性问你三个执行选择**（不是分三次问）。工作区隔离不在其中——它已在 open 阶段的工作区决策（停顿点 3）确定：选择结果写入 `isolation`，实际执行目录的当前分支记录为 `bound_branch`，build 阶段只验证当前目录和分支是否匹配，不会静默换目录。选择 `branch` 时的分支名在 open 阶段一并确认（hotfix/tweak 预设默认使用 `hotfix/YYYYMMDD/<name>`、`tweak/YYYYMMDD/<name>`）。
+选 A 继续后，Comet 在**同一次联合决策**里让你一次选定执行方式、TDD 模式和审查模式。工作区隔离不在这里——它已在 open 阶段的工作区决策（停顿点 3）确定：选择结果写入 `isolation`，实际执行目录的当前分支记录为 `bound_branch`，build 阶段只验证目录与分支匹配，不会静默换目录。选择 `branch` 时的分支名在 open 阶段一并确认（hotfix/tweak 预设默认 `hotfix/YYYYMMDD/<name>`、`tweak/YYYYMMDD/<name>`）。
 
 #### 1. 执行方式（build_mode）
 
