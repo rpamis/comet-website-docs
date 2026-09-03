@@ -1,169 +1,150 @@
 ---
 title: "Principles of Personal Memory: From User Signals to Task Context"
-description: "Understand the recording model, formation path, task matching, progressive context, correction and forgetting mechanism of Personal Memory."
+description: "Understand the recording model, formation paths, task matching, progressive context, and correction and forgetting mechanisms of Personal Memory."
 ---
 
-Personal Memory converts the long-term requirements explicitly expressed by users and reusable collaborative experiences into standardized records. Each record retains its owner, scope, applicable conditions, source and life cycle. The system only provides it in the relevant task.
+For setup, configuration, and everyday commands, see [Personal Memory](/en/plugins/personal-memory). This page explains the internal mechanisms: the record model, formation paths, task matching, and how correction and forgetting work.
 
-This design simultaneously meets four product requirements: traceable records, correctable content, contextual boundaries, and plugin failures not blocking current work.
+Personal Memory turns the long-term requirements you state explicitly and the collaboration experiences that can be reused into normalized records. Each record keeps its owner, scope, applicable conditions, source, and lifecycle, and the system only provides it in related tasks.
 
-## Core component
+This design satisfies four product requirements at once: records are traceable, content is correctable, context has boundaries, and a plugin failure never blocks the current work.
 
-|Component|Duties|
-| -------------------------------- | --------------------------------------------------------- |
-|Experience Journal|Add records of user signals, task results and application feedback, and support deduplication and failure replay|
-|"Reflection (Experience Refinement|Identify preferences, strategies or experiences with long-term value from structured events|
-|Consolidation|Merge near-meaning records, supplement evidence, tighten the scope of application and handle invalid versions|
-| Personal Memory Provider         |Save and query standardized personal memories, and provide a unified contract for Local and Remote|
-|Context Director|Filter, sort and control the resident context based on the current task|
-|Context Manifest|Provide summaries, application reasons, and stable ids for the Agent to expand the complete content as needed|
+## Core components
 
-## Data path
+| Component | Responsibility |
+| --- | --- |
+| Experience Journal | Appends user signals, task results, and application feedback; supports deduplication and failure replay |
+| Reflection | Identifies preferences, policies, or experiences with long-term value from structured events |
+| Consolidation | Merges near-duplicate records, adds evidence, tightens scope, and retires invalid versions |
+| Personal Memory Provider | Saves and queries normalized Personal Memory; provides one contract for Local and Remote |
+| Context Director | Filters, ranks, and controls the injected context for the current task |
+| Context Manifest | Provides summaries, application reasons, and stable IDs so the Agent can expand full content on demand |
 
-```mermaid
-flowchart TD
-  S["Capture signals <br/>, user requirements and task results"] --> J["2. Record Experiences <br/>Experience Journal"]
-  J --> R["3. Refine and consolidate <br/>Reflection + Consolidation"]
-  R --> P["4. Write Personal Memory <br/>Personal Memory Provider"]
-  U["Users actively manage the addition, correction, forgetting and rollback of <br/>"] --> P
-  P --> D["5. Match the current task <br/>Context Director"]
-  D --> A["6. Provide the relevant Context <br/> key body or Context Manifest"]
-  A --> O["7. Record the application results of <br/> as successful, ignored, overwritten, corrected or failed"]
-  O -. continue calibrating .-> J
-```
+## Record model
 
-Synchronous management and background learning remain separated in this path:
+A Personal Memory Record is made of its content and its governance information:
 
-- When the user explicitly adds, corrects or forgets, the Provider immediately performs deterministic operations.
-- When semantic induction is required for the task results, Journal first records the events, and then Reflection processes them in the background.
-- The Context Director only selects the content required by the current task and does not modify the record body.
-- The application results are re-entered into the Journal for subsequent sorting and lifecycle updates.
+| Field | Product role |
+| --- | --- |
+| Stable ID | Supports expansion, correction, forgetting, rollback, and history tracking |
+| `scope` | Distinguishes global user memory from project-scoped memory |
+| `projectKey` | Binds a project-scoped record to a stable project identity |
+| `memoryType` | Distinguishes Core Profile, Collaboration Policy, and Personal Episode |
+| `memoryClass` | Marks user facts, user preferences, collaboration habits, or personal project conventions |
+| selectors | Limit the applicable paths, tasks, operations, and phases |
+| `authority` | Distinguishes what you set explicitly from what the system inferred |
+| evidence | Keeps the minimum evidence needed to form or correct a record |
+| lifecycle | Represents `trial`, `proven`, or `superseded` |
+| application | Records the most recent application reason and its actual result |
 
-## "Record model"
+The Provider stores the structured state that Comet maintains automatically, shared by the CLI, Dashboard, Skill, and Hook. The user-readable Markdown is for viewing and management, and it can also be used to rebuild state after index corruption.
 
-Personal Memory Record consists of the main text and governance information together:
+## Record formation paths
 
-|Field|Product function|
-| ------------- | ----------------------------------------------------------- |
-|Stable ID|Supports unfolding, correcting, forgetting, rolling back and historical tracking|
-| `scope`       |Distinguish between global user memory and project scope memory|
-| `projectKey`  |Bind the project scope records to a stable project identity|
-| `memoryType`  |Distinguish between Core Profile, Collaboration Policy and Personal Episode|
-| `memoryClass` |Mark user facts, user preferences, collaboration habits or personal project agreements|
-| selectors     |Define the applicable paths, tasks, operations and stages|
-| `authority`   |Distinguish between user explicit Settings and system inferences|
-| evidence      |Retain the minimum evidence necessary for the formation or correction of records|
-| lifecycle     |Represents `trial`, `proven` or `superseded`|
-| application   |Record the reasons for the most recent application and the actual results|
+### Set explicitly by you
 
-The Provider saves the structured machine state for joint reading and writing by the CLI, Dashboard, Skill, and Hook. User-readable Markdown is used for viewing and management, and can also serve as the input for rebuilding after index corruption.
+`user.signal` represents a long-term preference, correction, or forgetting that you initiate. The coordinator first writes the event to the Journal, then completes the deterministic handling synchronously.
 
-## Record formation path
+A clear long-term requirement can go straight to `proven`, because the current user is the authoritative source for this kind of content. The system also recognizes one-off phrasing such as "don't commit this time"; that requirement keeps constraining the current task but is not written to long-term memory.
 
-### User's explicit Settings
+### Inferred candidates from the system
 
-`user.signal` indicates long-term preferences, corrections or forgetfulness voluntarily proposed by users. The coordinator first writes the event into the Journal and then synchronously completes the deterministic processing.
+Task completion, verification, Review, and context-application results can form inferred candidates. Reflection converts the related Personal Episodes into Learning Deltas (memory change instructions):
 
-Clear long-term requirements can be directly accessed at `proven`, as current users are the authoritative source of such content. The system will also recognize one-off expressions, such as "Do not submit this time". This requirement continues to constrain the current task but is not written into long-term memory.
+| Operation | Meaning |
+| --- | --- |
+| `create` | Create a new record |
+| `update` | Add evidence or tighten the scope of an existing record |
+| `supersede` | Retire conflicting or invalid old records |
+| `forget` | Execute a forgetting you explicitly requested |
+| `noop` | Evidence is insufficient; no long-term content is formed |
 
-### System inference candidate
+Consolidation merges near-duplicate records, keeps the more specific selectors (applicable conditions), and attaches new evidence to existing records. System-inferred content starts in `trial` and joins related tasks at lower priority; after one successful application it can be promoted to `proven`.
 
-The results of task completion, verification, Review and contextual application can form inferred candidates. Reflection converts the relevant Personal episodes into Learning Delta (memory change instructions) :
+## What the Experience Journal does
 
-|Operation|Meaning|
-| ----------- | -------------------------------- |
-| `create`    |Create a new record|
-| `update`    |Supplement evidence or tighten the scope of application of existing records|
-| `supersede` |Stop using conflicting or invalid old records|
-| `forget`    |Carry out the forgetting explicitly proposed by the user|
-| `noop`      |The current evidence is insufficient and does not form long-term content|
+The Experience Journal is an append-only, replayable machine event log with three responsibilities:
 
-Consolidate near-meaning records, retain more specific selectors (applicable conditions), and link new evidence to existing records. The system's inferred content initially enters `trial` and participates in related tasks with a lower priority. After one successful application, you can be promoted to `proven`.
+1. Deduplicate with stable `eventId`s so retries do not produce repeated learning.
+2. Correlate events from recovery, re-verification, and cross-session continuation with `episodeId`.
+3. Keep the replay capability after a background Reflection failure, without blocking the current workflow.
 
-## The responsibilities of Experience Journal
-
-Experience Journal is an append, replayable machine event log that undertakes three responsibilities:
-
-1. Use stable `eventId` for deduplication to avoid repeated learning caused by retries.
-2. Use `episodeId` to associate the events generated for recovery, verification, and cross-session continuation;
-3. Retain the replay capability after a failed Reflection in the background and do not block the current workflow.
-
-The Journal saves structured contexts and evidence citations, but does not save complete transcripts, complete Diffs, original logs, or hidden reasoning. Old Personal episodes that have completed Consolidation can be compressed, and records still in use will retain the necessary chain of evidence.
+The Journal stores structured context and evidence references, not full transcripts, full diffs, raw logs, or hidden reasoning. Old Personal Episodes that finished Consolidation can be compressed; records still in use keep the necessary evidence chain.
 
 ## Task matching
 
-The Provider first returns the available candidates, and the Context Director then performs hierarchical matching according to the current request:
+The Provider first returns the available candidates, and Context Director then runs layered matching against the current request:
 
 ```text
 project → path → task → operation → phase
 ```
 
-The sorting takes into account the following factors simultaneously:
+Ranking also considers the following:
 
-- The priority of `proven` is higher than that of `trial`.
-- The priority explicitly set by the user is higher than that inferred by the system.
-- The priority of precise project and path Selectors is higher than that of broad global content.
-- Recent successful applications will improve subsequent sorting.
-- Correcting or participating in failure will lower the ranking and trigger subsequent Reflection.
-- The `superseded` record does not enter the task context.
+- `proven` outranks `trial`.
+- What you set explicitly outranks what the system inferred.
+- Precise project and path selectors outrank broad global content.
+- A recent successful application improves later ranking.
+- A correction, or taking part in a failure, lowers ranking and triggers a later Reflection.
+- `superseded` records never enter task context.
 
-The current user requirements, system constraints and project strategies always have a higher priority. Personal Memory only provides a collaborative context and does not change system permission boundaries.
+Your current requirements, system constraints, and project policies always have higher priority. Personal Memory only provides collaboration context; it never changes the system permission boundaries.
 
 ## Progressive context
 
-Comet uses a hierarchical provisioning approach to control resident contexts:
+Comet controls how much context gets injected by providing it in layers:
 
-1. The key Core Profile can be fully integrated into the context;
-2. A small number of directly related stable Collaboration policies can be fully integrated into the context;
-3. Other relevant candidates enter the Context Manifest first;
-4. The Agent expands the required text, source and verification information through a stable ID.
+1. Key Core Profile entries can enter the context in full.
+2. A few directly related, stable Collaboration Policies can enter in full.
+3. Other relevant candidates enter the Context Manifest first.
+4. The Agent expands the content, source, and verification it needs by stable ID.
 
-The Context Manifest is a streamlined index. It provides each candidate with a title, abstract, stable ID and `whyApplied`. `whyApplied` comes from actual matching conditions, such as "Current Project Match", "Current Path Match", "User Explicit Settings", or "Recently Applied Successfully".
+The Context Manifest is a slim index. For each candidate it provides a title, summary, stable ID, and `whyApplied`. `whyApplied` comes from the real match conditions, such as "the current project matches", "the current path matches", "you set this explicitly", or "it was applied successfully recently".
 
-The character budget is only limited to the resident text in one task. A successfully saved record will only appear in the context or Manifest when the current condition is hit.
+The character budget limits only the content injected in one task. A saved record shows up in the context or the Manifest only when it hits the current conditions.
 
 ## Application feedback
 
-When the Context Director provides a record, an application record is created. After the task is completed, the following results can be written:
+When Context Director provides a record, it creates an application record. After the task, one of these results can be written:
 
-|Result|Subsequent impact|
-| ------------------------ | -------------------------------- |
-| `used-successfully`      |By enhancing the reusability, `trial` can be promoted|
-| `ignored`                |Minor impact on sorting does not directly determine content error|
-| `overridden`             |The record was overwritten by a higher-priority requirement this time|
-| `corrected`              |Trigger correction or substitution|
-| `contributed-to-failure` |Reduce the reuse intensity and trigger re-refinement|
+| Result | Later effect |
+| --- | --- |
+| `used-successfully` | Raises reuse strength; a `trial` can be promoted |
+| `ignored` | Affects ranking slightly; does not judge the content wrong |
+| `overridden` | Records that the content was overridden by a higher-priority requirement this time |
+| `corrected` | Triggers a correction or replacement |
+| `contributed-to-failure` | Lowers reuse strength and triggers re-distillation |
 
-The retrieval hit rate is used to measure relevance, and the application results are used to measure the actual task value. The two types of information jointly determine the subsequent sorting and life cycle.
+The retrieval hit rate measures relevance; application results measure real task value. Both kinds of information drive later ranking and the lifecycle.
 
-## Correction, forgetting and replay
+## Correction, forgetting, and replay
 
-The correction operation creates an updated normalized record and marks the conflicting old version as `superseded`. The system's inferred content cannot cover the main text explicitly set by the user.
+A correction creates an updated normalized record and marks the conflicting old version `superseded`. System-inferred content can never overwrite content you set explicitly.
 
-Forget operations are written into tombstone (forget mark). This tag is saved separately from the lifecycle, allowing the content that the user has withdrawn to still be recognized when historical events are replayed.
+Forgetting writes a tombstone. The tombstone is stored separately from the lifecycle, so replaying historical events can still recognize content you already withdrew.
 
-`forget` retains the rollback capability by default. `--permanent` performs permanent deletion. When an explicit operation fails, the Provider remains in its original state and returns an actual error.
+`forget` keeps the rollback capability by default; `--permanent` performs a permanent deletion. When an explicit operation fails, the Provider keeps the original state and returns the actual error.
 
-## Local and Remote Provider
+## Local and Remote Providers
 
-The Personal Memory domain accesses the Provider through the unified `status/query/apply` contract.
+The Personal Memory domain accesses the Provider through one `status / query / apply` contract.
 
 ### Local Provider
 
-- Retain user-readable `profile.md` and project projections;
-- Machine indexes can be rebuilt after an upgrade or damage.
-- Identify the same repository using a stable repository identity;
-- The main workspace and linked worktree share project-wide Personal Memory;
-- Different warehouses are isolated from each other.
+- Keeps a user-readable `profile.md` and project records.
+- The machine index can be rebuilt after an upgrade or corruption.
+- Identifies the same repository with a stable repository identity.
+- The main workspace and linked worktrees share project-scoped Personal Memory.
+- Different repositories are isolated from each other.
 
 ### Remote Provider
 
-- Use the same versioned Provider contract as Local;
-- Tokens are only provided through environment variables;
-- After enabling Remote configuration, Local will no longer be read simultaneously.
-- When Remote fails, it returns the actual state and does not read Local data.
+- Uses the same versioned Provider contract as Local.
+- Tokens are supplied through environment variables only.
+- Once Remote is enabled, Local is no longer read at the same time.
+- A Remote failure returns the actual state and does not read Local data.
 
-Project configuration can separately control automatic learning and task retrieval:
+Project configuration can control automatic learning and task retrieval separately:
 
 ```yaml
 memory:
@@ -171,30 +152,16 @@ memory:
   retrieval: true
 ```
 
-Closing `learning` will stop the formation of new records and retain existing data. Turning off `retrieval` will stop providing memory to tasks, but Dashboard and explicit management operations remain available.
+Turning off `learning` stops new records from forming and keeps existing data. Turning off `retrieval` stops memory from being provided to tasks, while the Dashboard and explicit management operations stay available.
 
 ## Failure isolation
 
-|Failure position|Product behavior|
-| -------------------------- | ------------------------------------------ |
-|Explicitly add, correct, forget, roll back|Return the actual error and maintain the original state|
-|Journal Back-end processing|Record the diagnosis and retain the ability to replay it later|
-|Semantic Reflection|It is clear that the user signal continues along a deterministic path, and the inference task is postponed|
-|Task retrieval|The current workflow continues and no failed content is provided|
-|The Personal Memory plugin is disabled|Stop learning and retrieving, and continue with other workflows and Project Knowledge|
+| Where it fails | Product behavior |
+| --- | --- |
+| Explicit add, correct, forget, or rollback | Returns the actual error and keeps the original state |
+| Journal background processing | Records the diagnostic and keeps the replay capability |
+| Semantic Reflection | Explicit user signals stay on the deterministic path; inference tasks are deferred |
+| Task retrieval | The current workflow continues and no failed content is provided |
+| Personal Memory plugin disabled | Learning and retrieval stop; other workflows and Project Knowledge continue |
 
-## Recall diagnosis
-
-When diagnosing memory usage once, check the three links in sequence:
-
-1. ** Save Status ** : View records using `comet memory list .` or Dashboard;
-2. ** Matching Conditions ** : Check scope, project, path, operation and phase;
-3. ** application Basis ** : View `whyApplied`, delivery and application outcome.
-
-```bash
-comet memory status .
-comet memory retrieve . --task "Modify the authentication module"
-comet task . --task "Modify the authentication module" --path src/auth --phase build --json
-```
-
-Return to [Personal Memory ](/en/plugins/personal-memory), or continue reading [Agent Learning Loop](/en/plugins/agent-learning-loop).
+Return to [Personal Memory](/en/plugins/personal-memory), or continue with [Agent Learning Loop](/en/plugins/agent-learning-loop).

@@ -1,368 +1,126 @@
 ---
 title: "Classic Workflow"
-description: "Understand how /comet enters Classic from project configuration and how Classic connects OpenSpec and Superpowers across five stages."
+description: "What Classic is and who it is for, what a single change goes through from entry to archive, and where the five stages and their mechanisms are covered in detail."
 ---
 
-Users normally only need to call `/comet`. It reads `.comet/config.yaml` and enters Native or Classic according to the project configuration. When the configuration is selected as Classic, it is internally forwarded to the permanent entry `/comet-classic`, and then Classic splits one change into five stages: open, design, build, verify, and archive. The changes, states and products of the two sets of workflows are independent of each other.
+You only need to call `/comet`. It reads the project configuration in `.comet/config.yaml`; when `default_workflow` is `classic`, it forwards the call to the permanent internal entry `/comet-classic`, which splits one change into five stages: open, design, build, verify, and archive. Classic and the [Native workflow](/en/concepts/native-workflow) are two independent workflows, and each keeps its own changes, state, and artifacts.
 
-Classic connects OpenSpec and Superpowers into a recoverable workflow. `/comet-classic` comes with intent recognition. It reads the active change, `.comet.yaml`, and the actual file status to determine whether to create a new file, restore it, enter the lightweight preset, or call the current stage Skill. Users do not need to first determine whether they are in open, design, build, verify or archive.
+Classic chains OpenSpec and Superpowers into one recoverable flow. OpenSpec owns the WHAT — requirements, proposals, the spec lifecycle, and archiving — while Superpowers owns the HOW — brainstorming, technical design, planning, execution, and verification — and Comet saves the phase and handoff state. Stage Skills do not depend on conversation history: every invocation re-reads the active change, `.comet.yaml`, and the actual file state to decide the current stage, so you do not need to figure out for yourself whether you are in open, design, build, verify, or archive.
 
-The following text uses `<classic-root>` to represent the current Classic OpenSpec root directory: The default for new projects is `docs/openspec/`, and for projects that retain the old layout, it is `openspec/`. The actual location is determined by `classic.artifact_layout`. For details, please refer to [Project File structure ](/en/guides/project-structure)
+**Classic primarily targets models in the capability tier below Fable 5 and GPT-5.6.** For these models, explicit spec, design, planning, TDD, debugging, and review stages reduce omissions and process drift. Comet's existing real-world baseline evaluations confirm that this structure keeps task coverage and completion quality on lower-capability models. Fable 5, GPT-5.6, and similarly stronger models are usually better served by the Native workflow, which executes more lightly.
 
-Classic is mainly compatible with the model capability profiles of Fable 5 and GPT-5.6 and below. For this type of model, clear Spec, design, planning, TDD, debugging and review phases can reduce omissions and process drift. The existing real baseline evaluations of Comet have verified that this constraint can maintain good task coverage and completion results on lower capability level models. Fable 5, GPT-5.6 and similar strong models are usually more suitable for using the [Native workflow ](/en/concepts/native-workflow)] with lighter execution methods
+The rest of this page uses `<classic-root>` for the current Classic OpenSpec root directory: `docs/openspec/` by default for new projects, and `openspec/` for projects that keep the legacy layout. The actual location is decided by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
 
-## What to know when using it
+## Who should use Classic
 
-|What is it that needs to be cared about|Conclusion|
-| ---------------- | ------------------------------------------------------ |
-|User entry|Use `/comet`; The project configuration determines whether to enter Classic or Native|
-|Internal entrance of Classic|`/comet-classic` is responsible for intent recognition, file status reading and stage routing|
-|Applicable model|Fable 5, models below GPT-5.6 that require more detailed steps and process constraints|
-|Process| `open` → `design` → `build` → `verify` → `archive`     |
-|When will you participate|Requirements, design, execution mode, verification failure, pre-archiving confirmation|
-|What does recovery rely on?|OpenSpec products, `.comet.yaml` and runtime evidence|
-|Which are the advanced details|handoff hash, archive directory, route judgment, read again during troubleshooting|
+| What matters | Bottom line |
+| ------------ | ----------- |
+| User entry | Call `/comet`; inside Classic, `/comet-classic` does intent recognition and stage routing |
+| Supported models | Fable 5, below GPT-5.6 — models that need finer-grained steps and process constraints |
+| Flow | open → design → build → verify → archive |
+| When you participate | Only at decision points: requirements, the design approach, execution mode, verification failures, pre-archive confirmation |
+| What recovery relies on | Calling `/comet` again; OpenSpec artifacts, `.comet.yaml`, and runtime evidence |
+| Lightweight presets | `/comet-hotfix` for bug fixes and `/comet-tweak` for medium changes; both skip design |
+| Advanced details | handoff hash, routing decisions, archive flow — read during troubleshooting; see "Mechanism details and related pages" at the end |
 
-**Write permissions**: by default, writes inside the project but outside artifact roots remain subject to the Classic phase guard. If an implementation directory must stay writable in every phase, configure shared `hook.allow_paths` in `.comet/config.yaml`. See [Classic configuration · Hook write release](/en/classic/configuration#hook-write-release).
+The full five stages fit changes that introduce new capabilities, change a public API or schema, or span multiple modules. For small, well-scoped changes, prefer the lightweight presets: fix bugs with `/comet-hotfix`, and handle light-to-medium changes to configuration, documentation, or prompts with `/comet-tweak`; both skip design. When a preset hits an escalation signal mid-run, Comet stops and lets you choose between staying on the preset and escalating to full — see "Lightweight presets and escalation" below.
 
-## Why connect OpenSpec with Superpowers
+If you want a documented record of requirements, design, and verification, Classic's five stages and archived artifacts leave a reviewable trail. If your model is already at the Fable 5 / GPT-5.6 tier and you want it to decide its own implementation and testing approach, the [Native workflow](/en/concepts/native-workflow) is the lighter choice.
 
-OpenSpec and Superpowers each have their own strengths, but when used separately, they both have their shortcomings:
+## What a change looks like end to end
 
-|Tools|"Good at|Weak point|
-| ----------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| OpenSpec    |WHAT - Requirements, Proposals, spec Lifecycle, delta spec, Archiving|The proposals and tasks lack detailed in-depth design|
-| Superpowers |HOW - brainstorming, technical design, planning, execution, closure, verification|Due to the lack of stateful design, after the spec is completed, it can only be checked. When the Agent resumes, it is easy to repeatedly review the documentation and code|
+The walkthrough below follows one complete `full` change from entry to archive. Every place where you must stop and decide is numbered: routing is 1, open is 2/3/4, design is 5, build is 6/7, verify is 8, archive is 9, and the hotfix/tweak escalation review is 10. For the complete list, see [Five-stage pause points and user selection points](/en/concepts/decision-points). `/comet-classic` chains the stages automatically; with `auto_transition: false`, advance stage by stage manually instead (see [Auto-transition](/en/concepts/auto-transition)).
 
-```mermaid
-flowchart LR
-  A["User objective"] --> B["OpenSpec: WHAT"]
-  A --> C["Superpowers: HOW"]
-  B --> D["proposal/design/tasks/spec delta"]
-  C --> E["Design Doc/Plan/ Implementation /Review"]
-  D --> F["Verification passed"]
-  E --> F
-  F --> G["Archive to the main specs"]
-```
+### Entry: say what you want, and routing picks the flow
 
-<p align="center">
-  <img
-    src="/assets/workflow-illustrations/01-what-how-bridge.png"
-alt=" Little Fish connects OpenSpec's WHAT and Superpowers' HOW to Comet workflow"
-    width="800"
-  />
-</p>
+Type `/comet` followed by what you want to do. Based on your words, the list of active changes, and the risk signals, `/comet-classic` routes the call to one of six outcomes: `full` (the complete five stages), `hotfix`, `tweak`, `resume` (continue an existing change), `ask_user`, or `out_of_scope` (you are only asking a question). A few common directions:
 
-<p align="center">OpenSpec records WHAT, Superpowers organizes HOW, Comet clips both onto the same recoverable link </p>
+- New capability, public API, schema, or cross-module work usually routes to `full`, which opens `/comet-open`;
+- Fixing an existing bug with no new capability or interface change routes to `hotfix`, which opens `/comet-hotfix`;
+- A contained light-to-medium change routes to `tweak`, which opens `/comet-tweak`;
+- Explicitly continuing some active change routes to `resume`, and the next step depends on which stage that change is currently paused at.
 
-Comet is responsible for organizing OpenSpec and Superpowers into a recoverable delivery chain:
+`full`, `hotfix`, `tweak`, and `resume` start right away; `ask_user` pauses at the entry only when the evidence is thin, several active changes exist, or the flow you stated conflicts with the risk signals. How routing decides, which risk signals affect the result, and typical scenarios are covered in [How Comet decides which flow to route to](/en/concepts/intent-routing).
 
-- Align the products of both onto the same chain - the WHAT recorded by OpenSpec and the HOW organized by Superpowers point to the same change.
-- ** Ensure reliable handover with state machines and guards ** - Do not let the Agent guess the progress based on the conversation history, but restore it from the file status and verifiable evidence.
-- ** Automate document synchronization ** - Incorporate handoff, status updates, verification, and archiving into the script process to reduce repetitive reminders such as "Remember to update the design document", "remember to synchronize the spec", and" remember to archive ".
+### open: turn an idea into an OpenSpec change
 
-## Five stages
+When the route is `full` and there is no active change to resume, `/comet-classic` calls `/comet-open`. Comet loads `openspec-explore` to clarify the requirements iteratively, then generates proposal → design → tasks one by one, following the project's `template`, `instruction`, and `dependencies`. Along the way you meet the pause points in order:
 
-|"Stage|Responsible party|Objective|Main products|
-| ------- | ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| open    | OpenSpec    |Turn the idea into OpenSpec change| `proposal.md`、`design.md`、`tasks.md`、delta spec                                         |
-| design  | Superpowers |Conduct in-depth technical design|`docs/superpowers/specs/...-design.md`, handoff bag|
-| build   | Superpowers |Write a plan and execute it|`docs/superpowers/plans/...md`, code changes, test evidence|
-| verify  |Both sides|Verify that the implementation complies with the design and spec|Verification report; `branch_status` keep `pending`|
-| archive | OpenSpec    |Merge the delta spec and archive it, and label the Superpowers document|`<classic-root>/changes/archive/YYYY-MM-DD-name/`, `archived-with` annotations in design doc/plan|
+- When the input is a large PRD or holds several independent capabilities, pause point 2 lets you split it into multiple changes, keep one change, or adjust the split;
+- Pause point 3 picks the workspace isolation — `current` (current branch), `branch` (a new branch), or `worktree` (an isolated workspace; choose it directly when you clearly want parallelism);
+- Pause point 4 reviews the output: confirm the change name and scope, and that proposal/design/tasks match expectations.
 
-### Open-openspec records WHAT
-
-`/comet-open` creates an OpenSpec change and outputs:
-
-<Tree>
-  <Tree.Folder name="<classic-root>/changes/<name>/" defaultOpen>
-    <Tree.File name=".openspec.yaml" />
-    <Tree.File name=".comet.yaml" />
-    <Tree.File name="proposal.md" />
-    <Tree.File name="design.md" />
-    <Tree.File name="tasks.md" />
-    <Tree.Folder name="specs/<capability>/">
-      <Tree.File name="spec.md" />
-    </Tree.Folder>
-  </Tree.Folder>
-</Tree>
-
-Comet will generate proposals, designs, and tasks one by one using the OpenSpec `openspec instructions` process, and adhere to the project's `template`, `instruction`, `dependencies`, and `resolvedOutputPath`. The complete workflow prohibits batch one-shot proposal generation and also prohibits skipping brainstorming.
+The artifacts land in `<classic-root>/changes/<name>/`, including `.comet.yaml`, `proposal.md`, `design.md`, and `tasks.md`, plus the delta spec (`specs/<capability>/spec.md`) when the change touches a capability. The full flow forbids one-shot proposal generation and forbids skipping brainstorming. When scope and naming are clear, requirement clarification and naming do not block by default — pause points appear only where you actually need to choose. The step-by-step open operations and artifact layout are in [open stage](/en/phases/open).
 
 <Warning>
-change must be created using `/comet-open`. Prohibit the use of `/opsx:new`: It only creates OpenSpec
-artifacts will not create `.comet.yaml`, and changes will fall outside the Comet state machine.
+  Create changes only with `/comet-open`. Calling `/opsx:new` directly only generates OpenSpec artifacts; it does not create `.comet.yaml`, and the change ends up outside the Comet state machine.
 </Warning>
 
-### design - Superpowers In-depth design, OpenSpec maintains authority
+### design: confirm the technical approach (full only)
 
-This is the stage where the two sets of tools connect. Comet uses `comet-handoff.mjs` to generate a handover package, which includes the OpenSpec artifacts of the open phase (the requirement motivation of `proposal.md`, the high-level solution of `design.md`, and the task boundary of `tasks.md`). And organize the delta spec in `specs/<capability>/spec.md` into a context that Superpowers can understand, and then hand it over to Superpowers `brainstorming` for in-depth design.
+After open completes, the full flow automatically chains to `/comet-design`. Comet first turns the open-phase artifacts into a handoff package with a script — the agent may not hand-write a summary in its place — then loads `brainstorming` to discuss the implementation approach, risks, and test strategy with you against the real context. Pause point 5 asks you to confirm the technical approach; the Design Doc (`docs/superpowers/specs/...-design.md`) is generated after confirmation, and only then does the guard advance to build.
 
-```mermaid
-flowchart LR
-  A["OpenSpec product"] --> B["comet-handoff.mjs --write"]
-  B --> C["design-context.json/md"]
-  C --> D["Superpowers brainstorming"]
-  D --> E["Design Doc"]
-  B --> F["handoff_hash is written to.comet.yaml"]
-```
+The design stage does not allow the agent to write a second requirements spec. When the delta spec lacks acceptance scenarios, the only legal move is a Spec Patch written back to OpenSpec; when a change exceeds the Spec Patch boundary (interface change, new component, data-flow change, and so on), return to brainstorming to realign or open a new change. Design details are in [design stage](/en/phases/design).
 
-The frontmatter of Design Doc explicitly states that OpenSpec is the authoritative source:
+### build: write a plan and implement task by task
 
-```yaml
----
-comet_change: <name>
-role: technical-design
-canonical_spec: openspec # OpenSpec is authoritative, not Design Doc
----
-```
+`/comet-build` first dispatches a sub-agent that loads `writing-plans` to produce the implementation plan, then pause point 6 (the build joint decision) lets you decide in one go: continue executing immediately or pause and resume with a stronger model, and select the execution mode, TDD mode, and review mode.
 
-Key constraint: ** The Agent cannot write a second requirements spec**. If the delta spec lacks acceptance scenarios, only the Spec Patch (write-back) can be written on `specs/*/spec.md`, and the scope cannot be expanded.
+After that, tasks are implemented in the mode you chose:
 
-The Spec Patch is the only legal channel for writing the requirement gap back to OpenSpec in the design stage. It has three hard boundaries:
+- `subagent-driven-development`: the main session only coordinates while background sub-agents implement tasks one by one; task-level reviews and fixes run per `review_mode`, and when a task passes, the main session checks it off in tasks.md and commits;
+- `executing-plans`: a lighter path where the main session executes directly;
+- On a crash, test failure, or build failure, execution is forced through `systematic-debugging` to find the root cause before fixing.
 
-- ** Only addition or correction can be done ** - Supplement acceptance scenarios, correct ambiguous descriptions, supplement boundary conditions; The structure or scope of the delta spec cannot be rewritten.
-- ** Only write back OpenSpec** -- Write the Spec Patch back to `specs/*/spec.md` without entering the Design Doc. Design Doc only records HOW, while OpenSpec is always the sole authority on WHAT.
-- ** After writing, handoff must be regenerated ** -- If the content of the delta spec changes, the hash will inevitably drift. When leaving the design stage, the guard will be FATAL.
+If execution turns up new tasks exceeding half of the initial tasks.md (pause point 7), Comet stops and asks whether to split them into a new change or keep them in the current one. For a comparison of the three execution modes, review modes, and the debugging protocol, see [build stage](/en/phases/build).
 
-If the changes exceed the boundaries of the Spec Patch (interface changes, new components, data flow changes, new capabilities), it is a major change at the design level: either return the current change to brainstorming for re-alignment or start a new change. The practical scenarios and specific operations of this type of "mid-process spec modification" can be found in [Mid-process spec Modification or Rollback workflow ](/en/guides/mid-workflow-changes)
+### verify: validate the implementation against the spec
 
-### build - Superpowers execution, taking the OpenSpec task boundary as input
+`/comet-verify` runs a light or full check depending on task size and saves the conclusion as a verification report. Failures that can be fixed objectively go back to build automatically, and the first three times do not interrupt you. What needs you converges on pause point 8: the fourth failure, accepting a WARNING/SUGGESTION deviation with trade-offs, or a full check finding drift between the delta spec and the Design Doc. On drift, choose one of three: append an Implementation Divergence entry to the Design Doc to record the deviation, run `verify-fail` to go back to build and realign, or accept the deviation and keep verifying. Once verification passes, the guard advances to archive while `branch_status` stays `pending`; whether to push or open a PR is confirmed right before archiving. Verification depth and failure handling are in [verify stage](/en/phases/verify).
 
-It is planned to be generated by a sub-agent loading Superpowers `writing-plans`, and its frontmatter explicitly links the OpenSpec change to the Superpowers Design Doc:
+### archive: confirm the delivery and archive
 
-```yaml
----
-change: <openspec-change-name>
-design-doc: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-base-ref: < git HEAD before implementation >
----
-```
+On entering archive, pause point 9 is the final confirmation, with five options: archive locally only, archive and push, archive and push with a PR, go back and adjust (return to verify for another round), or do not archive yet. Choosing "do not archive yet" keeps the change active in the archive stage and writes no archive state. If you are unsure, preview first with `comet archive --dry-run`, which only reports the outcome and merges nothing.
 
-The planned input is Design Doc (Superpowers) + `tasks.md` (OpenSpec task boundary). The Design Doc has digested the proposal, the original design, and the delta spec in the design stage, so there is no need to read back these original artifacts in the build stage. `tasks.md` is used as a live document to continuously check the task boundaries. The execution mode is selected by the user: `subagent-driven-development` or `executing-plans`, in conjunction with `isolation` (branch/worktree), `tdd_mode`, and `review_mode`.
+After you confirm, `comet archive` delegates to the OpenSpec CLI to merge the delta spec into the main spec, moves the change directory to `<classic-root>/changes/archive/YYYY-MM-DD-<name>/`, stamps the Design Doc and plan as archived, then creates a single archive commit and pushes or opens a PR the way you chose. Once archived, the change is no longer active and `comet status` stops listing it. Archive steps are in [archive stage](/en/phases/archive); command details are in [comet archive](/en/scripts/comet-archive).
 
-### verify - Check both parties and use hash to detect drift
+## Five stages at a glance
 
-verify will load Superpowers `verification-before-completion`, and then press the `verify_mode` branch:
+| Stage | Owner | Goal | Main artifacts |
+| ----- | ----- | ---- | -------------- |
+| open | OpenSpec | Turn an idea into an OpenSpec change | `proposal.md`, `design.md`, `tasks.md`, delta spec |
+| design | Superpowers | Deep technical design and finalize it | Design Doc (`docs/superpowers/specs/...-design.md`), handoff package |
+| build | Superpowers | Write a plan and execute task by task | Implementation plan, code changes, checked-off tasks.md |
+| verify | Both | Confirm the implementation matches the design and spec | Verification report; `branch_status` stays `pending` |
+| archive | OpenSpec | Merge the delta spec and archive | `changes/archive/YYYY-MM-DD-<name>/`, archive annotations on the Design Doc and plan |
 
-- **light** (6 checks) : Task completion, diff comparison, build, Test, Security, lightweight code review. Skip spec coverage, Design Doc consistency and drift checks.
-- **full** : Load `openspec-verify-change` additionally, and simultaneously check OpenSpec `design.md` and Superpowers design doc, including "delta spec and design doc are not contradictory ".
+<Note>
+  **Write release**: by default, writes inside the project but outside the artifact area are subject to the Classic stage guard. To keep an implementation directory writable in any stage, configure the shared `hook.allow_paths` in `.comet/config.yaml`. See [Classic configuration — Hook write release](/en/classic/configuration#hook-write-release).
+</Note>
 
-## The Skill used in the classic mode
+## Mechanism details and related pages
 
-The five-stage process is driven by these built-in skills (`comet init` installed in the platform directory) :
+Classic's handoff, spec handling, routing, archiving, and recovery each have a dedicated page. For everyday use, the two sections above are enough; when you need to chase down a mechanism, jump from here to the authoritative page:
 
-| Skill                            |Function|
-| -------------------------------- | ---------------------------------------- |
-| `/comet-classic`                 |The Classic main entry detects the status and routes to the current stage|
-| `/comet-open`                    |open phase: Create OpenSpec change|
-| `/comet-design`                  |design stage: In-depth technical design|
-| `/comet-build`                   |build phase: Plan and execute|
-| `/comet-verify`                  |verify stage: Verify the implementation|
-| `/comet-archive`                 |archive stage: Filing|
-| `/comet-hotfix` / `/comet-tweak` |Lightweight preset|
+- **Handoff and context compression**: how the handoff package and `handoff_hash` are computed and what each stage does with them is in [comet handoff](/en/scripts/comet-handoff); the two handoff formats, `off` and `beta`, and when to enable compression are in [Context compression mechanism](/en/concepts/context-compression). What the intermediate artifacts — the handoff package, brainstorm-summary, subagent-progress, the verification report, and so on — are each for is in [Workflow intermediate products](/en/concepts/intermediate-artifacts).
+- **Spec scope and drift**: the delta spec's `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` are native OpenSpec concepts; Comet uses them and does not deduplicate. How build handles a delta spec by size — small edits applied directly, medium ones realigned, large ones opened as a new change — is in [build stage](/en/phases/build) and [Change Spec or roll back mid-workflow](/en/guides/mid-workflow-changes). The three-way choice when verify finds spec drift belongs to pause point 8, in [Five-stage pause points and user selection points](/en/concepts/decision-points) and [verify stage](/en/phases/verify).
+- **Archive flow**: the step-by-step delta merge, directory move, and artifact annotation are in [archive stage](/en/phases/archive); the `comet archive` command and its `--dry-run` preview are in [comet archive](/en/scripts/comet-archive).
+- **Routing and stage detection**: how the six routing outcomes are decided and how risk signals affect the result is in [How Comet decides which flow to route to](/en/concepts/intent-routing); stage advancement, automatic chaining, and `auto_transition` are in [Auto-transition](/en/concepts/auto-transition).
+- **Where you participate**: the complete list of pause points 1–10, their options, and rules is in [Five-stage pause points and user selection points](/en/concepts/decision-points).
+- **Stage Skills**: the five stages are driven by `/comet-open`, `/comet-design`, `/comet-build`, `/comet-verify`, and `/comet-archive`, all routed from `/comet-classic`; the lightweight presets run `/comet-hotfix` and `/comet-tweak`. For normal use, call only `/comet`; when you may call these entries manually and how to recover from them is in the phases pages and [Resuming interrupted work](/en/guides/resuming-workflow).
 
-These skills are distributed along with the Comet package, and the Classic initialization will be installed in the platform directory. Normally, only `/comet` needs to be called; After the configuration is selected as Classic, the internal `/comet-classic` will detect the status and invoke the corresponding stage Skill.
+## Lightweight presets and escalation
 
-## How to hand over the product: handoff hash
+hotfix and tweak both run open → build → verify → archive (skipping design) and keep the OpenSpec state, verification, and archiving. Their shared precondition is that the change fits into a single OpenSpec change and does not need in-depth Superpowers design. `/comet-hotfix` suits quick bug fixes that need no Design Doc; `/comet-tweak` suits configuration adjustments, documentation or prompt refinements, and delta-spec-driven medium changes — in tweak the delta spec is a first-class artifact, so needing a delta spec alone is not a reason to escalate. Each preset's preconditions, flow, and limits are in the [hotfix preset](/en/presets/hotfix) and the [tweak preset](/en/presets/tweak).
 
-Comet uses a "handoff hash" to bind OpenSpec artifacts and subsequent stages together, which is the core mechanism of its reliability.
+The preset walkthrough is the same flow minus design: once the open guard completes, the change goes straight into build, and verify's failure handling and the pre-archive confirmation stay in place. The two differ only in how each builds — hotfix fixes tasks one by one manually (`build_mode` defaults to `direct`), while tweak executes through OpenSpec's native apply path.
 
-### How is hash calculated?
+When a change no longer fits into a single change, or execution hits an escalation signal such as cross-module coordination, a new public API, a schema change, or a deep architectural issue, Comet pauses (pause point 10) and asks whether to stay on the preset or escalate to full; escalation goes through the `preset-escalate` channel only. The operations for escalation and mid-run rollback are in [Change Spec or roll back mid-workflow](/en/guides/mid-workflow-changes).
 
-`comet-handoff.mjs` calculates the content hash for these files:
+## Next steps
 
-```text
-<classic-root>/changes/<name>/proposal.md
-<classic-root>/changes/<name>/design.md
-<classic-root>/changes/<name>/tasks.md
-<classic-root>/changes/<name>/specs/<capability>/spec. The md # each delta spec
-```
-
-For each file, calculate the per-file sha256 first, then combine "relative path + per-file sha256" to calculate the final sha256, and obtain `handoff_hash`. The path should uniformly use a forward slash to ensure that the hash input bytes of macOS/Linux/Windows are consistent.
-
-### The role of hash at each stage
-
-```mermaid
-flowchart TD
-  A["design stage"] --> B["comet-handoff --write generates a hash"]
-  B --> C["handoff_hash is written to.comet.yaml"]
-  C --> D["guard recalculates the hash when leaving design"]
-    D --> E{""hash consistent?""}
-  E -->|no| F["FATAL: artifacts drift, regenerate handoff"]
-  E -->|is| G["Enter build"]
-  G --> H["verify stage"]
-  H --> I["--hash-only recalculate the hash"]
-  I --> J{""hash consistent?""}
-  J -->|is| K["The OpenSpec artifacts remain unchanged, so the full text can be omitted for re-reading"]
-  J -->|no| L["Re-read all artifacts in full text"]
-```
-
-|"Stage|The Role of hash|
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| design               |Generate a hash and write the `handoff_hash` and `handoff_context` of `.comet.yaml`|
-|guard (Leaving design|Recalculate the hash. If it does not match the recorded one, it will be FATAL and prompt to regenerate handoff|
-| verify               |Quickly recalculate with `--hash-only`. If the hash is consistent, it indicates that the OpenSpec artifacts have not changed, and the full text can be omitted for re-reading. If there is any inconsistency, re-read the entire text|
-
-<p align="center">
-  <img
-    src="/assets/workflow-illustrations/02-handoff-hash.png"
-alt=" Little Fish uses the hash clip to connect OpenSpec products with subsequent stage evidence."
-    width="800"
-  />
-</p>
-
-<p align="center">handoff hash acts like a reliable clip, binding the evidence of the previous and subsequent stages together. </p>
-
-### handoff packet format
-
-The output of `comet-handoff.mjs ... --write` under `<classic-root>/changes/<name>/.comet/handoff/`:
-
-|"Mode"|Output file|"Content|
-| -------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
-|`off` (Default)| `design-context.json` + `design-context.md` |Traceable summary (files over 80 lines are truncated; `--full` outputs the full text), each file with SHA256|
-|`beta` (Compressed)| `spec-context.json` + `spec-context.md`     |Spec files are included verbatim; supporting files only store hashes, saving approximately 25-30% of tokens|
-
-JSON contains arrays of `change`, `phase`, `mode`, `canonical_spec: openspec`, `context_hash` and `files`. guard will additionally verify that the markdown package contains the `Generated-by:` tag and the `Source:`/`SHA256:` reference for each file to ensure that the context of Superpowers consumption is traceable.
-
-<Tip>
-The beta compression mode is the embodiment of Comet's context compression beta function in the handoff phase - the principles and tokens of the two modes
-For the calculation of savings and when to open beta, see [Context Compression mechanism ](/en/concepts/context-compression)
-</Tip>
-
-## How to handle the spec range
-
-Comet does not perform spec deduplication or overlap detection. The way it handles the spec range issue is by the delta spec lifecycle + delegating OpenSpec merging when archiving.
-
-<Tip>
-Large-scale PRD splitting is an independent feature developed by Comet to closely meet real-world demands - breaking down a large requirement into multiple ones that can be independently designed, delivered, and archived
-"change. For details, please refer to [Large PRD Split ](/en/guides/prd-splitting)
-</Tip>
-
-### delta spec semantics
-
-Delta spec `ADDED`/`MODIFIED` `REMOVED`/`RENAMED` is ** ** OpenSpec native concept, not invented by a Comet. Comet consumes but does not rewrite these semantics:
-
-- In the open phase, a delta spec is created to describe which capabilities are added, deleted or modified in this change.
-- During the build phase, treat the delta spec as a "living document" - make minor revisions directly, re-brainstorm for medium revisions, and create new changes through `/comet-open` for major revisions.
-- Archive stage by `ADDED` by OpenSpec CLI/`MODIFIED`/`REMOVED`/`RENAMED` semantic merge delta to the main spec.
-
-### verify's spec drift decision
-
-During the build phase, minor modifications to the delta spec (such as supplementary acceptance scenarios, boundary conditions, etc.) are allowed, and these changes do not necessarily have to be synchronized back to the Design Doc. During the verify stage, the delta spec and the Design Doc will be checked together - if it is found that there is content in the delta spec but not reflected in the Design Doc (i.e., spec drift), ** this is a blocking point that requires you to make a decision ** Comet does not automatically select. It will pause and wait for you to choose one of the three options:
-
-|Options|Applicable scenarios|What to do|After|
-| ---- | -------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| A    |The deviation is reasonable but the Design Doc was omitted. I'd like to leave an explanation|Add the "Implementation Divergence" section in the Design Doc to record the reasons for the divergence|Continue the verification and no longer trigger the change attribution|
-| B    |The deviation is quite large and the design has not kept up|`verify-fail` go back to build, load `brainstorming` and realign the Design Doc and delta spec|After the repair, go back to build→verify|
-| C    |The deviation is acceptable and there is no need to supplement the Design Doc|Confirm acceptance and continue verification; record the acceptance reason in the verification artifacts|No extra marker is added to the Design Doc when archiving|
-
-Judgment criteria: Deviation is A ** illustrative issue ** (omitted in the Design Doc, but the implementation is fine). Choose A; It is a ** Design issue ** (Design Doc cannot keep up with reality). Choose B; The deviation is insignificant and not worth going back to make up for. Choose C.
-
-## How to file
-
-The archive phase closes the entire spec lifecycle. `comet-archive.mjs` is the fixed entry point for archiving, but it delegates the merging of delta→ master spec to the OpenSpec CLI and performs the pre - and post-verification itself.
-
-### Archiving process
-
-```mermaid
-flowchart TD
-  A["Finally confirm the decision point"] --> Confirm filing B"comet-archive.mjs"]
-  A -->|Needs to be adjusted| C["archive-reopen back to verify"]
-  B --> D["Check the entry status: phase=archive, verify_result=pass"]
-  D --> E["Check that the archiving goals do not conflict"]
-  E --> F["Write the pending action checkpoint"]
-  F --> G["openspec archive --yes merge delta into the main spec"]
-  G --> H["Verify that the master spec has no residual delta headers"]
-  H --> I["Mark the archived-with of the design doc and plan"]
-  I --> J["Set archived: true to move the directory"]
-```
-
-Step by step: `comet-archive.mjs`
-
-1. ** Verify the change name ** (kebab-case).
-2. Locate the "change" directory. If it has been removed from a previous archive, scan the "Archive" directory to restore it.
-3. ** Verify the entry status ** : `phase` must be `archive`, and `verify_result` must be `pass`.
-4. ** Check Archive target availability ** : `<classic-root>/changes/archive/YYYY-MM-DD-<name>` cannot exist.
-5. ** Write pending action checkpoint** to support recovery after archive interruption.
-6. ** Call OpenSpec archive** : `openspec archive <change> --yes`. This step actually executes delta→ Master spec merge and move the change directory.
-7. ** Parse Archive Directory ** : Reposition the actual location where OpenSpec is placed (the date prefix may change).
-8. ** Verify that the master spec is clean ** : Scan `<classic-root>/specs/*/spec.md`. If there are residual delta-only titles like `## ADDED/MODIFIED/REMOVED/RENAMED Requirements`, it is a FATAL.
-9. ** Marking Superpowers Document frontmatter** : Write `archived-with: <archiveName>` in the frontmatter of design doc and plan to anchor the Superpowers product to the specific archive directory; The addition of "`status: final`" in "design doc" indicates the end of the design document lifecycle. Idempotent design: For existing annotations, the old values of `archived-with:` will be removed first and then rewritten. In this way, when the Agent retrieves the Design Doc/Plan after archiving, it can directly know from frontmatter which archive it belongs to and whether it has been closed, without having to reverse check `.comet.yaml`.
-10. ** Update archive status ** : Set `archived: true`, change the Run status to `completed`, and clear the pending action.
-
-### Archived directory structure
-
-```text
-<classic-root>/changes/archive/YYYY-MM-DD-<change-name>/
-```
-
-The date is set to UTC (`new Date().toISOString().slice(0,10)`) to ensure consistency across time zones.
-
-<Warning>
-After successful archiving, do not run `comet-guard <name> archive` anymore - the active directory no longer exists and the guard will report an error. The integrity of the archive is determined by the exit code and the status of the archive directory.
-</Warning>
-
-### Preview
-
-`comet-archive.mjs ... --dry-run` can preview the archiving process without actually executing OpenSpec. Use the `[DRY-RUN]` tag to mark and report how many steps will succeed.
-
-## How does Classic determine the current entry point
-
-Each time the user calls `/comet` and enters Classic from the project configuration, `/comet-classic` will re-read the active change and `.comet.yaml`. It will organize the user's original words, the active change list and the risk signals into a structured routing context, and then hand it over to the runtime score to obtain the final route. Routing is therefore based on the current file status and structured evidence.
-
-From the user's perspective, you only need to know these results:
-
-| route          |When will it appear?|Next step|
-| -------------- | -------------------------------------------------------------------- | ----------------------------------------- |
-| `full`         |New capabilities, public apis, schemas, cross-module or architecture changes|Enter `/comet-open`|
-| `hotfix`       |Fix existing anomalies, regressions, or erroneous behaviors without adding new capabilities/apis/schemas/cross-module risks|Enter `/comet-hotfix`|
-| `tweak`        |Light to moderate modifications to copywriting, configuration, documentation, prompts, or a single OpenSpec change|Enter `/comet-tweak`|
-| `resume`       |The user explicitly continues a certain active change|Read the `.comet.yaml` of this change and resume the phase|
-| `ask_user`     |Insufficient confidence, multiple active changes, lack of evidence, or conflicts between the user's explicit path and risk signals|Pause to make your choice|
-| `out_of_scope` |You are merely asking a question and have not requested to start or resume the workflow|Do not initialize change|
-
-```mermaid
-flowchart TD
-  A["The user calls /comet"] --> B["Configure routing to /comet-classic"]
-  B --> C["openspec list --json"]
-  C --> D["Organize the routing context"]
-  D --> E["Runtime scoring route"]
-  E --> F{"route?"}
-  F -->|full| G["/comet-open"]
-  F -->|hotfix| H["/comet-hotfix"]
-  F -->|tweak| I["/comet-tweak"]
-  F -->|resume| J["Read.comet.yaml and restore it"]
-  F -->|ask_user| K["Pause point: Allow the user to make a choice"]
-```
-
-The routing context makes the routing explainable. When the evidence is insufficient to confirm path safety, Comet will pause and ask you to confirm `hotfix`, `tweak` or `full`.
-
-## Where will users participate
-
-Comet will automatically advance to an unambiguous stage and hand over product or risk decisions to you. Common blocking points include:
-
-- In the open phase, Proposals, Designs, and tasks are confirmed. (For large-scale requirements, PRD splitting may also be encountered. See [Large-scale PRD splitting ](/en/guides/prd-splitting)).
-- In the design stage, confirm the plan and whether to write a Spec Patch.
-- In the open stage, decide the workspace isolation; in the build stage, jointly select the execution mode, TDD mode and review mode.
-- After the verify fails, choose to fix or accept the bias (A/B/C).
-- Make the final confirmation before archiving.
-- When hotfix/tweak hits the upgrade signal, choose to continue the lightweight path or upgrade to full.
-
-## Lightweight preset
-
-Both `/comet-hotfix` and `/comet-tweak` skip the full brainstorming process, but still retain the OpenSpec status, verification, and archiving. Their positioning is different:
-
-- **`/comet-hotfix`** is suitable for quick bug fixes without the need for Design Doc.
-- **`/comet-tweak`** is suitable for lightweight updates in the OpenSpec chain - configuration adjustments, document or prompt optimization, as well as moderate changes to spec drivers (including delta spec). In the tweak, delta spec is a formal artifact. Simply stating that "delta spec is needed" does not constitute a reason for upgrading.
-
-Common premise: Changes can be accommodated in a single OpenSpec change without the need for in-depth Superpowers design. Once there are qualitative change signals such as cross-module/cross-layer coordination, new public apis, schema changes, or deep architecture issues, it should be upgraded to full (for the upgrade path, see [Mid-process modification of spec or Rollback of workflow ](/en/guides/mid-workflow-changes)]).
-
-## Next step
-
-- Large-scale PRD splitting ](/en/guides/prd-splitting) - Breaking down large demands into multiple independently deliverable changes
-- Status Management ](/en/concepts/state-management) - Understand the `.comet.yaml` fields and status guards
-- [comet skill](/en/cli/skill) - Install, View and Debug Project skills
-- comet-handoff](/en/scripts/comet-handoff) - Script details for handing over packages and Hashes
-- comet-archive](/en/scripts/comet-archive) - Complete Description of the archiving script
+- [Five-stage pause points and user selection points](/en/concepts/decision-points) — where you stop to decide
+- [Resuming interrupted work](/en/guides/resuming-workflow) — continue after an interruption, context compression, or a device change
+- [Large PRD splitting](/en/guides/prd-splitting) — split a large requirement into several independently deliverable changes
+- [State management](/en/concepts/state-management) — `.comet.yaml` fields and state guards
+- [comet skill](/en/cli/skill) — install, view, and debug project Skills

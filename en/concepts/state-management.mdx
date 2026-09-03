@@ -1,33 +1,43 @@
 ---
 title: 'State management'
-description: 'Understand the complete .comet.yaml field reference, Run state, state-machine constraints, transition audit logs, and how Classic file-based state supports recovery.'
+description: "Where Classic state lives, which fields mark progress, which fields you choose and which you should not hand-edit, and where to look up transition history."
 ---
 
-Comet's recovery model comes from file-based state. Understanding user-readable state, machine-managed runtime state, and append-only audit logs tells you what Classic reads at each phase and why a phase advances. For project-level configuration (`.comet/config.yaml`), see [Classic configuration](/en/classic/configuration).
+Comet's recoverability comes from file-based state: Classic writes where a change is, how it is being executed, and what verification concluded into state files in the repository, and every call to `/comet` re-reads those files instead of relying on conversation history. Once you see the split between user-readable state, machine-owned run state, and the append-only audit log, you know what Classic reads at each stage and why it advances or refuses. Project-level configuration (`.comet/config.yaml`) is covered in [Classic configuration](/en/classic/configuration).
 
-This page uses `<classic-root>` for the configured Classic OpenSpec root: `docs/openspec/` for new projects and `openspec/` for projects that retain the legacy layout. The location is selected by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
+The rest of this page uses `<classic-root>` for the current Classic OpenSpec root directory: `docs/openspec/` by default for new projects, and `openspec/` for projects that keep the legacy layout. The actual location is decided by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
 
-## Current change selection
+<Warning>
+  <strong>The cost of corrupting state:</strong> state guards fail closed — they would rather refuse to run than continue on bad state. Hand-editing fields does not "unlock" the flow; it either stalls the flow or makes it proceed on state that no longer matches your actual working tree:
 
-`.comet/current-change.json` stores the explicitly selected workflow and change. It removes write ambiguity when multiple active changes exist; it does not replace Classic `.comet.yaml`.
+  - <code>.comet.yaml</code>'s <code>phase</code> advances only through a guard or a valid transition; a direct{' '}
+    <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> is hard-rejected.
+  - Do not hand-edit machine-owned fields such as <code>.comet/run-state.json</code>, and do not mark an already-archived change complete by hand (archiving goes through{' '}
+    <code>/comet-archive</code>).
+  - When state is genuinely broken, first diagnose it with the flow in [State damage and recovery](/en/guides/state-recovery); do not fabricate state by hand.
+</Warning>
 
-```bash
-comet state select <change-name>
-comet state current
-comet state clear-selection
-```
+This page is organized around three questions; the complete field reference is in the appendix at the end:
 
-- With one active change, attribution can be automatic.
-- With multiple active changes, explicitly `select` after entering the target change.
-- An archived target, damaged selection file, or workflow mismatch fails closed.
-- When `isolation` is `current`, `branch`, or `worktree`, the change is pinned to the branch that established the isolation through `bound_branch`. On drift, switch back to the original branch; run `comet state rebind <change-name>` only after explicitly confirming that the current branch should take over.
-- Do not hand-edit `current-change.json`.
+- **Where am I** — which files hold the state and which fields tell you the current progress;
+- **What did I choose** — which fields you choose explicitly, when, and whether they can change later; and which fields Comet maintains automatically and you should not hand-edit;
+- **Where to look when something goes wrong** — the state-events transition history, the Run-state boundary, and the diagnostic command entries.
 
-## Three state layers
+## Where am I: where state lives and how to read progress
+
+To answer "where are we and what is left", the normal path is to call `/comet` again (see [Resuming interrupted work](/en/guides/resuming-workflow)); to check by hand, run `comet status`. Both re-read the state files on disk; neither guesses from conversation history.
+
+### State lives in three files
+
+| File | Location | Managed by | Purpose |
+| ---- | -------- | ---------- | ------- |
+| `.comet.yaml` | `<classic-root>/changes/<name>/.comet.yaml` | User-visible; flows through `/comet` and the guards | Workflow state: stage, execution mode, verification result |
+| `.comet/run-state.json` | `<changeDir>/.comet/` or `.comet/runs/<runId>/` | Machine-owned (maintained by Comet; the runtime writes it as it goes, you never write it by hand) | Engine Run details: `currentStep`, `pending`, `trajectory` |
+| `.comet/state-events.jsonl` | `<classic-root>/changes/<name>/.comet/` | Appended by Comet; readable by users | Audit log of successful state transitions |
 
 ```mermaid
 flowchart LR
-  A[".comet.yaml<br/>one per change"] --> B["User-visible workflow projection<br/>phase / build_mode / verify_result"]
+  A[".comet.yaml<br/>one per change"] --> B["User-visible workflow state<br/>phase / build_mode / verify_result"]
   C[".comet/run-state.json<br/>one per change or run"] --> D["Machine-owned Run state<br/>currentStep / pending / artifacts"]
   E[".comet/state-events.jsonl<br/>one per change"] --> F["Append-only transition audit<br/>event / source / effects"]
   B --> G["status / doctor / guard"]
@@ -38,7 +48,7 @@ flowchart LR
 <p align="center">
   <img
     src="/assets/state-management-illustrations/01-state-layers.png"
-    alt="Xiaoyu labels three state drawers for .comet.yaml, Run state, and project configuration"
+    alt="Little Fish labels the three state drawers: .comet.yaml, run-state, and project configuration"
     width="800"
   />
 </p>
@@ -47,133 +57,120 @@ flowchart LR
   <code>.comet.yaml</code> tells you where the change is, Run state lets the runtime recover, and state events explain why the state changed
 </p>
 
-| File                        | Location                                            | Owner                                           | Purpose                                                         |
-| --------------------------- | --------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| `.comet.yaml`               | `<classic-root>/changes/<name>/.comet.yaml`         | User-visible; updated through `/comet` and Guard | Workflow projection: phase, execution mode, and verification result |
-| `.comet/run-state.json`     | `<changeDir>/.comet/` or `.comet/runs/<runId>/`     | Machine-owned; written by the runtime           | Engine Run details: `currentStep`, `pending`, and trajectory     |
-| `.comet/state-events.jsonl` | `<classic-root>/changes/<name>/.comet/`             | Appended by Comet; readable by users            | Audit log for successful state transitions                       |
+### Which fields show the progress
 
-<Warning>
-  Do not hand-edit machine-owned fields in <code>.comet/run-state.json</code>, and do not mark an
-  archived change complete by hand. Archive through <code>/comet-archive</code>.
-</Warning>
+`comet status` and the `/comet` resume routing mostly read the fields below; each field's full type and allowed values are in the "Field reference" appendix at the end.
 
-## Change state: `.comet.yaml`
+| Field | Tells you |
+| ----- | --------- |
+| `phase` | Which stage the change is paused at; `/comet-classic` routes to the matching stage Skill |
+| `workflow` | Whether this is a full run or a hotfix/tweak preset; it decides which defaults apply from then on |
+| `verify_result` | Whether verification passed. `pass` is required before archive; `fail` sends the change back to build to fix |
+| `build_pause` | Whether build is paused waiting on you. `plan-ready` = the plan is ready and you confirm it or finish choosing the execution settings |
+| `branch_status` | How far the remote-delivery confirmation got. It stays `pending` through verify; you confirm an immediate push or a push with PR before archive, and archive completion writes `handled` |
+| `archived` | Whether the change has been archived; an archived change is no longer resumed as an active change |
 
-Each active OpenSpec change has one:
+`branch_status: handled` only means you confirmed an immediate push or push-with-PR before archive and it was written back when archiving completed; it does not mean the push or PR succeeded.
 
-```text
-<classic-root>/changes/<name>/.comet.yaml
+### With several changes in parallel, pick the target first
+
+`.comet/current-change.json` stores the workflow and change you explicitly selected, removing write ambiguity when multiple active changes run in parallel. It does not replace `.comet.yaml`.
+
+```bash
+comet state select <change-name>
+comet state current
+comet state clear-selection
 ```
 
-### Workflow and phase
+- With a single active change, attribution can be automatic.
+- With several active changes, you must explicitly `select` after entering the target change.
+- When the target is archived, the selection file is damaged, or the workflow does not match, the guard fails closed (it refuses to run rather than continue on bad state).
+- When `isolation` is `current`, `branch`, or `worktree`, the change is also pinned through `bound_branch` to the branch where the isolation was set up. On drift, switch back to the original branch; run `comet state rebind <change-name>` only after you explicitly confirm that the current branch should take over the change.
+- Do not hand-edit `current-change.json`.
 
-| Field              | Type / allowed values                              | Meaning                                                                                                          |
-| ------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `workflow`         | `full` \| `hotfix` \| `tweak`                      | Workflow preset                                                                                                  |
-| `language`         | `en` \| `zh-CN`                                    | Primary artifact language, snapshotted from `.comet/config.yaml` when the change is created                    |
-| `phase`            | `open` \| `design` \| `build` \| `verify` \| `archive` | Current phase; `init` sets `open` and Guard advances it                                                        |
-| `auto_transition`  | `true` \| `false`                                  | Whether the next Skill is invoked automatically                                                                   |
+For the full commands on selecting and judging, see [comet state](/en/scripts/comet-state).
 
-### Execution mode
+## What did I choose: fields decided by you
 
-| Field                  | Type / allowed values                                                  | Meaning                                                                                                      |
-| ---------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `build_mode`           | `subagent-driven-development` \| `executing-plans` \| `direct`       | Execution mode                                                                                               |
-| `build_pause`          | `null` \| `plan-ready`                                                | Build pause point; `plan-ready` means a plan exists and the workflow waits for your choice                  |
-| `subagent_dispatch`    | `null` \| `confirmed`                                                  | Only `confirmed` permits `build_mode: subagent-driven-development`                                           |
-| `tdd_mode`             | `tdd` \| `direct`                                                      | `tdd` requires a failing test before each task; `direct` skips Red-Green-Refactor but still requires relevant tests and regression evidence. Hotfix and tweak default to `direct` |
-| `review_mode`           | `off` \| `standard` \| `thorough`                                     | Code review strength; see [Review mode](/en/concepts/review-mode)                                            |
-| `isolation`             | `current` \| `branch` \| `worktree`                                   | Workspace isolation. All three modes require an explicit choice and bind the branch where the setting command runs |
-| `bound_branch`          | Git branch name or `null` (machine-owned)                              | Branch bound to the isolation mode. Entry checks and source-write guards block accidental drift; do not change it with `set` |
-| `context_compression`   | `off` \| `beta`                                                        | Snapshotted from project configuration; see [Context compression](/en/concepts/context-compression)            |
+The fields in `.comet.yaml` split by who writes them: some you choose explicitly at a pause point in the flow and they decide how the flow runs; others are maintained automatically by Comet (machine-owned) and only record what has already happened — do not hand-edit those (see the next section).
 
-### Verification and branch
+### Fields you choose explicitly: when and how to change them
 
-| Field                  | Type / allowed values       | Meaning                                                                                                                                                              |
-| ---------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `verify_mode`          | `light` \| `full`           | Verification depth                                                                                                                                                   |
-| `verify_result`        | `pending` \| `pass` \| `fail` | Verification result                                                                                                                                                  |
-| `verify_failures`      | Integer (machine-owned)    | Consecutive verification failure count. `verify-fail` increments it; `verify-pass` or `archive-reopen` resets it to `0`. After the count reaches 3, the next failure pauses the workflow and you choose the retry-limit strategy |
-| `verification_report`  | Relative path              | Verification report path; before Verify passes, it must point to an existing file                                                                                   |
-| `branch_status`        | `pending` \| `handled`      | Remote-delivery confirmation. It stays `pending` through Verify. After you confirm an immediate push or push plus PR before Archive, Archive writes `handled` in the single archive commit. It does not mean the push or PR succeeded |
-| `verified_at`          | `YYYY-MM-DD` or `null`      | Date of the successful verification                                                                                                                                  |
+| Field | Who chooses it and when | How to change it later |
+| ----- | ----------------------- | ---------------------- |
+| `language` | You pick the Skill language at project initialization, which sets the project-level `classic.language`; every new change snapshots the project default into its own `.comet.yaml` | Changing the project default or an environment variable only affects later changes, not existing ones ([Classic configuration](/en/classic/configuration)) |
+| `isolation` | The workspace decision in the open stage (pause point 3): you pick `current`/`branch`/`worktree`, and all three modes require an explicit choice; the branch name is confirmed in the same decision | The choice is written into `isolation`, and the current Git branch is recorded as `bound_branch`; the build stage only checks that the directory and branch match and never silently switches directories |
+| `build_mode` | The joint decision in the build stage (pause point 6): you pick `subagent-driven-development`/`executing-plans`/`direct`; hotfix/tweak presets are fixed at `direct` | `subagent-driven-development` requires `subagent_dispatch: confirmed`; `direct` in a full workflow requires `direct_override: true` |
+| `tdd_mode` | The same joint decision: you pick `tdd`/`direct`; hotfix/tweak default to `direct` | `tdd` forces a failing test before every task; `direct` skips Red-Green-Refactor but still requires relevant tests and bug-regression evidence |
+| `review_mode` | The same joint decision: you pick `off`/`standard`/`thorough`; full snapshots the project default `standard`, and hotfix/tweak are fixed at `off` | When an existing change is missing this field, the guard blocks and asks you to set it; how to set it and where it applies is in [Code review mechanism](/en/concepts/review-mode) |
+| `context_compression` | Once the project-level `classic.context_compression` is set, new changes snapshot it as the default (`off`) | Changing the project configuration only affects new changes; adjusting a single change is covered in [Context compression mechanism](/en/concepts/context-compression) |
+| `auto_transition` | Once the project-level `classic.auto_transition` is set, new changes snapshot it as the default (`true`) | Only when the change-level field is empty can the `COMET_AUTO_TRANSITION` environment variable override it temporarily; behavior and priority are in [Auto-transition](/en/concepts/auto-transition) |
 
-### Path references
+Most of these fields are snapshotted from the project configuration when the change is created. If you skip a choice, the guard does not silently pick for you — it blocks before you leave the stage in question. If a field is missing, call `/comet` again and the route returns you to the matching decision point to fill it in, rather than editing the file by hand. The recovery paths for a build stage missing `isolation`/`build_mode`/`tdd_mode` are in [Resuming interrupted work](/en/guides/resuming-workflow).
 
-| Field             | Type               | Meaning                                      |
-| ----------------- | ------------------ | -------------------------------------------- |
-| `design_doc`      | Relative path or `null` | Superpowers Design Doc path                  |
-| `plan`            | Relative path or `null` | Superpowers implementation plan path         |
-| `base_ref`        | Git SHA string     | Commit SHA when the change was created, used to assess change size |
-| `direct_override` | `true` \| `false`   | Required when a full workflow uses `build_mode: direct` |
+### What the guards check before advancing (state-machine hard constraints)
 
-### Time and Archive
+These constraints exist in both guard layers, `comet guard` and `comet state transition`:
 
-| Field                   | Type / allowed values                      | Meaning                                                                                         |
-| ----------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `created_at`            | `YYYY-MM-DD`                               | Date the change was created; written by `init`                                                   |
-| `archived`              | `true` \| `false`                          | Whether the change is archived                                                                    |
-| `archive_confirmation`  | `null` \| `pending` \| `confirmed`         | Machine-owned final confirmation; Verify pass sets `pending`, and your confirmation sets `confirmed` |
-
-### Machine-managed fields
-
-Comet writes these fields automatically. They are not part of the user-facing field reference. In source code they are called machine wire keys, but they fall into two groups based on whether `comet state set` may modify them:
-
-| Field                | Meaning                           | Can `set` modify it?                                      |
-| -------------------- | --------------------------------- | --------------------------------------------------------- |
-| `handoff_context`    | Design handoff context file path  | Yes; machine-written but can be overridden by `set`       |
-| `handoff_hash`       | Handoff context hash               | Yes; machine-written but can be overridden by `set`       |
-| `classic_profile`    | Set only by the state machine; equals `workflow` | **No**; machine-owned                              |
-| `classic_migration`  | Classic migration version, currently `1` | **No**; machine-owned                                  |
-| `run_id`             | Link to Engine Run state           | **No**; machine-owned                                     |
-
-`classic_profile`, `classic_migration`, and `run_id` are machine-owned. `set` rejects them with `is a machine-owned Run field and cannot be set directly`. State transitions and Archive write them, for example `preset-escalate` atomically changes `classic_profile` to `full`.
-
-<Warning>
-  <code>build_command</code> and <code>verify_command</code> have been removed. The build Guard
-  detects npm, Maven, or Cargo commands. When it cannot infer an entrypoint, run the real command
-  and record it with{' '}
-  <code>
-    comet state record-check &lt;change&gt; &lt;build|verify&gt; --command "..." --exit-code 0
-  </code>
-  . Recorded evidence cannot replace actual execution.
-</Warning>
-
-## State-machine constraints
-
-These constraints exist in both `comet guard` and `comet state transition`:
-
-| Constraint                              | Requirement                                                                                                               |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Before `build -> verify`                | `isolation` must be `current`, `branch`, or `worktree`; all three modes validate the bound branch                       |
-| Before `build -> verify`                | `build_mode` must be selected                                                                                              |
-| `build_mode: subagent-driven-development` | Requires `subagent_dispatch: confirmed`                                                                                   |
-| Full workflow leaving Build             | `tdd_mode` must be `tdd` or `direct`                                                                                       |
-| Full workflow leaving Build             | `review_mode` must be `off`, `standard`, or `thorough`                                                                     |
-| `build_mode: direct`                    | Allowed by default for hotfix and tweak; full requires `direct_override: true`                                           |
-| Before `verify -> archive`              | `verify_result` must be `pass`                                                                                             |
-| `verify-pass` transition                | Requires `verification_report` to point to an existing file; `branch_status` remains `pending`                            |
-| Actual Archive command                  | Requires `archive_confirmation: confirmed`; reopening Archive clears the old confirmation                                |
-| Archive completion                      | After you confirm immediate remote delivery, Archive writes `branch_status: handled`, runs `comet guard archive`, and includes the final state in the single archive commit |
-| `build_pause`                            | Is not an execution mode and cannot be written into `build_mode`                                                          |
+| Constraint | Requirement |
+| ---------- | ----------- |
+| Before `build → verify` | `isolation` must be `current`, `branch`, or `worktree`; all three modes validate the bound branch |
+| Before `build → verify` | `build_mode` must be selected |
+| `build_mode: subagent-driven-development` | Requires `subagent_dispatch: confirmed` |
+| Full workflow leaves build | `tdd_mode` must be `tdd` or `direct` |
+| Full workflow leaves build | `review_mode` must be `off`/`standard`/`thorough` |
+| `build_mode: direct` | Allowed by default for hotfix/tweak; a full workflow requires `direct_override: true` |
+| Before `verify → archive` | `verify_result` must be `pass` |
+| `verify-pass` transition | Requires `verification_report` to point to an existing file; `branch_status` stays `pending` (branch handling happens inside archive) |
+| The real archive command | Requires `archive_confirmation: confirmed`; reopening archive clears the old confirmation |
+| Archive completion | After you confirm immediate remote delivery, archiving writes `branch_status: handled` and passes `comet guard archive`, then includes the final state in the single archive commit |
+| `build_pause` | Is not an execution mode and cannot be written into `build_mode` |
 
 <Note>
-  Direct <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> is blocked unless{' '}
-  <code>COMET_FORCE_PHASE=1</code> is set for repair. Advance phases only through{' '}
+  A direct <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> is hard-blocked unless{' '}
+  <code>COMET_FORCE_PHASE=1</code> is set (repair only). Phases advance only through{' '}
   <code>comet guard --apply</code> or a valid transition.
 </Note>
 
-### Preset escalation
+`COMET_FORCE_PHASE` is a troubleshooting-only switch; normal flows never need it. For the other environment variables, see [Classic configuration](/en/classic/configuration).
 
-When a hotfix or tweak hits an escalation signal such as a cross-module change, new API, or schema change, `preset-escalate` upgrades it to full:
+### Preset escalation goes through a valid transition only
 
-- It atomically sets `workflow` and `classic_profile` to `full`, resets `phase` to `design`, and clears `design_doc`.
-- This is the only legal preset-to-full route. Directly setting `phase` to `design` is blocked, and `classic_profile` is machine-owned.
+When a hotfix/tweak hits an escalation signal (cross-module, new API, schema change, and so on), the `preset-escalate` transition upgrades it to full:
 
-## State-transition audit log
+- It sets `workflow`/`classic_profile` to `full` in one go, rolls `phase` back to `design`, and clears `design_doc`.
+- This is the **only legal channel** from preset to full — a direct `set phase design` is hard-blocked, and `classic_profile` is machine-owned, so `set classic_profile` is hard-blocked too.
 
-Classic transitions share one audit format. Successful `comet state transition`, `comet guard --apply`, and Archive updates append one JSON line to:
+## Fields Comet maintains automatically: do not hand-edit
+
+Comet writes these fields automatically. You do not normally need to care about them, and they are not part of the user-facing field reference. In source they are collectively called machine wire keys, but they split into two groups by whether `comet state set` may modify them:
+
+| Field | Meaning | Can `set` modify it? |
+| ----- | ------- | -------------------- |
+| `handoff_context` | Path of the design handoff context file | Yes (machine-written but can be overridden by `set`) |
+| `handoff_hash` | Hash of the handoff context | Yes (machine-written but can be overridden by `set`) |
+| `classic_profile` | Set only by the state machine; equals `workflow` | **No** (machine-owned) |
+| `classic_migration` | Classic migration version (currently `1`) | **No** (machine-owned) |
+| `run_id` | Links to the Engine Run state | **No** (machine-owned) |
+
+`classic_profile`, `classic_migration`, and `run_id` are machine-owned fields, so `set` hard-rejects them (with `is a machine-owned Run field and cannot be set directly`). Only state-machine transition events and the archive flow write them — for example, `preset-escalate` sets `classic_profile` to `full` in one go.
+
+A few more field groups are also marked machine-owned: Comet writes them at specific moments, and their values reflect "what was bound then and what happened" or "what you already confirmed" — not how you want the flow to run right now:
+
+- `bound_branch`: records the current branch when isolation is set up. Entry checks and source-write guards block accidental branch drift; do not change it with `set`.
+- `verify_failures`: the consecutive verification-failure count. `verify-fail` increments it, and `verify-pass` or `archive-reopen` resets it to `0`. After it reaches 3, the next failure pauses so you decide the retry-limit strategy.
+- `archive_confirmation`: Comet writes `pending` after verify passes; it becomes `confirmed` only after you confirm before archive. The real archive command requires `confirmed`.
+- `currentStep`, `pending`, `artifacts`, and `trajectory` in `.comet/run-state.json`: written automatically by the Engine runtime; you never write them by hand and should not hand-edit them.
+
+After these fields are hand-edited, the most direct consequence is that state no longer matches your actual working tree and verification history — the guard either refuses to run or keeps advancing on wrong state. Archiving always goes through `/comet-archive`; do not mark an already-archived change complete by hand.
+
+## Where to look when something goes wrong
+
+First tell the two situations apart: an interrupted session, context compression, or a device change is normal interruption — call `/comet` to resume. You reach for `comet status`/`comet doctor` only when `.comet.yaml` is missing or malformed, a change routes to the wrong place, or a declared piece of evidence cannot be found. The full judging and handling flow is in [State damage and recovery](/en/guides/state-recovery).
+
+### Transition history: state-events.jsonl
+
+Classic state transitions share one set of semantics. Every successful `comet state transition`, `comet guard --apply`, and archive update appends one JSON line to:
 
 ```text
 <classic-root>/changes/<name>/.comet/state-events.jsonl
@@ -181,34 +178,100 @@ Classic transitions share one audit format. Successful `comet state transition`,
 
 Each record contains:
 
-| Field          | Meaning                                                        |
-| -------------- | -------------------------------------------------------------- |
-| `schemaVersion` | Log format version                                             |
-| `timestamp`    | Write time                                                     |
-| `change`       | Change name                                                    |
-| `event`        | Transition event such as `open-complete`, `build-complete`, or `verify-pass` |
-| `source`       | `comet state`, `comet guard`, or `comet archive`               |
-| `from` / `to`  | Classic state projection before and after the transition       |
-| `effects`      | Fields actually changed, such as `phase: build -> verify`     |
+| Field | Meaning |
+| ----- | ------- |
+| `schemaVersion` | Log format version |
+| `timestamp` | When it was written |
+| `change` | The change name |
+| `event` | The transition event, such as `open-complete`, `build-complete`, or `verify-pass` |
+| `source` | `comet state`, `comet guard`, or `comet archive` |
+| `from` / `to` | The Classic state before and after the transition |
+| `effects` | The fields actually changed, e.g. `phase: build -> verify` |
 
-## Boundary between workflow state and Run state
+Look here when you want to know why `phase` changed or what the last transition did. For the available transition events and commands, see [comet state](/en/scripts/comet-state) and [Auto-transition](/en/concepts/auto-transition).
 
-`.comet.yaml` stores the user-understandable workflow projection. Engine execution details live in `.comet/run-state.json`; the two are linked by `run_id`.
+### Run-state boundary
 
-| What you want to know                 | Where to look                                               |
-| ------------------------------------- | ------------------------------------------------------------ |
-| Current phase and next step           | `phase` in `.comet.yaml`                                     |
-| Execution mode and verification result | `build_mode` and `verify_result` in `.comet.yaml`          |
-| Current Engine step and pending action | `currentStep` and `pending` in `.comet/run-state.json`      |
-| Why the phase changed                 | `.comet/state-events.jsonl`                                  |
-| Engine trajectory audit               | `.comet/trajectory.jsonl`                                    |
+`.comet.yaml` holds the user-understandable workflow state. Engine execution details live in `.comet/run-state.json`. The two are linked by `run_id`.
 
-See [Skill and Engine](/en/skill-creator/engine) for the Runtime semantics.
+| What you want to know | Where to look |
+| --------------------- | ------------- |
+| Current stage and next step | `phase` in `.comet.yaml` |
+| Execution mode and verification result | `build_mode` and `verify_result` in `.comet.yaml` |
+| The Engine's current step and pending action | `currentStep` and `pending` in `.comet/run-state.json` |
+| Why the phase changed | `.comet/state-events.jsonl` |
+| Engine trajectory audit | `.comet/trajectory.jsonl` |
+
+See [Skill and Engine (Advanced)](/en/skill-creator/engine) for details.
+
+### Diagnostic command entries
+
+Engine-level details (`currentStep`, `pending`, `trajectory`) are not for everyday handling; they are what you look at during troubleshooting. The entry points are two diagnostic commands:
+
+- `comet status` — shows an active change's `phase`, verification result, whether the declared evidence actually exists on disk (`runtime_eval`), and a hint about the next step.
+- `comet doctor` — checks the installation, environment, Skill integrity, and whether each change's `.comet.yaml` is valid.
+
+The detailed usage of both commands and common symptoms are in [State damage and recovery](/en/guides/state-recovery).
+
+## Appendix: `.comet.yaml` field reference
+
+Every active change's `.comet.yaml` contains the fields below. Fields already explained in the body (whether they are machine-owned and who may change them) are covered in the matching section; the tables here list the type, allowed values, and meaning together for lookup. Fields marked machine-owned are maintained automatically by Comet — do not modify them by hand.
+
+### Workflow and stage
+
+| Field | Type / allowed values | Meaning |
+| ----- | --------------------- | ------- |
+| `workflow` | `full` \| `hotfix` \| `tweak` | The workflow preset |
+| `language` | `en` \| `zh-CN` | Primary language of the artifacts. Snapshotted from `.comet/config.yaml` when the change is created; constrains OpenSpec / Superpowers / verification reports / archive notes |
+| `phase` | `open` \| `design` \| `build` \| `verify` \| `archive` | The current stage. `init` sets `open`; the guards advance it |
+| `auto_transition` | `true` \| `false` | Whether the next Skill is invoked automatically |
+
+### Execution mode
+
+| Field | Type / allowed values | Meaning |
+| ----- | --------------------- | ------- |
+| `build_mode` | `subagent-driven-development` \| `executing-plans` \| `direct` | The execution mode |
+| `build_pause` | `null` \| `plan-ready` | Pause point inside build. `plan-ready` = the plan exists and it pauses for your choice |
+| `subagent_dispatch` | `null` \| `confirmed` | Only `confirmed` allows `build_mode: subagent-driven-development` |
+| `tdd_mode` | `tdd` \| `direct` | `tdd` forces a failing test before every task; `direct` skips Red-Green-Refactor but still requires relevant tests and bug-regression evidence. hotfix/tweak default to `direct` |
+| `review_mode` | `off` \| `standard` \| `thorough` | Code-review intensity. See [Code review mechanism](/en/concepts/review-mode) |
+| `isolation` | `current` \| `branch` \| `worktree` | Workspace isolation. All three modes need an explicit choice and bind the current Git branch where the setting command actually runs |
+| `bound_branch` | Git branch name or `null` (machine-owned) | The branch bound to the current isolation mode. Entry checks and source-write guards block accidental branch drift; do not change it with `set` |
+| `context_compression` | `off` \| `beta` | Snapshotted from the project configuration. See [Context compression mechanism](/en/concepts/context-compression) |
+
+### Verification and branch
+
+| Field | Type / allowed values | Meaning |
+| ----- | --------------------- | ------- |
+| `verify_mode` | `light` \| `full` | Verification depth |
+| `verify_result` | `pending` \| `pass` \| `fail` | Verification result |
+| `verify_failures` | Integer (machine-owned) | Consecutive verification-failure count. `verify-fail` increments it; `verify-pass` or `archive-reopen` resets it to `0`. After it reaches 3, the next failure pauses the workflow and you choose the retry-limit strategy |
+| `verification_report` | Relative path | Verification report path; before verify passes it must point to an existing file |
+| `branch_status` | `pending` \| `handled` | Remote-delivery confirmation state. Stays `pending` through verify; after you confirm an immediate push or a push with PR before archive, archiving writes `handled` and includes it in the single archive commit. It does not mean the push or PR succeeded |
+| `verified_at` | `YYYY-MM-DD` or `null` | When verification passed |
+
+### Path references
+
+| Field | Type / allowed values | Meaning |
+| ----- | --------------------- | ------- |
+| `design_doc` | Relative path or `null` | Superpowers Design Doc path |
+| `plan` | Relative path or `null` | Superpowers implementation plan path |
+| `base_ref` | Git SHA string | The commit SHA when the change was created, used to assess change size |
+| `direct_override` | `true` \| `false` | Must be `true` when a full workflow uses `build_mode: direct` |
+
+### Time and archive
+
+| Field | Type / allowed values | Meaning |
+| ----- | --------------------- | ------- |
+| `created_at` | `YYYY-MM-DD` | Date the change was created; `init` writes it automatically |
+| `archived` | `true` \| `false` | Whether the change is archived |
+| `archive_confirmation` | `null` \| `pending` \| `confirmed` | Machine-owned final confirmation; it is `pending` after verify passes and becomes `confirmed` only after you confirm |
 
 ## Next steps
 
 - [Classic configuration](/en/classic/configuration) — `.comet/config.yaml` fields, configuration precedence, and environment variables
-- [Context compression](/en/concepts/context-compression) — the `off` and `beta` `context_compression` modes
-- [Review mode](/en/concepts/review-mode) — the `off`, `standard`, and `thorough` `review_mode` modes
-- [Skill and Engine](/en/skill-creator/engine) — Run state and Engine runtime semantics
-- [Workflow concepts](/en/concepts/workflow) — how the five phases use these state fields
+- [State damage and recovery](/en/guides/state-recovery) — diagnosis and recovery with `comet status` / `comet doctor`
+- [Context compression mechanism](/en/concepts/context-compression) — the `off`/`beta` modes of `context_compression`
+- [Code review mechanism](/en/concepts/review-mode) — the `off`/`standard`/`thorough` modes of `review_mode`
+- [Skill and Engine (Advanced)](/en/skill-creator/engine) — Run state and Engine runtime semantics
+- [Classic workflow](/en/concepts/workflow) — how the five stages use these state fields

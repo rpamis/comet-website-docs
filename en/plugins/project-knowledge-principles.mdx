@@ -1,57 +1,59 @@
 ---
 title: "Project Knowledge Principles: From Project Evidence to Task Context"
-description: "Understand how Project Knowledge builds a limited basic Project Model and accumulates reusable Project Knowledge during task execution."
+description: "Understand how Project Knowledge builds a limited base Project Model and accumulates reusable Project Knowledge during task execution."
 ---
 
-Project Knowledge builds project understanding using two types of input: one type is basic project sources such as manifest, configuration, directory structure, and specified documentation; Another type is task execution events such as Review, verification, fault recheck, Change Archive and application results.
+For setup, configuration, and everyday commands, see [Project Knowledge](/en/plugins/project-rules). This page explains how Project Knowledge builds records from project evidence, verifies sources, and provides content to tasks.
 
-The system only saves the content that has a source, a scope of application and is helpful for subsequent tasks as Project Knowledge Record. It does not take over rules written by users, nor does it generate project wikis that cover the entire repository.
+Project Knowledge builds project understanding from two kinds of input: basic project sources such as the manifest, configuration, directory structure, and specified documents, and task-execution events such as Review, verification, failure re-verification, change archives, and application results.
 
-## Core component
+Only content that has a source, can be given an applicable scope, and helps later tasks is saved as a Project Knowledge Record. Project Knowledge never takes over Rules you wrote, and it never generates a project Wiki that covers the whole repository.
 
-|Component|Duties|
-| -------------------------------- | -------------------------------------------------- |
-|Corpus (Project corpus|Define the collection of project sources that the system can read and index|
-| Project Model Builder            |Generate topologies, facts, and dependency records from deterministic project structures|
-| Project Policy Learner           |Extract project strategies from accepted decisions, verification results and fault handling records|
-| Project Knowledge Record         |Save the main text, scope, source, verification method, relationship and lifecycle|
-| Project Knowledge Provider       |Provide a unified saving and querying interface for Local or Remote|
-|Context Director|Perform second-layer filtering and context budget control based on the current task|
-|Context Manifest|Provide summaries, application reasons and stable ids, and support the expansion of complete records as needed|
+## Core components
+
+| Component | Responsibility |
+| --- | --- |
+| Corpus | Defines the set of project sources the system can read and index |
+| Project Model Builder | Generates topology, fact, and dependency records from deterministic project structure |
+| Project Policy Learner | Distills project policies from accepted decisions, verification results, and failure-handling records |
+| Project Knowledge Record | Keeps the content, scope, sources, verification method, relationships, and lifecycle |
+| Project Knowledge Provider | Provides the unified save-and-query interface for Local or Remote |
+| Context Director | Runs the second-layer filtering and context budget control for the current task |
+| Context Manifest | Provides summaries, application reasons, and stable IDs so full records can be expanded on demand |
 
 ## Overall data path
 
 ```mermaid
 flowchart TD
-  S["1. Read the source of the basic project"] --> M["2. Establish a limited Project Model"]
-  M --> E["3. Receive task execution events"]
-  E --> L["4. Extract reusable models or policies"]
-  L --> P["5. Write to Project Knowledge Provider"]
-  P --> Q["6. Verify the source status and conduct a search"]
-  Q --> D["7. Match tasks and provide context"]
-  D --> F["8. Record the actual application results"]
-  F -. continue calibrating .-> E
+  S["1. Read basic project sources"] --> M["2. Build a limited Project Model"]
+  M --> E["3. Receive task-execution events"]
+  E --> L["4. Distill reusable Models or Policies"]
+  L --> P["5. Write to the Project Knowledge Provider"]
+  P --> Q["6. Check source state and retrieve"]
+  Q --> D["7. Match the task and provide context"]
+  D --> F["8. Record actual application results"]
+  F -. keep calibrating .-> E
 ```
 
-Three types of objects in the data link undertake different responsibilities:
+Three kinds of objects in this chain play different roles:
 
-- ** Project evidence ** includes source code, configuration, tests, documentation and verification results in the current repository, and is the direct source of project facts;
-- **Project Knowledge Record** is a standardized Project Model or project strategy established from evidence;
-- **SQLite FTS Index ** is a reconfigurable retrieval read model used to improve the efficiency of candidate recall.
+- **Project evidence** — the source code, configuration, tests, documents, and verification results in the current repository — is the direct source of project facts.
+- **Project Knowledge Record** is the normalized Project Model or Project Policy built from that evidence.
+- The **SQLite FTS index** can be rebuilt at any time; it exists to make candidate recall faster.
 
-Rules are maintained by users or teams and loaded by the host by scope. Project Knowledge can reference the basis of the Rule when the source configuration allows, but it will not write, replace or take over the Rule. The project Wiki is a complete project document oriented towards people and is not included in this automatic learning chain.
+Rules are maintained by users or teams and loaded by the host per scope. When the source configuration allows, Project Knowledge can cite a Rule's basis, but it never writes, replaces, or takes over a Rule. The project Wiki is human-oriented, complete project documentation and is not part of this automatic learning chain.
 
-## Corpus: The scope of the project's corpus
+## Corpus: the project corpus scope
 
-The Corpus (project corpus) defines the sources that the Local Provider can read, split, and index. Default sources include:
+The Corpus defines which sources the Local Provider can read, split, and index. The default sources include:
 
-- Native current Spec and Archive;
-- "Classic Current Spec and Archive;"
-- Workflow products supported by Comet;
-- The identifiable project structure, manifest and configuration can be determined;
-- The Markdown path explicitly added in the configuration.
+- The Native current Spec and Archive;
+- The Classic current Spec and Archive;
+- Comet-supported workflow artifacts;
+- The project structure, manifest, and configuration that can be identified deterministically;
+- The Markdown paths explicitly added in the configuration.
 
-You can use `knowledge.local.include` to expand the corpus range:
+You can extend the corpus with `knowledge.local.include`:
 
 ```yaml
 knowledge:
@@ -63,158 +65,158 @@ knowledge:
       - architecture/**/decisions-*.md
 ```
 
-`include` uses the glob relative to the project root directory. The system will split the document into source units with path and section (chapter) information for retrieval and source status checking.
+`include` uses globs relative to the project root. The system splits documents into source units with path and section information, which retrieval and source-state checks use.
 
-The default corpus scope only includes sources that Comet can clearly recognize. The Rule files or rule directories supported by the target platform are managed by the host. When it is necessary to use the Markdown as a knowledge corpus at the same time, please explicitly add it through `include`.
+The default corpus only contains sources Comet can identify clearly. Rule files or rule directories the target platform supports are managed by the host; if you also want their Markdown as knowledge corpus, add it explicitly through `include`.
 
-The Corpus defines the range of sources that are allowed to be read, but this does not mean that Comet will convert all of their content into long-term knowledge. The Builder only selects the content that can form the Project Model, project strategy or subsequent task clues.
+The Corpus sets the range of sources that may be read; it does not mean Comet converts all of that content into long-term knowledge. The Builder only selects content that can form a Project Model, a Project Policy, or a clue for later tasks.
 
-## Formation logic: Basic model and execution accumulation
+## Formation logic: base model and execution accumulation
 
 ### Project Model Builder
 
-When the Project is used for the first time, the Project Model Builder builds the base Project Model from the manifest, configuration, directory structure, limited source code relationships, and custom Markdown. The subsequent `repository.changed`, `verification.completed` and `change.archived` events will update these records.
+On first project use, the Project Model Builder builds a base Project Model from the manifest, configuration, directory structure, limited source relationships, and custom Markdown. Later `repository.changed`, `verification.completed`, and `change.archived` events update these records.
 
-The Project Model only saves the structural information that can be determined for extraction:
+Project Model only keeps structural information that can be extracted deterministically:
 
-- `topology`: Directory, module and workspace topology;
-- `fact`: Facts that can be verified from the current project;
-- `dependency`: Relationships among modules, packages and components.
+- `topology`: directory, module, and workspace topology;
+- `fact`: facts checkable against the current project;
+- `dependency`: relationships between modules, packages, and components.
 
-The deterministic extracted Project Model can directly enter the `proven` (confirmed) state and retain the source for review before task use. It consists of structured knowledge records and does not generate a complete project Wiki in directory or chapter format.
+A deterministically extracted Project Model can enter the `proven` (confirmed) state directly and keeps its sources for re-checking before a task uses it. It is made of structured knowledge records; it never becomes a directory-style or chapter-style Wiki of the whole project.
 
 ### Project Policy Learner
 
 The Project Policy Learner processes engineering experience accumulated during task execution:
 
-|"Event|Strategies that can be formed|
-| ------------------------ | ------------------------------------------ |
-|The Review conclusion has been accepted and processed|`decision` or `constraint`|
-|The root cause analysis and re-examination of the fault have been completed| `failure-resolution`                       |
-|The verification has been successfully executed|Connect the actual command to verification|
-|"Change" has been archived|Final decision, pattern, procedure and deprecation items|
-| Context outcome          |Strengthen, rewrite or replace the `trial` Policy|
+| Event | Policy that can form |
+| --- | --- |
+| Review conclusion accepted and acted on | `decision` or `constraint` |
+| Fault with completed root-cause analysis and re-verification | `failure-resolution` |
+| Verification executed successfully | The real command is attached as the verification |
+| Change archived | Final `decision`, `pattern`, `procedure`, and deprecations |
+| Context outcome | Strengthens, rewrites, or replaces a `trial` policy |
 
-Candidates that require semantic induction and have not yet been reused first enter the `trial` (trial) state. Project agreements explicitly proposed by users, existing project instructions, directly verifiable project facts, and execution results that have been successfully re-verified can be entered into `proven`. `trial` can also be promoted to `proven` after successfully assisting with subsequent tasks.
+Candidates that need semantic induction and have not survived reuse first enter the `trial` state. Project conventions you state explicitly, existing project instructions, directly checkable project facts, and execution results that were re-verified successfully can enter `proven`. A `trial` can also be promoted to `proven` after it helps a later task.
 
-## Record: Traceable knowledge unit
+## Record: the traceable knowledge unit
 
-Project Knowledge Record (Project Knowledge Record) contains at least the following information:
+A Project Knowledge Record contains at least the following:
 
-|Field|Product function|
-| -------------------------------------- | ---------------------------------------------- |
-|Stable ID and project ID|Bind the current repository and support historical tracking|
-|"type and family"|Distinguish between Project Model and Project Policy|
-|"title and summary"|Used for lists and Context Manifest|
-| applicable paths / operations / phases |Limit the applicable paths, operations and stages|
-| conclusions                            |Save structured conclusions that can be verified|
-| relations                              |Describe finite relations such as contains, depends on, consumes, etc|
-|sources and source versions|Point to the relative path of the project, anchor (location anchor point), and source version|
-| verification                           |Connect the actual project commands with the expected results|
-| authority                              |Distinguish between automatic, user and repository|
-| lifecycle                              |Represents `trial/proven/enforced/superseded`|
-| application statistics                 |Record the number of uses as well as successful, ignored, corrected and failed results|
+| Field | Product role |
+| --- | --- |
+| Stable ID and project ID | Bind to the current repository and support history tracking |
+| type and family | Distinguish Project Model from Project Policy |
+| title and summary | Used for lists and the Context Manifest |
+| applicable paths / operations / phases | Limit the applicable paths, operations, and phases |
+| conclusions | Hold structured conclusions that can be checked |
+| relations | Describe bounded relationships such as contains, depends-on, and consumes |
+| sources and source versions | Point to project-relative paths, anchors, and source versions |
+| verification | Connects real project commands with the expected result |
+| authority | Distinguishes `automatic`, `user`, and `repository` |
+| lifecycle | Represents `trial` / `proven` / `enforced` / `superseded` |
+| application statistics | Record the number of uses and the success, ignore, correction, and failure results |
 
-The system uses semantic identity (content identity) to identify the same knowledge unit. New evidence will update existing records and retain version relationships, reducing synonym duplication. The main text clearly corrected by the user has higher authority. Automatic extraction can only supplement evidence or form a version to be confirmed.
+The system judges whether multiple records point to the same thing by content: updating content creates a new version and keeps its relationship with the old version, which reduces near-duplicate entries. Content you explicitly corrected has higher authority; automatic distillation can only add evidence or form a pending version.
 
-## Policy Compiler: Policy activation
+## Policy Compiler: policy activation
 
-The Policy Compiler selects the following activation forms for the Project Policy based on whether the content is machine-checkable and how it is used:
+The Policy Compiler chooses how a Project Policy is activated, based on whether the content can be judged programmatically and how it will be used:
 
-1. **Context** : decision, pattern, procedure or constraint need to be judged by the Agent in combination with the task and provided in the form of a complete policy or Context Manifest;
-2. **Verification** : constraint has bound a runnable project command that can be judged as successful or failed and is provided as a verification policy;
-3. **Skill candidate** : When the procedure is stable across tasks, contains multiple steps and can be combined, generate an evidence-based Skill candidate summary.
+1. **Context**: a `decision`, `pattern`, `procedure`, or `constraint` that needs the Agent to judge it against the task is provided as a full policy or through the Context Manifest.
+2. **Verification**: a `constraint` bound to a runnable project command whose success or failure can be judged is provided as a verification policy.
+3. **Skill candidate**: when a `procedure` is stable across tasks, has several steps, and can be composed, an evidence-based Skill candidate summary is generated.
 
-During the strategy compilation stage, only context, validation associations, or candidate summaries are generated. Skill, linter, compiler, build and CI are still maintained by users and the existing processes of the project.
+The compilation stage only produces context, a verification binding, or a candidate summary. Skill, linter, compiler, build, and CI stay maintained by you and the project's existing processes.
 
-Only Project Policy can enter `enforced` and needs to bind the currently existing and successfully executed deterministic validation entry. `enforced` indicates that this strategy has a runnable validation association and does not expand model permissions or system permissions.
+Only a Project Policy can enter `enforced`, and it must be bound to a deterministic verification entry that currently exists and has run successfully. `enforced` means the policy has a runnable verification binding; it never expands model or system permissions.
 
 ## Hybrid retrieval
 
-The project task involves multiple retrieval signals:
+Project tasks carry several kinds of retrieval signals:
 
-- Precise paths, commands, error codes and identifiers are suitable for strong string matching;
-- The Chinese description, chapter titles and engineering semantics are suitable for full-text search.
-- Module responsibilities and cross-file impacts are suitable for structural filtering and finite relationship extension;
-- The current branch changes and source failures need to be verified on-site.
+- Precise paths, commands, error codes, and identifiers fit strong string matching;
+- Chinese descriptions, section titles, and engineering semantics fit full-text search;
+- Module responsibilities and cross-file impact fit structural filtering and bounded relationship expansion;
+- Current-branch changes and stale sources need on-site verification.
 
-The Local Provider combines these channels into a limited search chain:
+The Local Provider combines these channels into one bounded retrieval chain:
 
 ```text
-project/path/operation/phase/type/state filtering
-→ FTS section candidate
-Limited ripgrep strong matching and change file supplementation
-Controlled relationship expansion
-Sort the source status and application feedback
+project / path / operation / phase / type / state filter
+  → FTS section candidates
+  → bounded ripgrep strong matches + changed-file supplement
+  → controlled relationship expansion
+  → ranking by source state and application feedback
 ```
 
-SQLite FTS5 provides section-level full-text indexing and sorting; Limited ripgrep retains the capabilities of exact matching, changing file supplementation, and fault rollback. When SQLite indexes are corrupted, lock conflicts occur, or FTS is unavailable, the system can rebuild the read model or use limited source code search.
+SQLite FTS5 provides section-level full-text indexing and ranking; bounded ripgrep keeps exact matching, changed-file supplement, and failure fallback. When the SQLite index is corrupted, locked, or FTS is unavailable, the system can rebuild the index or fall back to a limited source search.
 
-Hybrid retrieval covers both semantic recall and exact matching, reduces blind broad searching, and improves the coverage of the complete modification range.
+Hybrid retrieval covers both semantic recall and exact matching, reducing broad blind searches and improving coverage of the full change scope.
 
-## Source validity check
+## Source-validity checks
 
-Before the record enters the context, the system will check the project-relative source, anchor, digest, or version:
+Before a record enters context, the system checks the project-relative source, anchor, digest, or version:
 
-1. When the source exists and the content is consistent, the record continues to participate in the search.
-2. When the source changes, the old record shall cease to be used as the current conclusion.
-3. When the source is deleted, the selector becomes invalid, or the verification command disappears, the record enters `superseded`.
-4. New evidence forms a new version and retains the substitution relationship with the old version.
+1. When the source exists and its content is unchanged, the record keeps participating in retrieval.
+2. When the source changed, the old record stops being used as the current conclusion.
+3. When the source is deleted, a selector stops applying, or a verification command disappears, the record enters `superseded`.
+4. New evidence forms a new version and keeps its replacement relationship with the old version.
 
-Source checking binds Project Knowledge to the current warehouse status, reducing the risk of outdated conclusions entering tasks.
+Source checks bind Project Knowledge to the current repository state, reducing the chance that an outdated conclusion reaches a task.
 
-## Context Director: Task context control
+## Context Director: task context control
 
-The Provider query returns a candidate set. The Context Director then performs the second layer of selection:
+The Provider query returns a candidate set. Context Director then applies a second layer of selection:
 
-- Filter out candidates that do not match the current project, path, task, operation, or phase;
-- Exclude `superseded`;
-- Rank `proven` and `enforced` before `trial`.
-- Rank repository-level sources and records explicitly provided by the user above automatic inference;
-- Improve the ranking of specific scope and recently successful application content;
-- Reduce the ranking of corrected or failed content.
+- Drops candidates that do not match the current project, path, task, operation, or phase;
+- Excludes `superseded`;
+- Ranks `proven` and `enforced` ahead of `trial`;
+- Ranks repository-level sources and records you explicitly provided ahead of automatic inference;
+- Ranks specific scopes and recently successful applications higher;
+- Ranks corrected or failure-involved content lower.
 
-A small number of key Project policies can be provided completely. Project Model, `trial` Policy, long Procedure and evidence are usually included in the Context Manifest.
+A few key Project Policies can be provided in full. Project Model entries, `trial` policies, long procedures, and evidence usually enter the Context Manifest.
 
-The Manifest uses a stable ID and carries:
+The Manifest uses stable IDs and carries:
 
-- Title and Abstract;
-- Knowledge types and life cycles;
+- Title and summary;
+- Knowledge type and lifecycle;
 - Source type;
-- `whyApplied`；
-- application ID。
+- `whyApplied`;
+- Application ID.
 
-The Agent acquires the complete text, source and verification through `expand`. The single-character budget only limits the resident content of the current task and does not limit the total number of records of the Provider.
+The Agent gets the full content, sources, and verification through `expand`. The per-task character budget limits only the content injected for the current task, never the total records the Provider holds.
 
-## The main workspace and linked worktree
+## Main workspace and linked worktrees
 
-The Local Provider distinguishes items using a stable repository identity:
+The Local Provider tells projects apart with a stable repository identity:
 
-- The main workspace shares the normalized Record with the linked worktree in the same repository;
-- Document sections and full-text indexes are isolated by workspace.
-- File changes in a branch or worktree only affect the source snapshot corresponding to the workspace.
-- Different warehouses are isolated from each other.
+- The main workspace and linked worktrees of the same repository share the normalized Records;
+- Document sections and full-text indexes are isolated per workspace;
+- File changes in a branch or worktree affect only that workspace's source snapshot;
+- Different repositories are isolated from each other.
 
-This design enables the same repository to reuse stable Project Knowledge while keeping the search results consistent with the current workspace files.
+This lets one repository reuse stable Project Knowledge while keeping retrieval results consistent with the current workspace files.
 
-## Local and Remote Provider
+## Local and Remote Providers
 
-The Project Knowledge domain accesses the Provider through the unified `status/query/apply` contract.
+The Project Knowledge domain accesses the Provider through the unified `status / query / apply` contract.
 
 ### Local Provider
 
-- Use SQLite isolated by repository ID in the user data directory;
-- Record stores the normalized machine state;
-- The section and FTS indexes can be rebuilt.
-- Limited ripgrep is responsible for strong matching, changing file supplementation, and fault rollback.
+- Uses per-repository-ID SQLite in the user data directory;
+- Records store the structured state Comet maintains automatically;
+- Section and FTS indexes can be rebuilt;
+- Bounded ripgrep handles strong matches, changed-file supplement, and failure fallback.
 
 ### Remote Provider
 
-- After enabling Remote configuration, Local will no longer be read simultaneously.
-- Queries only send bounded task, path, phase, operation and ID selector;
-- apply only sends normalized records and evidence.
-- Complete repositories, complete diffs, logs, personal memories, and credentials will not enter the request;
-- When Remote fails, it returns the actual state and does not switch to Local.
+- Once Remote is enabled, Local is no longer read at the same time;
+- Queries send only bounded task, path, phase, operation, and ID selectors;
+- apply sends only normalized Records and evidence;
+- Full repositories, full diffs, logs, Personal Memory, and credentials never enter a request;
+- A Remote failure returns the actual state and does not switch to Local.
 
 ```yaml
 knowledge:
@@ -226,45 +228,26 @@ knowledge:
     timeout_ms: 5000
 ```
 
-## Execution boundaries with rules, hooks, and engineering checks
+## Execution boundaries with Rule, Hook, and engineering checks
 
-|layer|The way to enter the model context|Deterministic execution ability|Typical content|
-| -------------------------- | ----------------------------- | --------------------------------------- | -------------------------------- |
-| Project Model / Policy     |Provide the task completely or enter the Manifest|The Policy for binding verification can be marked as `enforced`|Architecture, dependencies, decision-making, processes, and troubleshooting methods|
-|Platform Rule file or rule directory|Loaded by the host by scope|Rely on the Agent for interpretation and compliance|Team instructions and behavioral requirements|
-| Hook / Guard               |Executed as a runtime event or command|The process can be observed, blocked or adjusted|Permissions, security, workflow boundaries|
-| linter / test / build / CI |Provide diagnostic or verification results|Use the exit code and project rules to determine the result|Engineering constraints that can be automatically judged|
+| Layer | How it enters the model context | Deterministic execution capability | Typical content |
+| --- | --- | --- | --- |
+| Project Model / Policy | Provided in full per task or listed in the Manifest | A bound-verification Policy can be marked `enforced` | Architecture, dependencies, decisions, processes, failure solutions |
+| Platform Rule files or rule directories | Loaded by the host per scope | Depends on the Agent interpreting and following them | Team instructions and behavioral requirements |
+| Hook / Guard | Executes as runtime events or commands | Can observe, block, or adjust the flow | Permissions, security, workflow boundaries |
+| linter / test / build / CI | Provides diagnostics or verification results | Judges results with exit codes and project rules | Engineering constraints that can be judged automatically |
 
-You can continue to write project constraints through the Rule carrier supported by the target platform, and the host is still responsible for loading. The `AGENTS.md` of Codex, the `CLAUDE.md` of Claude Code and the `.cursor/rules` of Cursor are all just specific examples. Comet reuses these rules and the existing checks of the project; The basis for the existence of Project Knowledge record constraints, applicable paths and verification commands, deterministic judgments are still completed by the corresponding actuators.
+You can keep writing project constraints in the Rule carriers your target platform supports; the host still loads them. Codex `AGENTS.md`, Claude Code `CLAUDE.md`, and Cursor `.cursor/rules` are only concrete examples. Comet reuses these Rules and the project's existing checks: Project Knowledge records why a constraint exists, where it applies, and which verification command enforces it, while the deterministic judgment stays with the corresponding executor.
 
-## Failed behavior
+## Failure behavior
 
-|Failure position|Product behavior|
-| -------------- | --------------------------------------------------- |
-|Query or search|The current task continues without providing any failed content|
-|The source is unreadable.|Stop using relevant records and report the diagnosis|
-|FTS index is damaged|Rebuild the read model or use finite ripgrep|
-|Back-end learning|Keep the Journal and allow replay later|
-|Correct or abandon|Return the actual error and maintain the original state|
-|Disable or uninstall the plugin|Stop learning, querying, policy validation, SQLite access and Remote requests|
+| Where it fails | Product behavior |
+| --- | --- |
+| Query or retrieval | The current task continues; no failed content is provided |
+| Source unreadable | The related records stop being used and a diagnostic is reported |
+| FTS index corrupted | Rebuild the index or fall back to bounded ripgrep |
+| Background learning | The Journal is kept so it can replay later |
+| Correction or retirement | Returns the actual error and keeps the original state |
+| Plugin disabled or uninstalled | Learning, querying, policy verification, SQLite access, and Remote requests stop |
 
-## Recall diagnosis
-
-When diagnosing a Project Knowledge recall, check in the order of `Provider → Record → Query → Context`:
-
-```bash
-comet knowledge status .
-comet knowledge list . --state proven
-comet knowledge query . --task "Modify the authentication module" --path src/auth --phase build --operation edit
-comet knowledge get. --id < Record Identifier >
-```
-
-Focus on verifying the following information:
-
-1. The source has entered the default Corpus or `knowledge.local.include`;
-2. The project, path, operation, phase and lifecycle of Record match the task.
-3. The source version is still valid.
-4. The Query has returned relevant candidates.
-5. The `whyApplied` and application history in the Context Manifest are in line with expectations.
-
-Return to [Project Knowledge ](/en/plugins/project-rules), or continue reading [Agent Learning Loop](/en/plugins/agent-learning-loop).
+Return to [Project Knowledge](/en/plugins/project-rules), or continue with [Agent Learning Loop](/en/plugins/agent-learning-loop).

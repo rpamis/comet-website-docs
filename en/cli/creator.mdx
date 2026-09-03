@@ -1,34 +1,123 @@
 ---
 title: "comet creator"
-description: "Inspect, resume, and advance /comet-any Skill Creator state."
+description: "Inspect, resume, and advance the creation state of /comet-any Skill Creator flows."
 ---
+
+`comet creator` is the command-line entry that corresponds to `/comet-any`. It lists recoverable Skill Creator flows, reads the publishing readiness of a candidate, gives the unique next step, and provides the authoring commands you need.
+
+Normal users still start from `/comet-any`. Run `comet creator` directly only when a flow was interrupted, when you want to look at state, or when you want to automate a step.
 
 ## Difference from publish
 
-`comet creator` manages creation state: plans, authored content, lanes, and next actions.
+| Command | What it owns | When to use it |
+| --- | --- | --- |
+| `comet creator` | Creation, recovery, candidate resolution, proposal confirmation, generation, and authoring lanes | The `/comet-any` flow has not reached publishing, or you want to know the next step |
+| `comet publish` | Review, approve, publish, distribute | The eval evidence is ready and you are preparing to publish and distribute |
+| `comet bundle` | Advanced backend | Audit, troubleshooting, platform compile debugging |
 
-`comet publish` manages release readiness: review, approval, distribution preview, and publish candidates.
+The recommended main line is:
+
+```text
+/comet-any creates -> comet eval verifies -> comet creator status/next -> comet publish (review/approve/publish/distribute)
+```
+
+For command details in the publishing phase, see [comet publish](/en/cli/publish); the authoritative description of the state machine, readiness conclusions, and blocker codes is in [Publishing and distributing Skills](/en/skill-creator/publishing).
 
 ## Subcommands
 
-| Command | Purpose |
-| --- | --- |
-| `comet creator status` | Show current creation state. |
-| `comet creator next` | Print the next recommended action. |
-| `comet creator resume` | Resume a paused creation workflow. |
-| `comet creator plan` | Inspect or generate the composition plan. |
-| `comet creator lanes` | Inspect authoring lanes. |
+| Command | Purpose | Required arguments |
+| --- | --- | --- |
+| `comet creator list` | List recoverable Skill Creator candidates | - |
+| `comet creator status <name>` | Read readiness, blockers, warnings, and evidence | `<name>` |
+| `comet creator next <name>` | Print the single recommended next step | `<name>` |
+| `comet creator guide` | Read the first-run wizard, preferences, and recoverable flow summary | - |
+| `comet creator candidates` | Discover Skill candidates available for composition | - |
+| `comet creator propose <name>` | Preview the Skill Creator plan without writing state | `<name>`, `--file` |
+| `comet creator init <name>` | Initialize or update state with a confirmed plan | `<name>`, `--file` |
+| `comet creator resolve <name>` | Resolve missing or ambiguous candidates | `<name>`, `--candidate` |
+| `comet creator authoring-plan <name>` | Read the authoring lane plan of the generated Skill | `<name>` |
+| `comet creator authoring-record <name>` | Record the output of an authoring lane | `<name>`, `--lane`, `--file` |
+| `comet creator generate <name>` | Generate the Skill package from confirmed metadata | `<name>` |
+
+Every subcommand supports `--project <dir>` and `--json`.
 
 ## Common recovery commands
 
 ```bash
-comet creator status
-comet creator next
-comet creator resume
+# List recoverable flows
+comet creator list --project . --json
+
+# Read full status, readiness, and evidence
+comet creator status review-helper --project . --json
+
+# Read only what to do next
+comet creator next review-helper --project . --json
 ```
 
-Use these when `/comet-any` was interrupted or when you want a deterministic summary before asking the agent to continue.
+The text output of `comet creator next` includes the current status, the current stage, the recommended action, the recommended command, the reason, and whether the step needs user confirmation.
 
-## Authoring lanes
+```text
+Next step for review-helper
+Status: draft
+Current step: needs-eval
+Action: Run repository eval for the generated Skill
+Command: comet eval ./generated-skill/comet/eval.yaml --quick --html
+Reason: Current draft hash is missing passing eval evidence
+Requires confirmation: yes
+```
 
-Authoring lanes split bundle work into instructions, examples, tests, metadata, and executable disclosure.
+## Plan and generation commands
+
+`/comet-any` usually calls these internally. Run them by hand only for automation or troubleshooting.
+
+```bash
+# First-run wizard
+comet creator guide --project . --json
+
+# Discover candidate Skills
+comet creator candidates --project . --json
+
+# Preview a composition plan without writing state
+comet creator propose review-helper --file ./plan.json --json
+
+# Write state after the user confirms the plan
+comet creator init review-helper --file ./plan.json --confirmed-proposal --json
+
+# Resolve an ambiguous candidate
+comet creator resolve review-helper --candidate review-flow --source ./skills/review-flow --json
+
+# Ignore a missing candidate; a reason is required
+comet creator resolve review-helper --candidate optional-helper --ignore-missing --reason "not needed for this workflow" --json
+
+# Generate the Skill package
+comet creator generate review-helper --json
+```
+
+<Warning>
+  Do not bypass the proposal confirmation page and generate directly. <code>/comet-any</code> must show
+  the Skill Creator proposal confirmation page first and wait for your confirmation before it writes a
+  draft.
+</Warning>
+
+## Authoring lane commands
+
+A generated Skill is not a thin template. `/comet-any` uses authoring lanes to write entry content, node guidance, script contracts, reference files, and review evidence.
+
+```bash
+# Read the quick or full authoring plan
+comet creator authoring-plan review-helper --depth quick --json
+comet creator authoring-plan review-helper --depth full --json
+
+# Record the output of a lane
+comet creator authoring-record review-helper --lane skill-core --file ./lane-output.json --json
+```
+
+If generated content still keeps `AUTHORING PENDING` markers, the publishing readiness check reports an `[authoring]` blocker. You need to finish the corresponding lane and record its output before continuing to eval and publishing. For the full meaning of the blocker codes and their recovery suggestions, see [Publishing and distributing Skills: Blocker codes](/en/skill-creator/publishing#blocker-codes).
+
+## Next steps
+
+- [Getting started: combine any Skill](/en/skill-creator/getting-started) — run the full main line from `/comet-any`
+- [Full Skill creation workflow](/en/skill-creator/workflow) — understand every stage
+- [comet publish](/en/cli/publish) — review, approve, publish, and distribute after eval
+- [Publishing and distributing Skills](/en/skill-creator/publishing) — the authoritative state machine, readiness, and blocker codes
+- [comet bundle](/en/cli/bundle) — the advanced backend reference

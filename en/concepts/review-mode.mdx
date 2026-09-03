@@ -1,279 +1,247 @@
 ---
 title: "Code Review Mechanism"
-description: "Understand the three review_mode settings, their triggers, review budget, and model selection."
+description: "Learn the three review_mode modes, what triggers a review, the automatic fix budget, and how models are selected."
 ---
 
-`review_mode` controls when Classic dispatches task-level code reviews during the build stage, how many repair rounds are allowed, and the intensity of the final comprehensive review in the verify stage. Inside build: `off` dispatches no reviewer; `standard` reviews only risky tasks; `thorough` reviews every task. The ** final comprehensive code review of the whole change happens only in the verify stage **; after all tasks are done, build appends no reviewer.
+`review_mode` controls when Classic dispatches task-level code reviews during the build stage, how many fix rounds are allowed, and the intensity of the final comprehensive review in the verify stage. Inside build: `off` dispatches no reviewer, `standard` reviews only risky tasks, and `thorough` reviews every task. The change's **final comprehensive code review happens only in the verify stage**; after build finishes all tasks, it appends no reviewer.
 
 <Note>
-  <code>review_mode</code> only controls <strong>automatic</strong> reviews inside the workflow. You can also invoke{' '}
-  <code>/comet-review</code> at any time for a read-only, on-demand review of the current Change. It is independent of{' '}
+  <code>review_mode</code> only controls <strong>automatic</strong> reviews inside the flow. You can also invoke{' '}
+  <code>/comet-review</code> at any time for a read-only, on-demand review of the current change. It is independent of{' '}
   <code>review_mode</code> and does not advance the workflow. It only reports correctness, security, boundary, and coverage issues in the implementation diff; it does not modify files, update state, or replace Verify.
 </Note>
 
-## Mode selection
+## How to choose review_mode
 
-|"Mode"|Suitable|Cost|Suggestion|
-| ---------- | --------------------------- | ---- | -------------- |
-| `off`      |Documents, low-risk hotfixes/tweaks|The lowest|Use only when the risk is low|
-| `standard` |Daily full workflow|Medium|Default recommendation|
-| `thorough` |Security, architecture, and multi-module changes|The highest|Used in high-risk situations|
+Pick a mode by the change's risk surface first, then by the time and tokens you can afford. hotfix/tweak default to `off`, and a newly created full-workflow change defaults to `standard`; how each is set and where it applies is in "How to set it" below.
 
-<Tip>
-When in doubt, choose <code>standard</code>. It assigns a task-level reviewer only to risky tasks; the final comprehensive review is executed by the verify stage.
-</Tip>
+| Scenario | Recommended mode | Cost / speed | Why |
+| -------- | ---------------- | ------------ | --- |
+| hotfix / tweak, low-risk small changes such as docs | `off` (default) | Lowest / fastest | No strong review needed; use it only when risk is low |
+| Everyday full workflow | `standard` (default) | Medium | Low-risk tasks skip review, risky tasks are reviewed immediately, cost stays controlled |
+| Security, auth, data migration | `thorough` | Highest / slowest | Every task is reviewed immediately, covering the high-risk surface |
+| Cross-module / architecture change | `thorough` | Highest / slowest | Task-by-task review catches cross-module issues |
 
-## review_mode controls the automatic review flow
+Full comparison of the three modes:
 
-<Warning>
-<strong> This is the most crucial rule. </strong>Superpowers <code>subagent - driven - development</code>{' '}
-The default process requires "assigning a task reviewer after each task". Comet's <code>review_mode</code>{' '}
-<strong> takes over this stage </strong> and decides which tasks are assigned to each task reviewer.
-  <strong>
-Do not dispatch reviewers outside the <code>review_mode</code> regulations.
-  </strong>
-The task of the reviewer cannot be obtained (<code>off</code>: all; <code>standard</code>)
-For non-risk tasks, simply select the task box and assign the next task. The total number of reviews for a change
-<strong> is determined solely by the budget table below. </strong>.
-</Warning>
+| Dimension | `off` | `standard` | `thorough` |
+| --------- | ----- | ---------- | ---------- |
+| **Task-level reviewers** | 0 | Risky tasks only | **Every task** |
+| **Review timing** | — | Immediately when a task hits a risk signal | Immediately for every task |
+| **Review scope** | — | Risky tasks: spec compliance + code quality | Every task: spec compliance + code quality |
+| **Auto-fix limit** | 0 rounds | Up to **1 round** per review of a risky task + re-review | Up to **2 rounds** per review + re-review |
+| **BLOCKED trigger** | — | A risky task still failing after 1 fix round → BLOCKED | Still failing after 2 fix rounds → BLOCKED |
+| **Final comprehensive review** | Skipped by verify | Executed in the verify stage | Executed in the verify stage |
+| **Speed** | Fastest | Medium (low-risk tasks skip review) | **Slowest** (every task is reviewed) |
+| **Token cost** | Lowest | Medium | **Highest** |
+| **Best for** | hotfix/tweak, low-risk small changes | Everyday full workflow | High-risk, multi-module, architecture/security changes |
+| **Default** | hotfix/tweak | full workflow (including runtime fallback) | — |
 
-## The boundary with Superpowers SDD
+### Where the cost difference comes from
 
-Comet's `subagent-driven-development` extension now only relies on the task reviewer contract made public by Superpowers: After the implementer completes the task, the coordinator decides whether to assign a reviewer based on the task materials, real diff, test evidence, and risk signals. Comet does not read, write, or require the internal script names, workspace paths, or private implementation details of Superpowers `subagent-driven-development`.
-
-This means:
-
-- Superpowers still offers continuous task scheduling, pre-check plan review, file-type handoff, reviewer neutral prompts, feedback semantics of "insufficient materials for verification", and progress reconciliation.
-- Comet only takes over the reviewer trigger strategy and review-fix budget, that is, `review_mode` decides which tasks should be assigned to the reviewer.
-- Documentation, recovery and testing are subject to public behavior, and the shipped Skill copy is not bound to the internal directory structure of Superpowers.
-
-<Info>
-From the user's perspective, you only need to select `off`, `standard` or `thorough` during the build stage. Underlying Superpowers SDD
-Skills can upgrade one's own implementation. As long as the public task reviewer contract is continued to be met, Comet's review strategy does not need to be changed.
-</Info>
-## Review the budget sheet during the build stage
-
-This table ** only covers task-level review in the build stage **, and only these reviewers are assigned without any additional ones. After all tasks are done, no final reviewer is appended; the change moves straight into verify:
-
-| `review_mode` |Task-level reviewer (build)|
-| ------------- | -------------------------------- |
-| `off`         | 0                                |
-| `standard`    |Only risk tasks (see the rules below)|
-| `thorough`    |Each task (spec compliance + code quality)|
-
-<Note>
-The review during the <strong>verify stage is not included in this table. The review in the </strong>verify stage is conducted by <code>verify_mode</code>
-(light/full) driver, <code>review_mode, </code> only determines whether verify triggers automatic code review (<code>off</code>{' '})
-Skip; <code>standard</code>/<code>thorough</code> under light validation run a lightweight code review, in full
-verify the dependency (<code>openspec-Verific-change</code>). The verify stage does not have a separate per-
-<code>review_mode</code>" Complete "code review - For authoritative behavior, see the verify phase documentation.
-</Note>
+The cost difference between the three modes is structural. `off` dispatches no task-level reviewer for N tasks, so it is the fastest and cheapest. `standard` assigns a reviewer only to tasks that hit a risk signal, and each such task gets at most 1 round of automatic fixing. `thorough`'s overhead is **structural**: N tasks mean N task-level reviewers, and each reviewer can trigger up to 2 fix rounds. For a change of 12 tasks, `standard` may review only a handful of risky tasks, while `thorough` runs 12 task-by-task reviews — several times more review-and-fix agents than `standard`.
 
 <p align="center">
   <img
     src="/assets/review-mode-illustrations/01-review-mode-gradient.png"
-alt=" Little Fish arrange the off, standard and thorough measuring cups in ascending order of review intensity and cost."
+    alt="Little Fish lines up the off, standard, and thorough measuring cups from low to high review intensity and cost"
     width="800"
   />
 </p>
 
-<p align="center">review_mode is a true gradient: the further to the right, the stronger the review, but the higher the time and token cost </p>
+<p align="center">off, standard, and thorough map to different review counts and token costs</p>
 
-## Understand the three modes in one picture
+<Tip>
+  When in doubt, choose <code>standard</code>. It assigns a task-level reviewer only to risky tasks, so the cost stays controlled.
+</Tip>
+
+## What a single task goes through
+
+`review_mode` decides whether, and when, each task in the build stage gets a task-level reviewer, and how many fix rounds a review can trigger. All three modes share the same task baseline: the implementer self-tests, submits, and reports evidence (including any risk signals they found); once the coordinator verifies it, the task is checked off and the next one is dispatched. The description below follows `subagent-driven-development`; under `executing-plans`, the main session executes tasks directly and review takes a different shape — see "Final comprehensive review (verify stage)" and "Coordinating with build_mode".
+
+### standard: review only when a risk signal is hit
+
+Under `standard`, a task gets **no task-level reviewer by default**. After the coordinator reads the implementer's self-report and reviews the diff, **only when the self-report hits a risk signal, or the diff review reveals one**, does this task get a single task-level reviewer, checking spec compliance + code quality (the risk-signal list is below). When the review finds no CRITICAL/IMPORTANT issues, the task passes verification and is checked off, then the next one starts. CRITICAL/IMPORTANT findings enter review-fix with **at most 1 round**, and each fix round is followed by a re-review. If the re-review still fails → mark **BLOCKED**, pause, and hand it to you.
+
+### thorough: every task is reviewed
+
+Under `thorough`, every task gets a brand-new background task-level reviewer, again checking spec compliance + code quality. There is no batched combined review — high-risk changes need each task reviewed immediately and in focus; waiting until a batch boundary to catch problems is too costly. CRITICAL/IMPORTANT findings enter review-fix with **at most 2 rounds**; if the re-review still fails → mark **BLOCKED**, pause, and hand it to you.
+
+### off: no automatic review, rely on implementation evidence
+
+`off` dispatches **no** automatic spec reviewer, code-quality reviewer, or review-fix agent in the build stage. Whether a task is done is decided by the implementer's self-test, build/test evidence, the current-worktree confirmation, and the verification before check-off. `off` must record why the automatic code review was skipped in the **persistent artifacts** (tasks.md, commit body, verification report draft, and so on).
+
+- hotfix and tweak presets default to `off`.
+- A full workflow can also choose `off` explicitly, but the choice must be confirmed and the reason recorded before leaving build.
+
+<Warning>
+  <code>off</code> only skips <strong>automatic code review</strong>; it does <strong>not</strong> skip
+  building, testing, security checks, or the debug-gate protocol. If a test failure, build failure, or abnormal behavior happens during execution, you still have to go
+  through the debug gate — <code>off</code> cannot be used to bypass real problems.
+</Warning>
+
+## Final comprehensive review (verify stage)
+
+The change's **final comprehensive code review runs only in the verify stage**. After build finishes all tasks, it **does not append a final reviewer** and moves straight into verify. `review_mode` decides whether verify performs this final comprehensive review: `off` skips it and records the reason; `standard` and `thorough` both run it.
+
+The `executing-plans` boundary: the main session executes tasks directly and has no task-level reviewers like `subagent-driven-development`; code review targets the finished diff, with intensity following `review_mode`. Under `standard`, no whole-change review is requested inside build, and once all tasks pass acceptance the change moves straight into verify; under `thorough`, a segmented review runs after every 3 completed tasks (with 3 or fewer tasks there is no in-build review), and each segmented review only covers that segment's diff — the final comprehensive review of the whole change still runs in the verify stage.
+
+<Note>
+  <strong>The review in the verify stage is driven by <code>verify_mode</code> (light/full) and does not consume the build review budget.</strong>{' '}
+  <code>review_mode</code> only decides whether verify triggers an automatic code review (<code>off</code>{' '}
+  skips it; <code>standard</code>/<code>thorough</code> run a lightweight code review under light
+  verification and rely on <code>openspec-verify-change</code> under full verification). The verify stage has no separate per-
+  <code>review_mode</code> "full" code review — the authoritative behavior is documented in the verify-stage pages.
+</Note>
+
+## The three modes in one diagram
+
+The flowchart below summarizes the task-level review and fix flow of the three modes in the build stage. Build only dispatches reviewers along the branches below and **adds nothing extra**; the fix rounds shown on each branch are that mode's automatic-fix limit.
 
 ```mermaid
 flowchart TD
-    Start["Each task: Implementer self-test + submit + report evidence <br/> (including self-reporting of risk signals)"] --> Coord["The coordinator reads the self-report and reviews the diff"]
+    Start["Each task: implementer self-test + submit + report evidence<br/>(including any risk signals found)"] --> Coord["coordinator reads the self-report + reviews the diff"]
     Coord --> Q{"review_mode?"}
 
-    Q -->|off| OFF["Do not dispatch any review agent<br/>. Just check + dispatch the next task"]
-    OFF --> OFFR["Record the skip reason to the persistence product"]
+    Q -->|off| OFF["Dispatch no review agent<br/>check off directly + dispatch next task"]
+    OFF --> OFFR["Record the skip reason in persistent artifacts"]
 
-    Q -->|standard| STRISK{"Hit the risk signal?"}
-    STRISK -->|no| STSKIP["Directly check + Assign the next task <br/> (do not assign each task reviewer)"]
-    STRISK -->|is| STRV["Assign one reviewer for each task, <br/>. Scope: spec compliance + code quality"]
+    Q -->|standard| STRISK{"Risk signal hit?"}
+    STRISK -->|no| STSKIP["Check off directly + dispatch next task<br/>(no task-level reviewer)"]
+    STRISK -->|yes| STRV["Dispatch 1 task-level reviewer<br/>scope: spec compliance + code quality"]
     STRV --> STFX{"CRITICAL/IMPORTANT?"}
-    STFX -->|is| STFIX["At most 1 round of automatic repair + re-examination <br/> still fails → BLOCKED"]
+    STFX -->|yes| STFIX["At most 1 round of auto fix + re-review<br/>still failing → BLOCKED"]
     STFX -->|no| STSKIP
-    STSKIP --> STFIN{"All tasks completed?"}
+    STSKIP --> STFIN{"All tasks done?"}
     STFIN -->|no| Start
-    STFIN -->|is| STFINAL["Enter the verify stage<br/>. The final comprehensive review is executed by Verify"]
+    STFIN -->|yes| STFINAL["Move to the verify stage<br/>the final comprehensive review runs in verify"]
     STFINAL --> DONE
 
-    Q -->|thorough| THRV["Assign one reviewer for each task, <br/>. Scope: spec compliance + code quality"]
+    Q -->|thorough| THRV["Dispatch 1 task-level reviewer<br/>scope: spec compliance + code quality"]
     THRV --> THFX{"CRITICAL/IMPORTANT?"}
-    THFX -->|is| THFIX["Up to 2 rounds of automatic repair + re-examination <br/> still fails → BLOCKED"]
-    THFX -->|no| THNEXT{"Still have tasks?"}
-    THNEXT -->|is| Start
-    THNEXT -->|no| THFINAL["Enter the verify stage<br/>. The final comprehensive review is executed by Verify"]
-    THFINAL --> DONE["The build task-level review is completed."]
+    THFX -->|yes| THFIX["At most 2 rounds of auto fix + re-review<br/>still failing → BLOCKED"]
+    THFX -->|no| THNEXT{"More tasks?"}
+    THNEXT -->|yes| Start
+    THNEXT -->|no| THFINAL["Move to the verify stage<br/>the final comprehensive review runs in verify"]
+    THFINAL --> DONE["Build task-level review finished"]
 ```
 
-## Comparison of the three modes
+## Risk-signal list
 
-|"Dimension"| `off`                    | `standard`                                    | `thorough`                                  |
-| ---------------- | ------------------------ | --------------------------------------------- | ------------------------------------------- |
-|"Task-level reviewer"| 0                        |Only risk tasks|"Each task.|
-|Final comprehensive review|Skipped by verify|Executed in the verify stage|Executed in the verify stage|
-|** Review Scope **| —                        |Risk task: spec compliance + code quality|Each task: spec compliance + code quality|
-|"Automatic repair upper limit"|"0 rounds"|A single risk-task review is ** up to 1 round ** + review|A single review is ** up to 2 rounds ** + review|
-|"Execution speed"|The fastest|Medium (low-risk tasks skip review)|The slowest (each task needs to be reviewed)|
-|"token consumption.|The lowest|Medium|"Highest"|
-|** Suitable scenarios **|hotfix/tweak, low-risk minor modifications|Daily full workflow|High-risk, multi-module, architectural/security changes|
-|"Default value"|hotfix/tweak default|full workflow default (including runtime fallback)| —                                           |
+Hitting **any** of the following marks a task as risky (decided jointly by the implementer's self-report and the coordinator's diff review). This is what triggers a task-level reviewer under `standard`:
 
-## off mode (lowest intensity)
+- Cross-module / cross-subsystem coordination
+- Security-sensitive surfaces: authentication, authorization, encryption, SQL, external input handling, keys/credentials
+- Concurrency, locks, shared mutable state
+- Data or schema migration
+- Public API contract or external interface changes
+- The implementer returns `DONE_WITH_CONCERNS`
+- A single task diff over 200 lines
 
-Dispatch no automatic spec reviewers, code-quality reviewers, or review-fix agents (the final comprehensive review in the verify stage is also skipped). Whether a task is completed is determined by the implementer's self-test, build/test evidence, current worktree confirmation, and the verification performed before check-off.
+## Boundary with Superpowers SDD
 
 <Warning>
-<code>off</code> only skips the automatic code review of <strong>. </strong>, <strong> does not skip </strong>
-Build, test, conduct security checks and debug the gate protocol. If test failure, build failure or abnormal behavior occurs during execution, you still have to go
-debug gate -- <code>off</code> cannot be used to bypass real problems.
+  Superpowers' <code>subagent-driven-development</code>{' '}
+  default flow requires "a task reviewer after every task". Comet's <code>review_mode</code>{' '}
+  <strong>takes over this stage</strong> and decides which tasks get a task-level reviewer.
+  <strong>
+    Do not dispatch reviewers beyond what <code>review_mode</code> specifies.
+  </strong>
+  Tasks that get no reviewer (<code>off</code>: all of them; <code>standard</code>
+  : non-risky tasks) go straight to check-off and dispatch of the next task. The total number of reviews for a change
+  <strong>is decided only by each mode's task-level reviewers and fix rounds</strong> — nothing is added on top.
 </Warning>
 
-The off mode must record the reasons for skipping the automatic code review in the ** persistence product ** (tasks.md, commit body, verification report draft, etc.).
+Comet's `subagent-driven-development` extension now relies only on the public task-reviewer contract of Superpowers: after the implementer finishes a task, the coordinator decides whether to dispatch a reviewer based on the task materials, the real diff, test evidence, and risk signals. Comet does not read, write, or require the internal script names, workspace paths, or private implementation details of Superpowers `subagent-driven-development`.
 
-- The default default for hotfix and tweak is `off`.
-- full workflow can also explicitly select `off`, but this selection must be confirmed and the reason recorded before leaving the build.
+This means:
 
-## standard Mode (Moderate intensity)
+- Superpowers still provides continuous task scheduling, the pre-check plan review, file-based handoff, reviewer-neutral prompts, the "insufficient material to verify" feedback semantics, and progress reconciliation.
+- Comet only takes over the reviewer-trigger policy and the review-fix budget — in other words, `review_mode` decides which tasks get a task reviewer.
+- Documentation, recovery, and tests all follow public behavior, and shipped Skill text is not tied to Superpowers' internal directory layout.
 
-standard is no longer "reviewed only once at the end". It forms a **risk-triggered** task-by-task review pattern, and the final comprehensive review is handed to the verify stage.
+<Info>
+  During the build stage, choose <code>off</code>, <code>standard</code>, or <code>thorough</code>. Superpowers SDD may keep upgrading its own implementation, but it must continue to satisfy the public task-reviewer contract.
+</Info>
 
-### "build stage"
+## Model selection for each dispatch (mandatory)
 
-1. By default, no task reviewer is assigned. The implementer self-tests, submits and reports evidence (including self-reporting of risk signals); The coordinator performs targeted selection verification.
-2. ** Risk Trigger ** : After reading the implementer's self-report + review diff, ** Only when the self-report hits any risk signal or the diff review of the coordinator discovers any risk signal ** will a per-task reviewer be assigned to this task to simultaneously check spec compliance and code quality.
-3. CRITICAL/IMPORTANT discoveries of risk tasks enter **1 round ** review-fix (up to 1 round). If the rereview fails → mark **BLOCKED**, suspend and hand over to the user.
-4. Tasks that hit risk signals are checked off directly after the coordinator's verification passes.
-5. After all tasks are completed, no final reviewer is appended; the change moves straight into verify. The final comprehensive code review of the whole change is executed by the verify stage according to `review_mode` (see the verify-phase documentation).
+Every implementer/fixer/reviewer dispatch **must name the model explicitly**. Omitting it silently inherits the most expensive model in the session, slowing execution and raising cost. Follow the Model Selection rules of Superpowers `subagent-driven-development`:
 
-### List of Risk Signals
+| Role | Model selection |
+| ---- | --------------- |
+| Implementer / fixer | 1–2 files + a complete spec → cheapest tier; multi-file integration / pattern matching / debugging → standard tier; design judgment or broad code understanding needed → strongest tier. When the plan text already contains the full code to write (transcription + tests), use the cheapest tier |
+| Task reviewer | Pick the tier by the diff's size, complexity, and risk. A small mechanical diff does not need the strongest model; a subtle concurrency change does |
+| Final comprehensive review (verify stage) | Use the strongest available model, not the session default |
 
-Hitting any one of the following tasks will mark it as a risky mission (determined jointly by self-reporting by the implementer and review by the coordinator diff) :
+Omitting the model = letting it run the session's most expensive model, which defeats the purpose of this rule.
 
-- Coordinate changes across modules/subsystems
-- Security-sensitive aspects: authentication, authorization, encryption, SQL, external input processing, keys/credentials
-- Concurrency, locks, and shared mutable states
-- Data or schema migration
-- Changes to public API contracts or external interfaces
-- The implementer returns `DONE_WITH_CONCERNS`
-- The single task diff exceeds 200 lines
+## Coordinating with build_mode
 
-## thorough mode (maximum intensity)
+| build_mode | standard behavior | thorough behavior |
+| ---------- | ----------------- | ----------------- |
+| `subagent-driven-development` | Dispatch a task-level reviewer to risky tasks | Dispatch a task-level reviewer to **every task** |
+| `executing-plans` | No whole-change review inside build; tasks enter verify after acceptance | A segmented review every 3 tasks (no in-build review with ≤ 3 tasks) |
 
-thorough no longer conducts "batch-by-batch combined review". High-risk changes require that each task receive immediate and focused review - it is too costly to wait until the batch boundary to address issues.
+### executing-plans review gate (intensity follows review_mode)
 
-### Key rules in the build stage
+Under `executing-plans`, the main session executes tasks directly (there is no isolated implementer sub-agent), so there is no task-level reviewer like in `subagent-driven-development`. Code review targets the finished diff, with intensity following `review_mode`:
 
-1. For each task, assign a per-task reviewer (spec compliance + code quality) : After the implemencer conducts self-testing, submits, and reports evidence, the coordinator assigns a brand-new background reviewer to this task.
-2. CRITICAL/IMPORTANT discoveries enter review-fix (** up to 2 rounds **); Still not passed → Mark **BLOCKED** and pause the handover to the user.
-3. After all the tasks are completed, no final reviewer is appended; the change moves straight into verify, and the final comprehensive review is executed by the verify stage.
+- **`review_mode: off`**: no automatic code review, and `requesting-code-review` is not loaded. Record the skip reason in the verification report draft or tasks.md, then enter verify after the tasks pass acceptance.
+- **`review_mode: standard`**: no whole-change review is requested inside build; once all tasks pass acceptance, the change moves straight into verify.
+- **`review_mode: thorough`**: run a **segmented code review** after every 3 completed tasks (against only that segment's diff), using `requesting-code-review` on that segment's commit range. With a total of 3 or fewer tasks, no in-build review runs and the change goes straight to verify. This is the closest `executing-plans` gets to task-by-task review: the main session has no isolated implementer sub-agents, so it cannot dispatch a reviewer per task.
 
-<Note>
-thorough does not run batch review — high-risk changes need an immediate, focused review for each task. Dragging problems to the batch boundary is too costly.
-</Note>
+**Requirements** (for thorough):
 
-### Why is thorough slow and token-consuming
+- The `requesting-code-review` for a segmented review must finish loading before entering verify.
+- If a required review Skill cannot load, **stop and report the failure**; do not skip it silently.
+- **CRITICAL/IMPORTANT** findings (security vulnerabilities, data-loss risk, build/test failures) must be fixed before entering verify.
+- Non-CRITICAL findings may be accepted, but the reason and impact must be recorded in the persistent artifacts.
 
-The overhead of thorough is ** structural **: N tasks will assign N task-level reviewers, and each reviewer may trigger up to 2 rounds of fixes. For a 12-task change, standard may only assign reviewers to a few risky tasks, while thorough will run 12 task-by-task reviews - the number of agents for review and fix is several times that of standard.
+## How reviewers work
 
-<Tip>
-<strong> Rule of thumb </strong>: If the changes involve security, authentication, data migration, cross-module apis, or architectural adjustments, use {' '}
-; Otherwise, <code>standard</code> is sufficient. <code>thorough</code>{' '}
-It is a costly strong review: it will significantly slow down the build and increase token consumption, and thus is not suitable as the default value.
-</Tip>
+Under `subagent-driven-development`, reviews are run by **brand-new background agents**. A reviewer gets the full task, the implementation commit/diff, and (when TDD is on) the RED/GREEN evidence, and must check the real code directly before concluding.
 
-## The core difference between standard and thorough
-
-|"Dimension"| standard                 | thorough                     |
-| ------------ | ------------------------ | ---------------------------- |
-|Task-level reviewer|Only risk tasks|"Each task.|
-|Review timing|Immediately for risky tasks|Immediately for every task|
-|Final comprehensive review|Executed in the verify stage|Executed in the verify stage|
-|Automatic repair upper limit|Up to 1 round per task review|Up to 2 rounds per task review|
-|"BLOCKED triggered|Any review of the first round of fixes failed|Any review of the second round of fixes failed|
-|Execution overhead|Medium|"Highest"|
-
-## Model selection for each task assignment (mandatory)
-
-Each time the implemencer/fixer/reviewer dispatches, the model must be explicitly specified. Omitting the model will silently inherit the most expensive model in the session, slow down execution and increase costs. Follow the Model Selection rules of Superpowers `subagent-driven-development`:
-
-|"Role"|Model selection|
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|Implementers/fixators|1-2 files + complete spec → the cheapest file; Multi-file integration/pattern matching/debugging → Standard file; Design judgment or extensive code understanding required → The strongest file. When the plan text already contains the complete code to be written (copying + testing), use the cheapest version|
-|Task reviewer|Scale according to the size, complexity and risk of the diff. The small mechanical diff does not require the strongest model. Subtle concurrent changes are required|
-|Final comprehensive review (verify stage)|Use the strongest available model, not the session default|
-
-Omitting the model = making it run the most expensive model in the session directly violates the goal of this rule.
-
-## Coordination with build_mode
-
-| build_mode                    |"standard Behavior"|thorough behavior|
-| ----------------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
-| `subagent-driven-development` |Dispatch a task-level reviewer to risky tasks|Dispatch a task-level reviewer to every task|
-| `executing-plans`             |No whole-change review inside build; tasks enter verify after acceptance|A segmented review every 3 tasks (no in-build review when there are ≤ 3 tasks)|
-
-### -plans review gate (zoom in by review_mode)
-
-Under `executing-plans`, the main session directly executes tasks (without isolated implementer sub-agents), so there is no per-task reviewer like `subagent-driven-development`. The code review is for the completed diff and zooms in by `review_mode`:
-
-- **`review_mode: off`** : No automatic code review is performed, and `requesting-code-review` is not loaded. The reason for skipping is recorded in the verification report draft or tasks.md; after tasks pass acceptance the change enters verify (the verify stage also skips the final comprehensive review under `off`).
-- **`review_mode: standard`** : No whole-change review is requested inside build; once all tasks pass acceptance, the change moves straight into verify. The final comprehensive review of the whole change is executed by the verify stage.
-- **`review_mode: thorough`** : A ** segmented code review ** is run after every 3 completed tasks (only against that segment's diff), using `requesting-code-review` against that segment's commit range. When the total task count is ≤ 3, no in-build review is performed and the change moves straight into verify. This is the closest `executing-plans` gets to task-by-task review: the main session has no isolated implementer sub-agents, so it cannot dispatch reviewers task by task.
-
-** Requirements ** (thorough applicable) :
-
-- The `requesting-code-review` load corresponding to a segmented review must finish before entering verify.
-- If a required review Skill cannot be loaded, stop and report the failure; do not skip it silently.
-- CRITICAL/IMPORTANT discoveries (security vulnerabilities, data loss risks, build/test failures) must be fixed before entering verify.
-- Non-critical findings are acceptable, but the causes and impacts must be documented in the persistence product.
-
-## How do reviewers work
-
-Under `subagent-driven-development`, the review is performed by the ** brand-new background agent**. The reviewer will obtain complete task, implementation commit/diff and (when TDD is enabled) RED/GREEN evidence, and must directly verify the real code before drawing a conclusion.
-
-The repair agent is also a brand-new background agent that independently modifies the code based on review feedback.
+The fixer is also a brand-new background agent that changes the code independently based on the review feedback.
 
 ### Progress checkpoint
 
-coordinator maintenance `.comet/subagent-progress.md` Record the implementation commit of each task, the modified files, the RED/GREEN evidence, the selected `review_mode`, the passed review stage, the unresolved review feedback, and the current number of review-fix rounds (`standard` up to 1, `thorough` up to 2, `off` 0) And whether the task has triggered the risk per-task review in the standard mode (the completed per-task review will not be reassigned when resuming).
+The coordinator maintains `.comet/subagent-progress.md`, recording each task's implementation commit, changed files, RED/GREEN evidence, the selected `review_mode`, the review stages already passed, unresolved review feedback, and the current review-fix round (`standard` up to 1, `thorough` up to 2, `off` 0), plus whether the task already triggered a risky-task review under `standard` (a completed task review is not re-dispatched on resume).
 
-## How to set up
+## How to set it
 
 ### Priority
 
-The parsing priority of `review_mode`:
+The resolution priority of `review_mode`:
 
 ```text
-change '.comet.yaml > COMET_REVIEW_MODE environment variable > '.comet/config.yaml 'classic.review_mode > standard
+change .comet.yaml > COMET_REVIEW_MODE environment variable > classic.review_mode in .comet/config.yaml > standard
 ```
 
-When a new change is created, the full workflow snapshots the default values of the project to its own `.comet.yaml`; hotfix/tweak is directly hardcoded as `off`.
+When a change is created, the full workflow snapshots the project default into its own `.comet.yaml`; hotfix/tweak hardcode `off`.
 
 <Note>
-Starting from 0.4.0-beta.1, the default for newly created changes changes from <code>null</code> (disabled) to <code>standard</code>
-: when <code>comet init</code> or the snapshot at new-change creation finds that neither the environment variables nor the project configuration set {' '}
-<code>review_mode</code>, it writes <code>standard</code> (risk-triggered per-task review) by default
-instead of no review at all. Existing changes are not affected: a pre-existing full change that is missing this field is blocked
-by the guard when leaving build, with a prompt to first run <code>comet state set &lt;change&gt; review_mode &lt;off|standard|thorough&gt;</code> and then continue.
+  Since 0.4.0-beta.1, the default for a newly created change changed from <code>null</code> (disabled) to <code>standard</code>
+  : when <code>comet init</code> or the new-change snapshot finds that neither the environment variable nor the project configuration sets{' '}
+  <code>review_mode</code>, it writes <code>standard</code> (risk-triggered task review) by default instead of no review.
+  Existing changes are not affected: a pre-existing full change missing this field is blocked when leaving build,
+  with a prompt to first run <code>comet state set &lt;change&gt; review_mode &lt;off|standard|thorough&gt;</code> and then continue.
 </Note>
 
-### Project default values
+### Project default
 
-Editor: `.comet/config.yaml`
+Edit `.comet/config.yaml`:
 
 ```yaml
 classic:
   review_mode: thorough
 ```
 
-When a new change is created, it takes a snapshot to its own `.comet.yaml`. Note: Environment variables and project configurations only provide default values at the resolver layer, ** and do not affect `review_mode` that has been written to change **.
+New changes snapshot it into their own `.comet.yaml` when created. Note: the environment variable and the project configuration only provide defaults at the resolver layer; they do **not** affect a `review_mode` already written into a change.
 
-### "Single change"
+### A single change
 
-full workflow is selected by the user during build Step 3 (execution mode selection) and written via `comet-state`:
+In a full workflow, you choose it at build Step 3 (execution-mode selection), and it is written through `comet-state`:
 
 ```bash
 node "$COMET_STATE" set <change-name> review_mode standard
@@ -281,53 +249,43 @@ node "$COMET_STATE" set <change-name> review_mode standard
 
 This is the user decision point in the build stage.
 
-### Environmental variable
+### Environment variable
 
 ```bash
 export COMET_REVIEW_MODE=standard
 ```
 
-Only provide default values at the resolver layer and do not affect `review_mode` that has been written to change.
+This only supplies a default at the resolver layer; it does not affect a `review_mode` already written into a change.
 
 ## Hard constraint (full workflow leaves build)
 
-`review_mode` is the ** hard access control ** of full workflow, which is enforced by two layers of independent checks:
+`review_mode` is a **hard gate** of the full workflow, enforced by two independent checks:
 
-|layer|Checkpoint|Failed behavior|
-| --------------------------------------- | --------------------------- | ----------------------------------------- |
-| `comet-guard build`                     |`review_mode selected` inspection|Prompt the user to select and provide the `comet-state set` command|
-| `comet-state transition build-complete` | `requireBuildDecisions`     |Reject transition|
+| Layer | Checkpoint | Failure behavior |
+| ----- | ---------- | ---------------- |
+| `comet-guard build` | `review_mode selected` check | Prompt you to choose and give the `comet-state set` command |
+| `comet-state transition build-complete` | `requireBuildDecisions` | Reject the transition |
 
-Both layers must be passed before leaving the build. hotfix/tweak waived this check (they default to `off`).
+Both layers must pass before you leave build. hotfix/tweak are exempt (they default to `off`).
 
 <Note>
-<code>review_mode</code> is not a required field, so <code>.comet.yaml</code> files from before 0.4.0
-parse without migration. The mandatory check happens at the build→verify transition
-guard: when an old file is missing this field, the compatibility path applies, and the field
-should be backfilled during recovery. Illegal values (not <code>off</code>/
-<code>standard</code>/<code>thorough</code>) will be enumerated check to refuse.
+  <code>review_mode</code> is not a required field, so <code>.comet.yaml</code> files from before 0.4.0
+  parse without migration. The mandatory check lives on the build → verify stage guard: files missing the field take the
+  compatibility path, and the field should be backfilled on recovery. Illegal values (anything other than{' '}
+  <code>off</code>/<code>standard</code>/<code>thorough</code>) are rejected by the enum validation.
 </Note>
 
-## State transition interaction
+## State-transition interactions
 
-`review_mode` is the access control field in the build stage. It will not change the field effects of the transition event, but will be checked as a hard decision before `build-complete`. Related conversions
+`review_mode` is a gate field of the build stage. It does not change the field effects of the transition events, but it is checked as a hard decision before `build-complete`. The relevant transitions:
 
-- `build-complete` → Call `requireBuildDecisions` (including review_mode check), and after passing, `phase: verify, verify_result: pending`.
-- `verify-pass` → require the existence of `verification_report` and `branch_status: pending`, and then write `phase: archive, verify_result: pass`; `handled` is written by Archive after the final delivery confirmation.
-- `verify-fail` → `verify_result: fail, phase: build` (Roll back. review_mode must be satisfied again during the next build-complete).
+- `build-complete` → calls `requireBuildDecisions` (including the review_mode check), then writes `phase: verify, verify_result: pending`.
+- `verify-pass` → requires `verification_report` to exist with `branch_status: pending`, then writes `phase: archive, verify_result: pass`; `handled` is written by Archive after the final delivery confirmation.
+- `verify-fail` → writes `verify_result: fail, phase: build` (a rollback; the next `build-complete` must satisfy review_mode again).
 
-## How to choose
+## Next steps
 
-|Scene|Recommendation mode|Reason|
-| ------------------ | ------------- | ---------------------------------------------- |
-| hotfix / tweak     |`off` (Default)|Low-risk minor modifications do not require strict review|
-|Daily function development| `standard`    |Low-risk tasks skip review, while risky tasks are reviewed immediately, with controllable costs|
-|Security/Authentication/Data migration| `thorough`    |Each task is subject to immediate review, covering high-risk areas|
-|Cross-module/architecture changes| `thorough`    |Each task review can identify cross-module issues|
-
-## Next step
-
-- Configure the ](/en/classic/configuration)-review_mode field and set the priority in Classic
-- During the build phase, the usage position of ](/en/phases/build) - review_mode in the build is coordinated with build_mode
-- [verify phase ](/en/phases/verify) - Review check of the light path in verify (driven by verify_mode)
-- Context compression mechanism ](/en/concepts/context-compression) - Another project configuration item that affects execution overhead
+- [Classic configuration](/en/classic/configuration) — the review_mode field and configuration precedence
+- [build stage](/en/phases/build) — where review_mode is used in build and how it combines with build_mode
+- [verify stage](/en/phases/verify) — the light-path review check in verify (driven by verify_mode)
+- [Context compression mechanism](/en/concepts/context-compression) — another project-level option that affects execution cost
