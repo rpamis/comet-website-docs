@@ -33,7 +33,7 @@ Use the unified entry `/comet` normally; The stage command is directly invoked o
 
 ## What will you experience
 
-There are 4 pause points in the build phase (globally numbered 6-9, with a total of 13 in the entire five-stage workflow. See [Five-stage pause Points and User Selection points ](/en/concepts/decision-points)). The following is an explanation in the order of occurrence.
+There are 2 pause points in the build phase (globally numbered 6-7, with a total of 10 in the entire five-stage workflow. See [Five-stage pause Points and User Selection points ](/en/concepts/decision-points)). The following is an explanation in the order of occurrence.
 
 ```mermaid
 flowchart TD
@@ -41,8 +41,7 @@ flowchart TD
     S1 --> Stop2["Pause Point 6: plan-ready pause <br/> Continue/Pause switching models"]
     Stop2 -->|continue| Stop3["Pause point 7: select execution + TDD + review<br/>together"]
     Stop2 -->|pause to switch models| PauseDone["Pause now and resume later"]
-    Stop3 --> StopBranch["Pause point 8: Confirm the branch name <br/> (when isolation=branch)"]
-    StopBranch --> Exec["Execute each task in build_mode"]
+    Stop3 --> Exec["Execute each task in build_mode"]
     Exec --> Debug{"Crash/Test failure/build failure?"}
     Debug -->|yes| DebugGate["Load systematic-debugging<br/>to locate the root cause before fixing it"]
     DebugGate --> Exec
@@ -87,7 +86,7 @@ base-ref: <git rev-parse HEAD> # The commit and verify before implementation are
 ---
 ```
 
-### Pause Point 6: plan-ready Pause
+### Pause point 6: Build joint decision (plan-ready)
 
 After the plan is written, Comet ** Pause for your choice ** :
 
@@ -106,19 +105,7 @@ Directly enter the work mode selection.
 
 ### Pause point 7: Select three execution modes at once
 
-After confirming to proceed, Comet ** asks you three execution options at once ** (not in three installments) : The following first explains the workspace bindings that have been determined in the Open phase, and then lists these three execution options.
-
-#### Workspace Binding (isolation
-
-The new change of Classic has been selected and the workspace is ready in the Open phase. The following values are used to illustrate the workspace binding of change; When restoring or checking, Comet will verify whether the current directory and branch match and will not silently change the directory during the build stage.
-
-|Options|Explanation|"Recommended|
-| ---------------------- | ----------------------------------- | ------------------------------ |
-|The current branch of A works directly|Do not create a new branch and bind the current Git branch truthfully|The current branch is the target branch of change|
-|**B creates a branch **|Creating branches in the current warehouse is simple and fast|Change no more than 3 files|
-|**C creates worktree**|Independent workspace, allowing for parallel development|Parallel development or uncommitted changes in the current branch|
-
-When creating, select `branch`. Comet will allow you to confirm or overwrite the branch name during the Open phase. The naming rules are: `feature/YYYYMMDD/<name>` (full), `hotfix/...` (hotfix), `tweak/...` (tweak). All three isolation methods are applicable to full, hotfix and tweak. The selection result will be written to `isolation`, and the current branch of the actual execution directory will be recorded as `bound_branch`. Subsequent entry checks will prevent accidental branch switching.
+After confirming to continue, Comet asks you the three execution options **at once** (not in three separate questions). Workspace isolation is not among them - it was already determined in the workspace decision (pause point 3) of the open phase: the choice is written to `isolation`, the current branch of the actual execution directory is recorded as `bound_branch`, and the build phase only verifies that the current directory and branch match, without silently switching directories. When `branch` is chosen, the branch name is confirmed in the open phase as well (the hotfix/tweak presets default to `hotfix/YYYYMMDD/<name>` / `tweak/YYYYMMDD/<name>`).
 
 #### 1. Execution Mode (build_mode
 
@@ -146,8 +133,8 @@ Comet will pause to allow you to choose <code>executing-plans</code>. By default
 |Options|Explanation|"Recommended|
 | -------------- | -------------------------------------------------------------------------------- | ------------------------------ |
 | `off`          |No automatic review|Documents, configurations, copywriting, small-scale low-risk|
-| **`standard`** |By default, no task reviewer is assigned. Only assign each task reviewer when the task hits a risk signal, plus one final lightweight review|** Default recommendation **, most common changes|
-| `thorough`     |Each task is assigned a per-task reviewer (spec + quality), along with a final complete review|High risk, multi-module, architecture/security|
+| **`standard`** |By default, no reviewer is dispatched per task; one is only dispatched when a task hits a risk signal. The final comprehensive review happens in the verify phase|** Default recommendation **, most common changes|
+| `thorough`     |A reviewer (spec + quality) is dispatched for every task. The final comprehensive review happens in the verify phase|High risk, multi-module, architecture/security|
 
 For details, please refer to [Code Review Mechanism ](/en/concepts/review-mode)
 
@@ -159,7 +146,7 @@ After selection, press `build_mode` to execute. The experiences of the two execu
 | -------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 |Who writes the code?|Do it directly in the main session|The main session ** only coordinates **, and the backend sub-agent implementation (prohibiting direct code writing in the main session)|
 |Task advancement|Execute in sequence and check each one individually|For each task, a new sub-agent is assigned. Once it passes the acceptance inspection, the next one is immediately assigned, constantly asking if you want to continue|
-|Review|review gate scales by `review_mode` (standard= one final; thorough= every 3 task segments + final)|Assign each task reviewer + repair agent according to review_mode (thorough= each task; standard= only risk tasks)|
+|Review|Intensity adjusts by `review_mode` (standard = no whole-change review inside build; thorough = segmented review every 3 tasks); the final comprehensive review happens in verify|Assign each task reviewer + repair agent according to review_mode (thorough= each task; standard= only risk tasks)|
 |Model selection|The main session is executed directly|Each distribution must explicitly specify the model (the implementer/fixer/reviewer scales separately)|
 |The progress is visible|It can be directly seen in the conversation|Maintain the `.comet/subagent-progress.md` checkpoint|
 
@@ -221,7 +208,7 @@ When it is found during execution that the spec needs to be modified, handle it 
 |small|Omitted acceptance scenarios and boundary conditions|Directly edit delta spec + design.md and append tasks|
 |In the|Interface changes, new components added, and changes in data flow|** Pause for your confirmation **, load `brainstorming` to update Design Doc + delta spec|
 |big|"Brand-new capability|** Pause for your confirmation of the split **, create a new change through `/comet-open` (`/opsx:new` cannot be used)|
-|Over 50%|The number of newly added tasks exceeds half of the total number of initial tasks|** Pause Point 9** : Split into a new change/Continue to complete within the current change|
+|Over 50%|The number of newly added tasks exceeds half of the total number of initial tasks|**Pause point 7**: Split into a new change/Continue to complete within the current change|
 
 ### Step 5: Check + Submit
 
@@ -273,13 +260,13 @@ Advance to `phase: verify`, and set `verify_result: pending`.
 - `isolation` is `current`, `branch` or `worktree`, and the current Git branch is consistent with `bound_branch`
 - `build_mode` selected (for subagent mode, `subagent_dispatch: confirmed` is required)
 - `tdd_mode` has been selected
-- `review_mode` selected (complete by executing-plans review gate: standard/thorough requested review and fix CRITICAL or record non-critical acceptance reasons; off recorded skip reasons)
+- `review_mode` selected (for `thorough`, segmented reviews have been completed every 3 tasks and CRITICAL/IMPORTANT issues fixed, or non-CRITICAL acceptance reasons recorded; for `standard`/`off`, the corresponding reasons have been recorded)
 
 guard will automatically detect the project build entry (such as `npm run build`, Maven or Cargo) and take the failed output as evidence. `.comet.yaml` and the repository root configuration no longer support `build_command` / `verify_command`; when you need a fixed team-level verification process, put it in the project's own build script.
 
 ## "Restore
 
-Build is idempotent. When resuming, `grep -n '\- \[ \]' tasks.md | head -1` finds the first unfinished task. For `build_pause: plan-ready`, see [Pause point 6](#pause-point-6-plan-ready). After context compression, run `comet-state check <name> build --recover` to restore context. In subagent mode, reread `.comet/subagent-progress.md` to recover the current task and review round; **do not execute tasks directly in the main session**. If a `full` workflow stops at plan-ready, first confirm the existing workspace binding, then complete or confirm `build_mode`, `tdd_mode`, and `review_mode`.
+Build is idempotent. When resuming, `grep -n '\- \[ \]' tasks.md | head -1` finds the first unfinished task. For `build_pause: plan-ready`, see [Pause point 6](#pause-point-6-build-joint-decision-plan-ready). After context compression, run `comet-state check <name> build --recover` to restore context. In subagent mode, reread `.comet/subagent-progress.md` to recover the current task and review round; **do not execute tasks directly in the main session**. If a `full` workflow stops at plan-ready, first confirm the existing workspace binding, then complete or confirm `build_mode`, `tdd_mode`, and `review_mode`.
 
 ## Recommended path
 

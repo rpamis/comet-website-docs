@@ -36,7 +36,7 @@ The execution identification of the Reviewer must be different from that of the 
 After the candidate results enter Verify, the process proceeds in the following order:
 
 1. Determine the scope of acceptance. The first round of Verify covers all acceptance items. The repair round only covers the unresolved items from the previous round and those that may be affected by the current modification.
-2. Carry out necessary checks. Runtime runs tests, builds, or other project commands, and records status, exit codes, time consumption, and summaries.
+2. Carry out necessary checks. Runtime runs tests, builds, or other project commands, and records status, exit codes, time consumption, and summaries. Validation commands carried by project policies (see [Project rules](/en/plugins/project-rules)) are also executed here as necessary checks; a policy is promoted to `enforced` only when its check truly passes.
 3. Prepare the acceptance context. `verifierDispatch` provides the actual workspace, requirements and evidence locations, current `scopeIds`, Reviewer summary, and Runtime check results.
 4. Start the new Verifier Subagent. The Verifier remains read-only and provides a conclusion once for each acceptance ID within the current range.
 5. Verify and accept the result. The Runtime checks whether the candidate, identity, round, `attempt` and acceptance scope match, and then decides on the next step.
@@ -80,7 +80,7 @@ This approach of "partial repair and final full confirmation" reduces repetitive
 |There are `failed` items| `repairing` |Return to Build, fix the clear gap and submit a new candidate|
 |There are `blocked` items| `await-user` |Supplement the user's decision or external information and then start the new Verifier|
 |The Verifier task execution error|`verify-ready` or `blocked`|The Runtime decides to retry. Pause when consecutive errors reach the upper limit|
-|The independent Verifier cannot be started| `await-user` |Clearly demonstrate the risk of degradation, and let the user decide whether to accept the result of only Runtime checks|
+|The independent Verifier cannot be started| `await-user` |Return the two options "Retry the acceptance" and "Accept the degraded result" for the user to choose (see below)|
 
 "Failed acceptance" and "Verifier execution error" are not the same thing. The former indicates that there are still gaps in implementation or requirements, while the latter suggests that the acceptance task itself has not been completed normally. The Runtime will record them separately to avoid misjudging infrastructure failures as product failures.
 
@@ -105,7 +105,7 @@ When the final Verifier of Skill startup has determined that all judgments have 
 | `--revise-implementation` |Retain the confirmed requirements and return to Build to modify the implementation|
 | `--revise-requirements` |Return the Shape, modify the user-visible target or acceptance criteria and reconfirm|
 
-If the platform is unable to start the Semantic Verifier at all, even if all Runtime checks pass, only a downgrade result can be obtained. The Runtime will clearly state that "there is only automatic checking, no independent semantic acceptance", and require users to explicitly accept the `--confirmed` action returned by the continuation. The user confirms that this result will not be disguised as an independent verification, and the report will still retain the downgrade mark.
+If the platform is unable to start the Semantic Verifier at all, even if all Runtime checks pass, only a degraded result can be obtained. The Runtime pauses and offers two options: **retry the acceptance** (`comet native next <change> --retry-verifier`, which keeps the current candidate and the checks already completed and only starts a new acceptance attempt) or **accept the degraded result** (accept it explicitly with the `--confirmed` action returned by the continuation). Confirming does not disguise this result as independent verification, and the report will still retain the downgrade mark.
 
 All decision commands come with `--expected-state-version` and `--expected-action`. If the status has changed, the operation comes from an old page or an old task, the Runtime will refuse to execute to avoid late decisions overwriting the current result.
 

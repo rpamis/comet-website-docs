@@ -13,14 +13,15 @@ description: 'The public Native commands for creating, inspecting, selecting, pr
 | `comet native root show/move` | Inspect or transactionally move the artifact root               |
 | `comet native new`            | Create a change and prepare `current`, `branch`, or `worktree`  |
 | `comet native show`           | Read the brief, Specs, and portable state                       |
-| `comet native status`         | View the change, Loop, acceptance, checks, and next action      |
+| `comet native status`         | View the change, Loop, acceptance, checks, and next action (`--cursor` paginates, `--details` shows the full continuation) |
 | `comet native select`         | Select ownership when several changes coexist                   |
 | `comet native spec remove`    | Record a capability-removal intent                              |
 | `comet native next`           | Confirm or recover a boundary and submit handoff/Verifier input |
 | `comet native archive`        | Preview or execute Archive and workspace finish                 |
+| `comet native check`          | Run the read-only Native verification check for a change        |
 | `comet native doctor`         | Diagnose, migrate, and rebuild local Runtime                    |
 
-The new Native flow does not expose `checkpoint`, `check`, `evidence`, or `receipt` commands. Runtime executes checks during Verify and stores their summaries in portable state and the user report.
+The new Native flow no longer exposes `checkpoint`, `evidence`, or `receipt` commands; acceptance checks run during Verify and you can re-run them read-only at any time with `comet native check`. Results are stored in portable state and the user report.
 
 ## Create and inspect
 
@@ -45,7 +46,14 @@ comet native next add-user-avatar --summary "Acceptance criteria changed" --revi
 comet native next add-user-avatar --runner-input <temporary-json-file>
 ```
 
-Use `--accept-result`, `--revise-implementation`, and `--revise-requirements` for the user decision after Verify. `--confirmed` only confirms Shape or an explicit verifier-unavailable fallback; it does not accept a passing result.
+Use `--accept-result`, `--revise-implementation`, and `--revise-requirements` for the user decision after Verify. `--confirmed` only confirms Shape or an explicit verifier-unavailable fallback; it does not accept a passing result. When the Verifier is unavailable, the two choices are:
+
+```bash
+comet native next add-user-avatar --summary "Retry verifier" --retry-verifier
+comet native next add-user-avatar --summary "Accept degraded result" --confirmed
+```
+
+`--retry-verifier` keeps the current candidate and completed checks and starts a new acceptance attempt. For Supervisor parallel progress, `next` also accepts `--coordination-mode` and `--max-parallel` (default 2); recovery calls can guard stale responses with `--expected-state-version` / `--expected-action`.
 
 Use `continuation.inputOptions.template` from `comet native status <name> --details --json` as the current input schema. Only the current Verifier can request checks through `request-checks`; a Builder self-report cannot enter Archive.
 
@@ -58,7 +66,7 @@ comet native archive add-user-avatar --dry-run
 comet native archive add-user-avatar --confirmed
 ```
 
-Archive applies complete target Specs, writes `verification.md`, moves the change, and cleans local Runtime; the normal path does not rerun Verify. For a capability conflict, follow the continuation to choose the serial order first.
+Archive applies complete target Specs, writes `verification.md`, moves the change, and cleans local Runtime; the normal path does not rerun Verify. For branch/worktree isolation, specify the delivery with `--finish keep|merge|push|pull-request` (option meanings follow the Native delivery table in [artifacts-and-state](/en/native/artifacts-and-state)). For a capability conflict, choose the serial order first with `--serial-first`.
 
 ## Diagnose, migrate, and recover
 

@@ -57,16 +57,16 @@ The open phase gradually generates the document through multiple rounds of dialo
 ```mermaid
 flowchart TD
     Start["Express your thoughts."] --> S1["Load openspec-explore<br/> and repeatedly ask questions for clarification"]
-    S1 --> S1a{"What are the multiple independent capabilities of large PRD /<br/>?"}
-    S1a -->|yes| Stop1["Pause point 1: PRD split pre-check: choose one option<br/>"]
-    S1a -->|no| S1sum["Generate the five essential parts of the clarification summary<br/>"]
+    S1 --> S1a{"Large PRD /<br/>multiple independent capabilities?"}
+    S1a -->|yes| Stop1["Pause point 2: PRD split pre-check<br/>choose one of three"]
+    S1a -->|no| S1sum["Generate the five essential parts of the clarification summary"]
     Stop1 --> S1sum
-    S1sum --> Stop2["Pause point 2: Confirm that the clarification of requirements is completed"]
-    Stop2 --> Stop3["Pause point 3: Confirm the name of the change"]
-    Stop3 --> S2["Load openspec-new-change<br/> to generate proposal → design → tasks one by one"]
+    S1sum --> S2["Load openspec-new-change<br/> to derive the unique change name and tell you"]
+    S2 --> S2b{"Pause point 3: Workspace decision<br/>current / branch / worktree"}
+    S2b --> S3["Entry status verification + content integrity check"]
     S2 --> S3["Entry status verification + content integrity check"]
     S3 --> Stop4["Pause point 4: Review the three documents and confirm"]
-    Stop5 --> Exit["comet-guard open -apply<br/> advances to the next stage"]
+    Stop4 --> Exit["comet-guard open --apply<br/> advances to the next stage"]
 ```
 
 <p align="center">
@@ -91,7 +91,7 @@ Comet loads `openspec-explore`, and continuously asks questions around your idea
 |** Key Unknown items **|Assumption, risk, dependence|
 |"Draft Acceptance Scenario"|Core success scenarios + key boundary scenarios|
 
-### Pause Point 1: PRD Split Pre-check (conditional trigger)
+### Pause point 2: PRD split pre-check (conditional trigger)
 
 If your input is a ** large PRD, roadmap or complete product plan **, or if ** multiple independent capabilities ** appear in the clarification summary, Comet will pause here and provide you with a ** candidate split list ** (each split item includes a suggested name, target scope, non-target, dependency order, core acceptance scenario) Then let you choose one of the three:
 
@@ -107,17 +107,19 @@ After splitting, Comet <strong> will not automatically advance any individual ch
 <code>/comet</code> restored.
 </Tip>
 
-### Pause point 2: Confirm that the clarification of requirements is completed
+### Pause point 3: Workspace decision
 
-Before creating any document, Comet presents you with a complete clarification summary (in five parts), ** for your clear confirmation **. proposal/design/tasks will not be created before confirmation, nor will they be generated all at once using `openspec-propose`.
+Before creating the artifacts and `.comet.yaml`, Comet asks you to settle the workspace isolation method (this step cannot be postponed to build):
 
-### Pause point 3: Confirm the name of the change
+| Option     | Meaning                                                                          |
+| ---------- | -------------------------------------------------------------------------------- |
+| `current`  | Work directly on the current branch and bind the current Git branch as-is        |
+| `branch`   | Create a new branch in the current repository and confirm the branch name        |
+| `worktree` | A separate worktree for parallel development (use it directly when you explicitly want to work in parallel) |
 
-Before `openspec new change`, Comet asked you to choose a name. The name must be kebab-case in English (lowercase letters, numbers, hyphens, for example `refine-requirements-doc`). It will:
+The choice is written to `isolation`; the current branch of the actual working directory is recorded as `bound_branch`, and later entry checks block accidental branch switches. The hotfix/tweak presets default to `current`.
 
-- Recommend 2-3 kebab-case English names, each with a line of range description
-- Let you ** enter the name by yourself ** - if you enter Chinese or non-compliant text, it will be converted to compliant kebab-case and ** echo for your confirmation **
-- If the name conflicts with an existing "change", report the conflict and ask you to change it
+Requirement clarification and naming are **non-blocking**: when the scope and the name are clear, Comet derives the **single kebab-case English name** from the requirements (for example `refine-requirements-doc`) and shows it directly. It only asks separately when a mutually exclusive choice would change the scope or the identity of the change, or when the name conflicts with an existing change. It will not create proposal/design/tasks before confirmation, nor will it generate them all at once using `openspec-propose`.
 
 ### Step 2: Create the change structure
 
@@ -201,16 +203,17 @@ node "$COMET_STATE" init <name> full
 
 All operations in the open phase can be safely repeated. If `.comet.yaml` already exists in `phase: open` and all three products are present, Comet will ** skip the completed steps ** and continue from the first missing step. This ensures that even if you call `/comet` again after an interruption, the state will not be disrupted.
 
-## A list of four pause points
+## Pause points at a glance
 
-There are 4 pause points in the open phase (globally numbered 1-4, with a total of 13 in the entire five-stage workflow. See [Five-stage Pause Points and User Selection points ](/en/concepts/decision-points)) :
+There are 3 pause points in the open phase (globally numbered 2-4, with a total of 10 in the entire five-stage workflow. See [Five-stage Pause Points and User Selection points ](/en/concepts/decision-points)) :
 
 |Pause point|When will it appear?|What are you going to do|
 | -------------- | --------------------------- | ---------------------- |
-|1 PRD split|The input is a large PRD or multiple independent capabilities|Split/not split/Adjust the plan|
-|The clarification of requirements has been completed|After the clarification summary is generated|Confirm that your understanding is correct|
-|3 change Name|Before creating "change"|Select a name/Custom name|
-|4 Document Review|After the three documents are generated|Confirm/To adjust|
+|2 PRD split|The input is a large PRD or multiple independent capabilities|Split/keep as one/Adjust the plan|
+|3 Workspace decision|Before creating the artifacts and `.comet.yaml`|current / branch / worktree|
+|4 Document review|After the proposal/design/tasks are generated|Confirm the name, scope, and the three documents / adjust|
+
+Requirement clarification and naming are **non-blocking** by default: when the scope and the name are clear, Comet derives the single kebab-case English name from the requirements and shows it directly; it only asks separately when a mutually exclusive choice would change the scope or the identity of the change.
 
 All pause points follow the [Decision Point Protocol ](/en/concepts/decision-points) - Comet cannot replace your explicit choice with recommendation rules, default values, or "users should agree"
 
@@ -222,8 +225,8 @@ Do not bypass with `/opsx:new` - it only creates OpenSpec artifacts and does not
   </Accordion>
 
 <Accordion title="What restrictions apply to a Change name?">
-It must be kebab-case English (lowercase letters, numbers, hyphens). Chinese or non-compliant names will be converted to
-kebab-case and echo for your confirmation. A conflict with an existing change will be reported and you will be asked to switch to another one.
+It must be kebab-case English (lowercase letters, numbers, hyphens). Chinese or non-compliant names are converted to
+kebab-case; when only one name exists, Comet uses and shows it directly, and only reports and asks you to choose when there are multiple candidates or a conflict with an existing change.
 </Accordion>
 
 <Accordion title="What should I do if openspec instructions fail">
@@ -240,6 +243,6 @@ Not necessarily. The split pre-check will give you one choice among three option
 ## Next step
 
 - After the design phase ](/en/phases/design)-OPEN is completed, proceed to in-depth design
-- Detailed explanation of the four pause points of the five-stage pause point and the user selection point ](/en/concepts/decision-points)-open
+- Detailed explanation of the pause points of the five-stage pause point and the user selection point ](/en/concepts/decision-points)-open
 - The complete mechanism of large PRD splitting ](/en/guides/prd-splitting)-STEP 1a
 - How does the automatic propulsion mechanism ](/en/concepts/auto-transition)-OPEN automatically connect to design after completion
