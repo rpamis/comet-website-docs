@@ -1,29 +1,29 @@
 ---
-title: '状态管理'
-description: 'Classic 的状态存在哪些文件、由哪些字段表示进度、哪些字段由你选择、哪些不要手改，以及状态转换历史去哪查。'
+title: 'Classic 状态管理与恢复'
+description: '了解 Classic 的状态文件分工、如何判断当前进度、哪些字段需要你确认，以及出现异常时如何排查。'
 ---
 
-Comet 的恢复能力来自文件化状态：Classic 把"一个 change 走到哪一步、按什么方式执行、验证结果如何"写进仓库里的状态文件，每次调用 `/comet` 都重新读这些文件，不依赖对话历史。理解用户可读状态、机器运行状态和追加审计日志的分工，你就能知道 Classic 在每个阶段读什么、为什么推进或拒绝。项目级配置（`.comet/config.yaml`）见 [Classic 配置](/zh/classic/configuration)。
+Classic 通过文件保存状态。Comet 会把 change 的阶段、执行方式和验证结果写入仓库。每次调用 `/comet` 都会重新读取这些文件，不依赖上一轮对话。你只要知道看哪几个文件、用哪条命令排查，就能判断进度并在中断后继续。项目级配置（`.comet/config.yaml`）见 [Classic 配置](/zh/classic/configuration)。
 
 下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。实际位置由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
 
 <Warning>
-  <strong>误改状态的后果：</strong>状态守卫按失败关闭（fail closed）工作——宁可拒绝执行，也不带错误状态继续。手工改字段不会"解锁"流程，反而会让流程卡住，或带着与你实际工作树不符的状态走下去：
+  <strong>不要手工改状态文件：</strong>状态守卫按失败关闭（fail closed）工作。也就是说，状态不可信时会直接拒绝执行。手工改字段通常不会“解锁”流程，反而会让任务卡住或走错目录：
 
   - <code>.comet.yaml</code> 的 <code>phase</code> 只能由守卫或合法转换推进，直接{' '}
     <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> 会被硬拒绝。
   - <code>.comet/run-state.json</code> 等由 Comet 自动维护（machine-owned）的字段不要手工编辑，也不要手工把已归档 change 标成完成（归档通过{' '}
     <code>/comet-archive</code> 完成）。
-  - 状态真的坏了时，先按[状态损坏与恢复](/zh/guides/state-recovery)诊断，不要手工伪造状态。
+  - 状态异常时先按[状态损坏与恢复](/zh/guides/state-recovery)诊断，不要手工伪造状态。
 </Warning>
 
-本页围绕三个问题组织，完整字段参考放在文末附录：
+本页分为三部分，完整字段参考放在文末附录：
 
-- **我在哪**——状态存在哪些文件里、用哪几个字段判断当前进度；
-- **哪些是我选的**——由你显式选择的字段在何时选、能否改；哪些字段由 Comet 自动维护、不要手改；
-- **出问题去哪查**——state-events 转换历史、Run state 边界和诊断命令入口。
+- **如何查看当前进度**：状态文件放在哪里、看哪些字段最直接。
+- **哪些设置需要你确认**：哪些字段由你在流程节点选择，哪些字段由 Comet 自动维护。
+- **出现异常时如何排查**：状态转换历史、Run state 边界和诊断命令入口。
 
-## 我在哪：状态放在哪、进度怎么看
+## 如何查看当前进度
 
 想知道"现在做到哪了、还差什么"，正常路径是重新调用 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)）；想人工核对时运行 `comet status`。两者都从磁盘上的状态文件重读，不猜对话历史。
 
@@ -32,7 +32,7 @@ Comet 的恢复能力来自文件化状态：Classic 把"一个 change 走到哪
 | 文件                        | 位置                                            | 谁管理                                        | 作用                                                           |
 | --------------------------- | ----------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------- |
 | `.comet.yaml`               | `<classic-root>/changes/<name>/.comet.yaml`     | 用户可见，通过 `/comet` 和 guard 流转         | 工作流状态：阶段、执行方式、验证结果                           |
-| `.comet/run-state.json`     | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | machine-owned（由 Comet 自动维护），不需要手动编写，运行时自动写入 | Engine Run 细节：currentStep、pending、trajectory              |
+| `.comet/run-state.json`     | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | Comet 自动维护，不需要手动编写                                    | Engine Run 细节：currentStep、pending、trajectory              |
 | `.comet/state-events.jsonl` | `<classic-root>/changes/<name>/.comet/`         | Comet 追加写入，用户可读                      | 成功 state transition 的审计日志                               |
 
 ```mermaid
@@ -57,9 +57,9 @@ flowchart LR
   `.comet.yaml` 告诉你当前在哪，Run state 让运行时恢复，state events 解释状态为什么变了
 </p>
 
-### 看哪几个字段判断进度
+### 快速判断进度要看哪些字段
 
-`comet status` 和 `/comet` 的恢复路由主要读这几个字段；每个字段的完整类型和允许值见文末"字段速查（参考）"附录。
+`comet status` 和 `/comet` 的恢复路由主要看这几个字段。完整类型和允许值见文末附录。
 
 | 字段              | 告诉你什么                                                                          |
 | ----------------- | ----------------------------------------------------------------------------------- |
@@ -90,11 +90,11 @@ comet state clear-selection
 
 选择与判断的完整命令说明见 [comet state](/zh/scripts/comet-state)。
 
-## 哪些是我选的：由你决定的字段
+## 哪些设置需要你确认
 
-`.comet.yaml` 里的字段按"谁写入"分成两类：一类由你在流程的停顿点显式选择，决定流程怎么执行；另一类由 Comet 自动维护（machine-owned），只记录运行时已经发生的事实，不要手改（见下一节）。
+`.comet.yaml` 里的字段可以分成两类：一类是你在流程节点要确认的设置；另一类是 Comet 自动维护的运行记录。自动维护字段不要手改（见下一节）。
 
-### 由你显式选择的字段：何时选、如何改
+### 你会在这些节点做选择
 
 | 字段                  | 谁在何时选                                                                                                                                    | 之后如何改                                                                                                                            |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -106,9 +106,9 @@ comet state clear-selection
 | `context_compression` | 项目级 `classic.context_compression` 设好后，新建 change 时快照为默认（`off`）                                                                 | 改项目配置只影响新 change；单个 change 的调整方式见[上下文压缩机制](/zh/concepts/context-compression)                                    |
 | `auto_transition`     | 项目级 `classic.auto_transition` 设好后快照为默认（`true`）                                                                                    | 只在 change 级字段为空时，环境变量 `COMET_AUTO_TRANSITION` 可以临时覆盖；行为与优先级见[自动推进机制](/zh/concepts/auto-transition) |
 
-这些字段大多在 change 创建时先从项目配置快照默认值。如果你漏选了，守卫不会默默替你选——它会在离开对应阶段前拦截；缺字段时重新调用 `/comet`，路由会把你带回对应决策点补选，而不是让你手工编辑文件。build 阶段缺 `isolation`/`build_mode`/`tdd_mode` 的恢复路径见[恢复中断的工作](/zh/guides/resuming-workflow)。
+这些字段大多在 change 创建时从项目配置带入默认值。如果你漏选了，守卫会在离开阶段前拦截，并把你带回对应决策点补选；不需要手工改文件。build 阶段缺 `isolation`、`build_mode`、`tdd_mode` 的恢复路径见[恢复中断的工作](/zh/guides/resuming-workflow)。
 
-### 守卫在推进前检查什么（状态机硬约束）
+### 进入下一阶段前会检查什么
 
 这些约束同时存在于 `comet guard` 和 `comet state transition` 两个守卫层：
 
@@ -141,34 +141,24 @@ hotfix/tweak 命中升级信号（跨模块、新 API、schema 变更等）时�
 - 一次性设置 `workflow`/`classic_profile` 为 `full`，回退 `phase` 到 `design`，清除 `design_doc`。
 - 这是预设→full 升级的**唯一合法通道**——直接 `set phase design` 被硬阻止，`set classic_profile` 是 machine-owned 也被硬阻止。
 
-## Comet 自动维护的字段：不要手改
+## 哪些字段由系统维护
 
-这些字段都由 Comet 自动写入，日常使用不需要关心，也不出现在用户可见的字段参考里。它们在源码里统称 machine wire keys，但按"能否通过 `comet state set` 修改"分两类：
+这类字段由 Comet 自动写入，用来记录运行过程。你不需要手动设置，也不要用 `comet state set` 强改。
 
-| 字段                | 含义                            | 能否 `set` 修改                            |
-| ------------------- | ------------------------------- | ------------------------------------------ |
-| `handoff_context`   | design 交接上下文文件路径       | 可以（machine-written，但可被 `set` 覆盖） |
-| `handoff_hash`      | 交接上下文 hash                 | 可以（machine-written，但可被 `set` 覆盖） |
-| `classic_profile`   | 只由状态机设置，等于 `workflow` | **不能**（machine-owned）                  |
-| `classic_migration` | Classic 迁移版本（当前为 `1`）  | **不能**（machine-owned）                  |
-| `run_id`            | 链接到 Engine Run state         | **不能**（machine-owned）                  |
+常见字段包括：
 
-`classic_profile`、`classic_migration`、`run_id` 是 machine-owned 字段，`set` 会被硬拒绝（报错 "is a machine-owned Run field and cannot be set directly"）。它们只由状态机的 transition 事件和归档流程写入，例如 `preset-escalate` 会一次性把 `classic_profile` 设为 `full`。
-
-此外还有几类字段也标着 machine-owned：它们由 Comet 在特定时机落盘，值反映"当时绑定在哪、发生过什么"或"你已经确认了什么"，不是你现在想怎么跑：
-
-- `bound_branch`：建立隔离时记录当前分支。入口检查与源码写入守卫会阻止意外分支漂移；不要直接 `set` 修改。
+- `bound_branch`：记录这个 change 绑定的分支，用来防止你在错误分支继续执行。
 - `verify_failures`：连续验证失败计数。`verify-fail` 自增，`verify-pass` 或 `archive-reopen` 重置为 `0`。达到 3 次后，下一次失败会暂停，由你决定重试上限策略。
 - `archive_confirmation`：verify 通过后 Comet 写 `pending`；你在归档前确认后才变 `confirmed`。真实归档命令要求 `confirmed`。
 - `.comet/run-state.json` 的 `currentStep`、`pending`、`artifacts`、`trajectory`：Engine 运行时自动写入，不需要手动编写，不要手工编辑。
 
-这些字段手改后，最直接的后果是状态和你实际的工作树、验证历史对不上——守卫要么拒绝执行，要么按错误状态继续推进。归档流程统一走 `/comet-archive`，不要手工把已归档 change 标成完成。
+手工改这类字段后，最常见的结果是状态和实际代码不一致。守卫会拒绝执行，或者把你带回补救流程。归档统一走 `/comet-archive`，不要手工把 change 标记成已完成。
 
-## 出问题去哪查
+## 出现异常时如何排查
 
-先区分两种情形：会话中断、上下文压缩或换设备属于正常中断，直接 `/comet` 恢复；`.comet.yaml` 缺失或格式异常、change 路由不对、声明的证据找不到，才需要 `comet status`/`comet doctor` 诊断。判断和处理的完整流程见[状态损坏与恢复](/zh/guides/state-recovery)。
+先区分两种情形：会话中断、上下文压缩、换设备属于正常中断，直接 `/comet` 恢复；只有在 `.comet.yaml` 缺失、格式异常、路由不对或证据文件找不到时，再用 `comet status` 和 `comet doctor` 诊断。完整流程见[状态损坏与恢复](/zh/guides/state-recovery)。
 
-### 转换历史：state-events.jsonl
+### 查看状态转换历史
 
 Classic 状态转换共用同一套语义。成功的 `comet state transition`、`comet guard --apply` 和归档更新都会追加一行 JSON 到：
 
@@ -190,7 +180,7 @@ Classic 状态转换共用同一套语义。成功的 `comet state transition`�
 
 `phase` 为什么改变、上一次转换发生了什么，从这里查。可用的 transition 事件与命令见 [comet state](/zh/scripts/comet-state) 和[自动推进机制](/zh/concepts/auto-transition)。
 
-### Run state 边界
+### 区分工作流状态和运行细节
 
 `.comet.yaml` 保存用户可理解的工作流状态。Engine 运行细节放在 `.comet/run-state.json`。两者通过 `run_id` 链接。
 
@@ -204,9 +194,9 @@ Classic 状态转换共用同一套语义。成功的 `comet state transition`�
 
 详见[Skill 与 Engine（进阶）](/zh/skill-creator/engine)。
 
-### 诊断命令入口
+### 常用诊断命令
 
-Engine 层细节（`currentStep`、`pending`、`trajectory`）日常不需要处理，它们是排障时看的东西。入口是两条诊断命令：
+Engine 层细节（`currentStep`、`pending`、`trajectory`）通常只在排障时查看。常用入口是两条命令：
 
 - `comet status`——看活跃 change 的 `phase`、验证结果、声明的证据是否真的在磁盘上（`runtime_eval`），以及下一步提示。
 - `comet doctor`——检查安装、环境、Skill 完整性和每个 change 的 `.comet.yaml` 是否有效。
@@ -215,7 +205,7 @@ Engine 层细节（`currentStep`、`pending`、`trajectory`）日常不需要处
 
 ## 附录：`.comet.yaml` 字段速查（参考）
 
-每个活跃 change 的 `.comet.yaml` 包含以下字段。正文已说明的字段（是否 machine-owned、谁能改）见对应章节；下表集中列出类型、允许值和含义，供查阅。标注 machine-owned 的字段由 Comet 自动维护，不要手工修改。
+每个活跃 change 的 `.comet.yaml` 包含以下字段。上文已经说明哪些由你确认、哪些由系统维护；下表用于快速查值域和含义。
 
 ### 工作流与阶段
 
@@ -267,7 +257,7 @@ Engine 层细节（`currentStep`、`pending`、`trajectory`）日常不需要处
 | `archived`             | `true` \| `false`                  | 是否已归档                                                                      |
 | `archive_confirmation` | `null` \| `pending` \| `confirmed` | machine-owned 最终确认；verify 通过后为 `pending`，用户确认后才变为 `confirmed` |
 
-## 下一步
+## 继续阅读
 
 - [Classic 配置](/zh/classic/configuration) — `.comet/config.yaml` 字段、配置优先级和环境变量
 - [状态损坏与恢复](/zh/guides/state-recovery) — `comet status`/`comet doctor` 诊断与恢复流程

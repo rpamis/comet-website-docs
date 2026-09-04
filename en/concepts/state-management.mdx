@@ -1,29 +1,29 @@
 ---
-title: 'State management'
-description: "Where Classic state lives, which fields mark progress, which fields you choose and which you should not hand-edit, and where to look up transition history."
+title: 'Classic state management and recovery'
+description: "Understand how Classic state files are split, how to check progress, which fields require your confirmation, and how to troubleshoot abnormal states."
 ---
 
-Comet's recoverability comes from file-based state: Classic writes where a change is, how it is being executed, and what verification concluded into state files in the repository, and every call to `/comet` re-reads those files instead of relying on conversation history. Once you see the split between user-readable state, machine-owned run state, and the append-only audit log, you know what Classic reads at each stage and why it advances or refuses. Project-level configuration (`.comet/config.yaml`) is covered in [Classic configuration](/en/classic/configuration).
+Classic uses files to preserve workflow state. Comet writes each change's stage, execution mode, and verification result into repository files. Every call to `/comet` re-reads those files instead of relying on the previous conversation. If you know which files to check and which commands to run, you can quickly judge progress and resume safely after an interruption. Project-level configuration (`.comet/config.yaml`) is covered in [Classic configuration](/en/classic/configuration).
 
 The rest of this page uses `<classic-root>` for the current Classic OpenSpec root directory: `docs/openspec/` by default for new projects, and `openspec/` for projects that keep the legacy layout. The actual location is decided by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
 
 <Warning>
-  <strong>The cost of corrupting state:</strong> state guards fail closed — they would rather refuse to run than continue on bad state. Hand-editing fields does not "unlock" the flow; it either stalls the flow or makes it proceed on state that no longer matches your actual working tree:
+  <strong>Do not hand-edit state files:</strong> state guards fail closed. In other words, when state is not trustworthy, Comet refuses to continue. Hand-editing fields usually does not "unlock" the flow. It often stalls the task or sends it down the wrong directory:
 
   - <code>.comet.yaml</code>'s <code>phase</code> advances only through a guard or a valid transition; a direct{' '}
     <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> is hard-rejected.
   - Do not hand-edit machine-owned fields such as <code>.comet/run-state.json</code>, and do not mark an already-archived change complete by hand (archiving goes through{' '}
     <code>/comet-archive</code>).
-  - When state is genuinely broken, first diagnose it with the flow in [State damage and recovery](/en/guides/state-recovery); do not fabricate state by hand.
+  - If state is abnormal, first follow [State damage and recovery](/en/guides/state-recovery); do not fabricate state by hand.
 </Warning>
 
-This page is organized around three questions; the complete field reference is in the appendix at the end:
+This page has three parts. The complete field reference is in the appendix:
 
-- **Where am I** — which files hold the state and which fields tell you the current progress;
-- **What did I choose** — which fields you choose explicitly, when, and whether they can change later; and which fields Comet maintains automatically and you should not hand-edit;
-- **Where to look when something goes wrong** — the state-events transition history, the Run-state boundary, and the diagnostic command entries.
+- **How to check current progress**: where state files live and which fields to check first.
+- **Which settings require your confirmation**: what you select at workflow checkpoints and what Comet maintains automatically.
+- **How to troubleshoot abnormal states**: transition history, run-state boundaries, and diagnostic command entries.
 
-## Where am I: where state lives and how to read progress
+## How to check current progress
 
 To answer "where are we and what is left", the normal path is to call `/comet` again (see [Resuming interrupted work](/en/guides/resuming-workflow)); to check by hand, run `comet status`. Both re-read the state files on disk; neither guesses from conversation history.
 
@@ -32,7 +32,7 @@ To answer "where are we and what is left", the normal path is to call `/comet` a
 | File | Location | Managed by | Purpose |
 | ---- | -------- | ---------- | ------- |
 | `.comet.yaml` | `<classic-root>/changes/<name>/.comet.yaml` | User-visible; flows through `/comet` and the guards | Workflow state: stage, execution mode, verification result |
-| `.comet/run-state.json` | `<changeDir>/.comet/` or `.comet/runs/<runId>/` | Machine-owned (maintained by Comet; the runtime writes it as it goes, you never write it by hand) | Engine Run details: `currentStep`, `pending`, `trajectory` |
+| `.comet/run-state.json` | `<changeDir>/.comet/` or `.comet/runs/<runId>/` | Automatically maintained by Comet | Engine Run details: `currentStep`, `pending`, `trajectory` |
 | `.comet/state-events.jsonl` | `<classic-root>/changes/<name>/.comet/` | Appended by Comet; readable by users | Audit log of successful state transitions |
 
 ```mermaid
@@ -57,9 +57,9 @@ flowchart LR
   <code>.comet.yaml</code> tells you where the change is, Run state lets the runtime recover, and state events explain why the state changed
 </p>
 
-### Which fields show the progress
+### Which fields quickly tell you progress
 
-`comet status` and the `/comet` resume routing mostly read the fields below; each field's full type and allowed values are in the "Field reference" appendix at the end.
+`comet status` and `/comet` resume routing mainly use the fields below. Full types and allowed values are in the appendix.
 
 | Field | Tells you |
 | ----- | --------- |
@@ -90,11 +90,11 @@ comet state clear-selection
 
 For the full commands on selecting and judging, see [comet state](/en/scripts/comet-state).
 
-## What did I choose: fields decided by you
+## Which settings require your confirmation
 
-The fields in `.comet.yaml` split by who writes them: some you choose explicitly at a pause point in the flow and they decide how the flow runs; others are maintained automatically by Comet (machine-owned) and only record what has already happened — do not hand-edit those (see the next section).
+Fields in `.comet.yaml` can be grouped into two types: settings you confirm at workflow checkpoints, and runtime records maintained automatically by Comet. Do not hand-edit auto-maintained fields (see the next section).
 
-### Fields you choose explicitly: when and how to change them
+### Choices you make at workflow checkpoints
 
 | Field | Who chooses it and when | How to change it later |
 | ----- | ----------------------- | ---------------------- |
@@ -106,9 +106,9 @@ The fields in `.comet.yaml` split by who writes them: some you choose explicitly
 | `context_compression` | Once the project-level `classic.context_compression` is set, new changes snapshot it as the default (`off`) | Changing the project configuration only affects new changes; adjusting a single change is covered in [Context compression mechanism](/en/concepts/context-compression) |
 | `auto_transition` | Once the project-level `classic.auto_transition` is set, new changes snapshot it as the default (`true`) | Only when the change-level field is empty can the `COMET_AUTO_TRANSITION` environment variable override it temporarily; behavior and priority are in [Auto-transition](/en/concepts/auto-transition) |
 
-Most of these fields are snapshotted from the project configuration when the change is created. If you skip a choice, the guard does not silently pick for you — it blocks before you leave the stage in question. If a field is missing, call `/comet` again and the route returns you to the matching decision point to fill it in, rather than editing the file by hand. The recovery paths for a build stage missing `isolation`/`build_mode`/`tdd_mode` are in [Resuming interrupted work](/en/guides/resuming-workflow).
+Most of these fields are copied from project defaults when a change is created. If you skip a choice, the guard blocks before stage exit and routes you back to the correct decision point. You do not need to edit files manually. Recovery for missing `isolation`, `build_mode`, or `tdd_mode` in build is covered in [Resuming interrupted work](/en/guides/resuming-workflow).
 
-### What the guards check before advancing (state-machine hard constraints)
+### What is checked before moving to the next stage
 
 These constraints exist in both guard layers, `comet guard` and `comet state transition`:
 
@@ -141,34 +141,24 @@ When a hotfix/tweak hits an escalation signal (cross-module, new API, schema cha
 - It sets `workflow`/`classic_profile` to `full` in one go, rolls `phase` back to `design`, and clears `design_doc`.
 - This is the **only legal channel** from preset to full — a direct `set phase design` is hard-blocked, and `classic_profile` is machine-owned, so `set classic_profile` is hard-blocked too.
 
-## Fields Comet maintains automatically: do not hand-edit
+## Fields maintained by the system
 
-Comet writes these fields automatically. You do not normally need to care about them, and they are not part of the user-facing field reference. In source they are collectively called machine wire keys, but they split into two groups by whether `comet state set` may modify them:
+These fields are written by Comet to record runtime facts. You do not need to set them manually, and you should not force them with `comet state set`.
 
-| Field | Meaning | Can `set` modify it? |
-| ----- | ------- | -------------------- |
-| `handoff_context` | Path of the design handoff context file | Yes (machine-written but can be overridden by `set`) |
-| `handoff_hash` | Hash of the handoff context | Yes (machine-written but can be overridden by `set`) |
-| `classic_profile` | Set only by the state machine; equals `workflow` | **No** (machine-owned) |
-| `classic_migration` | Classic migration version (currently `1`) | **No** (machine-owned) |
-| `run_id` | Links to the Engine Run state | **No** (machine-owned) |
+Common examples:
 
-`classic_profile`, `classic_migration`, and `run_id` are machine-owned fields, so `set` hard-rejects them (with `is a machine-owned Run field and cannot be set directly`). Only state-machine transition events and the archive flow write them — for example, `preset-escalate` sets `classic_profile` to `full` in one go.
+- `bound_branch`: records which branch this change is bound to, so execution does not continue on the wrong branch.
+- `verify_failures`: the consecutive verification-failure count. `verify-fail` increments it, and `verify-pass` or `archive-reopen` resets it to `0`. After it reaches 3, the next failure pauses and asks you to choose a retry-limit strategy.
+- `archive_confirmation`: Comet writes `pending` after verify passes; it becomes `confirmed` only after your confirmation before archive.
+- `currentStep`, `pending`, `artifacts`, and `trajectory` in `.comet/run-state.json`: written automatically by the Engine runtime.
 
-A few more field groups are also marked machine-owned: Comet writes them at specific moments, and their values reflect "what was bound then and what happened" or "what you already confirmed" — not how you want the flow to run right now:
+If these fields are edited manually, state can diverge from actual code and verification history. The guard will either refuse to continue or route you into recovery handling. Archiving should always go through `/comet-archive`.
 
-- `bound_branch`: records the current branch when isolation is set up. Entry checks and source-write guards block accidental branch drift; do not change it with `set`.
-- `verify_failures`: the consecutive verification-failure count. `verify-fail` increments it, and `verify-pass` or `archive-reopen` resets it to `0`. After it reaches 3, the next failure pauses so you decide the retry-limit strategy.
-- `archive_confirmation`: Comet writes `pending` after verify passes; it becomes `confirmed` only after you confirm before archive. The real archive command requires `confirmed`.
-- `currentStep`, `pending`, `artifacts`, and `trajectory` in `.comet/run-state.json`: written automatically by the Engine runtime; you never write them by hand and should not hand-edit them.
+## How to troubleshoot abnormal states
 
-After these fields are hand-edited, the most direct consequence is that state no longer matches your actual working tree and verification history — the guard either refuses to run or keeps advancing on wrong state. Archiving always goes through `/comet-archive`; do not mark an already-archived change complete by hand.
+First distinguish two situations: interruption (session closed, context compressed, device switched) and state anomaly. For interruption, call `/comet` to resume. Use `comet status` and `comet doctor` only when `.comet.yaml` is missing or malformed, routing is wrong, or declared evidence is missing. The complete flow is in [State damage and recovery](/en/guides/state-recovery).
 
-## Where to look when something goes wrong
-
-First tell the two situations apart: an interrupted session, context compression, or a device change is normal interruption — call `/comet` to resume. You reach for `comet status`/`comet doctor` only when `.comet.yaml` is missing or malformed, a change routes to the wrong place, or a declared piece of evidence cannot be found. The full judging and handling flow is in [State damage and recovery](/en/guides/state-recovery).
-
-### Transition history: state-events.jsonl
+### Check state transition history
 
 Classic state transitions share one set of semantics. Every successful `comet state transition`, `comet guard --apply`, and archive update appends one JSON line to:
 
@@ -190,7 +180,7 @@ Each record contains:
 
 Look here when you want to know why `phase` changed or what the last transition did. For the available transition events and commands, see [comet state](/en/scripts/comet-state) and [Auto-transition](/en/concepts/auto-transition).
 
-### Run-state boundary
+### Distinguish workflow state and runtime details
 
 `.comet.yaml` holds the user-understandable workflow state. Engine execution details live in `.comet/run-state.json`. The two are linked by `run_id`.
 
@@ -204,9 +194,9 @@ Look here when you want to know why `phase` changed or what the last transition 
 
 See [Skill and Engine (Advanced)](/en/skill-creator/engine) for details.
 
-### Diagnostic command entries
+### Common diagnostic commands
 
-Engine-level details (`currentStep`, `pending`, `trajectory`) are not for everyday handling; they are what you look at during troubleshooting. The entry points are two diagnostic commands:
+Engine-level details (`currentStep`, `pending`, `trajectory`) are usually only needed during troubleshooting. Start with these two commands:
 
 - `comet status` — shows an active change's `phase`, verification result, whether the declared evidence actually exists on disk (`runtime_eval`), and a hint about the next step.
 - `comet doctor` — checks the installation, environment, Skill integrity, and whether each change's `.comet.yaml` is valid.
@@ -215,7 +205,7 @@ The detailed usage of both commands and common symptoms are in [State damage and
 
 ## Appendix: `.comet.yaml` field reference
 
-Every active change's `.comet.yaml` contains the fields below. Fields already explained in the body (whether they are machine-owned and who may change them) are covered in the matching section; the tables here list the type, allowed values, and meaning together for lookup. Fields marked machine-owned are maintained automatically by Comet — do not modify them by hand.
+Every active change includes the fields below in `.comet.yaml`. The body explains which fields you confirm and which are system-maintained. The tables here are for quick lookup of value ranges and meanings.
 
 ### Workflow and stage
 
@@ -267,7 +257,7 @@ Every active change's `.comet.yaml` contains the fields below. Fields already ex
 | `archived` | `true` \| `false` | Whether the change is archived |
 | `archive_confirmation` | `null` \| `pending` \| `confirmed` | Machine-owned final confirmation; it is `pending` after verify passes and becomes `confirmed` only after you confirm |
 
-## Next steps
+## Continue reading
 
 - [Classic configuration](/en/classic/configuration) — `.comet/config.yaml` fields, configuration precedence, and environment variables
 - [State damage and recovery](/en/guides/state-recovery) — diagnosis and recovery with `comet status` / `comet doctor`
