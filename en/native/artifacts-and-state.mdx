@@ -3,7 +3,7 @@ title: "Native Products and States"
 description: "Understand what the Native user documentation, the recoverable state across devices, and the native Runtime file are each responsible for. "
 ---
 
-Native places the content that users need to read and synchronize in the "change" directory and the execution process at the project-level Runtime. You usually only need to look at the brief, Spec, `comet-state.yaml` and `verification.md`; Do not manually create or modify the Runtime file.
+Native places the content that users need to read and synchronize in the "change" directory and the execution process at the project-level Runtime. You usually only need to look at the brief, Spec, `comet-state.yaml` and `verification.md`;
 
 ## Project layout
 
@@ -42,7 +42,7 @@ The default layout is as follows:
   </Tree.Folder>
 </Tree>
 
-`native.artifact_root` can be changed to other relative directories within the project, such as `artifacts/comet/`. `.comet/config.yaml` and `.comet/current-change.json` still fall within the project-level boundaries. `.comet/runtime/native/` is managed by the Runtime and is ignored by default. It should not be copied to the change directory or submitted as user documentation.
+`native.artifact_root` can be changed to other relative directories within the project, such as `artifacts/comet/`. `.comet/config.yaml` and `.comet/current-change.json` are bound to the project. `.comet/runtime/native/` is managed by the Runtime and is added to `.gitignore` and ignored by default; it is not copied to the change directory or committed as user documentation.
 
 ## Three types of user-readable files
 
@@ -50,15 +50,24 @@ The default layout is as follows:
 
 The brief explains the objectives, scope, non-objectives, confirmed user decisions, unresolved issues, acceptance examples, and validation expectations. It is the working description of the Shape stage, and users can directly read and modify the requirements.
 
-When hand-editing the brief or a Spec, note the acceptance-item generation rules: the Runtime recognizes as acceptance items only the **acceptance examples at the top level of the brief** and the **complete scenarios in a Spec whose headings start with `Scenario:`**. Descriptive prose, plain lists, and standalone WHEN/THEN lines do not generate additional acceptance items. To widen or narrow the acceptance scope, write in these two formats.
+When hand-editing the brief or a Spec, note where acceptance items come from: the Runtime generates acceptance items from only two places — the **acceptance examples at the top level of the brief** and the **complete scenarios in a Spec whose headings start with `Scenario:`**. Descriptive paragraphs, plain lists, and standalone WHEN/THEN lines are not recognized as acceptance items. So, to adjust the acceptance scope, you can only modify content in these two formats.
 
 ### `specs/<capability>/spec.md`
 
-Each Spec describes the complete behavior of the capability after archiving. When archiving, the Runtime will execute `create`, `modify` or `remove` as declared: create, completely replace, or delete within the controlled path. To declare the removal of a capability, run `comet native spec remove` to express the removal intent - simply deleting the Spec file is not treated as a removal declaration, and that Spec is still handled as existing when archiving. If parallel changes all need to modify the same capability, they will first stop to request a determination of the archiving sequence and will not automatically overwrite.
+A capability is a standalone feature of the project, such as "avatar upload" or "session timeout". Specs are organized by feature, one directory per capability, and the `spec.md` in the directory describes the complete behavior of that feature after archiving. When archiving, the Runtime will execute `create`, `modify` or `remove` as declared: create, completely replace, or delete within the controlled path. To declare the removal of a capability, run `comet native spec remove` to express the removal intent — simply deleting the Spec file is not treated as a removal declaration, and that Spec is still handled as existing when archiving. When parallel changes try to modify the same capability, they will first stop to request a determination of the archiving sequence and will not automatically overwrite files.
 
 ### `comet-state.yaml`
 
-This is the stable state of cross-device recovery. It records the current stage and status, iteration/attempt of the Loop, complete acceptance items and results, Builder handoff, necessary check summaries, Verifier conclusions, blocking causes, limited history and the next action. The new Agent first reads it and then executes it according to the continuation, without relying on the content of the previous round of chat.
+This is the stable state of cross-device recovery. It records the following:
+
+- the current stage and status;
+- Loop progress: `iteration` is the implementation round, incremented each time the Builder submits a new candidate implementation; `attempt` is the number of acceptance attempts on the same candidate implementation;
+- the complete acceptance items and results;
+- the Builder handoff: the handoff note the Builder writes when submitting a candidate implementation, describing this round of changes and declaring the affected acceptance items;
+- necessary check summaries, Verifier conclusions, and blocking causes;
+- the last 50 execution records and the next action.
+
+After a session switch, device switch, or flow interruption, the Agent taking over has no previous conversation history. It first reads this file and then continues with the next action recorded in it (the continuation; for the complete field descriptions, see [Task progress and interruption recovery](/en/native/continuation-and-checkpoints)).
 
 ### `verification.md`
 
@@ -66,7 +75,7 @@ This is the user report generated by the Runtime based on the status, including 
 
 ## Local Runtime
 
-`.comet/runtime/native/` only saves the local execution state files (overlays), logs, short-term locks and recoverable transactions. It may be missing due to equipment replacement or cleaning. The Runtime will rebuild based on the synchronized YAML and will not treat the local execution state as a cross-device fact. Logs are suitable for troubleshooting command output and cannot replace `verification.md`.
+`.comet/runtime/native/` only saves four kinds of local files: execution state files (overlays), logs, operation locks, and recoverable transactions. An operation lock is held only while a single operation runs, prevents two concurrent operations from modifying the same change at once, and is released when the operation ends. This directory may be missing due to equipment replacement or cleaning. The Runtime will rebuild based on the synchronized YAML and will not treat the local execution state as a cross-device fact. Logs are suitable for troubleshooting command output and cannot replace `verification.md`. For which components write these files, see [Inside the Native Runtime](/en/native/runtime).
 
 `.comet/current-change.json` only indicates which workflow/change the next write belongs to, and there is no restriction that a project can only have one active change. Status viewing is read-only. When it is necessary to clarify the ownership, use `comet native select <change-name>`.
 
@@ -95,4 +104,4 @@ The delivery choices when archiving — keep the workspace, merge locally, push,
 
 The successfully archived change only retains user-readable content such as brief, Specs, `comet-state.yaml` and `verification.md`. The local execution directory of this change in `.comet/runtime/native/` will be cleared. The machine files left over from the old version are only processed through migration or read-only adapters and will not become input for the new Native process.
 
-Continue reading: [Verification and Repair ](/en/native/verification-and-repair), [Continuous Advancement ](/en/native/continuation-and-checkpoints) and [Recovery Manual ](/en/native/recovery-playbook).
+Continue reading: [Verification and Repair ](/en/native/verification-and-repair), [Task progress and interruption recovery ](/en/native/continuation-and-checkpoints) and [Recovery Manual ](/en/native/recovery-playbook).

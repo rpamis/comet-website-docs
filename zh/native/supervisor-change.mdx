@@ -16,7 +16,7 @@ Supervisor Change 是 Native 为大型任务提供的并行交付模式。它按
 | 按验收项拆分   | 每个子任务都负责明确的验收项，不采用“前端、后端各做一点”这类模糊分工  |
 | 按依赖自动推进 | Runtime 只安排依赖已经满足的子任务，避免尚未具备条件的任务提前开始    |
 | 独立工作区     | 每个子任务只在自己的 worktree 中修改代码，避免多个 Agent 相互覆盖     |
-| 结果不会串线   | 任务包、基线提交和 `runId` 共同标识当前执行，迟到或重复的结果会被拒绝 |
+| 结果与任务绑定 | 任务包、基线提交和 `runId` 共同标识当前执行，迟到或重复的结果会被拒绝 |
 | 整体统一验收   | 所有子任务集成后，再对完整目标执行一次最终验收                        |
 
 例如，一个权限管理目标可以拆成权限 API、权限配置页面和审计日志。三个结果可以独立实现和验证，但仍属于同一个产品目标，需要统一集成和最终验收。这类任务适合使用 Supervisor Change。
@@ -32,7 +32,7 @@ Comet 会在最终 Shape 确认前检查是否值得拆分。只有同时满足�
 
 需求文字很长、任务条目很多，并不代表适合拆分。如果多个部分需要反复修改同一核心区域，或者拆分后增加的沟通与集成成本高于并行收益，继续使用单个 Native Change 更合适。没有共同最终验收的目标，则应创建多个独立 Change。
 
-拆分草案记录在 `children.yaml`。RC1 使用 `comet.native.children.v2`：`acceptance_index` 保存从 `brief.md` 派生的整体目标验收 ID、来源和完整文字，每个子任务只声明唯一名称、依赖项和自己覆盖的验收 ID。Runtime 会检查名称重复、未知依赖、依赖环和验收遗漏。
+拆分方案记录在 `children.yaml`，RC1 使用 `comet.native.children.v2` 格式。文件中的 `acceptance_index` 保存从 `brief.md` 派生的整体目标验收项，包括每项的验收 ID、来源和完整文字；每个子任务只声明唯一名称、依赖项和自己覆盖的验收 ID。Runtime 会检查名称重复、未知依赖、依赖环和验收遗漏。
 
 ## 用户选择拆分方案与推进方式
 
@@ -40,10 +40,10 @@ Comet 会在最终 Shape 确认前检查是否值得拆分。只有同时满足�
 
 | 选项 | 推进方式           | 实际影响                                                                                                |
 | ---- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| A    | 多会话协作（推荐） | 当前会话只负责统筹；优先由 Codex 独立会话或 Claude Code Agent Teams 执行，宿主不支持时自动改用 subagent |
+| A    | 多会话协作（推荐） | 当前会话只负责统筹；优先由 Codex 独立会话或 Claude Code Agent Teams 执行，平台不支持时自动改用 subagent |
 | B    | 单会话推进         | 不创建独立会话或 Agent Team；当前会话按照同一范围、依赖和验收要求依次完成子任务                         |
 
-推进方式只决定子任务在哪里执行，不会改变拆分结果、依赖、验收标准或集成规则。确认 Supervisor 拆分时，Runtime 会把选择作为 `coordination_mode` 写入 `comet-state.yaml`。恢复流程或因需求变化重新进入 Shape 时会沿用这个选择，不重复询问。只有出现新的用户可见决定时，流程才会返回 Shape，请用户重新确认。
+推进方式只决定子任务在哪里执行；拆分结果、依赖、验收标准和集成规则在两种方式下保持一致。确认 Supervisor 拆分时，Runtime 会把选择作为 `coordination_mode` 写入 `comet-state.yaml`。恢复流程或因需求变化重新进入 Shape 时会沿用这个选择，只有出现新的用户可见决定时，流程才会返回 Shape，请用户重新确认。
 
 确认之前，Runtime 不会创建子任务、worktree 或外部会话。包含两个或更多子任务时，普通的“确认”也不能代替推进方式选择。
 
@@ -59,19 +59,19 @@ Shape 确认后，Runtime 会先为主任务创建专用的集成分支和集成
 - 用于绑定任务回报的 `runId`；
 - 依赖条件和停止条件。
 
-Runtime 通过 `readyChildren` 告诉主会话哪些子任务现在可以开始。多会话模式默认最多同时启动两个互不依赖的子任务；单会话模式按顺序执行。需要临时改为串行推进时，可以使用：
+Runtime 通过 `readyChildren` 告诉主会话哪些子任务现在可以开始。多会话模式默认最多同时启动两个互不依赖的子任务；单会话模式按顺序执行。需要临时改为串行时，由主会话在分发任务时指定：
 
 ```bash
 comet native next <supervisor-change> --max-parallel 1
 ```
 
-这个参数只限制同时执行的任务数量，不会改变任务依赖或验收范围。
+这个参数只限制同时执行的任务数量，任务依赖和验收范围保持不变。
 
 ## 在 Codex 中采用多会话并行推进
 
 在 Codex 中选择多会话协作后，当前会话成为主会话。它负责分配任务、持续检查进度、处理阻塞、让 Runtime 集成已经验证的结果，并完成主任务的最终 Verify。主会话不直接进入子任务 worktree 修改代码。
 
-`readyChildren` 中的每个子任务都会交给一个用户可见的独立任务。独立任务沿用当前项目，并直接进入 Runtime 已经准备好的子任务目录，无需另外创建 worktree。任务完成后，主会话仍要等待子任务 Verify 和 Runtime 集成，不能把独立任务的完成消息当作交付结果。
+`readyChildren` 中的每个子任务都会交给一个用户可见的独立任务。独立任务沿用当前项目，并直接进入 Runtime 已经准备好的子任务目录，无需另外创建 worktree。独立任务报告完成后，结果还要经过子任务 Verify 和 Runtime 集成；主会话以集成后的状态为准，才继续下一步。
 
 <SupervisorVideo
   src="/vedio/codex.mp4"
@@ -91,7 +91,7 @@ $env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
 
 当前会话作为 team lead，为 `readyChildren` 中的每个子任务分配一个有明确名称的 teammate。teammate 只在 Runtime 指定的子任务 worktree 中工作，不能自行创建新的工作区、领取依赖尚未满足的子任务、集成主任务分支或创建嵌套团队。
 
-Agent Teams 负责运行多个会话，Native Runtime 仍然负责工作区、任务状态、验证和集成。团队成员的消息不能覆盖 Runtime 状态，也不能代替主任务的最终验收。
+Agent Teams 负责运行多个会话，Native Runtime 仍然负责工作区、任务状态、验证和集成：任务状态以 Runtime 记录为准，主任务的最终验收也由它执行，团队成员的消息只作为进度参考。
 
 <SupervisorVideo
   src="/vedio/claude%20code.mp4"
@@ -114,7 +114,7 @@ Agent Teams 负责运行多个会话，Native Runtime 仍然负责工作区、�
 
 ## 集成完成后统一验收
 
-所有子任务进入 `integrated` 后，Runtime 会立即推进主任务的最终 Verify，不需要用户再次发送“继续”。最终 Verify 在集成 worktree 中运行至少一项集成检查，并覆盖整体目标的完整验收范围。
+所有子任务进入 `integrated` 后，Runtime 会立即推进主任务的最终 Verify。最终 Verify 在集成 worktree 中运行至少一项集成检查，并覆盖整体目标的完整验收范围。
 
 最终 Verify 通过后，Supervisor Change 才能进入 Archive。用户按 Native 的归档交付选项决定保留工作区、本地合并、推送或创建 PR（选项语义见[归档与交付](/zh/native/archive-and-delivery)），目标分支在最终交付前不会被提前修改。
 
@@ -122,13 +122,9 @@ Agent Teams 负责运行多个会话，Native Runtime 仍然负责工作区、�
 
 ## 可恢复的任务进度
 
-主会话可以通过以下命令查看子任务汇总、`readyChildren`、集成状态和下一步：
+子任务汇总、`readyChildren`、集成状态和下一步动作都记录在 Runtime 状态中，主会话在恢复或推进任务时会通过 `comet native status <supervisor-change> --details --json` 读取。你只需要让 Agent 继续当前任务，这些查询和衔接由主会话自动完成。
 
-```bash
-comet native status <supervisor-change> --details --json
-```
-
-恢复任务时，Comet 以 Runtime 持久化的 `coordination_mode` 为准，不重复创建已有子任务或 worktree。`multi-session` 继续使用多会话协作，`single-session` 继续由当前会话按顺序推进。
+在恢复任务时，Comet 以 Runtime 持久化的 `coordination_mode` 为准，不重复创建已有子任务或 worktree。`multi-session` 继续使用多会话协作，`single-session` 继续由当前会话按顺序推进。
 
 如果原来的 Codex 独立会话或 Claude Code Agent Team 已经不存在，Comet 会重新读取 Runtime，并在 `multi-session` 下自动改用 subagent。已经派发但丢失的任务会先通过 `supervisor-cancel` 使旧 `runId` 失效，再使用新的任务包和 `runId` 重新派发；旧执行的迟到结果会被拒绝。subagent 也不可用时，Comet 会报告真实阻塞，不会自动切换为单会话推进。
 

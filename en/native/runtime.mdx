@@ -1,0 +1,84 @@
+---
+title: "Native Runtime components"
+description: "Understand what Native Runtime is, which components it includes, what each component does, and the boundary of its capabilities."
+---
+
+**Runtime** is the part of Comet that controls workflow progression, stores state, and records evidence. Builder, Reviewer, and Verifier are model-driven and handle implementation, review, and judgment. Runtime follows fixed rules and does not make model-style subjective decisions. Every Native stage transition goes through Runtime: the Agent calls `comet native`, Runtime validates current state, runs the corresponding action, and returns the next step.
+
+You do not operate Runtime directly. In daily use, enter `/comet` or `/comet-native` in the Agent, and the Skill calls commands based on Runtime's continuation. If you suspect state issues, run `comet native doctor` to check health.
+
+## Component overview
+
+Runtime includes eight components:
+
+| Component | Responsibility | When you notice it |
+| --- | --- | --- |
+| State machine | Stage progression, gates, and round budgets | You cannot enter Build before goals are confirmed; it pauses when failures hit limits |
+| Continuation | Generate next commands and pending decisions | The `NEXT` prompt after each command and decision requests relayed by the Agent |
+| Check executor | Actually run test/build commands | Verify-stage check results and command logs |
+| Receipts and evidence | Bind conclusions to exact code and scope | Old verification conclusions become invalid after code changes |
+| State files | Store syncable state and local execution state | Progress is restored from `comet-state.yaml` on another device |
+| Locks and transactions | Prevent concurrent conflicts and keep writes recoverable | Conflict prompts in parallel changes; archive resumes from completed steps after interruption |
+| Trace and checkpoints | Record progression history and recovery anchors | Work continues after session interruption without re-explaining finished parts |
+| Write guard | Block implementation writes outside valid stages | Agent code edits are rejected outside Build |
+
+The first four components directly participate in the acceptance loop. The last four support state persistence and write safety.
+
+## State machine: deciding the next step
+
+The state machine stores each change's current progress: stage (`Shape`, `Build`, `Verify`, `Archive`), overall status (`active`, `await-user`, `blocked`, `done`), and Build ↔ Verify loop counters, including implementation `iteration`, verification `attempt`, failure count, and no-progress count.
+
+Stage progression has explicit gates: Native enters Build only after you confirm Shape goals, scope, and key decisions. It enters Archive only after all acceptance items pass. If failures reach configured limits, or if multiple rounds fail to reduce the unpassed acceptance set, Runtime stops auto-advancement and returns the decision to you. Runtime enforces these rules; the Agent cannot bypass them.
+
+For full gate and budget rules, see [Native Loop](/en/native/native-loop). For failure-limit configuration, see [Native configuration](/en/native/configuration).
+
+## Continuation: the next command
+
+Every Runtime response includes a continuation that states one of four outcomes: continue (with full command arguments), wait for user (with questions and mutually exclusive options), resolve a block, or finish. The Agent only executes returned commands and cannot assemble progression commands on its own.
+
+Progression and decision commands include state-version and expected-action checks. If state changes between operations, Runtime rejects outdated commands and requires you to read the latest continuation first, preventing stale results from overwriting current state.
+
+For field details and handling of all outcomes, see [Task advancement and interruption recovery](/en/native/continuation-and-checkpoints).
+
+## Check executor: running commands for real
+
+Runtime executes Verify checks directly. It runs tests, builds, and other project commands, and records status, exit code, duration, and output for each command. Logs are stored under local `logs/`. Checks reported in Builder handoff only describe candidate implementation and do not replace Runtime execution results. Extra checks requested by Verifier are also executed and recorded by Runtime.
+
+Runtime can reuse already-passed identical checks under the same candidate and filters duplicated requests. It also provides a read-only built-in check that scans textual issues in implementation scope, such as leftover merge-conflict markers. You can rerun it with `comet native check`.
+
+For where checks fit in acceptance, see [Native Loop](/en/native/native-loop) and [Verification and repair](/en/native/verification-and-repair).
+
+## Receipts and evidence: binding conclusions to content
+
+Each check and acceptance run produces a receipt. A receipt records the conclusion and binds it to code version, acceptance scope, and content hash at that time. After implementation changes, old receipts become invalid and are not reused as current conclusions. Verifier results with identity mismatch, stale timing, or missing coverage are also rejected.
+
+`verification.md` is the user-facing report for this evidence, including executed checks, per-item acceptance results, risks, and conclusion. If missing or outdated, Runtime can rebuild it from state.
+
+## State files: syncable and local layers
+
+Runtime persists state in two layers. `comet-state.yaml` inside the change directory stores syncable cross-device state and serves as the recovery source of truth. `.comet/runtime/native/` under project root stores local execution state, logs, locks, and transactions, and does not sync with the project. If local files are missing after device switch or cleanup, Runtime rebuilds from progress recorded in YAML.
+
+For directory layout and cross-device recovery details, see [Products and status](/en/native/artifacts-and-state).
+
+## Locks and transactions: mutual exclusion and recoverable writes
+
+Before changing state, Runtime acquires a project-level lock so only one process writes state at a time. If unfinished transactions are detected, Runtime restores them before allowing new changes. Cross-file updates are executed transactionally. For example, archive moves change directories and updates Specs. If interrupted, it resumes from completed steps and avoids half-finished state. All writes first go to temporary files, then replace targets atomically.
+
+For concurrency, version, and path validation details, see [Runtime protection and fault recovery of Native](/en/native/safety-and-recovery).
+
+## Trace and checkpoints: resume from breakpoints
+
+Runtime records progression as append-only events and writes checkpoints at key positions. After session interruption, Agent replacement, or local execution-state loss, it resumes from recorded progress in files, not from chat memory.
+
+## Write guard: blocking out-of-bound writes
+
+Platform-installed Hooks check targets before writes happen. Implementation code can be written only during Build. Runtime-managed files such as `comet-state.yaml` and `verification.md` reject Agent writes. This layer complements Runtime validation: Hooks block erroneous writes visible to the platform, and Runtime revalidates state, workspace, and candidate on each command execution.
+
+## What Runtime does not do
+
+- It does not write business code. Builder implements; Runtime controls workflow.
+- It does not decide whether requirements are satisfied. Acceptance conclusions come from an independent read-only Verifier. Runtime proves checks actually ran and results match current code.
+- It does not provide operating-system-level sandboxing. It governs its own state files and formal artifacts, not arbitrary processes.
+- It does not accept manual state edits. Directly editing Runtime-managed files can break state consistency. Use `comet native doctor` first when adjustment is needed.
+
+Continue reading: [Native Loop](/en/native/native-loop), [Products and status](/en/native/artifacts-and-state), and [Runtime protection and fault recovery of Native](/en/native/safety-and-recovery).

@@ -9,12 +9,12 @@ Native 是 Comet 为强模型设计的需求工作流。Fable 5、GPT-5.6 等模
 
 Native 只规定两件事：
 
-- **把需求固定下来**：用 `brief.md` 和完整目标 Specs 明确“要做什么”。
+- **把需求固定下来**：用 `brief.md`（记录目标、范围、非目标和已确认的用户决定）和完整目标 Specs 明确“要做什么”。
 - **用证据判断是否完成**：由 Runtime 运行必要检查，再由独立 Verifier 判断结果是否满足验收标准。
 
 计划、实现、测试和审查方法仍由模型自主选择。
 
-这个取舍有实测数据支撑。与 Classic 的对齐评估（16 个任务、48 次运行，取双方均通过的 41 组配对样本）里，Native 的总 token 少 **76.8%**，Agent 轮次少 **57.4%**，耗时短 **47.4%**，三次全通过率 **87.5%**。实验设计和原始数字见 [Native 与 0.4.0 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
+在Comet Eval内与 Classic 的评估实验（16 个任务、48 次运行，取双方均通过的 41 组配对样本）里，Native 的总 token 少 **76.8%**，Agent 轮次少 **57.4%**，耗时短 **47.4%**，三次全通过率 **87.5%**。实验设计和原始数字见 [Native 与 0.4.0 Classic 真实评估](/zh/eval/comet-native-vs-040-experiment)。
 
 ![约 100 行的 Native Skill 承载复杂长程工作流；在 16 个真实任务、每个任务运行 3 次的评估中，对比 Classic 显著减少 Token 和模型耗时，RC1 进一步提高重复运行稳定性](/img/rc1-highlights-v2/02-native-eval-landscape.png)
 
@@ -24,20 +24,20 @@ Shape 把用户目标转化为 brief、Specs 和可验证的验收项；Build �
 
 ![Native Runtime 以 Shape、Build、Verify、Archive 组成可恢复执行循环，并通过 Portable State、Guarded Transitions 和 Evidence Gates 保持状态可恢复、转换受控、完成结论有证据](/img/rc1-highlights-v2/07-recoverable-runtime-landscape.png)
 
-任何未通过项都会带着明确缺口回到 Build，修复后重新验证；只有所有验收项都通过，才进入 Archive。遇到新的用户决定或无法继续的阻塞时，Loop 会立即暂停并交还用户，避免无效重试。
+任何未通过项都会连同失败原因一起回到 Build，修复后重新验证；只有所有验收项都通过，才进入 Archive。遇到新的用户决定或无法继续的阻塞时，Loop 会立即暂停并交还用户，避免无效重试。
 
 ![loop流程图](/img/native-loop-goal.png)
 
 ### 与 `/goal` 的区别
 
-Native Loop 本质上也是一种 Goal Loop。它和 [`/goal`](https://learn.chatgpt.com/use-cases/follow-goals) 都让 Agent 围绕可验证的终点持续推进。区别在于，`/goal` 提供通用的长期执行能力；Native 进一步把目标变成一套面向软件研发的项目协议。
+Native Loop 也是一种 Goal Loop。它和 [`/goal`](https://learn.chatgpt.com/use-cases/follow-goals) 都让 Agent 围绕可验证的终点持续推进。区别在于，`/goal` 提供通用的长期执行能力；Native Loop 专门为软件研发定义了固定的阶段、验收标准和状态管理。
 
 | 对比项   | `/goal`                    | Comet Native                                         |
 | -------- | -------------------------- | ---------------------------------------------------- |
 | 目标定义 | 用户提供目标和停止条件     | Shape 将目标写成 brief、Specs 和逐项验收标准         |
 | 状态恢复 | Codex 保存 Goal 的运行状态 | 状态随项目保存，可在新会话中从 Runtime 继续          |
 | 完成判定 | Codex 判断是否达到停止条件 | Runtime 执行检查，再由独立 Verifier 根据证据逐项验收 |
-| 工程协作 | 聚焦目标的持续执行         | 内置分支、worktree、并行任务、修复循环和归档管理     |
+| 工程协作 | 聚焦目标的持续执行         | 内置分支、worktree、并行任务、失败自动返回修复和归档管理     |
 | 结果沉淀 | 完成当前 Goal              | 留下可审查的需求、状态、验收结果和归档记录           |
 
 换句话说，Native 在通用 Goal 的持续执行之上，补齐了软件研发需要的**目标定义、状态恢复、证据验收和交付归档**。你也可以组合使用两者：让 `/goal` 提供长时间持续执行，让 Native 负责研发过程中的目标、工作区、状态和完成判定。
@@ -54,7 +54,7 @@ Native Loop 本质上也是一种 Goal Loop。它和 [`/goal`](https://learn.cha
 
 ## 从目标到交付，四个阶段自动推进
 
-四个阶段聚焦四个关键结果：目标清楚、实现可控、验收可信、交付可追溯。模型可以自主决定具体执行方法，Runtime 负责自动衔接阶段，并在需要你决定时暂停。
+四个阶段聚焦四个关键结果：目标清楚、实现可控、验收可信、交付可追溯。模型可以自主决定具体执行方法，Runtime 负责自动衔接阶段，并在需要你决定时暂停。Runtime 的内部构成，见 [Native Runtime 的组成](/zh/native/runtime)。
 
 ### Shape：把模糊需求变成可执行目标
 
@@ -81,15 +81,15 @@ Shape 会先调查仓库，再根据已知信息动态提出需要确认的问�
 
 ![Comet Native Build 在普通 Change 中自主实现，或通过 Supervisor Change 将满足依赖的子任务放入独立 worktree 并行完成后统一集成](/img/native-build-workspaces.png)
 
-Builder 最后提交可供验收的 handoff，完成结论由 Verify 给出。深入了解：[Supervisor Change](/zh/native/supervisor-change)。
+Builder 最后提交的代码不是“已完成”的定论，而是一份候选实现，由 Verify 判断是否通过。深入了解：[Supervisor Change](/zh/native/supervisor-change)。
 
 ### Verify：让每一项完成都有证据
 
-Verify 接手 Builder 提交的候选结果。Runtime 根据完整验收列表运行必要检查，再启动一个全新的只读 Verifier Subagent。它不参与实现，也不能修改代码，先读当前范围的验收场景、brief、完整 Specs、实际实现和 Runtime 检查结果逐项验收，最后才把 Builder handoff 当作辅助线索，保证判断独立。漏项、重复项、未知验收项或失败检查均判为未通过。
+Verify 接手 Builder 提交的候选实现。Runtime 根据完整验收列表运行必要检查，再启动一个全新的只读 Verifier Subagent。它不参与实现，也不能修改代码，先读当前范围的验收场景、brief、完整 Specs、实际实现和 Runtime 检查结果逐项验收，最后才把 Builder handoff 当作辅助线索，保证判断独立。漏项、重复项、未知验收项或失败检查均判为未通过。
 
-如果验收失败，Runtime 会把具体缺口带回 Build。修复轮优先检查未通过项和受到影响的范围；局部问题解决后，还要再进行一次覆盖全部验收项的最终验证。连续失败、进展停滞或执行错误达到上限时，Loop 会暂停并说明原因，避免继续消耗轮次。
+如果验收失败，Runtime 会把失败原因带回 Build。Builder 修复时优先检查未通过项和受到影响的范围；局部问题解决后，还要再进行一次覆盖全部验收项的最终验证。连续失败、进展停滞或执行错误达到上限时，Loop 会暂停并说明原因，避免继续消耗轮次。
 
-深入了解：[Native Loop](/zh/native/native-loop)和[验证与修复](/zh/native/verification-and-repair)。
+深入了解：[Native Loop](/zh/native/native-loop) 和 [验证与修复](/zh/native/verification-and-repair)。
 
 ### Archive：把通过验收的结果沉淀下来
 
@@ -97,17 +97,21 @@ Verify 接手 Builder 提交的候选结果。Runtime 根据完整验收列表�
 
 Archive 会复用已通过的检查，同时确认代码、规格和验收结果仍然匹配。如果归档前需求或实现发生变化，旧结果会失效，并回到正确的阶段重新处理。
 
-最后，Comet 根据你的交付选择保留当前工作区、合并结果、推送分支或创建 PR。current 工作区的 change 不询问这些：Comet 展示当前分支和目录，归档不做任何 merge、push 或 PR，你确认后直接完成归档。branch 或 worktree 隔离的 change 在归档前给出五个互斥选项：仅保留工作区、本地合并、推送、推送并创建 PR、暂缓归档。以后无论换会话还是换设备，都能从项目中的正式产物追溯这次需求如何完成。深入了解：[归档与交付](/zh/native/archive-and-delivery)、[产物与状态](/zh/native/artifacts-and-state)和[连续推进与恢复](/zh/native/continuation-and-checkpoints)。
+最后，Comet 根据你的交付选择保留当前工作区、合并结果、推送分支或创建 PR。change 的工作区有三种隔离模式：current（直接在你当前所在的分支和目录中完成）、branch 和 worktree。current 工作区的 change 不询问交付方式：Comet 展示当前分支和目录，归档不做任何 merge、push 或 PR，你确认后直接完成归档。branch 或 worktree 隔离的 change 在归档前给出五个互斥选项：仅保留工作区、本地合并、推送、推送并创建 PR、暂缓归档。以后无论换会话还是换设备，都能从项目中的正式产物追溯这次需求如何完成。深入了解：[归档与交付](/zh/native/archive-and-delivery)、[产物与状态](/zh/native/artifacts-and-state) 和 [连续推进与恢复](/zh/native/continuation-and-checkpoints)。
 
-## 状态与恢复
+## 状态与中断恢复
 
-`comet-state.yaml` 保存阶段、Loop、验收、handoff、检查摘要、Verifier 结论、阻塞原因、有限的 history 和下一步；`state.json`、日志、锁和事务这些本机文件都在 `.comet/runtime/native/`。换设备或本机执行状态文件缺失时从 YAML 重建；代码、artifact root 或 branch/worktree 对不上，就停下来等你。
+当你关闭会话、换设备或流程中断后，Comet 读取保存在项目里的状态，从上次停下的地方继续。状态分散在三类位置：
 
-`.comet/current-change.json` 记录当前写入属于哪个 change，避免将后续修改写到其他需求。`status` 和 `show` 保持只读，查询期间会继续保留这个指向。如果当前 change 已删除或归档，可以从活跃 change 中重新选择：
+1. change 目录下的 `comet-state.yaml`：保存阶段、Loop、验收、handoff、检查摘要、Verifier 结论、阻塞原因、最近 50 条执行记录和下一步。换设备或本机执行状态文件缺失时，Runtime 从这份 YAML 重建。
+2. `.comet/runtime/native/` 下的本机文件：`state.json`、日志、锁和事务。这些文件不跨设备同步，丢失后按上一条从 YAML 重建。
+3. `.comet/current-change.json`：记录当前写入属于哪个 change，避免将后续修改写到其他需求。`status` 和 `show` 保持只读，查询期间会继续保留这个指向。如果当前 change 已删除或归档，可以从活跃 change 中重新选择：
 
-```bash
-comet native select <change-name>
-```
+   ```bash
+   comet native select <change-name>
+   ```
+
+在恢复时，如果代码、artifact root 或 branch/worktree 与记录的状态不匹配，Comet 会停下来等你处理，不会继续执行。
 
 ## 和 Classic 的关系
 

@@ -10,38 +10,52 @@ Comet saves the project configuration in `.comet/config.yaml` in the root direct
 The following configuration is suitable for new projects that use Chinese documentation:
 
 ```yaml
+# Configuration schema version managed by Comet
 schema: comet.project.v1
+# /comet enters Native by default
 default_workflow: native
+# Workflows enabled in this project
 workflows:
   - native
+# Run a read-only resume probe for natural-language "continue" requests
 ambient_resume: true
 
+# Personal Memory (shared by Native and Classic)
 memory:
+  # Learn reusable personal preferences and collaboration habits from workflow outcomes
   learning: true
+  # Retrieve and inject relevant personal memory for the current task
   retrieval: true
 
+# Project Knowledge source
 knowledge:
   provider: local
 
+# Native core fields
 native:
+  # Directory for changes, Specs, and reports: <artifact_root>/comet/
   artifact_root: docs
+  # Language for new change briefs, Specs, and reports
   language: zh-CN
+  # batch: ask a set of questions per round; sequential: ask one per round
   clarification_mode: batch
+  # automatic: archive immediately after Verify passes; required: wait for your confirmation
   archive_confirmation: automatic
+  # Consecutive failed implementation rounds allowed for one requirement before pausing
   max_verify_failures: 5
 ```
 
 This will cause `/comet` to default to Native, save the change document in `docs/comet/`, generate the official product in Chinese, and complete the requirement clarification in Batch mode.
 
 <Tip>
-Prioritize using `comet init --workflow native` to create configurations and `comet update` to complete or upgrade managed fields. Do not merely add a workflow name in YAML to replace the installation of Skill, Rule and Hook.
+Prioritize using `comet init --workflow native` to create configurations and `comet update` to complete or upgrade configuration fields.
 </Tip>
 
-## Entrance and Restoration
+## Default workflow and natural-language resume
 
 |Field|Default value|The influence on you|
 | --- | --- | --- |
-| `schema` | `comet.project.v1` |The configuration format version is managed by Comet and should not be changed manually|
+| `schema` | `comet.project.v1` |The configuration format version managed by Comet|
 | `default_workflow` |Select during initialization|Decide whether `/comet` will default to Native or Classic|
 | `workflows` |Select during initialization|Declare that the project has enabled `native`, `classic`, or both|
 | `ambient_resume` | `true` |Natural language seems to be running read-only recovery probes while continuing with old tasks|
@@ -142,9 +156,9 @@ knowledge:
       - packages/*/README.md
 ```
 
-`knowledge.local.include` only accepts Markdown glob within the project. The path should use `/` and must not go beyond the project root directory. These paths will be appended to the built-in corpus instead of being replaced.
+`knowledge.local.include` only accepts Markdown glob within the project. The path should use `/` and must not go beyond the project root directory. These paths are appended to the built-in corpus.
 
-If the team has deployed Comet Retrieval API v1, it can switch to the remote Provider:
+If your team already has a RAG knowledge system, you can switch to a remote Provider:
 
 ```yaml
 knowledge:
@@ -156,13 +170,15 @@ knowledge:
     timeout_ms: 5000
 ```
 
-`endpoint` is the complete URL where your service actually receives requests. Comet will directly send `POST` to this address and will not automatically append `/comet` or any other path. The sample domain name needs to be replaced with your real interface address.
+`endpoint` is the complete URL where your service actually receives requests. Comet sends `POST` requests to this address directly. Replace the sample domain with your real endpoint.
 
-The remote address must use HTTPS. Only localhost and other loopback addresses can use HTTP. Fill in the environment variable names for `token_env`. Do not directly write the Token into the configuration. The timeout period is allowed from `100` to `30000` milliseconds.
+The remote address must use HTTPS. Only localhost and other loopback addresses can use HTTP. Set `token_env` to an environment variable name, and avoid writing the token directly in configuration. Timeout can be between `100` and `30000` milliseconds.
 
 ## Hook write release
 
 `hook.allow_paths` is an advanced configuration shared by Native and Classic. It allows the specified directory to continue writing during the originally protected phase, which is empty by default.
+
+If Shape should still block code changes but you need writes under `docs/team-notes` while keeping other Hook protections, configure:
 
 ```yaml
 hook:
@@ -178,7 +194,7 @@ This configuration will bypass the stage write restrictions of the corresponding
 
 ## Custom PR creation command
 
-Only when the warehouse must use its own PR template generator or remote verification script is it necessary to configure `native.finish.pull_request`:
+By default, when you choose push + create PR during Archive, Comet runs `gh pr create --fill` and fills the title and body from commit messages. If your repository requires a custom PR template (for example, checklist fields or linked issue fields), or requires post-create remote validation scripts, the default flow may fail repository rules. `native.finish.pull_request` lets you replace only the PR creation step with your own command while keeping the rest of delivery unchanged:
 
 ```yaml
 native:
@@ -189,7 +205,7 @@ native:
       timeout_ms: 120000
 ```
 
-The repository command is responsible for PR titles, bodies, templates, and library-specific validations. Comet is still responsible for submitting, pushing, finding existing PRS, verifying base/head/head SHA and failure recovery.
+The repository command is responsible for generating PR title, body, and template, and for repository-specific validations. Comet still handles commit, branch push, existing PR lookup, base/head/head SHA checks, and failure retry.
 
 Please note the following restrictions:
 
@@ -198,13 +214,5 @@ Please note the following restrictions:
 - The default `timeout_ms` is `120000`, and the maximum is `600000`.
 - The command is executed in the project root directory, receiving `comet.native.pull-request-finish-input.v1` JSON via stdin and returning `comet.native.pull-request-finish-result.v1` JSON via stdout.
 - Even if custom commands are configured, it is necessary to install and authenticate the GitHub CLI (`gh`) for Comet to independently verify the remote status.
-
-When not configured, Comet uses the compatible `gh pr create --fill` process.
-
-## Do not manually configure fields
-
-Currently, Native v4 no longer writes `native.snapshot` into the user configuration. The Runtime can still read the old configuration to complete compatibility and migration, but `comet update` will remove this old block. Don't add it again to adjust the acceptance scope.
-
-`native.pending_root_move` is the Runtime recovery state during the product directory migration and should not be created or modified manually. The old version of change-local Runtime, receipt and evidence files are also only used for migration or compatibility; Run `comet update` and `comet doctor` to process them.
 
 Continue reading: [User Selection Points and Requirements Clarification Protocol ](/en/native/decision-ownership), [Products and Status ](/en/native/artifacts-and-state) and [Recovery Manual ](/en/native/recovery-playbook).

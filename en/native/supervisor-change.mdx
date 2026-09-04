@@ -16,7 +16,7 @@ No matter how many sub-tasks it is split into, there is still only one final del
 |Split by acceptance items|Each sub-task is responsible for a clear acceptance item, and the ambiguous division of labor such as "each doing a little at the front end and the back end" is not adopted|
 |Automatically advance by dependency|Runtime only arranges sub-tasks that have already met their dependencies to prevent tasks that have not yet met the conditions from starting ahead of schedule|
 |Independent workspace|Each sub-task only modifies the code within its own worktree to prevent multiple agents from overwriting each other|
-|The result will not be connected|Task packages, baseline submissions, and `runId` jointly identify the current execution. Late or duplicate results will be rejected|
+|Results bound to their task|Task packages, baseline commits, and `runId` jointly identify the current execution. Late or duplicate results are rejected|
 |Overall unified acceptance|After integrating all sub-tasks, conduct a final acceptance of the complete target once again|
 
 For example, a permission management objective can be broken down into a permission API, a permission configuration page, and an audit log. The three results can be independently achieved and verified, but they still belong to the same product objective and require unified integration and final acceptance. This type of task is suitable for using Supervisor Change.
@@ -32,7 +32,7 @@ Comet will check whether it is worth splitting before the final Shape is confirm
 
 A long demand text and numerous task items do not necessarily mean they are suitable for splitting. If multiple parts need to repeatedly modify the same core area, or the increased communication and integration costs after splitting are higher than the benefits of parallelism, it is more appropriate to continue using a single Native Change. If there is no common final acceptance target, multiple independent changes should be created.
 
-The split draft is recorded at `children.yaml`. RC1 uses `comet.native.children.v2`: `acceptance_index` to store the overall target acceptance ID, source, and complete text derived from `brief.md`. Each sub-task only declares a unique name, dependency, and its own overridden acceptance ID. The Runtime checks for name duplicates, unknown dependencies, dependency loops, and acceptance omissions.
+The split plan is recorded in `children.yaml`, using the `comet.native.children.v2` format in RC1. The `acceptance_index` in this file stores the acceptance items of the overall target derived from `brief.md`, including each item's acceptance ID, source, and full text; each sub-task only declares a unique name, its dependencies, and the acceptance IDs it covers. The Runtime checks for duplicate names, unknown dependencies, dependency cycles, and acceptance omissions.
 
 ## The user selects the splitting plan and the advancement method
 
@@ -40,10 +40,10 @@ Before confirmation, Comet will display the overall goal, sub-task list, depende
 
 |Options|Promotion method|Actual impact|
 | ---- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| A    |Multi-session collaboration (Recommended|The current session is only responsible for overall planning. It is preferentially executed by Codex Independent Session or Claude Code Agent Teams. subagent is automatically switched when the host does not support it|
+| A    |Multi-session collaboration (Recommended|The current session is only responsible for overall planning. It is preferentially executed by Codex Independent Session or Claude Code Agent Teams. subagent is automatically used instead when the platform does not support them|
 | B    |Single-session advancement|Do not create independent sessions or Agent teams; The current session completes sub-tasks in sequence according to the same scope, dependencies, and acceptance requirements|
 
-The advancement mode only determines where sub-tasks are executed and does not change the split results, dependencies, acceptance criteria, or integration rules. When confirming the Supervisor split, the Runtime will write the selection as `coordination_mode` to `comet-state.yaml`. When restoring the process or re-entering Shape due to changes in requirements, this option will be continued without repeated inquiries. The process will only return the Shape when a new user-visible decision appears, asking the user to reconfirm.
+The advancement mode only determines where sub-tasks are executed; the split results, dependencies, acceptance criteria, and integration rules stay the same under both modes. When confirming the Supervisor split, the Runtime writes the selection as `coordination_mode` to `comet-state.yaml`. Resuming the flow or re-entering Shape after a requirement change reuses this selection; only a new user-visible decision sends the flow back to Shape for you to reconfirm.
 
 Before confirmation, the Runtime will not create sub-tasks, worktrees, or external sessions. When there are two or more sub-tasks involved, the ordinary "confirmation" cannot replace the selection of the advancement method.
 
@@ -59,19 +59,19 @@ Each task package contains:
 - `runId` for binding task reports;
 - Dependency conditions and stop conditions.
 
-The Runtime informs the main session through `readyChildren` which sub-tasks can start now. By default, the multi-session mode can start up to two independent sub-tasks simultaneously at most. The single-session mode is executed in sequence. When it is necessary to temporarily change to serial propulsion, the following can be used:
+The Runtime informs the main session through `readyChildren` which sub-tasks can start now. By default, the multi-session mode can start up to two independent sub-tasks simultaneously at most. The single-session mode runs sub-tasks in sequence. To switch to serial execution temporarily, the main session specifies the following when dispatching tasks:
 
 ```bash
 comet native next <supervisor-change> --max-parallel 1
 ```
 
-This parameter only limits the number of tasks executed simultaneously and does not change the task dependencies or acceptance scope.
+This parameter only limits the number of tasks running at the same time; task dependencies and the acceptance scope stay unchanged.
 
 ## Adopt multi-session parallel advancement in Codex
 
 After selecting multi-session collaboration in Codex, the current session becomes the main session. It is responsible for assigning tasks, continuously checking progress, handling blockages, integrating verified results into the Runtime, and completing the final Verify of the main task. The main session does not directly enter the sub-task worktree to modify the code.
 
-Each sub-task in `readyChildren` will be assigned to an independent task visible to the user. Independent tasks continue to use the current project and directly enter the subtask directory already prepared by the Runtime, without the need to create a separate worktree. After the task is completed, the main session still needs to wait for the integration of the sub-tasks Verify and Runtime. The completion message of the independent task cannot be regarded as the delivery result.
+Each sub-task in `readyChildren` will be assigned to an independent task visible to the user. Independent tasks continue to use the current project and directly enter the subtask directory already prepared by the Runtime, without the need to create a separate worktree. When an independent task reports completion, the result still has to go through the sub-task Verify and Runtime integration; the main session continues with the next step based on the integrated state.
 
 <SupervisorVideo
   src="/vedio/codex.mp4"
@@ -91,7 +91,7 @@ $env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
 
 The current session acts as the team lead and assigns a clearly named teammate to each subtask in `readyChildren`. only works within the subtask worktree specified by the Runtime and cannot create new workspaces, claim subtasks with unfulfilled dependencies, integrate main task branches, or create nested teams on its own.
 
-Agent Teams is responsible for running multiple sessions, while Native Runtime is still responsible for the workspace, task status, validation, and integration. Messages from team members cannot override the Runtime state and cannot replace the final acceptance of the main task.
+Agent Teams is responsible for running multiple sessions, while Native Runtime remains responsible for the workspace, task status, verification, and integration: the recorded Runtime state is authoritative, the final acceptance of the main task is also performed by the Runtime, and messages from team members serve only as a progress reference.
 
 <SupervisorVideo
   src="/vedio/claude%20code.mp4"
@@ -114,7 +114,7 @@ Sub-tasks do not execute Archive independently, nor can they merge the main task
 
 ## After the integration is completed, a unified acceptance will be conducted
 
-After all sub-tasks enter `integrated`, the Runtime will immediately advance the final Verify of the main task without the need for the user to send "Continue" again. Ultimately, Verify runs at least one integration check in the integration worktree and covers the complete acceptance scope of the overall target.
+After all sub-tasks enter `integrated`, the Runtime immediately advances the final Verify of the main task. The final Verify runs at least one integration check in the integration worktree and covers the complete acceptance scope of the overall target.
 
 Only after the final verification is passed can the Supervisor Change enter the Archive. The user decides to retain the workspace, merge locally, push or create a PR according to Native's archive delivery options (the option semantics are described in [Archive and delivery](/en/native/archive-and-delivery)). The target branch will not be modified in advance before the final delivery.
 
@@ -122,13 +122,9 @@ If the Verify fails in the end, the Runtime will retain the integration scene an
 
 ## Recoverable task progress
 
-The main session can view sub-task summaries, `readyChildren`, integration status, and next steps through the following commands:
+Sub-task summaries, `readyChildren`, integration status, and the next action are all recorded in the Runtime state; the main session reads them with `comet native status <supervisor-change> --details --json` when resuming or advancing the work. You only need to tell the Agent to continue the current task — the main session handles these queries and the handoffs automatically.
 
-```bash
-comet native status <supervisor-change> --details --json
-```
-
-When restoring tasks, Comet uses the `coordination_mode` persisted in the Runtime as the standard and does not repeatedly create existing sub-tasks or worktrees. `multi-session` continues to use multi-session collaboration, and `single-session` continues to advance in sequence from the current session.
+When resuming a task, Comet follows the `coordination_mode` persisted by the Runtime and does not recreate existing sub-tasks or worktrees. `multi-session` continues with multi-session collaboration, and `single-session` continues with the current session advancing sub-tasks in sequence.
 
 If the original Codex standalone session or Claude Code Agent Team no longer exists, Comet will re-read the Runtime and automatically switch to subagent under `multi-session`. Tasks that have been dispatched but lost will first inactivate the old `runId` through `supervisor-cancel`, and then be redispatched using the new task package and `runId`. The late results of the old execution will be rejected. When the subagent is also unavailable, Comet will report a real block and will not automatically switch to single-session advancement.
 

@@ -3,7 +3,7 @@ title: 'Native 产物与状态'
 description: '理解 Native 的用户文档、可跨设备恢复的状态，以及本机 Runtime 文件各自负责什么。'
 ---
 
-Native 把用户需要阅读和同步的内容放在 change 目录，把执行过程放在项目级 Runtime。你通常只需要看 brief、Spec、`comet-state.yaml` 和 `verification.md`；不要手工创建或修改 Runtime 文件。
+Native 把用户需要阅读和同步的内容放在 change 目录，把执行过程放在项目级 Runtime。你通常只需要看 brief、Spec、`comet-state.yaml` 和 `verification.md`；
 
 ## 项目布局
 
@@ -42,7 +42,7 @@ Native 把用户需要阅读和同步的内容放在 change 目录，把执行�
   </Tree.Folder>
 </Tree>
 
-`native.artifact_root` 可以改成项目内其他相对目录，例如 `artifacts/comet/`。`.comet/config.yaml` 和 `.comet/current-change.json` 仍属于项目级边界；`.comet/runtime/native/` 由 Runtime 管理并默认忽略，不应复制到 change 目录或提交为用户文档。
+`native.artifact_root` 可以改成项目内其他相对目录，例如 `artifacts/comet/`。`.comet/config.yaml` 和 `.comet/current-change.json` 跟随项目绑定；`.comet/runtime/native/` 由 Runtime 管理并默认加入.gitignore忽略，不会复制到 change 目录或提交为用户文档。
 
 ## 三类用户可读文件
 
@@ -50,15 +50,24 @@ Native 把用户需要阅读和同步的内容放在 change 目录，把执行�
 
 brief 说明目标、范围、非目标、已确认的用户决定、未解决问题、验收示例和验证期望。它是 Shape 阶段的工作说明，用户能直接阅读和修改需求。
 
-手工编辑 brief 或 Spec 时注意验收项的生成规则：Runtime 只把 **brief 顶层的验收示例**和 **Spec 中以 `Scenario:` 标题开头的完整场景**识别为验收项；描述性文字、普通列表和单独的 WHEN/THEN 行不会生成额外验收项。想扩大或缩小验收范围，按这两种格式编写。
+手工编辑 brief 或 Spec 时，注意验收项的来源：Runtime 只从两处生成验收项——**brief 顶层的验收示例**，以及 **Spec 中以 `Scenario:` 标题开头的完整场景**。描述性段落、普通列表和单独的 WHEN/THEN 行不会被识别为验收项。因此，要调整验收范围，只能修改这两种格式的内容。
 
 ### `specs/<capability>/spec.md`
 
-每个 Spec 描述归档后 capability 的完整行为。归档时 Runtime 会按声明执行 `create`、`modify` 或 `remove`：创建、完整替换，或在受控路径内删除。要声明移除一个 capability，运行 `comet native spec remove` 表达删除意图——只删除 Spec 文件不会被当作移除声明，归档时该 Spec 仍按存在处理。并行 change 如果都要改同一 capability，会先停下来要求确定归档顺序，不会自动覆盖。
+capability 是项目的一项独立功能，例如“头像上传”或“会话超时”。Spec 按功能组织，每个 capability 一个目录，目录下的 `spec.md` 描述这项功能归档后的完整行为。归档时 Runtime 会按声明执行 `create`、`modify` 或 `remove`：创建、完整替换，或在受控路径内删除。要声明移除一个 capability，运行 `comet native spec remove` 表达删除意图——只删除 Spec 文件不会被当作移除声明，归档时该 Spec 仍按存在处理。当并行 change 尝试修改同一 capability，会先停下来要求确定归档顺序，不会自动覆盖文件。
 
 ### `comet-state.yaml`
 
-这是跨设备恢复的稳定状态。它记录当前阶段和状态、Loop 的 iteration/attempt、完整验收项及结果、Builder handoff、必要检查摘要、Verifier 结论、阻塞原因、有限历史和下一步动作。新 Agent 先读它，再按 continuation 执行，不依赖上一轮聊天内容。
+这是跨设备恢复的稳定状态。它记录以下内容：
+
+- 当前阶段和状态；
+- Loop 进度：`iteration` 是实现轮次，Builder 每提交一次新的候选实现加一；`attempt` 是对同一份候选实现的验收尝试次数；
+- 完整验收项及结果；
+- Builder handoff：Builder 提交候选实现时写下的交接说明，描述本次改动和声明受影响的验收项；
+- 必要检查摘要、Verifier 结论和阻塞原因；
+- 最近 50 条执行记录和下一步动作。
+
+换会话、换设备或流程中断后，接手的 Agent 没有之前的对话记录。它会先读这份文件，再按其中记录的下一步动作（continuation，完整字段说明见[任务推进与中断恢复](/zh/native/continuation-and-checkpoints)）继续执行。
 
 ### `verification.md`
 
@@ -66,7 +75,7 @@ brief 说明目标、范围、非目标、已确认的用户决定、未解决�
 
 ## 本机 Runtime
 
-`.comet/runtime/native/` 只保存本机执行状态文件（overlay）、日志、短时锁和可恢复事务。它可能因换设备或清理而缺失；Runtime 会依据同步的 YAML 重建，而不会把本机执行状态当成跨设备事实。日志适合排查命令输出，不能替代 `verification.md`。
+`.comet/runtime/native/` 只保存四类本机文件：执行状态文件（overlay）、日志、操作锁和可恢复事务。操作锁只在单个操作执行期间持有，用来防止两个并发操作同时修改同一个 change，操作结束就释放。这个目录可能因换设备或清理而缺失；Runtime 会依据同步的 YAML 重建，而不会把本机执行状态当成跨设备事实。日志适合排查命令输出，不能替代 `verification.md`。这些文件由哪些组件写入，见 [Native Runtime 的组成](/zh/native/runtime)。
 
 `.comet/current-change.json` 只表示下一次写入归属哪个 workflow/change，不限制项目只能有一个 active change。状态查看是只读的；需要明确归属时使用 `comet native select <change-name>`。
 

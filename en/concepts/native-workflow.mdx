@@ -9,12 +9,12 @@ Native is the requirement workflow designed by Comet for strong models. Models s
 
 Native only stipulates two things:
 
-- ** Fix the requirements ** : Use `brief.md` and the complete target Specs to clarify "what to do".
+- ** Fix the requirements ** : Use `brief.md` (which records the goals, scope, non-objectives, and confirmed user decisions) and the complete target Specs to clarify "what to do".
 - ** Determine completion with evidence ** : The Runtime runs necessary checks, and then the independent Verifier determines whether the result meets the acceptance criteria.
 
 The methods for planning, implementation, testing and review are still independently chosen by the model.
 
-This trade-off is supported by measured data. In the alignment evaluation with Classic (16 tasks, 48 runs, taking 41 pairs of samples that both sides passed), the total token of Native was 76.8% less, the number of Agent rounds was 57.4% less, and the time consumption was 47.4% shorter. The pass rate for all three attempts is 87.5%. The experimental design and original figures can be found in [Native vs. 0.4.0 Classic Real Evaluation ](/en/eval/comet-native-vs-040-experiment)].
+In the evaluation experiment with Classic inside Comet Eval (16 tasks, 48 runs, taking 41 pairs of samples that both sides passed), the total token of Native was 76.8% less, the number of Agent rounds was 57.4% less, and the time consumption was 47.4% shorter. The pass rate for all three attempts is 87.5%. The experimental design and original figures can be found in [Native vs. 0.4.0 Classic Real Evaluation ](/en/eval/comet-native-vs-040-experiment)].
 
 ![An approximately 100-line Native Skill supports complex long-running workflows. Across 16 real tasks with three runs per task, Native reduces total tokens and model duration compared with Classic, while RC1 improves repeat-run stability over Beta16.](/img/rc1-highlights-v2/02-native-eval-landscape-en.png)
 
@@ -24,18 +24,18 @@ Shape transforms user goals into briefs, Specs, and verifiable acceptance items;
 
 ![The Native Runtime connects Shape, Build, Verify, and Archive in a recoverable execution loop, supported by portable state, guarded transitions, and evidence gates.](/img/rc1-highlights-v2/07-recoverable-runtime-landscape-en.png)
 
-Any failed items will return to Build with a clear gap, be fixed and then re-verified. Only when all acceptance items are passed will it enter the Archive. When encountering a new user decision or a block that cannot continue, the Loop will immediately pause and return to the user to avoid invalid retries.
+Any failed items will return to Build together with the failure reason, be fixed and then re-verified. Only when all acceptance items are passed will it enter the Archive. When encountering a new user decision or a block that cannot continue, the Loop will immediately pause and return to the user to avoid invalid retries.
 
 ### The difference from `/goal`
 
-A Native Loop is essentially also a Goal Loop. Both it and [`/goal`](https://learn.chatgpt.com/use-cases/follow-goals)] enable agents to continuously advance around verifiable endpoints. The difference lies in that `/goal` offers universal long-term execution capabilities; Native further turns the goal into a set of project protocols for software development.
+A Native Loop is also a Goal Loop. Both it and [`/goal`](https://learn.chatgpt.com/use-cases/follow-goals)] enable agents to continuously advance around verifiable endpoints. The difference lies in that `/goal` offers universal long-term execution capabilities; Native Loop defines fixed stages, acceptance criteria, and state management specifically for software development.
 
 |Comparison item| `/goal`                    | Comet Native                                         |
 | -------- | -------------------------- | ---------------------------------------------------- |
 |Goal definition|The user provides the target and the stop conditions|Shape writes the goals as briefs, Specs and item-by-item acceptance criteria|
 |"Status recovery"|Codex saves the running status of Goal|The status is saved with the project and can be continued from the Runtime in a new session|
 |Completed determination|Codex determines whether the stop condition has been met|The Runtime performs checks, and then the independent Verifier verifies each item based on the evidence|
-|Engineering collaboration|Focus on the continuous execution of the goal|Built-in branches, worktree, parallel tasks, repair loops and archive management|
+|Engineering collaboration|Focus on the continuous execution of the goal|Built-in branches, worktree, parallel tasks, automatic return to Build for repair on failure, and archive management|
 |Result: Precipitation|Achieve the current Goal|Keep reviewable requirements, statuses, acceptance results and archiving records|
 
 Therefore, Native upgraded the general Goal to a recoverable, collaborative, and auditable Agent development closed loop. You can also combine the two: let `/goal` provide long-term continuous execution, and let Native handle the goals, workspaces, statuses, and completion determinations during the R&D process.
@@ -52,7 +52,7 @@ When Comet Native is executed, ** The Agent will independently select the approp
 
 ## From the goal to the delivery, the four stages are automatically advanced
 
-The four stages focus on four key outcomes: clear goals, controllable implementation, reliable acceptance, and traceable delivery. The model can independently determine the specific execution method, and the Runtime is responsible for automatically connecting the phases and pausing when you need to make a decision.
+The four stages focus on four key outcomes: clear goals, controllable implementation, reliable acceptance, and traceable delivery. The model can independently determine the specific execution method, and the Runtime is responsible for automatically connecting the phases and pausing when you need to make a decision. For the internal components of the Runtime, see [Inside the Native Runtime](/en/native/runtime).
 
 ### Shape: Transform vague requirements into executable goals
 
@@ -79,13 +79,13 @@ Ordinary requirements can be fulfilled in one Change. When encountering large ta
 
 ![Comet Native Build works autonomously in a standard Change, or uses Supervisor Change to run dependency-ready children in independent worktrees before integrating them.](/img/native-build-workspaces.png)
 
-The Builder finally submits the handoff available for acceptance, and the completion conclusion is given by Verify. Learn more: [Supervisor Change](/en/native/supervisor-change).
+The code the Builder finally submits is not a "completed" verdict, but a candidate implementation, and Verify decides whether it passes. Learn more: [Supervisor Change](/en/native/supervisor-change).
 
 ### Verify: Ensure that every completion is supported by evidence
 
-Verify takes over the candidate results submitted by Builder. Runtime runs the necessary checks based on the complete acceptance list and then starts a brand new read-only Verifier Subagent. It does not participate in the implementation, nor can it modify the code. It first reads the current scope's acceptance scenarios, `brief.md`, the full Specs, the actual implementation and the Runtime check results, and accepts items one by one; only at the end does it treat the Builder `handoff` as an auxiliary clue, keeping its judgment independent. Missing items, duplicate items, unknown acceptance items or failed inspections are all judged as not passing.
+Verify takes over the candidate implementation submitted by Builder. Runtime runs the necessary checks based on the complete acceptance list and then starts a brand new read-only Verifier Subagent. It does not participate in the implementation, nor can it modify the code. It first reads the current scope's acceptance scenarios, `brief.md`, the full Specs, the actual implementation and the Runtime check results, and accepts items one by one; only at the end does it treat the Builder `handoff` as an auxiliary clue, keeping its judgment independent. Missing items, duplicate items, unknown acceptance items or failed inspections are all judged as not passing.
 
-If the acceptance fails, the Runtime will bring the specific gap back to the Build. The repair round prioritizes checking the failed items and the affected scope. After the local issues are resolved, a final verification covering all acceptance items must be conducted again. When there are consecutive failures, progress stagnation, or execution errors reaching the upper limit, the Loop will pause and explain the reason to prevent further consumption of rounds.
+If the acceptance fails, the Runtime will bring the failure reason back to the Build. When repairing, the Builder prioritizes checking the failed items and the affected scope. After the local issues are resolved, a final verification covering all acceptance items must be conducted again. When there are consecutive failures, progress stagnation, or execution errors reaching the upper limit, the Loop will pause and explain the reason to prevent further consumption of rounds.
 
 In-depth understanding: [Native Loop](/en/native/native-loop) and [Verify and Fix ](/en/native/verification-and-repair).
 
@@ -95,17 +95,21 @@ Native is only allowed to enter the Archive when all acceptance items are passed
 
 Archive will reuse the passed checks while confirming that the code, specifications, and acceptance results still match. If the requirements or implementation change before archiving, the old results will become invalid and be returned to the correct stage for reprocessing.
 
-Finally, Comet retains the current workspace, merges the results, pushes the branch, or creates a PR based on your delivery choices. Changes in a `current` workspace are not asked these questions: Comet shows the current branch and directory, archiving performs no merge, push, or PR, and the archive completes directly after you confirm. A change isolated in a branch or worktree is presented with five mutually exclusive options before archiving: keep the workspace only, merge locally, push, push and create a PR, or defer the archive. In the future, whether changing sessions or devices, it will be possible to trace how this requirement was fulfilled from the official products in the project. In-depth understanding: [Archive and delivery](/en/native/archive-and-delivery), [Product and State ](/en/native/artifacts-and-state) and [Continuous Advancement and Recovery ](/en/native/continuation-and-checkpoints).
+Finally, Comet retains the current workspace, merges the results, pushes the branch, or creates a PR based on your delivery choices. A change workspace has three isolation modes: `current` (completed directly in the branch and directory you are working in), `branch`, and `worktree`. Changes in a `current` workspace are not asked how to deliver: Comet shows the current branch and directory, archiving performs no merge, push, or PR, and the archive completes directly after you confirm. A change isolated in a branch or worktree is presented with five mutually exclusive options before archiving: keep the workspace only, merge locally, push, push and create a PR, or defer the archive. In the future, whether changing sessions or devices, it will be possible to trace how this requirement was fulfilled from the official products in the project. In-depth understanding: [Archive and delivery](/en/native/archive-and-delivery), [Product and State ](/en/native/artifacts-and-state) and [Task progress and interruption recovery ](/en/native/continuation-and-checkpoints).
 
-## Status and Recovery
+## State and interruption recovery
 
-`comet-state.yaml` save phase, Loop, acceptance, handoff, check summary, Verifier conclusion, blocking, limited history and next step; The native files such as `state.json`, logs, locks and transactions are all in `.comet/runtime/native/`. Rebuild from YAML when changing devices or when the local execution state file is missing. If the code, artifact root or branch/worktree don't match, just stop and wait for you.
+When you close a session, switch devices, or the flow is interrupted, Comet reads the state saved in the project and continues from where it stopped. The state lives in three places:
 
-`.comet/current-change.json` records which change the current write belongs to to avoid writing subsequent modifications to other requirements. `status` and `show` remain read-only and will continue to be retained during the query period. If the current change has been deleted or archived, you can reselect from the active changes:
+1. `comet-state.yaml` in the change directory: it saves the stage, Loop, acceptance, handoff, check summary, Verifier conclusion, blocking cause, the last 50 execution records, and the next step. When you switch devices or the local execution state file is missing, the Runtime rebuilds from this YAML.
+2. Local files under `.comet/runtime/native/`: `state.json`, logs, locks, and transactions. These files are not synchronized across devices; if lost, they are rebuilt from the YAML as described above.
+3. `.comet/current-change.json`: it records which change the current write belongs to to avoid writing subsequent modifications to other requirements. `status` and `show` remain read-only and keep this pointer during the query. If the current change has been deleted or archived, you can reselect from the active changes:
 
-```bash
-comet native select <change-name>
-```
+   ```bash
+   comet native select <change-name>
+   ```
+
+During recovery, if the code, artifact root, or branch/worktree does not match the recorded state, Comet stops and waits for you to handle it instead of continuing.
 
 ## The relationship with Classic
 

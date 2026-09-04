@@ -1,0 +1,84 @@
+---
+title: 'Native Runtime 的组成'
+description: '了解 Native Runtime 是什么、由哪些组件构成、每个组件负责什么，以及它的能力边界。'
+---
+
+**Runtime** 是 Comet 中负责流程控制、状态保存和证据记录的部分。Builder、Reviewer 和 Verifier 由模型驱动，负责实现、审查和判断；Runtime 的行为由固定规则决定，不包含模型判断。Native 的每次阶段推进都要经过它：Agent 调用 `comet native` 命令，Runtime 校验当前状态、执行相应操作，再返回下一步。
+
+你不直接操作 Runtime。日常使用时在 Agent 里输入 `/comet` 或 `/comet-native`，由 Skill 根据 Runtime 返回的 continuation 调用命令；怀疑状态异常时，可以运行 `comet native doctor` 查看它的健康情况。
+
+## 组件一览
+
+Runtime 由八个组件构成：
+
+| 组件                   | 负责什么                 | 你什么时候感知到它                             |
+| ---------------------- | ------------------------ | --------------------------------------------- |
+| 状态机                 | 阶段推进、门禁和轮次预算 | 目标未确认时无法进入 Build；失败达到上限时暂停 |
+| Continuation           | 生成下一步命令和待决定选项 | 每条命令末尾的 NEXT 提示；Agent 转述给你的决定请求 |
+| 检查执行器             | 实际运行测试和构建命令   | Verify 阶段的检查结果和命令日志                 |
+| 回执与证据             | 把结论绑定到具体代码和范围 | 代码更新后，旧的验证结论不再有效               |
+| 状态文件               | 保存可同步状态和本机执行状态 | 换设备后从 `comet-state.yaml` 恢复进度         |
+| 锁与事务               | 防止并发冲突，保证写入可恢复 | 并行 change 的冲突提示；中断后归档从已完成的步骤继续 |
+| 轨迹与检查点           | 记录推进历史和恢复点     | 会话中断后接着做，不需要重新说明已完成的部分   |
+| 写入守卫               | 拦截阶段外的实现写入     | Agent 在非 Build 阶段修改代码被拒绝           |
+
+前四个组件直接参与验收循环，后四个负责支撑状态存储与写入安全。
+
+## 状态机：决定下一步
+
+状态机保存每个 change 的当前进度：所处阶段（Shape、Build、Verify、Archive）、整体状态（active、await-user、blocked、done），以及 Build ↔ Verify 循环的计数——实现轮次（`iteration`）、验收尝试（`attempt`）、失败次数和无进展次数。
+
+阶段推进有明确门禁：Shape 的目标、范围和关键决定得到你的确认后才进入 Build；全部验收项通过后才进入 Archive；失败达到配置上限，或连续多轮没有缩小未通过的验收集合时，Runtime 停止自动推进，把决定交回给你。这些规则由 Runtime 强制执行，Agent 无法绕过。
+
+门禁和轮次预算的完整规则见 [Native Loop](/zh/native/native-loop)；失败上限如何配置见 [Native 配置](/zh/native/configuration)。
+
+## Continuation：下一步指令
+
+Runtime 的每次返回都带 continuation，说明接下来发生四种情况中的哪一种：继续（附完整的命令参数）、等待用户（附要转述的问题和互斥选项）、解决阻塞或结束。Agent 只执行返回的命令，不能自己拼接一条推进命令。
+
+推进和决定类命令带有状态版本与预期动作校验。状态在两次操作之间已经变化时，Runtime 拒绝执行，要求先读取最新的 continuation，避免迟到的结果覆盖当前状态。
+
+四种结果的处理方式和字段说明见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
+
+## 检查执行器：实际运行命令
+
+Verify 阶段的检查由 Runtime 实际执行：它运行测试、构建或其他项目命令，记录每项命令的状态、退出码、耗时和输出，日志保存在本机的 `logs/` 目录下。Builder 在交接里报告的开发检查只描述候选实现，不能替代 Runtime 的执行结果；Verifier 请求的补充检查，同样由 Runtime 执行并记录。
+
+Runtime 会复用同一候选下已经通过的相同检查，并过滤重复请求。它还提供一个只读的内置检查，扫描实现范围内的文本问题（例如残留的合并冲突标记），可用 `comet native check` 随时复跑。
+
+检查在验收流程中的位置见 [Native Loop](/zh/native/native-loop) 和 [验证与修复](/zh/native/verification-and-repair)。
+
+## 回执与证据：结论绑定内容
+
+每次检查和验收都会生成回执（receipt）。回执记录结论，同时绑定产生这个结论时的代码版本、验收范围和内容哈希。实现更新后旧回执即失效，不会被当作当前结论复用；身份不符、迟到或漏项的 Verifier 结果也会被拒绝。
+
+`verification.md` 是这些证据面向用户的报告，包含实际执行的检查、逐项验收结果、风险和结论；缺失或落后时，Runtime 可以从状态重建它。
+
+## 状态文件：可同步与本机两层
+
+Runtime 把状态分成两层保存。change 目录下的 `comet-state.yaml` 保存可跨设备同步的状态，是恢复的依据；项目根下 `.comet/runtime/native/` 保存本机执行状态、日志、锁和事务，不随项目同步。本机文件因换设备或清理而缺失时，Runtime 依据 YAML 里记录的进度重建。
+
+目录布局和跨设备恢复的完整说明见 [Native 产物与状态](/zh/native/artifacts-and-state)。
+
+## 锁与事务：互斥与可恢复写入
+
+状态变更前，Runtime 先取得项目级锁，同一时刻只有一个进程在改写状态；检测到未完成的事务时，会先恢复，再允许新的变更。跨文件的改动以事务方式执行——例如归档时要移动 change 目录并更新 Specs，中断后可以从已完成的步骤继续，不会停在半完成状态。所有写入都先落临时文件，再一次性替换为正式文件。
+
+并发、版本和路径校验的机制细节见 [Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery)。
+
+## 轨迹与检查点：断点恢复
+
+Runtime 以追加式事件记录保存推进过程，并在关键位置写入进度检查点。会话中断、Agent 更换或本机执行状态丢失后，它从记录的进度继续，恢复依据是文件里记录的状态，而不是对话记忆。
+
+## 写入守卫：拦截越界写入
+
+安装到平台的 Hook 会在写入发生前检查目标。实现代码只能在 Build 阶段写入；`comet-state.yaml`、`verification.md` 等由 Runtime 管理的文件，Agent 的写入会被拒绝。这层拦截与 Runtime 自身的校验互补：Hook 挡住平台能观察到的错误写入，Runtime 在每次命令执行时再校验状态、工作区和候选是否匹配。
+
+## Runtime 不做什么
+
+- 不写业务代码。实现由 Builder 完成，Runtime 只控制流程。
+- 不判断需求是否满足。验收结论来自独立的只读 Verifier，Runtime 负责证明检查确实执行、结果确实对应当前代码。
+- 不提供操作系统级沙箱。它管辖自己的状态文件和正式产物，不隔离任意进程。
+- 不接受手工修改状态。直接编辑 Runtime 管理的文件会造成状态不一致；需要调整时，先用 `comet native doctor` 诊断。
+
+继续阅读：[Native Loop](/zh/native/native-loop)、[Native 产物与状态](/zh/native/artifacts-and-state) 和 [Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery)。
