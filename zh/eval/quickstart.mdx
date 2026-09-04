@@ -1,9 +1,11 @@
----
+﻿---
 title: '快速上手：评估一个 Skill'
 description: '从第一次运行、评估配置到报告解读，带你用 comet eval 评估本地 Skill。'
 ---
 
-你只需要一个包含 `SKILL.md` 的本地目录，就可以用 `comet eval` 评估一个 Skill。即使你还没有预先编写评估用例，**Eval 也会根据 Skill 的内容自动生成 2–4 个评估用例并运行**。本文按实际使用顺序介绍：先跑通一次，再选择 Agent 和评估后端，然后配置任务、生成报告和定位失败原因。
+只要你有一个包含 `SKILL.md` 的本地目录，就可以开始评估。
+即使还没写评估用例，**Eval 也会基于 Skill 内容自动生成 2–4 个用例并执行**。
+本文按实际操作顺序展开：先跑通一次，再选择 Agent 和后端，最后看任务配置、报告解读与失败定位。
 
 ## 你要准备什么
 
@@ -13,20 +15,23 @@ description: '从第一次运行、评估配置到报告解读，带你用 comet
 - 一个本地 Skill 目录，里面包含 `SKILL.md`。
 - 运行真实评估时，需要 `uv`、Python 3.11+、Docker、选定的 Agent CLI 和对应模型凭证。
 
-`--collect` 只做静态发现和配置检查，不启动 Agent、Docker、插件、凭据或网络请求。因此可以先用它检查 Skill，不必一开始就准备完整的模型环境。
+`--collect` 只做静态发现和配置检查，不会启动 Agent、Docker、插件，也不会消耗凭据或网络调用。
+所以你可以先用它验证 Skill 入口与任务发现，再准备完整模型环境。
 
 如果要选择 Claude Code 以外的 Agent，先阅读 [Eval Agent 启动配置](/zh/eval/agent-setup)，确认对应的 CLI、认证方式和模型协议。
 
 ### 用户级 `.env` 配置
 
-普通用户不需要 clone Comet 源码，也不需要进入源码目录下的 `eval/`。第一次运行任意
-`comet eval` 命令时，CLI 会自动创建完整的用户级配置文件：
+普通用户不需要 clone Comet 源码，也不需要进入源码目录下的 `eval/`。
+第一次运行任意 `comet eval` 命令时，CLI 会自动创建完整的用户级配置文件：
 
 - Windows：`%USERPROFILE%\.comet\eval\\.env`
 - macOS/Linux：`~/.comet/eval/.env`
 
-CLI 只会创建缺失文件，不会覆盖已有文件。首次运行会在输出中显示实际路径；打开这个文件，
-按需填写参数后再次运行即可。当前 shell 中已经设置的环境变量优先于 `.env`。
+CLI 只会创建缺失文件，不会覆盖已有文件。
+首次运行会打印实际路径。
+你按需填写参数后再次运行即可。
+如果当前 shell 已设置同名变量，则优先使用 shell 值。
 
 自动生成的模板包含全部用户可配置参数，按以下几组组织：
 
@@ -63,7 +68,8 @@ CLI 只会创建缺失文件，不会覆盖已有文件。首次运行会在输�
 非预定义 Agent 的注册、凭据和 CLI 约定见[Eval Agent 启动配置](/zh/eval/agent-setup#扩展自定义-agent)。
 仅仅把可执行文件放到 PATH 上不会自动启用它。
 
-如果看到评估瞬间结束且没有真实运行，通常是 Docker、Agent CLI 或模型凭证没有准备好。harness 在这些情况下会将样本标记为跳过，避免产生虚假的成功运行。
+如果评估几乎瞬间结束且没有真实执行，多数是 Docker、Agent CLI 或模型凭证未就绪。
+harness 会把这类样本标为跳过，避免产生“假成功”。
 
 ## 第一次运行
 
@@ -80,7 +86,9 @@ comet eval ./my-skill --quick --html
 comet eval ./my-skill --html
 ```
 
-没有 `comet/eval.yaml`，或者 manifest 中没有 `evaluation.tasks` 和 `recommendedTasks` 时，普通运行会根据 Skill 内容**自动生成 2–4 个评估用例**，冻结并缓存后再执行。你不需要先手写任务就能开始评估。`--quick` 不会使用这些自动生成的用例，而是固定运行 `generic-skill-smoke`，验证 Skill 能被注入、调用并产出 `result.md`。
+如果没有 `comet/eval.yaml`，或 manifest 中缺少 `evaluation.tasks` 与 `recommendedTasks`，普通运行会根据 Skill 内容**自动生成 2–4 个评估用例**，冻结并缓存后执行。
+你不需要先手写任务就能开始。
+`--quick` 不会使用自动生成用例，而是固定跑 `generic-skill-smoke`，重点验证 Skill 能被注入、调用并产出 `result.md`。
 
 ### target 怎么传
 
@@ -140,7 +148,9 @@ judge:
   baseUrl: https://judge.example/v1
 ```
 
-主 Agent 和 LLM-as-Judge 可以使用不同的 Agent、模型、API 地址和凭据。Judge 不会默默继承主 Agent 的模型或凭据；启用 Judge 时，需要单独提供 Judge 配置。
+主 Agent 与 LLM-as-Judge 可以使用不同的 Agent、模型、API 地址和凭据。
+Judge 不会自动继承主 Agent 的模型或凭据。
+启用 Judge 时，必须单独提供 Judge 配置。
 
 ## 选择评估后端
 
@@ -196,7 +206,7 @@ comet eval ./my-skill --html
 2. 失败归因是 `harness`、`workflow`、`task` 还是 `model`。
 3. 是否缺少预期 artifact，以及 token、cost、duration 是否异常。
 
-失败归因的含义是：`harness` 通常表示环境或依赖问题，`workflow` 表示 Skill 流程没有达到预期，`task` 表示任务定义或校验条件有问题，`model` 表示模型行为或调用不稳定。
+失败归因可这样理解：`harness` 多数表示环境或依赖问题，`workflow` 表示 Skill 流程未达预期，`task` 表示任务定义或校验条件有问题，`model` 表示模型行为或调用不稳定。
 
 ## 怎么自定义任务
 
@@ -316,9 +326,9 @@ else:
 write_test_results({"passed": passed, "failed": failed})
 ```
 
-`eval-tasks/writes-summary/task.toml` 描述任务的环境和校验方式，`instruction.md` 是发给 Agent 的任务指令；如果需要 Docker 或确定性校验脚本，就分别放在同一个任务包的 `environment/` 和 `validation/` 下。`source` 任务不能同时写 inline task 的 `prompt` 或 `expect` 字段，且 Comet 会检查任务包中确实存在 `task.toml` 和 `instruction.md`。
+`eval-tasks/writes-summary/task.toml` 描述任务的环境和校验方式，`instruction.md` 是发给 Agent 的任务指令。如果需要 Docker 或确定性校验脚本，就分别放在同一个任务包的 `environment/` 和 `validation/` 下。`source` 任务不能同时写 inline task 的 `prompt` 或 `expect` 字段，且 Comet 会检查任务包中确实存在 `task.toml` 和 `instruction.md`。
 
-配置后可以直接传 Skill 目录，Comet 会自动发现 `comet/eval.yaml`；也可以直接传 manifest：
+配置后可以直接传 Skill 目录，Comet 会自动发现 `comet/eval.yaml`。也可以直接传 manifest：
 
 ```bash
 # 自动发现 my-skill/comet/eval.yaml
@@ -330,7 +340,7 @@ comet eval ./my-skill/comet/eval.yaml --collect
 comet eval ./my-skill/comet/eval.yaml --task writes-summary --html
 ```
 
-任务可以检查文件、文本、JSON 或命令结果；任务工作区和期望产物必须留在允许的 Skill 包或评估工作区内。
+任务可以检查文件、文本、JSON 或命令结果。任务工作区和期望产物必须留在允许的 Skill 包或评估工作区内。
 
 只有需要自定义 Docker 环境、验证脚本、profile 或 treatment 时，才需要继续阅读[配置评估与自定义 Task](/zh/eval/configuration)。
 

@@ -1,4 +1,4 @@
----
+﻿---
 title: "Eval harness（进阶）"
 description: "深入理解 Comet 如何封装本地 eval harness，harness 目录结构、collect/run 内部机制、profile/task 选择、报告生成和所有环境变量。"
 ---
@@ -10,22 +10,26 @@ description: "深入理解 Comet 如何封装本地 eval harness，harness 目�
 
 <Warning>
   本页是 Eval 源码/维护者进阶内容。普通用户不需要 clone Comet 源码、进入 `eval/` 目录或手工
-  运行 pytest；直接使用已安装的 `comet eval` 和用户级 `%USERPROFILE%\.comet\eval\\.env` /
+  运行 pytest。直接使用已安装的 `comet eval` 和用户级 `%USERPROFILE%\.comet\eval\\.env` /
   `~/.comet/eval/.env` 即可。只有修改内置 harness、使用 `--project` 或复现底层任务时，才需要拉取源码。
 </Warning>
 
-Comet 的 eval harness 随 npm 包按版本分发。直接运行 `comet eval` 时，CLI 默认使用当前 `@rpamis/comet` 包中的 `eval/`。在 Comet 源码仓库开发或需要自定义 harness 时，可以用 `--project <repository-root>` 显式选择该仓库的 `eval/`。`comet eval` 负责启动路径、任务发现、profile、report config 和 quick smoke，无需手工切换目录或组合 pytest 参数。
+Comet 的 eval harness 随 npm 包一起分发，并与包版本保持一致。
+直接运行 `comet eval` 时，CLI 默认使用当前 `@rpamis/comet` 包中的 `eval/`。
+只有在你开发 Comet 源码或需要自定义 harness 时，才用 `--project <repository-root>` 指向仓库里的 `eval/`。
+入口路径、任务发现、profile 选择、report config 和 quick smoke 都由 `comet eval` 统一处理，不需要手工拼 pytest 参数。
 
 ## harness 定位与故障边界
 
-CLI 会先确认 eval 根目录包含 `pyproject.toml` 和任务入口，再检查 `uv`。哪一步失败就可以直接定位问题：
+CLI 会先检查 eval 根目录（`pyproject.toml` 与任务入口），再检查 `uv`。
+哪个环节失败，就对应哪个问题域：
 
 | 错误                                 | 说明                                                         | 处理                                         |
 | ------------------------------------ | ------------------------------------------------------------ | -------------------------------------------- |
 | `Eval harness is missing at ...`     | 当前 npm 包不完整，或 `--project` 指向的仓库没有有效 `eval/` | 重新安装 `@rpamis/comet`，或修正 `--project` |
 | `uv is not installed or not in PATH` | harness 已找到，但本机缺少 Python 启动工具                   | 安装 `uv` 并确认 PATH                        |
 
-npm 用户不需要另外 clone Comet 仓库来获得 harness；包版本与 harness 版本保持一致。
+npm 用户不需要另外 clone Comet 仓库来获得 harness。包版本与 harness 版本保持一致。
 
 ## harness 目录结构
 
@@ -63,7 +67,7 @@ eval/
 
 - 固定从 `<project>/eval` 根目录启动 harness（用 `uv run`）
 - 把 `--manifest` 或 `--skill-path` 转换成 pytest 参数
-- 选择默认 profile（`generic`）和 task；没有 manifest 时按 Skill 快照自动生成并缓存受限任务
+- 选择默认 profile（`generic`）和 task。没有 manifest 时按 Skill 快照自动生成并缓存受限任务
 - 按需生成临时 report config（`--html` 时）
 - 打印一组执行信息，便于定位报告
 
@@ -84,7 +88,10 @@ uv run pytest <suite>/tests/tasks/test_tasks.py [参数]
 | `comet eval <target> --collect` | 否               | 给 pytest 加 `--collect-only` | 验证 manifest、task、profile 和路径，低成本排错 |
 | `comet eval <target> --html`    | 是               | 给 pytest 加 `-v`             | 执行真实评估并生成报告                          |
 
-两者共用同一套参数构建逻辑，唯一区别是 collect 加 `--collect-only`，普通执行加 `-v`。`--suite local|langsmith|langfuse` 选择入口；`--report-config`、`--html`、`--quick` 用于真实评估路径。
+两者共用同一套参数构建逻辑。
+区别只有一处：collect 增加 `--collect-only`，真实运行增加 `-v`。
+`--suite local|langsmith|langfuse` 用来切换套件入口。
+`--report-config`、`--html`、`--quick` 用来控制真实评估路径。
 
 ## skill-path 模式（默认入口）
 
@@ -94,7 +101,11 @@ uv run pytest <suite>/tests/tasks/test_tasks.py [参数]
 comet eval ./my-skill --html
 ```
 
-这是评估任意本地 Skill 的默认入口。传目录时会自动发现 manifest；没有 manifest 时普通运行会从 Skill 快照生成并缓存 2–4 个受限任务，`--quick` 则明确选择 `generic-skill-smoke` 冒烟任务。`--skill-name` 会从目录名自动推断，你也可以用 `--task` 显式指定任务，或用 `--profile` 覆盖 profile。
+这是评估任意本地 Skill 的默认入口。
+传目录时，CLI 会自动发现 manifest。
+若没有 manifest，普通运行会基于 Skill 快照生成并缓存 2–4 个受限任务。
+`--quick` 会固定使用 `generic-skill-smoke` 冒烟任务。
+`--skill-name` 默认从目录名推断，也可以用 `--task` 指定任务，或用 `--profile` 覆盖 profile。
 
 | 模式                            | 默认 profile                            | 默认 task             | 适合场景                                      |
 | ------------------------------- | --------------------------------------- | --------------------- | --------------------------------------------- |
@@ -112,13 +123,20 @@ comet eval ./generated-skill/comet/eval.yaml --collect
 comet eval ./generated-skill/comet/eval.yaml --html
 ```
 
-manifest 通常由 `/comet-any` 自动生成（不是手写），包含目标 Skill、profile、推荐任务、预期产物和交互配置。Engine-enabled 生成物默认使用 `authoring-skill` profile 和 `authoring-skill-smoke` quick eval。这条路径的结果才是发布 readiness 的有效证据；skill-path 的 `generic-skill-smoke` 只是早期验证，不作为发布证据。
+manifest 一般由 `/comet-any` 自动生成，而不是手写。
+它包含目标 Skill、profile、推荐任务、预期产物和交互配置。
+Engine-enabled 生成物默认使用 `authoring-skill` profile 与 `authoring-skill-smoke` quick eval。
+这条路径的结果才是发布 readiness 的有效证据。
+skill-path 的 `generic-skill-smoke` 只用于早期验证，不作为发布证据。
 
 ### generated manifest 的 draft hash
 
-manifest 的 `metadata.draftHash` 为 `<current-bundle-hash>` 时，CLI 会定位上层 `bundle.yaml`、计算当前 draft hash，并在系统临时目录写入一份运行时 manifest。Skill source 会解析为稳定绝对路径；评估结束后临时目录会被清理。
+当 manifest 的 `metadata.draftHash` 为 `<current-bundle-hash>` 时，CLI 会定位上层 `bundle.yaml` 并计算当前 draft hash。
+随后，它会在系统临时目录写入一份运行时 manifest。
+Skill source 会解析为稳定绝对路径。
+评估结束后，临时目录会自动清理。
 
-原 manifest 和 Bundle 不会被修改。占位值只适用于仍位于 Bundle draft 内的 generated manifest；离开 Bundle 后应使用具体、可验证的 draft hash。
+原 manifest 和 Bundle 不会被修改。占位值只适用于仍位于 Bundle draft 内的 generated manifest。离开 Bundle 后应使用具体、可验证的 draft hash。
 
 ## 执行信息
 
@@ -198,8 +216,8 @@ flowchart TD
 关键点：
 
 - 模型在 **Docker 容器**里运行，和你的工作目录隔离。
-- **双 Agent 循环**（`auto_user` 模式）：被测 Agent 跑被测 Skill，每个决策点由**用户模拟 Agent**回复（批准合理方案、选默认、推动前进，永不拒绝、不写代码）。被测 Agent 用 `--resume` 续接同一会话，最多 `max_turns` 次外层往返（comet-workflow 通常 12 次、authoring-skill 通常 8 次），命中"完成"提前结束。这里的 `max_turns` 不是被测 Agent 内部消息数或工具调用数。这让多阶段工作流能**自动跑完整条链**。完整循环和决策点检测见[评分指标与双 Agent 评测](/zh/eval/scoring)。
-- **rubric 评分**在校验器之后跑，把结果作为 `[RUBRIC]` 信息性检查追加（comet-workflow rubric 永不产生硬失败；generic/authoring 对特定缺失项产生硬失败）。
+- **双 Agent 循环**（`auto_user` 模式）：被测 Agent 运行被测 Skill。每个决策点由**用户模拟 Agent**回复（批准合理方案、选择默认、推动流程前进，不拒绝、不写代码）。被测 Agent 通过 `--resume` 续接同一会话，最多进行 `max_turns` 次外层往返（comet-workflow 常用 12 次，authoring-skill 常用 8 次），命中"完成"则提前结束。这里的 `max_turns` 不是被测 Agent 的内部消息数或工具调用数。该机制的目标是让多阶段工作流可以自动跑完整条链。完整循环和决策点检测见[评分指标与双 Agent 评测](/zh/eval/scoring)。
+- **rubric 评分**在校验器之后跑，把结果作为 `[RUBRIC]` 信息性检查追加（comet-workflow rubric 永不产生硬失败。generic/authoring 对特定缺失项产生硬失败）。
 - 真正的**通过/失败**由任务校验器（expected artifacts 存在 + test_scripts 通过）决定，rubric 分和 pass@k 是诊断信息。
 
 ## 报告输出配置
@@ -244,9 +262,13 @@ flowchart TD
 | `BENCH_SUITE_ROOT` / `BENCH_TASKS_DIR` / `BENCH_TREATMENTS_DIR` / `BENCH_SKILLS_DIR` / `BENCH_LOGS_DIR` | 路径覆盖                                                                                                                               |
 | `BENCH_TEST_CONTEXT` / `BENCH_TEST_RESULTS`                                                             | 覆盖 host↔Docker 传输文件名                                                                                                            |
 
-LangSmith suite 额外需要 `LANGSMITH_API_KEY`、`LANGSMITH_TRACING=true`、`TRACE_TO_LANGSMITH=true`。用户入口是 `comet eval <target> --suite langsmith`；不需要手工进入 `eval/langsmith/` 执行 pytest。
+LangSmith suite 额外需要 `LANGSMITH_API_KEY`、`LANGSMITH_TRACING=true`、`TRACE_TO_LANGSMITH=true`。
+用户入口是 `comet eval <target> --suite langsmith`。
+不需要手工进入 `eval/langsmith/` 执行 pytest。
 
-Langfuse suite 需要 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY`。用户入口是 `comet eval <target> --suite langfuse`；`--collect --suite langfuse` 不初始化 SDK、不联网，也不会下载插件。
+Langfuse suite 需要 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY`。
+用户入口是 `comet eval <target> --suite langfuse`。
+`--collect --suite langfuse` 不初始化 SDK、不联网，也不会下载插件。
 
 ### 用 Anthropic 兼容代理认证
 
@@ -262,7 +284,7 @@ Langfuse suite 需要 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY`。用户�
 | `CLAUDE_CODE_SUBAGENT_MODEL`                                                                        | 子 agent 模型             |
 
 这些变量在自动生成的用户级 `.env` 模板里都有占位项。普通用户编辑
-`%USERPROFILE%\.comet\eval\\.env` / `~/.comet/eval/.env` 即可；源码维护者使用
+`%USERPROFILE%\.comet\eval\\.env` / `~/.comet/eval/.env` 即可。源码维护者使用
 `--project` 时，才需要在对应源码 checkout 中调试 harness 的 `eval/.env`。
 
 ### 自定义用户模拟器提示词
@@ -284,7 +306,7 @@ Never refuse; always let the workflow move forward. Do not write code or files.
 BENCH_SIMULATOR_PROMPT_FILE=my-simulator-prompt.md
 ```
 
-相对路径从 `eval/` 解析；文件存在才会被读取。命令行 `--simulator-prompt "..."` 的优先级最高，会覆盖文件内容。详见[评分指标与双 Agent 评测 · 用户模拟 Agent 的指令](/zh/eval/scoring#用户模拟-agent-的指令)。
+相对路径从 `eval/` 解析。文件存在才会被读取。命令行 `--simulator-prompt "..."` 的优先级最高，会覆盖文件内容。详见[评分指标与双 Agent 评测 · 用户模拟 Agent 的指令](/zh/eval/scoring#用户模拟-agent-的指令)。
 
 ## 不要把 harness 和 runtime check 混淆
 

@@ -3,7 +3,8 @@ title: '状态损坏与恢复'
 description: '当 Classic 路由不对、.comet.yaml 缺失或格式异常、证据缺失时，如何用 comet status / comet doctor 诊断和恢复。'
 ---
 
-Classic 正常恢复只需要统一入口 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)）。配置进入 Classic 后，内部 `/comet-classic` 会读取文件状态并选择阶段；本页只处理该内部路由异常或状态损坏。
+Classic 的正常恢复只需要统一入口 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)）。
+配置进入 Classic 后，内部 `/comet-classic` 会读取文件状态并选择阶段。本页只处理内部路由异常或状态损坏。
 
 状态损坏时，先**恢复仓库的真实状态**，再让流程基于正确状态继续。请勿为了解锁流程而强行修改字段。
 
@@ -15,7 +16,7 @@ Classic 正常恢复只需要统一入口 `/comet`（见[恢复中断的工作](
   />
 </p>
 
-<p align="center">状态恢复先诊断真实文件证据，再按提示修复；不要为了推进流程手工伪造状态</p>
+<p align="center">状态恢复先诊断真实文件证据，再按提示修复。不要为了推进流程手工伪造状态。</p>
 
 ## 先判断：是状态坏了，还是只是中断
 
@@ -24,7 +25,7 @@ Classic 正常恢复只需要统一入口 `/comet`（见[恢复中断的工作](
 | 会话断了、上下文压缩了、换了设备   | 正常中断                   | 直接 `/comet`（见[恢复中断的工作](/zh/guides/resuming-workflow)） |
 | 自然语言请求命中多个 active change | 需要确认目标，不是状态损坏 | 查看恢复探测结果中的 `reason`，点名要恢复的 change                |
 | 工作树有未提交改动                 | 需要先归因，不是状态损坏   | 确认改动属于哪个 change，再继续                                   |
-| `/comet-classic` 路由到的阶段不对  | 可能元数据和文件冲突       | `/comet-classic` 会以文件为准自动修正；若仍不对，跑诊断           |
+| `/comet-classic` 路由到的阶段不对  | 可能元数据和文件冲突       | `/comet-classic` 会以文件为准自动修正。如果仍不对，运行诊断       |
 | `.comet.yaml` 缺失或格式异常       | 状态损坏                   | `comet doctor` 诊断                                               |
 | 声明的产物/证据在磁盘上找不到      | 证据缺失                   | `comet status` 看 `runtime_eval`                                  |
 
@@ -36,15 +37,16 @@ comet status        # 看活跃 change 的 phase、任务完成度、runtime_eva
 comet doctor        # 诊断安装、环境、Skill 完整性、.comet.yaml 有效性
 ```
 
-加 `--json` 适合给 Agent 或自动化工具读；普通用户先看文本输出。
+加 `--json` 适合给 Agent 或自动化工具读取。普通用户先看文本输出即可。
 
-恢复探测只负责进入 workflow 前的判断。它返回 `ask_user` 时通常代表多个 change、未提交改动或用户决策点，不等于状态已经损坏。详见[恢复探测命令](/zh/cli/resume-probe)。
+恢复探测只负责 workflow 入口前的判断。
+它返回 `ask_user` 时，多数情况代表多个 change、未提交改动或用户决策点，不等于状态已经损坏。详见[恢复探测命令](/zh/cli/resume-probe)。
 
 ### comet status 看什么
 
 每个活跃 change 报告：`phase`、任务 `done/total`、`workflow | build_mode`、`run_step`、`runtime_mode`、`runtime_eval`（声明的步骤证据是否真在磁盘上）、`design`、`plan`、`verify_result`，以及 `next:` 提示。
 
-`runtime_eval` 失败时会提示 `run <命令> or restore missing evidence (...)`——按提示补证据或恢复。
+`runtime_eval` 失败时会提示 `run <命令> or restore missing evidence (...)`。按提示补证据或恢复。
 
 ### comet doctor 看什么
 
@@ -57,17 +59,17 @@ comet doctor        # 诊断安装、环境、Skill 完整性、.comet.yaml 有�
 | `comet status` 没有下一步                  | `.comet.yaml` 缺失或格式异常           | `comet doctor`                                                            |
 | build 无法进入 verify                      | 缺 `build_mode`/`isolation`/`tdd_mode` | 重新调用 `/comet`，让 Classic 路由回 build 补选                           |
 | verify 通过但不能 archive                  | 缺验证报告、分支绑定漂移或状态异常     | 补验证报告、切回绑定分支，并让 verify guard 保持 `branch_status: pending` |
-| archive 后仍显示 active                    | 手工移动目录或状态没同步               | 用 `openspec status` 核对，用归档脚本重跑（可恢复）                       |
-| `/comet-classic` 报 `.comet.yaml` 格式异常 | 文件被手工改坏                         | `comet doctor`；严重时从 git 恢复 `.comet.yaml`                           |
+| archive 后仍显示 active                    | 手工移动目录或状态没同步               | 用 `openspec status` 核对，再用归档脚本重跑（可恢复）                     |
+| `/comet-classic` 报 `.comet.yaml` 格式异常 | 文件被手工改坏                         | 先运行 `comet doctor`。严重时从 git 恢复 `.comet.yaml`                    |
 
 ## 恢复原则
 
 - **以文件为证据**：OpenSpec 产物、Design Doc、Plan、测试结果、实际工作树是状态的唯一可信来源。
 - **不要手工写 machine-owned Run 字段**（`.comet/run-state.json` 等，由 Comet 自动维护）。
-- **不要把 `build_pause` 当成 `build_mode`**——它们是不同字段。
-- **不要跳过 verify 失败决策点**——必须由你选修复或接受偏差。
-- **不要手工伪造 archive 状态**——归档由 `/comet-archive` 或 `comet archive` 完成。
-- **不要手工编辑 `.comet.yaml` 推进 phase**——用 `comet guard --apply` 或 `comet state transition`。
+- **不要把 `build_pause` 当成 `build_mode`**：它们是不同字段。
+- **不要跳过 verify 失败决策点**：必须由你选修复或接受偏差。
+- **不要手工伪造 archive 状态**：归档由 `/comet-archive` 或 `comet archive` 完成。
+- **不要手工编辑 `.comet.yaml` 推进 phase**：用 `comet guard --apply` 或 `comet state transition`。
 
 ## .comet.yaml 缺失或坏了怎么办
 

@@ -1,20 +1,25 @@
----
+﻿---
 title: "Comet 怎么用评估驱动 Skill 演进"
-description: "Comet 如何用评估驱动 Skill 演进——Spec Coding 类 Skill 多轮交互的特点、它和 SWE-bench 这类纯模型评测的区别、绑定 Skill 的评测为何至今没有金标准，以及这套评估要解决的开放难题。"
+description: "Comet 如何用评估驱动 Skill 演进。Spec Coding 类 Skill 多轮交互的特点、它和 SWE-bench 这类纯模型评测的区别、绑定 Skill 的评测为何至今没有金标准，以及这套评估要解决的开放难题。"
 ---
 
 <Info>
-  这一页面向希望把评估用起来、并推进到企业生产环境的团队。如果只需跑一次评估，看[快速上手](/zh/eval/quickstart)；想理解评估为什么重要，看[评估：Skill 演进的罗盘](/zh/eval/why-eval)。这一页说明 Comet 如何用评估驱动 Skill 演进，以及"评估模型"和"评估 Skill"的区别。
+  本页面向要把评估真正接入团队流程的读者。
+  如果你只想先跑通一次评估，看[快速上手](/zh/eval/quickstart)。
+  如果你更关心评估为什么重要，看[评估：Skill 演进的罗盘](/zh/eval/why-eval)。
+  本页重点是两件事：Comet 如何用评估驱动 Skill 演进，以及“评估模型”和“评估 Skill”为什么不是同一件事。
 </Info>
 
 <Warning>
   本页是面向团队和源码维护者的 Eval 进阶内容。复现其中的 harness、追踪和实验流程需要
-  拉取 Comet 源码；普通用户不需要了解这些内部细节，请直接看[快速上手](/zh/eval/quickstart)。
+  拉取 Comet 源码。普通用户不需要了解这些内部细节，请直接看[快速上手](/zh/eval/quickstart)。
 </Warning>
 
 ## Comet 怎么把评估接入演进闭环
 
-评估只有接入"造 → 评 → 发布"闭环，才能驱动演进。Comet 的做法是把 eval 结果设为发布门禁：没有当前 draft 的 eval 证据、eval 失败、或 eval 证据对应旧 hash，Skill 都不能 publish。
+评估只有进入“造 → 评 → 发布”闭环，才能真正驱动演进。
+Comet 的做法是把 eval 结果设为发布门禁。
+没有当前 draft 的 eval 证据、eval 失败、或证据指向旧 hash 时，Skill 都不能发布。
 
 修改 Skill 后，使用同一任务集重新运行评估，并根据以下信号决定下一步：
 
@@ -53,7 +58,9 @@ Comet 评估一个多阶段、会在决策点暂停问用户的工作流 Skill�
 
 ### 多轮交互：Skill 在决策点暂停等用户
 
-五阶段工作流 Skill（`/comet`）不是单轮任务。它会在阶段边界和需要确认的决策点暂停，等待用户输入——方案是否可行、选哪个默认、是否走 hotfix。这带来两个评测约束：
+五阶段工作流 Skill（`/comet`）不是单轮任务。
+它会在阶段边界和需要确认的决策点暂停，等待用户输入，例如是否接受方案、选哪个默认、是否走 hotfix。
+这会带来两个评测约束：
 
 - 单轮评测无法跑完。如果只给任务 prompt 就执行，Skill 会停在第一个决策点，评测无法进入后续阶段。
 - 决策点需要应答。决策点依赖用户输入，但人工介入会让评测无法自动化、无法重复。
@@ -62,7 +69,9 @@ Comet 评估一个多阶段、会在决策点暂停问用户的工作流 Skill�
 
 ### 评测的"成功"包含状态机推进，不只是产物正确
 
-纯模型评测的"成功"通常是代码通过测试。工作流 Skill 的成功还包括：是否按 `open → design → build → verify → archive` 顺序走过阶段、是否在决策点暂停并等待用户、是否保留可恢复状态。这些是流程证据，不能仅从产物文件判断。
+纯模型评测里的“成功”通常等于代码通过测试。
+但工作流 Skill 的成功还包含流程证据：是否按 `open → design → build → verify → archive` 推进、是否在决策点暂停并等待用户、是否保留可恢复状态。
+这些信息不能只靠产物文件反推。
 
 ### 可靠性比单次能力更重要
 
@@ -81,7 +90,10 @@ SWE-bench 家族是代码智能评测的事实标准：给定真实 GitHub issue
 | 能力 vs 可靠性 | 主要看通过率 | 显式区分 `pass@k`（能力）和 `pass^k`（可靠性）|
 | 对比方式 | 绝对通过率 | 有/无 Skill 的增量对比（treatment 体系）|
 
-核心区别在于：SWE-bench 将模型、harness 和增强（augmentation）的效果合并到一个通过率中；而评估 Skill 要回答的是一个对照问题——在同一任务、同一模型上，加上这个 Skill，表现会改善还是下降、幅度多大。这个问题无法用纯模型评测回答。
+核心区别在于评估问题本身不同。
+SWE-bench 把模型、harness 和增强（augmentation）的效果合并为一个通过率。
+而 Skill 评估要回答的是对照问题：同一任务、同一模型下，加入 Skill 后是变好还是变差，幅度有多大。
+这个问题无法用纯模型评测直接回答。
 
 Comet 用 treatment 体系做有/无 Skill 对照：`CONTROL`（无 Skill 基线）对比 `COMET_FULL`（注入完整 Skill 栈），同一任务、同一隔离环境，唯一变量是 Skill。这样可以单独测量 Skill 的边际效果，避免将模型自身能力计入 Skill 收益。
 
@@ -91,7 +103,11 @@ Comet 用 treatment 体系做有/无 Skill 对照：`CONTROL`（无 Skill 基线
 
 学术论文 SkillsBench<sup>[1]</sup> 针对这个空白，把 Skill 作为直接评测对象，用配对实验（paired evaluation）测量"加 Skill vs 不加 Skill"的增量，并指出：传统的 agent benchmark "measure raw capability in isolation... do not answer the deployment question: will adding this Skill help my agent on this task, and by how much?"
 
-SkillsBench 自身也列出多项未解决问题：仅覆盖终端式、容器化任务；Skill 注入会增加上下文长度，增益可能部分来自更多上下文而非程序性知识；容器化提供状态隔离但并非完全确定；且它没有模拟用户交互、没有使用 pass@k、未采用 LLM-as-judge 打分（坚持确定性测试）。
+SkillsBench 也明确列出了未解决问题。
+它目前只覆盖终端式、容器化任务。
+Skill 注入会增加上下文长度，收益可能部分来自“上下文变多”，而不完全来自程序性知识。
+容器化能提供隔离，但不是绝对确定环境。
+此外，它不模拟用户交互，也不使用 pass@k 和 LLM-as-judge（坚持确定性测试）。
 
 这个方向目前还处于早期阶段。下面是 Comet 在设计和落地 eval 时面对的具体问题及当前做法。
 
@@ -116,7 +132,9 @@ Comet 的做法是双 Agent 自动交互，由两个独立 Agent 角色协作：
 
 ### 难题二：如何用 Agent 做评测（LLM-as-judge）
 
-规则型 rubric 能检测结构性信号（文件是否存在、命令是否执行、Skill 是否被调用），但无法判断产物是否有实质内容——agent 是否做了有意义的设计，还是只生成了占位内容。
+规则型 rubric 能检测结构性信号（文件存在、命令执行、Skill 调用）。
+但它很难判断产物是否真的有内容。
+例如，agent 到底做了有意义的设计，还是只生成了占位文本。
 
 Comet 的做法是可选的 LLM-as-judge：由裁判模型读取 workspace 产物后打分。关键在于将主观判断限制在可审计范围内：
 
@@ -139,7 +157,11 @@ SkillsBench 出于确定性，未采用 LLM-as-judge 打分。Comet 的取舍是
 | rubric 多维分（7/9/11 维，加权汇总） | 哪里强、哪里弱、差距多少 | 信息性（诊断）|
 | pass@k / pass^k | 能否做到 / 能否每次做到 | 信息性（分布）|
 
-分层的理由是：把"是否正确"和"质量高低"分开。一个产出了所有正确文件但包含 `rm -rf` 的 Skill，任务校验器会判通过，但 `safety_boundary` 维度会标低——前者说明能否交付，后者说明能否安全交付。rubric 采用二元检查项而非 0–100 评分（与 SWE-bench、τ-bench 等一致），使分数可复现、可解释。
+分层的核心目的，是把“是否正确”和“质量高低”拆开。
+一个 Skill 可能产出了所有必需文件，但同时包含 `rm -rf` 这类风险操作。
+这时任务校验器可能判通过，而 `safety_boundary` 会给低分。
+前者回答“能否交付”，后者回答“能否安全交付”。
+rubric 采用二元检查项而不是 0–100 主观打分（与 SWE-bench、τ-bench 等思路一致），结果更可复现，也更可解释。
 
 源码位置：pass@k/pass^k 在 `eval/scaffold/python/pass_at_k.py`，rubric 加权在 `validation/rubric.py`，失败归因在 `attribution.py`。
 
@@ -168,7 +190,7 @@ Comet 通过多层机制确保模型实际使用 Skill：
 3. **PreToolUse hook 守护**。将 Skill 自带的 `comet-hook-guard.mjs` 注册为 `Write|Edit|MultiEdit` 前置 hook，每次写文件前运行阶段守卫，使模型持续按 Skill 的阶段逻辑执行。
 4. **Skill 调用证据作为硬门禁**。评测从 `stream-json` 输出中解析真实的 `Skill` tool_use 事件来验证调用（不从产物文件名反推）。如果 comet 入口、至少一个嵌套阶段 Skill、OpenSpec 和 Superpowers 依赖 Skill 未全部作为真实工具调用出现，运行判定失败。
 
-这些机制检查 Skill 是否被调用并留下可解析的调用轨迹；缺少调用证据时，评估判定失败。
+这些机制检查 Skill 是否被调用并留下可解析的调用轨迹。缺少调用证据时，评估判定失败。
 
 源码位置：CLAUDE.md 契约在 `eval/local/skills/benchmarks/dependency/claude-md/comet-workflow/CLAUDE.md`，调用证据解析在 `scaffold/python/logging.py` 的 `extract_events`，硬门禁在 `validation/rubric.py` 的 `_score_skill_invocation`。
 
@@ -191,16 +213,19 @@ Comet 的 LangSmith 集成复用同一套本地任务套件，把评估跑进真
 
 ## 小结
 
-评测模型能力已有较成熟的金标准；评估"绑定到 Agent 上的 Skill 是否有效"目前仍是开放问题。Comet eval 的做法是：
+评测模型能力已经有较成熟的基准。
+但“绑定到 Agent 的 Skill 是否有效”仍是开放问题。
+Comet eval 的实践路径是：
 
-- 把 Skill 评测作为多轮交互问题处理，用双 Agent 自动交互跑完整条工作流，而非单轮执行；
-- 把确定性测试和定性判断分工，任务校验器承担硬性判定，LLM judge 补充深度评估；
-- 用 pass@k/pass^k 区分能力与可靠性，使演进有明确方向；
-- 用 Docker 隔离、只读挂载、密钥白名单保证环境可复现；
-- 用 CLAUDE.md 契约和调用证据硬门禁确保 Skill 被真实调用；
-- 用 LangSmith 集成把评估接入企业级可观测平台。
+- 把 Skill 评测当成多轮交互问题处理，用双 Agent 自动交互跑完整流程，而不是单轮执行。
+- 把确定性测试与定性判断分工：任务校验器负责硬判定，LLM judge 补充深度评估。
+- 用 pass@k/pass^k 区分能力和可靠性，让优化方向更明确。
+- 用 Docker 隔离、只读挂载、密钥白名单保证环境可复现。
+- 用 CLAUDE.md 契约和调用证据门禁保证 Skill 被真实调用。
+- 用 LangSmith 集成接入企业级可观测平台。
 
-这些问题目前都没有被完全解决，SkillsBench 的开放问题清单也说明了这一点。Comet eval 为评估的每个环节提供了可解释、可审计、可复现的工程实现，让评估可以持续运行并驱动 Skill 演进。
+这些问题目前仍未被完全解决，SkillsBench 的开放问题清单也说明了这一点。
+Comet eval 为评估链路的每个环节提供了可解释、可审计、可复现的工程实现，让评估能够持续运行并驱动 Skill 演进。
 
 ## 参考文献
 

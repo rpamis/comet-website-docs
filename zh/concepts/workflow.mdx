@@ -3,17 +3,17 @@ title: 'Classic 工作流'
 description: 'Classic 是什么、适合谁；一次 change 从入口到归档会经历什么；五阶段与各机制的细节分别在哪些页面展开。'
 ---
 
-用户只需要调用 `/comet`。
-它读取项目配置 `.comet/config.yaml`，`default_workflow` 为 classic 时把调用转发到内部永久入口 `/comet-classic`，由 Classic 把一次变更拆成 open、design、build、verify、archive 五个阶段。
+在 Classic 模式下，你只需要调用 `/comet`。
+系统会读取项目配置 `.comet/config.yaml`。当 `default_workflow` 为 `classic` 时，请求会转发到内部入口 `/comet-classic`，再按 open、design、build、verify、archive 五个阶段执行。
 Classic 与 [Native 工作流](/zh/concepts/native-workflow) 是两套独立工作流，各自维护自己的 change、状态与产物。
 
-Classic 把 OpenSpec 和 Superpowers 连成一条可恢复的流程：
-OpenSpec 负责 WHAT（需求、提案、spec 生命周期、归档），Superpowers 负责 HOW（brainstorming、技术设计、计划、执行、验证），Comet 负责保存阶段与交接状态。
-阶段 Skill 不依赖对话历史，每次调用都重读活跃 change、`.comet.yaml` 与实际文件状态来判断当前阶段，因此你不需要自己判断处于 open、design、build、verify 还是 archive。
+Classic 把 OpenSpec 和 Superpowers 接在同一条可恢复流程里。
+OpenSpec 负责 WHAT（需求、提案、spec 生命周期、归档），Superpowers 负责 HOW（brainstorming、技术设计、计划、执行、验证），Comet 负责记录阶段和交接状态。
+阶段 Skill 每次都会重读活跃 change、`.comet.yaml` 与实际文件状态，所以即使对话中断，也能判断当前处于 open、design、build、verify 还是 archive。
 
 **Classic 主要适配 Fable 5、GPT-5.6 以下的模型能力档**。
-对这类模型，明确的 Spec、设计、计划、TDD、调试和审查阶段能减少遗漏与流程漂移；Comet 的现有真实基线评估已验证，这种约束在较低能力档模型上能保持任务覆盖与完成效果。
-Fable 5、GPT-5.6 及同档更强模型通常更适合执行方式更轻的 Native 工作流。
+这类模型通常更依赖明确的 Spec、设计、计划、TDD、调试和审查步骤。Comet 的基线评估显示，这些约束能更稳定地覆盖任务并完成交付。
+如果模型能力达到 Fable 5、GPT-5.6 或更高，一般更适合执行方式更轻的 Native 工作流。
 
 下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。
 实际位置由 `classic.artifact_layout` 决定，见[项目文件结构](/zh/guides/project-structure)。
@@ -30,16 +30,17 @@ Fable 5、GPT-5.6 及同档更强模型通常更适合执行方式更轻的 Nati
 | 轻量预设   | `/comet-hotfix` 修 bug、`/comet-tweak` 做中等改动，都跳过 design  |
 | 高级细节   | handoff hash、路由判定、归档流程等，排障时再读，见文末“机制细节与对应页面” |
 
-完整五阶段适合会引入新能力、改 public API 或 schema、或跨模块协作的变更。
-改动小而明确时优先考虑轻量预设：修 bug 走 `/comet-hotfix`，配置、文档或 prompt 类轻中量修改走 `/comet-tweak`，两者都跳过 design。
-预设执行中命中升级信号时，Comet 会停下让你选择继续预设还是升级 full，见下文“轻量预设与升级”。
+当变更会引入新能力、修改 public API 或 schema、或涉及跨模块协作时，优先使用完整五阶段。
+改动小且目标明确时，可优先使用轻量预设：修 bug 走 `/comet-hotfix`，配置、文档或 prompt 类轻中量修改走 `/comet-tweak`，两者都跳过 design。
+预设执行中命中升级信号时，Comet 会暂停，让你选择继续预设还是升级 full，见下文“轻量预设与升级”。
 
-如果你需要的是文档化的需求、设计与验证记录，Classic 的五个阶段和归档产物会留下可回顾的过程；如果你的模型已到 Fable 5、GPT-5.6 档位，想让它自主决定实现与测试方法，[Native 工作流](/zh/concepts/native-workflow) 是更轻的选择。
+如果你需要保留可回顾的需求、设计与验证记录，Classic 的五个阶段和归档产物更合适。
+如果模型已到 Fable 5、GPT-5.6 档位，并且你希望它自主决定实现与测试方法，[Native 工作流](/zh/concepts/native-workflow) 会更轻。
 
 ## 一次 change 你会经历什么
 
 下面以一条完整 full 流程为例，从入口走到归档。
-需要你停下做选择的地方都有编号：路由阶段是 1，open 是 2/3/4，design 是 5，build 是 6/7，verify 是 8，archive 是 9，hotfix/tweak 的升级评估是 10——完整清单见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
+需要你停下做选择的地方都有编号：路由阶段是 1，open 是 2/3/4，design 是 5，build 是 6/7，verify 是 8，archive 是 9，hotfix/tweak 的升级评估是 10。完整清单见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
 各阶段之间由 `/comet-classic` 自动衔接（`auto_transition: false` 时改为逐阶段手动推进，见[自动推进机制](/zh/concepts/auto-transition)）。
 
 ### 入口：说出目标，路由决定走哪条流程
@@ -53,7 +54,8 @@ Fable 5、GPT-5.6 及同档更强模型通常更适合执行方式更轻的 Nati
 - 可收敛的轻中量修改，路由 `tweak`，进入 `/comet-tweak`；
 - 明确要继续某个 active change，路由 `resume`，下一步由该 change 当前停在哪一阶段决定。
 
-`full`、`hotfix`、`tweak`、`resume` 直接开始；`ask_user` 只在证据不足、存在多个活跃 change、或你口头指定的流程与风险信号冲突时停在入口等你选择。
+`full`、`hotfix`、`tweak`、`resume` 会直接开始。
+只有在证据不足、存在多个活跃 change，或你口头指定的流程与风险信号冲突时，才会路由到 `ask_user` 并在入口等待你选择。
 路由的判定依据、风险信号与典型场景见 [Comet 怎么决定这次该走哪条流程](/zh/concepts/intent-routing)。
 
 ### open：把想法变成 OpenSpec change
@@ -132,27 +134,29 @@ delta spec 缺少验收场景时，只能写 Spec Patch 回写 OpenSpec；改动
 
 ## 机制细节与对应页面
 
-Classic 的交接、spec 处理、路由、归档与恢复都有专门页面。
-日常使用了解上面两节即可；需要追查某段机制时，从这里进入对应权威页：
+Classic 的交接、spec 处理、路由、归档与恢复都有对应页面。
+日常使用先看上面两节即可。需要追查具体机制时，再从这里进入对应页面：
 
-- **产物交接（handoff 与上下文压缩）**：交接包和 handoff_hash 的计算方式与各阶段作用见 [comet handoff](/zh/scripts/comet-handoff)；交接包 off/beta 两种格式与何时开压缩见[上下文压缩机制](/zh/concepts/context-compression)。handoff 交接包、brainstorm-summary、subagent-progress、验证报告等中间产物各自的作用见[工作流中间产物](/zh/concepts/intermediate-artifacts)。
-- **spec 范围与漂移**：delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 OpenSpec 原生概念，Comet 使用但不做去重。build 中按规模处理 delta spec（小改直接编辑、中改重新对齐、大改开新 change）见 [build 阶段](/zh/phases/build) 与[中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。verify 发现 spec 漂移时的三选一属于停顿点 8，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)与 [verify 阶段](/zh/phases/verify)。
-- **归档流程**：delta 合并、目录移动与产物标注的逐步说明见 [archive 阶段](/zh/phases/archive)；`comet archive` 命令与 `--dry-run` 预览见 [comet archive](/zh/scripts/comet-archive)。
-- **路由与阶段判定**：六种路由结果怎么判定、风险信号如何影响结果见 [Comet 怎么决定这次该走哪条流程](/zh/concepts/intent-routing)；阶段推进、自动衔接与 `auto_transition` 见[自动推进机制](/zh/concepts/auto-transition)。
-- **你在哪些地方参与**：停顿点 1–10 的完整清单、选项与规则见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
-- **阶段 Skill**：五阶段分别由 `/comet-classic` 路由到的 `/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive` 驱动，轻量预设走 `/comet-hotfix`、`/comet-tweak`。正常使用只调 `/comet`；手动调用这些入口的条件与恢复方式见各 phases 页与[恢复中断的工作](/zh/guides/resuming-workflow)。
+- **产物交接（handoff 与上下文压缩）**：如果你要看交接包和 handoff_hash 的计算方式与阶段作用，先看 [comet handoff](/zh/scripts/comet-handoff)。如果你要看 off/beta 两种格式和启用时机，再看 [上下文压缩机制](/zh/concepts/context-compression)。handoff 交接包、brainstorm-summary、subagent-progress、验证报告等中间产物的作用，见 [工作流中间产物](/zh/concepts/intermediate-artifacts)。
+- **spec 范围与漂移**：delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 OpenSpec 原生概念，Comet 会使用这些类型，但不做去重。build 中按规模处理 delta spec（小改直接编辑、中改重新对齐、大改开新 change），见 [build 阶段](/zh/phases/build) 和 [中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。verify 发现 spec 漂移时，对应停顿点 8，见 [五阶段停顿点和用户选择点](/zh/concepts/decision-points) 与 [verify 阶段](/zh/phases/verify)。
+- **归档流程**：如果你要看 delta 合并、目录移动和产物标注，见 [archive 阶段](/zh/phases/archive)。如果你要看 `comet archive` 命令和 `--dry-run` 预览，见 [comet archive](/zh/scripts/comet-archive)。
+- **路由与阶段判定**：六种路由结果如何判定、风险信号如何影响结果，见 [Comet 怎么决定这次该走哪条流程](/zh/concepts/intent-routing)。阶段推进、自动衔接和 `auto_transition`，见 [自动推进机制](/zh/concepts/auto-transition)。
+- **你在哪些地方参与**：停顿点 1-10 的完整清单、选项和规则，见 [五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
+- **阶段 Skill**：五阶段由 `/comet-classic` 路由到 `/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`。轻量预设走 `/comet-hotfix`、`/comet-tweak`。正常使用只调用 `/comet`。手动调用这些入口的条件和恢复方式，见各 phases 页面与 [恢复中断的工作](/zh/guides/resuming-workflow)。
 
 ## 轻量预设与升级
 
 hotfix 与 tweak 都走 open → build → verify → archive（跳过 design），仍保留 OpenSpec 状态、验证与归档。
 共同前提是变更能装进单个 OpenSpec change，且不需要 Superpowers 深度设计。
-`/comet-hotfix` 适合快速修 bug，无需 Design Doc；`/comet-tweak` 适合配置调整、文档或提示词优化，以及 delta spec 驱动的中等变更——在 tweak 里 delta spec 是正式产物，单凭需要 delta spec 不构成升级理由。
+`/comet-hotfix` 适合快速修 bug，无需 Design Doc。
+`/comet-tweak` 适合配置调整、文档或提示词优化，以及 delta spec 驱动的中等变更。在 tweak 里，delta spec 是正式产物，单凭需要 delta spec 不构成升级理由。
 两者各自的前提、流程与限制见 [hotfix 预设](/zh/presets/hotfix) 与 [tweak 预设](/zh/presets/tweak)。
 
 预设版的走查是同一流程去掉 design：open 的 guard 完成后直接进入 build 阶段，verify 的失败处理和归档前确认仍然保留。
-差异只在两者各自的 build 方式——hotfix 手动逐任务修复（build_mode 默认 `direct`），tweak 用 OpenSpec 原生的 apply 路径执行。
+差异只在两者各自的 build 方式：hotfix 手动逐任务修复（build_mode 默认 `direct`），tweak 用 OpenSpec 原生的 apply 路径执行。
 
-变更装不进单个 change，或执行中出现跨模块协调、新 public API、schema 变更、深层架构问题等升级信号时，Comet 会停下（停顿点 10）让你选择继续预设还是升级 full；升级只能走 `preset-escalate` 合法通道。
+当变更无法收敛到单个 change，或执行中出现跨模块协调、新 public API、schema 变更、深层架构问题等升级信号时，Comet 会在停顿点 10 暂停，让你选择继续预设还是升级 full。
+升级只能走 `preset-escalate` 这一条合法通道。
 升级与中途回退的操作见[中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。
 
 ## 下一步

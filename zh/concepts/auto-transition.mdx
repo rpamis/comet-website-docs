@@ -15,7 +15,7 @@ description: '理解 /comet 进入 Classic 后，内部路由如何自动检测�
 | **自动衔接** | `comet-state next` | 决定是否自动调用下一个阶段 Skill   | 是，读取 `classic.auto_transition` |
 
 <Warning>
-  <strong>阶段推进一定发生</strong>——guard 的 <code>--apply</code> 总是更新 <code>phase</code>。
+  <strong>阶段推进一定发生</strong>。guard 的 <code>--apply</code> 总是更新 <code>phase</code>。
   <code>auto_transition</code> 只控制是否自动调用下一个 Skill，不影响 phase 推进。用户决策点无论{' '}
   <code>auto_transition</code> 取何值都必须阻塞。
 </Warning>
@@ -32,11 +32,11 @@ description: '理解 /comet 进入 Classic 后，内部路由如何自动检测�
 
 ## 自动检测怎么工作
 
-每次调用 `/comet` 并进入 Classic 后，内部 `/comet-classic` 不依赖对话历史，而是重新读取文件状态判断当前阶段。
+每次调用 `/comet` 并进入 Classic 后，内部 `/comet-classic` 都会重新读取文件状态来判断当前阶段，而不是依赖对话历史。
 
 ### Step 0：发现活跃 change
 
-1. **预设检测（优先级最高）**——命中 hotfix/tweak 时直接调用对应预设 Skill
+1. **预设检测（优先级最高）**：命中 hotfix/tweak 时直接调用对应预设 Skill
 2. 未命中预设时运行 `openspec list --json` 获取所有活跃 change
 3. 按 change 数量和用户输入决定行为：
 
@@ -44,13 +44,15 @@ description: '理解 /comet 进入 Classic 后，内部路由如何自动检测�
 | ----------- | ------------------ | --------------------------------------------------------- |
 | 无          | 非预设             | 调用 `/comet-open`                                        |
 | 1 个        | `/comet <描述>`    | 配置进入 Classic 后询问：继续该 change 还是创建新的 |
-| 多个        | `/comet <描述>`    | 配置进入 Classic 后询问：继续已有 change 还是创建新的；选继续则列出清单 |
+| 多个        | `/comet <描述>`    | 配置进入 Classic 后询问是否继续已有 change 或创建新的。若选继续，会列出清单 |
 | 1 个        | `/comet`（无描述） | 配置进入 Classic 后自动选中                               |
 | 多个        | `/comet`（无描述） | 配置进入 Classic 后列出清单让用户选择                     |
 
 ### Step 1：读取状态
 
-优先读取当前 Classic OpenSpec 根目录下的 `changes/<name>/.comet.yaml`：新项目默认是 `docs/openspec/changes/<name>/.comet.yaml`，保留旧布局的项目是 `openspec/changes/<name>/.comet.yaml`。不存在时回退到 `openspec status`、`tasks.md` 和 `docs/superpowers/` 文件检查。根目录由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
+优先读取当前 Classic OpenSpec 根目录下的 `changes/<name>/.comet.yaml`。
+新项目默认路径是 `docs/openspec/changes/<name>/.comet.yaml`，保留旧布局的项目是 `openspec/changes/<name>/.comet.yaml`。
+如果文件不存在，会回退到 `openspec status`、`tasks.md` 和 `docs/superpowers/` 做文件检查。根目录由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
 
 ### Step 2：阶段判定
 
@@ -128,7 +130,7 @@ verify 和 archive 阶段不受 workflow 类型影响，始终返回标准 Skill
 
 ## 连续执行
 
-单次 `/comet` 调用由配置进入 Classic 后，从检测到的阶段开始；退出条件满足后自动推进后续阶段。
+单次 `/comet` 调用进入 Classic 后，会从检测到的阶段开始。退出条件满足后，自动推进到后续阶段。
 
 ```text
 /comet
@@ -136,7 +138,9 @@ verify 和 archive 阶段不受 workflow 类型影响，始终返回标准 Skill
 /comet-open ──→ /comet-design ──→ /comet-build ──→ /comet-verify ──→ /comet-archive
 ```
 
-**自动推进只适用于没有用户决策的衔接点。** 遇到[停顿点](/zh/concepts/decision-points)时必须暂停等待用户确认，不能用推荐规则、默认值或历史偏好代替。支持结构化提问的平台会优先展示可点击的单选/多选；如果平台没有这类工具，或第一次调用失败，本会话后续停顿点会直接退回编号文本选项。
+**自动推进只适用于没有用户决策的衔接点。**
+遇到[停顿点](/zh/concepts/decision-points)时必须暂停并等待用户确认，不能用推荐规则、默认值或历史偏好代替。
+支持结构化提问的平台会优先展示可点击的单选或多选。如果平台没有这类工具，或第一次调用失败，本会话后续停顿点会直接退回编号文本选项。
 
 ## auto_transition 配置
 
@@ -164,7 +168,7 @@ export COMET_AUTO_TRANSITION=false
 
 ## 预设升级
 
-hotfix 或 tweak 执行过程中命中升级信号时，会暂停并提供两个选项：
+hotfix 或 tweak 执行过程中命中升级信号时，会暂停，并提供两个选项：
 
 | 信号类型        | 触发                                                                  | 决策           |
 | --------------- | --------------------------------------------------------------------- | -------------- |
@@ -176,22 +180,23 @@ hotfix 或 tweak 执行过程中命中升级信号时，会暂停并提供两个
 | 继续预设轻量流程            | 继续当前预设                                                                |
 | 升级为完整 `/comet-classic` | `transition preset-escalate` → 回退到 design → 补 Design Doc → 回到完整流程 |
 
-`preset-escalate` 是预设→full 升级的唯一合法通道——一次性设置 `workflow`/`classic_profile` 为 `full`、把 `phase` 回退到 `design`、清除 `design_doc`，三步要么全部生效、要么都不执行。
+`preset-escalate` 是预设到 full 升级的唯一合法通道。
+它会一次性设置 `workflow`/`classic_profile` 为 `full`、把 `phase` 回退到 `design` 并清除 `design_doc`。这三个动作要么全部生效，要么都不执行。
 
 ## 断点恢复
 
-上下文压缩或会话中断后，重新调用 `/comet`；配置进入 Classic 后，内部路由重新读取文件状态恢复：
+上下文压缩或会话中断后，重新调用 `/comet`。配置进入 Classic 后，内部路由会重新读取文件状态并恢复：
 
 | 场景                                                                   | 恢复行为                          |
 | ---------------------------------------------------------------------- | --------------------------------- |
 | `phase: build` + `build_pause: plan-ready`（配置已齐全） | 重新发起同一次联合决策，你补全配置后才清除暂停标记并继续 |
 | `phase: build` + `build_pause: plan-ready`（配置未齐全） | 回到 plan-ready 联合决策，等你补选执行方式、TDD 和审查模式 |
 | `phase: build` + `build_pause: plan-ready` + plan 缺失                 | 状态损坏，重新生成 plan            |
-| `phase: verify` + `verify_result: fail`                                | ≤3 次失败自动回 build 修复；第 4 次暂停等你决策     |
+| `phase: verify` + `verify_result: fail`                                | ≤3 次失败自动回 build 修复。第 4 次暂停并等待你决策 |
 | `phase: open` + 产物已完整                                       | 先 guard `--apply` 修正状态再判定 |
 | `phase: archive`                                                       | 只允许调用 `/comet-archive`       |
 
-断点恢复不依赖对话历史——每次都重新执行 Step 0 和 Step 1。
+断点恢复不依赖对话历史。每次都重新执行 Step 0 和 Step 1。
 
 ## 红旗清单
 

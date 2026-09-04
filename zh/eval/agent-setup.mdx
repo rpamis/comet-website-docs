@@ -1,16 +1,23 @@
----
+﻿---
 title: 'Eval Agent 启动配置'
 description: '在运行 comet eval 前，分别准备 Claude Code、Codex、Qoder 或 CodeBuddy 的 CLI、认证信息和模型配置。'
 ---
 
-`comet eval` 会在隔离的 Docker 容器中启动你选择的 Agent。不同 Agent 的登录方式和模型协议并不通用：Claude Code 可以使用 Anthropic 兼容接口，Codex 需要 OpenAI Responses API，Qoder 需要 Qoder 自己的登录态或 Personal Access Token，CodeBuddy 的自定义模型使用它自己的 API 配置。
+`comet eval` 会在隔离的 Docker 容器中启动你选择的 Agent。
+不同 Agent 的认证方式和模型协议互不兼容，不能混用。
+Claude Code 走 Anthropic 兼容接口。
+Codex 依赖 OpenAI Responses API。
+Qoder 使用自己的登录态或 Personal Access Token。
+CodeBuddy 使用自己的模型配置。
 
-本页只说明 Agent 启动前需要准备什么。Eval 的主任务（Bench）和 LLM-as-judge 仍然分别使用 `BENCH_*` 和 `BENCH_JUDGE_*` 配置；完整变量表见 [Eval harness](/zh/eval/harness#环境变量参考)。
+本页只讲 Agent 启动前的准备项。
+Eval 主任务（Bench）和 LLM-as-judge 仍分别使用 `BENCH_*` 与 `BENCH_JUDGE_*`。
+完整变量表见 [Eval harness](/zh/eval/harness#环境变量参考)。
 
 <Warning>
   不要把真实密钥写进 Skill、manifest、公开仓库、Dockerfile 或报告。建议使用当前 shell
   环境变量，或使用用户级 <code>%USERPROFILE%\.comet\eval\\.env</code> /{' '}
-  <code>~/.comet/eval/.env</code>；发布包不会包含这些文件。
+  <code>~/.comet/eval/.env</code>。发布包不会包含这些文件。
 </Warning>
 
 ## 用户级 `.env` 在哪里
@@ -21,10 +28,11 @@ description: '在运行 comet eval 前，分别准备 Claude Code、Codex、Qode
 - Windows：`%USERPROFILE%\.comet\eval\\.env`
 - macOS/Linux：`~/.comet/eval/.env`
 
-第一次执行 `comet eval` 时，如果这个文件不存在，CLI 会自动创建一份包含全部 Eval 参数的
-注释模板，并在终端输出实际路径。编辑后再次执行即可；已有文件不会被覆盖，当前 shell
-中的环境变量优先级更高。完整参数按主任务、独立 Judge、Claude Code、Codex、Qoder、
-CodeBuddy、LangSmith 和 Langfuse 分组，直接编辑自动生成的模板即可，不需要手工新建参数表。
+第一次执行 `comet eval` 时，如果该文件不存在，CLI 会自动创建带注释的完整模板，并在终端打印实际路径。
+你编辑模板后再次执行即可。
+CLI 不会覆盖已存在的文件。
+若同名变量同时出现在模板和当前 shell，以当前 shell 为准。
+参数已经按主任务、Judge、Claude Code、Codex、Qoder、CodeBuddy、LangSmith、Langfuse 分组，不需要你手工重建参数表。
 
 ## 先选择一个 Agent
 
@@ -42,17 +50,20 @@ comet eval ./my-skill --agent qoder --quick --html
 comet eval ./my-skill --agent codebuddy --quick --html
 ```
 
-每个 Agent 都先在宿主机上单独验证启动，再运行 Eval。这样可以把“Agent 没有登录”与“Skill 评估失败”区分开。
+先在宿主机单独验证 Agent 可用，再运行 Eval。
+这样可以把“Agent 启动或登录失败”和“Skill 评估失败”分开排查。
 
 ## Claude Code
 
 ### 启动前需要什么
 
-- PATH 中可执行的 `claude` CLI；
-- 任选一种认证方式：首次交互式登录，或 `ANTHROPIC_API_KEY`；
+- PATH 中可执行的 `claude` CLI。
+- 任选一种认证方式：首次交互式登录，或 `ANTHROPIC_API_KEY`。
 - 如果使用 Anthropic 兼容代理，还需要 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL` 和模型名。
 
-Claude Code 官方快速开始说明，首次运行 `claude` 会进入登录流程；设置 `ANTHROPIC_API_KEY` 后可以跳过登录提示并改为确认该 key。使用其他 LLM gateway 时，官方支持通过 `ANTHROPIC_AUTH_TOKEN` 和 `ANTHROPIC_BASE_URL` 配置代理。
+首次运行 `claude` 会进入登录流程。
+如果你设置了 `ANTHROPIC_API_KEY`，CLI 会改为确认该 key，而不是走交互登录。
+使用第三方网关时，可通过 `ANTHROPIC_AUTH_TOKEN` 和 `ANTHROPIC_BASE_URL` 指向代理。
 
 官方参考：[Claude Code overview](https://code.claude.com/docs/en/overview)、[LLM gateway](https://code.claude.com/docs/en/llm-gateway)。
 
@@ -77,18 +88,22 @@ ANTHROPIC_BASE_URL=https://your-anthropic-gateway.example/v1
 ANTHROPIC_MODEL=your-anthropic-compatible-model
 ```
 
-Eval 会把通用配置映射到 Claude Code 的原生变量。显式设置的 `ANTHROPIC_*` 优先于通用 `BENCH_*` fallback。
+Eval 会把通用配置映射到 Claude Code 原生变量。
+若同时设置了 `ANTHROPIC_*` 和 `BENCH_*`，以显式的 `ANTHROPIC_*` 为准。
 
 ## Codex
 
 ### 启动前需要什么
 
-- PATH 中可执行的 `codex` CLI；
-- 一个能访问 OpenAI Responses API 的 API key 或登录态；
-- 一个与该 key 对应的模型名；
+- PATH 中可执行的 `codex` CLI。
+- 一个能访问 OpenAI Responses API 的 API key 或登录态。
+- 一个与该 key 对应的模型名。
 - 如果使用自定义 provider，需要在用户级 `~/.codex/config.toml` 中声明 `model_provider`、`base_url`、`env_key` 和 `wire_api = "responses"`。
 
-Codex 的自定义 provider 配置位于用户级 `config.toml`。官方配置参考说明：`base_url` 是 provider API 地址，`env_key` 指定从哪个环境变量读取 key，当前 `wire_api` 使用 `responses`。不要把 Anthropic Messages 地址填给 Codex；它必须提供 Responses 接口，通常是 `<base-url>/responses`。
+Codex 的自定义 provider 配置在用户级 `config.toml`。
+`base_url` 表示 provider 地址，`env_key` 表示读取哪个环境变量作为 key，`wire_api` 需要设为 `responses`。
+不要把 Anthropic Messages 地址给 Codex。
+Codex 需要的是 Responses 接口，常见形式是 `<base-url>/responses`。
 
 官方参考：[Codex configuration reference](https://developers.openai.com/codex/config-reference/)。
 
@@ -139,17 +154,19 @@ OPENAI_MODEL=your-responses-model
 # BENCH_MODEL=your-responses-model
 ```
 
-Eval 运行时会在容器内生成临时 `config.toml`，其中只保存 `env_key = "OPENAI_API_KEY"`，不会保存真实 key。你仍然必须确认 provider 实际支持 Responses API；仅支持 `/chat/completions` 或 Anthropic `/messages` 的地址不能直接用于 Codex。
+Eval 运行时会在容器内生成临时 `config.toml`，其中只写 `env_key = "OPENAI_API_KEY"`，不会落盘真实 key。
+你仍需要确认 provider 真实支持 Responses API。
+只支持 `/chat/completions` 或 Anthropic `/messages` 的地址不能直接用于 Codex。
 
 ## Qoder
 
 ### 启动前需要什么
 
-- PATH 中可执行的 `qodercli` CLI；
-- Qoder 登录态，或 Qoder Personal Access Token（PAT）；
+- PATH 中可执行的 `qodercli` CLI。
+- Qoder 登录态，或 Qoder Personal Access Token（PAT）。
 - 自动化和 Eval 推荐使用 `QODER_PERSONAL_ACCESS_TOKEN`。
 
-Qoder 官方文档支持两种 CLI 登录方式：运行 `qodercli` 后输入 `/login` 进行浏览器登录或粘贴 Qoder PAT；非交互式启动可以设置 `QODER_PERSONAL_ACCESS_TOKEN`。PAT 在 [Qoder Account → Integrations](https://qoder.com/account/integrations) 创建。
+Qoder 官方文档支持两种 CLI 登录方式：运行 `qodercli` 后输入 `/login` 进行浏览器登录或粘贴 Qoder PAT。非交互式启动可以设置 `QODER_PERSONAL_ACCESS_TOKEN`。PAT 在 [Qoder Account → Integrations](https://qoder.com/account/integrations) 创建。
 
 官方参考：[Qoder CLI quick start](https://docs.qoder.com/en/cli/quick-start)、[Qoder CLI authentication](https://docs.qoder.com/en/cli/sdk/authentication)。
 
@@ -185,19 +202,26 @@ QODER_MODEL=your-qoder-model
 # BENCH_MODEL=your-qoder-model
 ```
 
-Qoder 的 PAT 是 Qoder 自己的登录凭据，不是 Anthropic/OpenAI API key。不要把 Claude Code 使用的 `ANTHROPIC_AUTH_TOKEN` 或其他模型网关 key 填到 `QODER_PERSONAL_ACCESS_TOKEN`；这会在 Qoder 启动时认证失败。当前 Eval 不要求为 Qoder 填写 Claude Code 的 `ANTHROPIC_BASE_URL`。
+Qoder 的 PAT 只用于 Qoder 认证，不是 Anthropic/OpenAI 的 API key。
+不要把 `ANTHROPIC_AUTH_TOKEN` 或其他网关 key 填到 `QODER_PERSONAL_ACCESS_TOKEN`。
+那样会在 Qoder 启动阶段直接认证失败。
+当前 Eval 也不要求你为 Qoder 配置 Claude Code 的 `ANTHROPIC_BASE_URL`。
 
-Eval 会把 `QODER_PERSONAL_ACCESS_TOKEN` 仅注入本次容器进程，并为 Qoder 使用隔离的临时配置根；不会读取或挂载宿主机的 Qoder 登录文件。
+Eval 只在本次容器进程注入 `QODER_PERSONAL_ACCESS_TOKEN`，并使用隔离的临时配置目录。
+它不会读取或挂载宿主机的 Qoder 登录文件。
 
 ## CodeBuddy
 
 ### 启动前需要什么
 
-- PATH 中可执行的 `codebuddy` CLI；
-- 如果使用 CodeBuddy 平台登录，使用 `CODEBUDDY_AUTH_TOKEN`；
+- PATH 中可执行的 `codebuddy` CLI。
+- 如果使用 CodeBuddy 平台登录，使用 `CODEBUDDY_AUTH_TOKEN`。
 - 如果使用第三方或 OpenAI-compatible 模型，使用 `CODEBUDDY_API_KEY`、`CODEBUDDY_BASE_URL` 和该 provider 接受的模型名。
 
-CodeBuddy 的自定义模型通过 `--model <model-id>` 选择。`CODEBUDDY_MODEL` 可以设置默认模型，`CODEBUDDY_BASE_URL` 覆盖请求地址。不要把 Claude Code 的 `ANTHROPIC_BASE_URL`（尤其是 `/anthropic` 或 `/messages` 地址）直接复用给 CodeBuddy；模型名也必须使用 CodeBuddy/provider 接受的 ID，不要直接带上 Claude 专用的模型后缀。
+CodeBuddy 通过 `--model <model-id>` 选择模型。
+`CODEBUDDY_MODEL` 可设置默认模型，`CODEBUDDY_BASE_URL` 可覆盖请求地址。
+不要把 Claude Code 的 `ANTHROPIC_BASE_URL`（尤其是 `/anthropic` 或 `/messages`）直接复用给 CodeBuddy。
+模型名也要使用 CodeBuddy 或 provider 认可的 ID，不要照搬 Claude 专用后缀。
 
 官方的宿主机模型注册文件是用户级 `~/.codebuddy/models.json` 或工作区级 `.codebuddy/models.json`。其中 `url` 应填写完整的 OpenAI-compatible `/chat/completions` 地址，`apiKey` 可以写成 `${CODEBUDDY_API_KEY}`，不要写真实密钥。例如：
 
@@ -216,7 +240,9 @@ CodeBuddy 的自定义模型通过 `--model <model-id>` 选择。`CODEBUDDY_MODE
 }
 ```
 
-Eval 不会挂载宿主机的 `models.json` 或 CodeBuddy 登录目录，而是在容器内使用临时 `settings.json`，并通过原生环境变量和 `--model` 传入配置。推荐先在宿主机验证：
+Eval 不会挂载宿主机 `models.json` 或 CodeBuddy 登录目录。
+它会在容器内使用临时 `settings.json`，并通过环境变量与 `--model` 传入配置。
+建议先在宿主机完成一次最小验证：
 
 ```bash
 CODEBUDDY_API_KEY=your-subject-key \
@@ -246,7 +272,9 @@ CODEBUDDY_MODEL=your-model-id
 
 官方参考：[CodeBuddy 模型配置](https://www.codebuddy.cn/docs/cli/models)、[环境变量](https://www.codebuddy.cn/docs/cli/env-vars)、[CLI 参数](https://www.codebuddy.cn/docs/cli/cli-reference)。
 
-Eval 运行时只把凭据注入本次容器进程；临时 `settings.json` 使用 `apiKeyHelper` 读取环境变量，运行结束后随容器配置目录销毁，不会把真实 key 写入报告、manifest 或 Skill 工作区。
+Eval 只在当前容器进程注入凭据。
+临时 `settings.json` 用 `apiKeyHelper` 读取环境变量。
+运行结束后该配置目录会销毁，不会把真实 key 写入报告、manifest 或 Skill 工作区。
 
 ## 扩展自定义 Agent
 
@@ -294,14 +322,14 @@ capabilities:
 
 字段规则：
 
-- `runtime.executable` 是容器内启动的命令；npm/pip 包必须暴露这个可执行入口。
-  `runtime.install.kind` 支持 `npm`、`pip`、`none`；`none` 表示该命令已经存在于基础镜像中。
-- `credentials` 只能声明最多两个环境变量名，不能写密钥值。主 Agent 只会把这些变量转发进容器；
+- `runtime.executable` 是容器内启动的命令。npm/pip 包必须暴露这个可执行入口。
+  `runtime.install.kind` 支持 `npm`、`pip`、`none`。`none` 表示该命令已经存在于基础镜像中。
+- `credentials` 只能声明最多两个环境变量名，不能写密钥值。主 Agent 只会把这些变量转发进容器。
   如果用于 Judge，`BENCH_JUDGE_API_KEY` 映射到第一个名称，`BENCH_JUDGE_AUTH_TOKEN` 映射到第二个名称。
 - `modelEnv`、`baseUrlEnv` 是可选的自定义变量名。自定义 Agent 不会自动继承 `BENCH_API_KEY`、
-  `BENCH_MODEL` 或 `BENCH_BASE_URL`；请使用声明的变量、CLI 参数或 manifest 配置。
-- `resume` 支持 `auto_user` 多轮交互；`structuredEvents` 要求输出 JSONL；
-  `skillInvocationEvidence` 要求输出明确的 Skill 调用事件；`telemetry: false` 时 token/cost 可以是
+  `BENCH_MODEL` 或 `BENCH_BASE_URL`。请使用声明的变量、CLI 参数或 manifest 配置。
+- `resume` 支持 `auto_user` 多轮交互。`structuredEvents` 要求输出 JSONL。
+  `skillInvocationEvidence` 要求输出明确的 Skill 调用事件。`telemetry: false` 时 token/cost 可以是
   `N/A`。真实评估至少需要 `singleTurn`、`resume`、`structuredEvents` 和
   `skillInvocationEvidence` 为 `true`。
 
@@ -367,7 +395,7 @@ BENCH_JUDGE_BASE_URL=https://your-judge-gateway.example/v1
 | Eval 瞬间跳过                      | Agent 凭据没有进入 Eval 进程                                                | 检查用户级 `.env` 或当前 shell；不要只检查 GUI 客户端的配置                                     |
 
 <Info>
-  CodeBuddy 的自定义模型需要使用 CodeBuddy 的 OpenAI-compatible 配置；Claude Code 的 `ANTHROPIC_*`
+  CodeBuddy 的自定义模型需要使用 CodeBuddy 的 OpenAI-compatible 配置。Claude Code 的 `ANTHROPIC_*`
   配置不会自动变成 CodeBuddy 配置。
 </Info>
 

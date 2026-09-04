@@ -1,4 +1,4 @@
----
+﻿---
 title: "评估系统概览（进阶）"
 description: "了解 comet eval 的入口、任务发现、评分、报告，以及评估证据如何进入发布检查。"
 ---
@@ -13,9 +13,10 @@ description: "了解 comet eval 的入口、任务发现、评分、报告，以
   Comet 源码。只有修改评测框架本身或复现历史实验时，才需要拉取源码。
 </Note>
 
-`comet eval` 是 Comet 的通用 Skill 评估入口。它先回答一个问题：**你手里的 Skill 能不能作为可靠的产品能力，通过真实任务评估？**
+`comet eval` 是 Comet 的通用 Skill 评估入口。
+它先回答一个核心问题：**你当前的 Skill 能否在真实任务中稳定通过评估，并成为可发布的产品能力。**
 
-本页分为两部分：
+本页分两部分：
 
 1. 先看自己的 Skill 怎么被评估：入口、任务、评分、报告和失败归因。
 2. 再看 `/comet-any` 如何把 eval 结果接入发布 readiness。
@@ -33,7 +34,9 @@ description: "了解 comet eval 的入口、任务发现、评分、报告，以
 
 ## 评估输出
 
-日常使用只需关注评估任务和结果。`comet eval` 已封装 pytest、任务发现、profile、实验条件（treatment，指本次注入哪些 Skill 做对照）、Docker 和本地评测框架的启动细节，你可以直接在项目根目录运行评估。
+日常使用只要关注任务和结果。
+`comet eval` 已经封装了 pytest、任务发现、profile、实验条件（treatment，用于定义本轮注入哪些 Skill 做对照）、Docker 以及本地评测框架启动细节。
+你可以直接在项目根目录运行评估。
 
 ## 两套评估系统，不要混淆
 
@@ -44,7 +47,9 @@ Comet 有两套评估系统，名字相近但完全不同：
 | **创建期评估** | `comet eval`        | Skill 包或 `comet/eval.yaml` | **是**       |
 | **运行期检查** | `comet skill check` | 某次 Skill 运行              | 否           |
 
-`comet eval` 回答"这个 Skill 作为产品能力能不能通过评估"，通过共享 eval harness 执行真实模型任务。`comet skill check` 回答"这次 Skill 运行是否缺文件或状态"，只检查运行期检查项，不跑模型。详见 [Runtime check](/zh/eval/runtime)。
+`comet eval` 回答的是“这个 Skill 作为产品能力能否通过评估”，它会通过共享 eval harness 执行真实模型任务。
+`comet skill check` 回答的是“这次 Skill 运行是否缺文件或状态”，只检查运行期检查项，不跑模型。
+详见 [Runtime check](/zh/eval/runtime)。
 
 <p align="center">
   <img
@@ -102,25 +107,34 @@ flowchart TB
 
 ## 入口怎么选
 
-`comet eval [target]` 根据 target 自动判断入口：传目录或 `SKILL.md` 走 skill-path，传 `comet/eval.yaml` 走 manifest。两者也可以用 `--skill-path` / `--manifest` 显式指定，显式入口互斥。
+`comet eval [target]` 会根据 target 自动判断入口。
+传目录或 `SKILL.md` 走 skill-path。
+传 `comet/eval.yaml` 走 manifest。
+也可以用 `--skill-path` 或 `--manifest` 显式指定，但二者互斥。
 
 | 场景                        | 命令                                                  | 适合                                       |
 | --------------------------- | ----------------------------------------------------- | ------------------------------------------ |
 | 任意本地 Skill 目录（默认） | `comet eval ./my-skill --html`                        | 评估自己的 Skill，一条命令跑通 Docker 评估 |
 | `/comet-any` 生成的完整包   | `comet eval ./generated-skill/comet/eval.yaml --html` | 跑完整 profile 任务集，作为发布证据        |
 
-传目录时会自动发现 manifest；没有 manifest 时普通运行会从 Skill 快照生成并缓存 2–4 个受限任务，`--quick` 才是固定的 `generic-skill-smoke` 冒烟。`--skill-name` 会从目录名自动推断。不需要 `comet/eval.yaml`，也不需要 clone Comet 仓库——npm 包自带 eval harness。
+传目录时会自动发现 manifest。
+若没有 manifest，普通运行会从 Skill 快照生成并缓存 2–4 个受限任务。
+`--quick` 才会固定成 `generic-skill-smoke` 冒烟任务。
+`--skill-name` 默认从目录名推断。
+这条路径不要求 `comet/eval.yaml`，也不要求 clone Comet 仓库，因为 npm 包自带 eval harness。
 
 <Warning>
   直接评估本地 Skill 不等于发布评估。`--quick` 只验证"Skill
-  能被注入、被调用、产出文件"；普通运行会生成与 Skill 内容相关的受限任务。发布
+  能被注入、被调用、产出文件"。普通运行会生成与 Skill 内容相关的受限任务。发布
   readiness 需要评估 <code>/comet-any</code> 生成的完整包（带{" "}
   <code>comet/eval.yaml</code>）。
 </Warning>
 
 ## 先运行 collect
 
-`collect` 是成本最低的排错入口。它只做发现和预检查，不执行模型或 Docker 任务，适合快速发现路径、manifest、任务缓存和配置问题。
+`collect` 是成本最低的排错入口。
+它只做发现和预检查，不执行模型或 Docker 任务。
+这一步最适合先排查路径、manifest、任务缓存和配置问题。
 
 ```bash
 comet eval ./generated-skill/comet/eval.yaml --collect
@@ -173,10 +187,12 @@ interaction:
 <Warning>
   <code>apiVersion</code> 和 <code>kind</code> 是强校验：不等于{" "}
   <code>comet.eval/v1alpha1</code> / <code>comet.eval/SkillEvalManifest</code>{" "}
-  会直接报错。日常使用通常不需要手写这个文件，<code>/comet-any</code> 会生成。
+  会直接报错。日常使用大多不需要手写这个文件，<code>/comet-any</code> 会生成。
 </Warning>
 
-`/comet-any` 生成的 eval.yaml 默认用 `authoring-skill` profile。普通 workflow-kernel 会推荐 `generic-skill-smoke`、`authoring-skill-smoke` 和 `workflow-route-conformance`；基于 `/comet` 的 overlay 会额外推荐 `workflow-overlay-contract` 和经典 Comet workflow 任务，用来检查 Output Schema、预期 evidence 和 overlay 路由。
+`/comet-any` 生成的 eval.yaml 默认使用 `authoring-skill` profile。
+普通 workflow-kernel 一般推荐 `generic-skill-smoke`、`authoring-skill-smoke` 和 `workflow-route-conformance`。
+基于 `/comet` 的 overlay 会额外推荐 `workflow-overlay-contract` 与经典 Comet workflow 任务，用于检查 Output Schema、预期 evidence 和 overlay 路由。
 
 ## Profile
 
@@ -205,9 +221,9 @@ Profile 解析优先级：`--profile` 覆盖 > manifest 的 `skill.profile` > ta
 
 eval 是**指标驱动**的评测，不只给通过/失败：
 
-- **rubric 多维评分**：把 Skill 质量拆成多个维度（如五阶段的 main_flow/gate_guard、通用 Skill 的 safety_boundary），每维度 0.0–1.0，加权汇总成 `weighted_score`。仅用于诊断，不作为门禁。
-- **pass@k / pass^k**：区分**能力上限**（k 次里至少成功一次）和**可靠性下限**（k 次全部成功）。基于多次重复运行计算（重复运行目前由 eval harness 内部的 pytest 选项驱动），同样仅用于诊断。
-- **任务校验器通过/失败**：这次实现到底对不对（`target_artifacts` + `test_scripts`）。**这才是真正决定 pass/fail 的硬性结果**。
+- **rubric 多维评分**：把 Skill 质量拆成多个维度（例如五阶段的 main_flow/gate_guard、通用 Skill 的 safety_boundary），每维度 0.0–1.0，最后加权汇总为 `weighted_score`。它只用于诊断，不作为门禁。
+- **pass@k / pass^k**：分别表示**能力上限**（k 次里至少成功一次）和**可靠性下限**（k 次全部成功）。它们基于重复运行统计，同样用于诊断。
+- **任务校验器通过/失败**：判断这次实现到底对不对（`target_artifacts` + `test_scripts`）。**这才是决定 pass/fail 的硬结果**。
 
 完整的维度细则、权重、公式、双 Agent 交互循环见[评分指标与双 Agent 评测](/zh/eval/scoring)。
 
@@ -222,11 +238,14 @@ eval harness 内置一组任务，每个任务是一个目录（含 `instruction
 | `workflow-route-conformance` | -       | 校验生成的 Skill 是否按预期 stage 顺序运行 |
 | `comet-full-workflow` 等     | comet   | 经典五阶段的不同维度评估                   |
 
-**`recommended`** 是 CLI 的默认解析路径：用 `--manifest` 时读 manifest 的 `recommendedTasks`；没有 manifest 时跑每个 task 的 `default_treatments`。它不代表具体任务名。
+**`recommended`** 是 CLI 的默认解析路径。
+使用 `--manifest` 时，它读取 manifest 里的 `recommendedTasks`。
+没有 manifest 时，它读取各 task 的 `default_treatments`。
+它不是一个具体任务名。
 
 ## skill-path 默认入口跑什么
 
-传一个本地 Skill 目录时，普通运行会根据 Skill 快照生成并缓存受限任务；需要固定的 quick smoke 时，显式使用 `--quick`：
+传一个本地 Skill 目录时，普通运行会根据 Skill 快照生成并缓存受限任务。需要固定的 quick smoke 时，显式使用 `--quick`：
 
 ```bash
 comet eval ./my-skill --html
@@ -238,7 +257,9 @@ comet eval ./my-skill --html
 - eval harness 是否能把它当作动态 Skill 注入
 - 通用 smoke task 是否能跑起来并产出 `result.md`
 
-这是评估自己 Skill 的默认入口，轻量但真实。它**不等于**发布前完整证据——发布 readiness 需要评估 `/comet-any` 生成的完整包（带 `comet/eval.yaml`）。
+这是评估自有 Skill 的默认入口，轻量但真实。
+但它**不等于**发布前完整证据。
+发布 readiness 需要评估 `/comet-any` 生成的完整包（含 `comet/eval.yaml`）。
 
 ## 第二部分：/comet-any 如何连接 eval
 
@@ -280,7 +301,11 @@ flowchart TB
   -> comet creator 读取评估结果并进入 readiness / review / publish / distribute
 ```
 
-`comet eval` 不负责发布。发布仍然由 creator / publish 命令处理：创建和恢复状态通过 [comet creator](/zh/cli/creator) 暴露，发布和分发通过 [comet publish](/zh/cli/publish) 暴露。eval 的职责是提供发布前证据。
+`comet eval` 本身不负责发布。
+发布动作仍由 creator / publish 命令处理。
+创建与恢复状态看 [comet creator](/zh/cli/creator)。
+发布与分发看 [comet publish](/zh/cli/publish)。
+eval 的职责是提供发布前证据。
 
 ## 推荐路径：评估 /comet-any 生成的 Skill
 
@@ -303,12 +328,13 @@ comet eval ./generated-skill/comet/eval.yaml --html
 
 ## Eval 结果如何进入 publish readiness
 
-`/comet-any` 或 creator / publish 后端在记录 Eval 结果后，会把它并入 publish readiness。用户需要知道的只有两点：
+`/comet-any` 或 creator / publish 后端记录 Eval 结果后，会把证据并入 publish readiness。
+对用户来说，最关键是两点：
 
 1. `comet eval` 产出的结果会成为 `Publish readiness:` 的证据来源。
 2. 当前 hash 缺少 Eval 证据时，`User next steps:` 必须先指向补齐评估，并暂停发布。
 
-通常顺序是：
+常见顺序是：
 
 ```bash
 comet eval ./generated-skill/comet/eval.yaml --collect
@@ -316,7 +342,8 @@ comet eval ./generated-skill/comet/eval.yaml --html
 comet creator next <name> --json
 ```
 
-`comet creator next` 只输出当前推荐的一步用户命令；`comet publish review` 会把 `Publish readiness:`、`User next steps:`、`Readiness:`、`Blockers:`、`Warnings:` 和 `Evidence:` 展示给用户。
+`comet creator next` 只输出当前推荐的一条用户命令。
+`comet publish review` 会展示 `Publish readiness:`、`User next steps:`、`Readiness:`、`Blockers:`、`Warnings:` 和 `Evidence:`。
 
 ## /comet-any 如何使用 eval 结果
 
@@ -338,7 +365,7 @@ comet creator next <name> --json
 2. 发布 `/comet-any` 产物时，评估包含 `comet/eval.yaml` 的完整包。
 3. 先 `collect`，再 `run --html`。
 4. `/comet-any` 生成物会把 eval 结果接入发布 readiness，但 eval 本身不是发布动作。
-5. `comet eval` 用于创建期评估；`comet skill check` 用于运行期检查。
+5. `comet eval` 用于创建期评估。`comet skill check` 用于运行期检查。
 
 ## 下一步
 

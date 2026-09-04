@@ -1,16 +1,19 @@
----
+﻿---
 title: 'Skill 与 Engine（进阶）'
 description: '了解 Skill 包结构、Engine 运行循环、快照、guardrails、runtime checks 和 Run 状态。'
 ---
 
 <Tip>
-  创建、优化或组合 Skill 时，通常只需要在 Agent 里调用 <code>/comet-any</code>{' '}
+  创建、优化或组合 Skill 时，先在 Agent 里调用 <code>/comet-any</code>{' '}
   并按提示确认。除非你要调试 Engine Run、runtime checks
   或生成物结构，不需要先理解本页的底层机制。经典 Spec 模式的 <code>/comet-classic</code>{' '}
   用户也不需要理解 Engine 就能使用五阶段工作流。
 </Tip>
 
-Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置了 **Skill Engine**——一个确定性运行时，负责执行、约束、持久化、恢复和评估 Comet Skill。它为多步骤 Skill 提供稳定内容 hash、不可变快照、pending action 恢复、guardrails 和 runtime check。
+Comet 的 Skill 不只是 Markdown 提示词。
+从 0.4.0-beta.1 开始，Comet 内置了 **Skill Engine**。
+它是一个确定性运行时，负责执行约束、状态持久化、恢复和评估。
+对于多步骤 Skill，Engine 提供稳定内容 hash、不可变快照、pending action 恢复、guardrails 和 runtime check。
 
 ## 适用读者
 
@@ -24,9 +27,9 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 
 命令边界如下：
 
-- `SKILL.md` 是人和 Agent 看到的入口说明。
-- `comet/` 目录是运行时控制面，决定如何执行、恢复、检查和评估。
-- `comet eval` 看发布前证据，`comet skill check` 看某次 Run 的运行期检查；两者不是同一件事。
+- `SKILL.md` 是给人和 Agent 的入口说明。
+- `comet/` 目录是运行时控制面，定义如何执行、恢复、检查和评估。
+- `comet eval` 看发布前证据，`comet skill check` 看单次 Run 的运行期检查。两者解决的问题不同。
 
 ## 三类 Skill
 
@@ -38,7 +41,7 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 
 ### Skill 发现顺序
 
-`resolveSkill` 按以下顺序查找，找到即停止：
+`resolveSkill` 按固定顺序查找，找到即停止：
 
 1. **explicit** — selector 指向一个已存在的目录，直接加载。路径不存在会报错，不会继续找。
 2. **project** — `<projectRoot>/.comet/skills/<selector>`，**优先于内置**，所以项目可以按名称覆盖内置 Skill。
@@ -46,8 +49,9 @@ Comet 的 Skill 不只是 Markdown 提示词。0.4.0-beta.1 起，Comet 内置�
 4. 都没找到 → **fail closed**，不静默回退。
 
 <Warning>
-  项目 Skill 按名称覆盖内置 Skill 时，如果项目 Skill
-  无效时会直接失败，并禁止回退到内置版本。这可以防止自定义版本无效时静默降级。
+  项目 Skill 按名称覆盖内置 Skill。
+  如果项目 Skill 无效，会直接失败，并禁止回退到内置版本。
+  这样可以避免“自定义失效但系统静默降级”的问题。
 </Warning>
 
 ## Skill 包结构
@@ -84,7 +88,7 @@ Engine-enabled Skill 除 `SKILL.md` 外，还包含 `comet/` 控制面：
 
 <Note>
   <strong>容易混淆的命名：</strong>复数 <code>evals.yaml</code>（或 <code>checks.yaml</code>
-  ）是运行期 eval，由 Engine 在运行时检查；单数 <code>eval.yaml</code> 是创建期评估 manifest，由{' '}
+  ）是运行期 eval，由 Engine 在运行时检查。单数 <code>eval.yaml</code> 是创建期评估 manifest，由{' '}
   <code>comet eval</code> 在发布前验证。两者生命周期不同，不能混为一谈。<code>checks.yaml</code> 和{' '}
   <code>evals.yaml</code> 不能同时存在。
 </Note>
@@ -143,19 +147,21 @@ tools: []
 
 ## 两种编排模式
 
-两种模式共享**同一个执行循环**。区别在于谁来决定下一步动作。
+两种模式共享**同一个执行循环**。
+差异只在于“谁来决定下一步动作”。
 
 ### deterministic（确定性）
 
 - 步骤是一个静态图，`entry` 指定起点，每个 step 的 `next` 指定下一步。
-- Engine 自己解析当前 step → 构造动作 → 过 guardrails → 暂停等结果。
-- 成功后推进到 `next`；失败则增加重试计数、停留在当前 step。
+- Engine 解析当前 step，构造动作，通过 guardrails，然后暂停等待结果。
+- 成功后推进到 `next`。失败后增加重试计数，并停留在当前 step。
 - `next` 为空时 Run 完成。`comet skill run` 目前只支持 deterministic 端到端执行。
 
 ### adaptive（自适应）
 
 - 不能定义 `entry` 或 `steps`。
-- Engine **不自己提议动作**——由外部 Agent 提议，通过 `acceptAdaptiveAction` 注入，同样过 guardrails。
+- Engine **不自己提议动作**。
+- 动作由外部 Agent 提议，再通过 `acceptAdaptiveAction` 注入，同样要经过 guardrails。
 - 完成由 evals/Agent 驱动，没有 `next: null` 终止 step。
 - 循环层已就绪并有测试覆盖，但 `comet skill run` 的公开入口目前会拒绝 adaptive 包。
 
@@ -166,7 +172,9 @@ tools: []
 
 ## Engine 运行循环
 
-Engine 的核心是一个 ReAct 风格的循环，但 Engine 本身**不执行副作用**——它只负责决定、约束、记录、评估，真正的动作执行交给外部（Agent、平台或人）。
+Engine 的核心是 ReAct 风格循环，但它本身**不执行副作用**。
+Engine 只负责决定、约束、记录和评估。
+真正执行动作的是外部执行者（Agent、平台或人）。
 
 ```mermaid
 flowchart LR
@@ -189,13 +197,16 @@ flowchart LR
   />
 </p>
 
-<p align="center">Engine 只提议、约束和记录；真正的副作用由外部执行后再 resume</p>
+<p align="center">Engine 只提议、约束和记录。真正的副作用由外部执行后再 resume</p>
 
 ### pending action：为什么暂停
 
 pending action 是 Engine 把控制权交回给执行者的机制。Engine 提议一个动作后，Run 状态变成 `waiting`，直到外部提交这个动作的结果（`ActionOutcome`）。
 
-为什么要暂停：Engine 是确定性状态机，自己不做实际工作（不调模型、不写代码）。它把"该做什么"写入 pending action 持久化到磁盘，外部执行完再通过 `resume` 提交结果。这同时让 Run **跨进程可恢复**——pending action 在磁盘上，新进程读它就能继续。
+为什么要暂停：Engine 是确定性状态机，它不直接调模型，也不直接写代码。
+它会把“下一步该做什么”写入 pending action 并持久化到磁盘，等待外部执行后通过 `resume` 回传结果。
+这也让 Run 具备**跨进程恢复**能力。
+因为 pending action 在磁盘上，换进程后读取状态即可继续。
 
 动作 id 是确定性的：`sha256(runId:iteration:stepId)` 的前 16 位。
 
@@ -224,7 +235,7 @@ flowchart TD
 
 1. 拒绝 adaptive 包（目前）。
 2. 拒绝已存在的 Run（change 模式一个目录只能有一个 Run）。
-3. **创建不可变快照**——把整个 Skill 包冻结到 `.comet/skill-snapshots/<hash>/`，hash 锁定到 Run 的 `skillHash`。
+3. **创建不可变快照**。把整个 Skill 包冻结到 `.comet/skill-snapshots/<hash>/`，并将 hash 锁定到 Run 的 `skillHash`。
 4. 初始化 Run state：`currentStep = entry`，`status = running`。
 5. 记录 `run_started` trajectory 事件。
 6. `decide` 解析 entry step、构造第一个动作、过 guardrails、写入 pending action、`status = waiting`。
@@ -299,7 +310,7 @@ guardrails 约束 Engine 能执行什么动作，由 `guardrails.yaml` 覆盖默
 
 <Warning>
   动态重新规划<strong>不能放宽 guardrails</strong>。允许列表和预算由 Skill 固定，运行时的 Agent
-  无法在运行中扩大它们。这是 Engine 安全性的核心——Skill 定义了边界，执行者只能在边界内行动。
+  无法在运行中扩大它们。这是 Engine 安全性的核心。Skill 定义了边界，执行者只能在边界内行动。
 </Warning>
 
 ### 示例
@@ -450,7 +461,7 @@ flowchart LR
 <Note>
   Engine 内部的 <code>comet-classic</code> 定义是一个 deterministic Skill，有 28 个步骤覆盖
   full/hotfix/tweak 三种 profile。用户通过永久入口 <code>/comet-classic</code>（或由项目配置驱动的{' '}
-  <code>/comet</code> 别名转发）进入，不直接操作这些内部 YAML；Engine 在底层加载并运行它们。
+  <code>/comet</code> 别名转发）进入，不直接操作这些内部 YAML。Engine 在底层加载并运行它们。
 </Note>
 
 #### Classic 控制包的打包方式
@@ -463,7 +474,7 @@ flowchart LR
 | `comet/runtime/classic/guardrails.yaml` | 允许的 7 个公开 Skill、`maxIterations: 500`、`maxRetriesPerAction: 3`     |
 | `comet/runtime/classic/checks.yaml`     | runtime check（`classic-completed`：completion 时 `status == completed`） |
 
-这里的 Engine 定义**不是**用户调用的顶层 `comet-classic/` 入口目录。内部安装产物是这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册并由 Engine 加载；顶层 `/comet-classic` 只负责稳定入口与工作流编排。
+这里的 Engine 定义**不是**用户调用的顶层 `comet-classic/` 入口目录。内部安装产物是这三个 YAML，由 `assets/manifest.json` 的 `internalSkills` 注册并由 Engine 加载。顶层 `/comet-classic` 只负责稳定入口与工作流编排。
 
 ## 什么时候用 /comet-any
 
