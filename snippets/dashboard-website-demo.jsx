@@ -65,8 +65,8 @@ export const DashboardWebsiteDemo = () => {
           });
 
       globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
-        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=rc1-website-11'),
-        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=rc1-website-11'),
+        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.1-website-01'),
+        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.1-website-01'),
       ])
         .then(([jsPayload, cssPayload]) => ({
           scriptUrl: URL.createObjectURL(
