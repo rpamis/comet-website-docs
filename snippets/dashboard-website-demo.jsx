@@ -58,20 +58,22 @@ export const DashboardWebsiteDemo = () => {
       if (cache) return cache;
 
       const fetchPayload = (url) =>
-        fetch(url)
-          .then((response) => {
-            if (!response.ok) throw new Error(`Dashboard 预览静态资源加载失败（${response.status}）。`);
-            return response.json();
-          });
+        fetch(url).then((response) => {
+          if (!response.ok)
+            throw new Error(`Dashboard 预览静态资源加载失败（${response.status}）。`);
+          return response.json();
+        });
 
       globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
-        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.1-website-01'),
-        fetchPayload('/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.1-website-01'),
+        fetchPayload(
+          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.1-website-02',
+        ),
+        fetchPayload(
+          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.1-website-02',
+        ),
       ])
         .then(([jsPayload, cssPayload]) => ({
-          scriptUrl: URL.createObjectURL(
-            new Blob([jsPayload.js], { type: 'text/javascript' }),
-          ),
+          scriptUrl: URL.createObjectURL(new Blob([jsPayload.js], { type: 'text/javascript' })),
           stylesheetUrl: URL.createObjectURL(new Blob([cssPayload.css], { type: 'text/css' })),
         }))
         .catch((error) => {
