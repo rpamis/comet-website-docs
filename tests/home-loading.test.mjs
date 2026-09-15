@@ -17,6 +17,12 @@ test("custom home pages keep the top-level loader until the mounted loader is hi
     ),
     "the top-level loader spinner exits before the mounted loader is hidden",
   );
+  assert.ok(
+    /html\[data-page-mode=['"]custom['"]\]:not\(:has\(\.comet-home__loader\.is-hidden\)\)\s+header/.test(
+      css,
+    ),
+    "the sticky header remains visible above the loading layer",
+  );
 });
 
 test("homepage font loading does not block the critical custom CSS", () => {
