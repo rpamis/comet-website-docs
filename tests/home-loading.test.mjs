@@ -4,18 +4,22 @@ import test from "node:test";
 
 const css = readFileSync(new URL("../custom.css", import.meta.url), "utf8");
 
-test("custom home pages keep the top-level loader until the mounted loader is hidden", () => {
+test("custom home pages keep the top-level loader until the mounted loader mounts", () => {
   assert.ok(
-    /html\[data-page-mode=['"]custom['"]\]\s+body:not\(:has\(\.comet-home__loader\.is-hidden\)\)::before/.test(
+    /html\[data-page-mode=['"]custom['"]\]\s+body:not\(:has\(\.comet-home__loader\)\)::before/.test(
       css,
     ),
-    "the top-level loader backdrop exits before the mounted loader is hidden",
+    "the top-level loader backdrop exits once the mounted loader exists",
   );
   assert.ok(
-    /html\[data-page-mode=['"]custom['"]\]\s+body:not\(:has\(\.comet-home__loader\.is-hidden\)\)::after/.test(
+    /html\[data-page-mode=['"]custom['"]\]\s+body:not\(:has\(\.comet-home__loader\)\)::after/.test(
       css,
     ),
-    "the top-level loader spinner exits before the mounted loader is hidden",
+    "the top-level loader spinner exits once the mounted loader exists",
+  );
+  assert.ok(
+    !/body:not\(:has\(\.comet-home__loader\.is-hidden\)\)::(before|after)/.test(css),
+    "the top-level loader must not overlap the mounted loader",
   );
   assert.ok(
     /html\[data-page-mode=['"]custom['"]\]:not\(:has\(\.comet-home__loader\.is-hidden\)\)\s+header/.test(
