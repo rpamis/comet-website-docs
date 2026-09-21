@@ -5,7 +5,7 @@ description: "Learn how Comet accumulates Project Knowledge from basic project s
 
 Project Knowledge is Comet's first-party, project-level plugin. As the Agent works on tasks, it discovers project information that has reuse value and organizes it into Project Knowledge records that carry a source, an applicable scope, and verification records.
 
-On first use, Comet builds a limited base Project Model from the manifest, configuration, directory structure, Comet artifacts, and the Markdown you explicitly added. Review, verification, failure re-verification, change archives, and actual application results in later tasks keep adding project policies. The Agent can reuse confirmed project understanding while still treating the current source code, configuration, and tests as its direct basis.
+On first use, Comet builds a limited base Project Model from the manifest, configuration, directory structure, Comet artifacts, and the Markdown you explicitly added. Review, verification, failure re-verification, change archives, and actual application results in later tasks keep adding project policies. The Agent can also write verified, reusable lessons directly into project memory at the end of a task. The Agent can reuse confirmed project understanding while still treating the current source code, configuration, and tests as its direct basis.
 
 ## The boundary with Rule and the project Wiki
 
@@ -100,6 +100,29 @@ A Project Policy can enter the `enforced` (verified constraint) state only after
   />
 </p>
 
+## Project Memory: experience the Agent writes directly
+
+Project Memory is the file-based experience layer inside Project Knowledge. Unlike Project Model and Project Policy, it skips extraction and the review queue: at the end of a task, the Agent writes verified, reusable lessons directly through `comet knowledge remember`, and they take effect for later tasks immediately.
+
+```bash
+comet knowledge remember . --title "<concise title>" --text "<symptom, approach, verification result>" --type <type> --paths <related paths>
+```
+
+`--type` accepts `fact`, `decision`, `pattern`, `procedure`, `constraint`, or `failure-resolution` and defaults to `pattern`. The same title updates the same memory by default instead of stacking duplicates.
+
+Project Memory is stored outside the repository in the local knowledge-cache directory: one `MEMORY.md` index plus one Markdown file per lesson. The Dashboard's project memory page shows the exact storage location.
+
+### Injection and expansion
+
+- The `MEMORY.md` index is injected in full with every task context; the index is ordered newest first, so a tight context budget keeps the newer lessons.
+- To read one lesson in full, append `--expand-context "project-memory:<slug>"` with the same task arguments.
+- The index is read before Local/Remote provider retrieval, so Project Memory still applies when a provider is unavailable.
+- `comet task --complete` reminds the Agent in its tool response: if this task produced verified, reusable, and not-yet-recorded project experience, record it now with `comet knowledge remember`; otherwise skip.
+
+### Management entry
+
+`comet knowledge forget . --memory <slug>` deletes stale project memories. The **Project Memory** tab on the Dashboard's Project Knowledge page is a read-only view where you can browse, search, inspect, and delete project memories; the recently-used list shows when the memory index was last delivered to the Agent.
+
 ## Relationship with Rule, Hook, and engineering checks
 
 | Layer | Core responsibility | Typical carrier | Executor |
@@ -131,9 +154,11 @@ knowledge:
       - docs/**/*.md
       - packages/*/README.md
       - architecture/**/decisions-*.md
+    max_file_mb: 1
+    max_total_mb: 32
 ```
 
-Extra paths are resolved relative to the project root. Only Markdown enters the full-text retrieval corpus; source code, configuration, and tests can support model records without becoming retrieval corpus. The default corpus does not automatically include every platform Rule file or rule directory. Add their Markdown through `include` when needed.
+Extra paths are resolved relative to the project root. Only Markdown enters the full-text retrieval corpus; source code, configuration, and tests can support model records without becoming retrieval corpus. The default corpus does not automatically include every platform Rule file or rule directory. Add their Markdown through `include` when needed. Per-file and total corpus sizes are limited by `knowledge.local.max_file_mb` and `max_total_mb` (defaults 1 MB and 32 MB); files over the limit stay out of the corpus and produce a diagnostic. You can also adjust both limits in the Dashboard's Project Knowledge settings.
 
 ### Distill project policies from execution results
 
@@ -188,7 +213,7 @@ The success, ignore, override, correction, or failure results after the Agent us
 
 ## Management entry
 
-The Dashboard's **Project Knowledge** page separates Project Models from Project Policies and shows each record's applicable scope, source, verification method, state, `whyApplied`, recent application results, and full history.
+The Dashboard's **Project Knowledge** page separates Project Models from Project Policies and shows each record's applicable scope, source, verification method, state, `whyApplied`, recent application results, and full history; project memories are shown in a separate **Project Memory** tab.
 
 The CLI reads and writes the same state:
 
@@ -197,8 +222,10 @@ comet knowledge status .
 comet knowledge query . --task "modify the authentication module" --path src/auth --phase build --operation edit
 comet knowledge list . --state proven
 comet knowledge get . --id <record-id>
+comet knowledge remember . --title "<concise title>" --text "<symptom, approach, verification result>" --type <type>
 comet knowledge correct . --id <record-id> --text <new-description>
 comet knowledge forget . --id <record-id>
+comet knowledge forget . --memory <memory-slug>
 comet knowledge feedback . --id <record-id> --outcome used-successfully
 comet knowledge rebuild .
 ```

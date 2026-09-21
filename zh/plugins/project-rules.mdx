@@ -5,7 +5,7 @@ description: "了解 Comet 如何从基础项目来源和实际任务结果中�
 
 Project Knowledge（项目知识）是 Comet 的第一方项目级插件。它在 Agent 执行任务的过程中发现具有复用价值的项目信息，并将这些信息整理为带来源、适用范围和验证记录的项目知识。
 
-首次使用时，Comet 会从 manifest、配置、目录结构、Comet 产物和你明确加入的 Markdown 中建立有限的基础项目模型。后续任务中的 Review、验证、故障复验、Change Archive 和实际应用结果会继续补充项目策略。Agent 因此能够复用已经确认的项目理解，同时仍以当前源码、配置和测试为直接依据。
+首次使用时，Comet 会从 manifest、配置、目录结构、Comet 产物和你明确加入的 Markdown 中建立有限的基础项目模型。后续任务中的 Review、验证、故障复验、Change Archive 和实际应用结果会继续补充项目策略。Agent 还可以在任务结束时把验证过的可复用经验直接写入项目记忆。Agent 因此能够复用已经确认的项目理解，同时仍以当前源码、配置和测试为直接依据。
 
 ## 与 Rule 和项目 Wiki 的边界
 
@@ -100,6 +100,29 @@ Project Policy 只有在关联的验证命令当前存在且已成功执行后�
   />
 </p>
 
+## 项目记忆：Agent 直接写入的经验
+
+项目记忆是项目知识中的文件层经验。与 Project Model 和 Project Policy 不同，它不经过提取和评审队列：Agent 在任务结束时通过 `comet knowledge remember` 把验证过、可复用的经验直接写入，写入后立即对后续任务生效。
+
+```bash
+comet knowledge remember . --title "<简明标题>" --text "<现象、做法、验证结果>" --type <类型> --paths <相关路径>
+```
+
+`--type` 可选 `fact`、`decision`、`pattern`、`procedure`、`constraint`、`failure-resolution`，默认 `pattern`。同一标题默认更新同一条记忆，不会重复堆叠。
+
+项目记忆保存在项目仓库之外的本机知识缓存目录中：一份 `MEMORY.md` 索引，加上每条经验一个 Markdown 文件。Dashboard 的项目记忆页会显示具体存储位置。
+
+### 注入与展开
+
+- 每次任务上下文都会完整注入 `MEMORY.md` 索引；索引按最新在前排序，上下文预算紧张时优先保留新经验。
+- 需要单条经验的完整内容时，用同一任务参数追加 `--expand-context "project-memory:<slug>"` 展开。
+- 索引先于 Local/Remote Provider 检索读取，Provider 不可用时项目记忆仍然生效。
+- `comet task --complete` 会在工具响应中提醒 Agent：本次任务若有验证过、可复用且尚未记录的项目经验，立即用 `comet knowledge remember` 写入；没有就跳过。
+
+### 管理入口
+
+`comet knowledge forget . --memory <slug>` 删除过期的项目记忆。Dashboard 项目知识页的**项目记忆**标签页是只读视图，可以浏览、搜索、查看和删除项目记忆；最近使用列表会显示记忆索引何时投递给了 Agent。
+
 ## 与 Rule、Hook 和工程检查的关系
 
 | 层                | 核心职责                             | 典型载体                                | 执行方                   |
@@ -131,9 +154,11 @@ knowledge:
       - docs/**/*.md
       - packages/*/README.md
       - architecture/**/decisions-*.md
+    max_file_mb: 1
+    max_total_mb: 32
 ```
 
-额外路径均相对于项目根目录解析。只有 Markdown 进入全文检索语料；源码、配置和测试可以作为模型记录的证据，但不会因此成为检索语料。默认语料范围不会自动包含目标平台的所有 Rule 文件或规则目录，需要时可通过 `include` 加入其中的 Markdown。
+额外路径均相对于项目根目录解析。只有 Markdown 进入全文检索语料；源码、配置和测试可以作为模型记录的证据，但不会因此成为检索语料。默认语料范围不会自动包含目标平台的所有 Rule 文件或规则目录，需要时可通过 `include` 加入其中的 Markdown。单个文件和语料总量分别受 `knowledge.local.max_file_mb` 和 `max_total_mb` 限制（默认 1 MB 和 32 MB），超限的文件不进入检索语料并产生诊断；两个上限也可以在 Dashboard 的项目知识设置中调整。
 
 ### 从执行结果中沉淀项目策略
 
@@ -188,7 +213,7 @@ Agent 使用后的成功、忽略、覆盖、纠正或失败结果会反向影�
 
 ## 管理入口
 
-Dashboard 的**项目知识**页面区分项目模型与项目策略，并展示作用范围、来源、验证方式、状态、`whyApplied`、最近应用结果和完整历史。
+Dashboard 的**项目知识**页面区分项目模型与项目策略，并展示作用范围、来源、验证方式、状态、`whyApplied`、最近应用结果和完整历史；项目记忆在单独的**项目记忆**标签页中查看。
 
 CLI 访问同一份状态：
 
@@ -197,8 +222,10 @@ comet knowledge status .
 comet knowledge query . --task "修改身份验证模块" --path src/auth --phase build --operation edit
 comet knowledge list . --state proven
 comet knowledge get . --id <记录标识>
+comet knowledge remember . --title "<简明标题>" --text "<现象、做法、验证结果>" --type <类型>
 comet knowledge correct . --id <记录标识> --text <新说明>
 comet knowledge forget . --id <记录标识>
+comet knowledge forget . --memory <记忆标识>
 comet knowledge feedback . --id <记录标识> --outcome used-successfully
 comet knowledge rebuild .
 ```

@@ -66,10 +66,10 @@ export const DashboardWebsiteDemo = () => {
 
       globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.1-website-02',
+          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.2-website-01',
         ),
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.1-website-02',
+          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.2-website-01',
         ),
       ])
         .then(([jsPayload, cssPayload]) => ({

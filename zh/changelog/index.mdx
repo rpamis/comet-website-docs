@@ -5,7 +5,47 @@ description: "Comet 发布记录。"
 
 本页默认展开当前版本，历史版本按版本逐个折叠。日常升级时先看最新版本的重点变化、破坏性调整和修复项；只有排查旧版本行为时才需要展开对应版本。
 
+<Update label="0.4.2" description="2026-09-20" rss={{ title: "Comet 0.4.2", description: "2026-09-20 发布记录" }}>
+0.4.2 新增项目记忆和按需 Runtime 守护进程，完善 Classic 检查策略与 Native 文档覆盖规则，并改进大型仓库支持和恢复能力。
+
+### Added（新增）
+
+- **项目记忆命令**：`comet knowledge remember` 记录项目级可复用经验，以 `MEMORY.md` 索引加单条 Markdown 文件保存；索引随每次任务上下文完整注入，单条经验通过 `--expand-context "project-memory:<slug>"` 展开，`comet knowledge forget --memory <slug>` 移除过期内容。Dashboard 的项目知识页新增只读的项目记忆标签页，可浏览、搜索、查看和删除这些记忆，并在最近使用列表显示记忆索引何时投递给 Agent。索引先于 Provider 检索读取，Local/Remote Provider 故障不会丢失它；`MEMORY.md` 按最新在前排序，上下文预算紧张时优先丢弃最旧的经验；`comet task --complete` 会在工具响应中提醒 Agent 记录可复用经验。
+- **按需 Runtime 守护进程**：`comet daemon start|status|stop` 为只读 Classic 和 Native 查询复用项目级 Node 进程，提供有界 IPC、权限隔离和空闲自动退出，守护进程不可用时自动回退。
+- **ZCode Hook 集成**：`comet init` 和 `comet update` 会把项目级阶段守卫安装到 `.zcode/config.json`，保留无关的用户设置；`comet doctor` 可以检查并修复这个托管入口。
+- **Classic 检查策略 v2 与增量检查**：在 `.comet/check-policy.json` 中声明每个命令的输入文件、输出、工作目录和通配范围；`comet check run --incremental` 产出阶段内证据，推进阶段前的完整检查保持必需。
+- **Native 文档与源码覆盖规则**：Shape 确认要求完整的需求文档和正式 Spec；源码 Review 可以停留在用户选择的章节及其必要依赖内，并附可执行的修复指引。
+- **Native 验证交接**：Builder 交接可以提交最终检查计划，由 Runtime 执行或复用；Native 状态会记录独立派发的 Verifier 是否真正启动。
+- **Monorepo 构建发现**：Classic Guard 能找到提供构建命令的唯一工作区包，并记录实际使用的目录。
+- **可配置的项目知识上限**：在 `.comet/config.yaml` 或 Dashboard 设置中配置 Local Provider 的单文件与 Markdown 语料总量上限。
+
+### Changed（变更）
+
+- **证据跟随真实输入**：Classic 与 Native 的检查复用现在跟踪命令实际依赖的文件、生成输出、工作目录和执行环境。文档编辑默认视为中性变更，严格和显式策略仍然可用；过期证据会报告变化路径和精确的重跑命令。
+- **大型仓库支持**：检查、归档和 Runtime 文档哈希改为流式处理内容，不再应用原来的固定文件大小上限。Native 快照和生成输入的预算可配置，含大量资产的项目默认更高。
+- **工作流选择与 CLI 指引**：`comet init` 推荐 Native 并说明何时 Classic 更合适。`native select`、根帮助、决策提示和过期状态响应现在返回完整状态和可执行的下一步。
+- **Hook 与工作流响应速度**：Hook 只校验选中的 change，把受保护路径归属到所有者，异步读取 stdin，并让可选的上下文检索离开写入路径。重复的选择、检查和阶段过渡避免冗余扫描和执行。
+- **归档与恢复流程**：Native 可以用一条确认命令记录完成选择并归档。锁、子进程、检查和交付恢复现在报告所有者、工作区、变化的输入和安全的重试命令，包括跨设备和中断进程的情况。
+- **安装生命周期**：Init、update 和 Doctor 校验每个打包的 Skill、Rule 和 Hook，恢复损坏的项目注册表，并在单个全局更新失败后继续安全地更新所有项目。
+
+### Fixed（修复）
+
+- **工作流收敛**：过期或中断的 Classic 证据不再伪装成成功，`comet check rerun` 重复记录的命令。Native 在可恢复失败期间保留有效候选，防止重复恢复循环，并保持归档选择和交付边界一致。
+- **Supervisor 与 worktree 恢复**：Shape 修订不再在依赖集成前把子任务标记为就绪，Doctor 可以修复受影响的子任务状态。Git 分支和 worktree 身份检查也支持晚于 Comet 初始化的 Git、linked worktree 和 Windows 路径别名。
+- **Ambient Resume 重复**：`CLAUDE.md` 导入 `AGENTS.md` 的项目只保留一个托管恢复块，更新时自动迁移已存在的重复项（[#433](https://github.com/rpamis/comet/issues/433)）。
+- **个人记忆暂停与 Dashboard 汇总**：已暂停的项目不再评审或持久化自动观察，Dashboard 在切换项目后保持学习结果和项目级汇总一致（[#440](https://github.com/rpamis/comet/issues/440)）。
+- **Native 确认与 Verifier 恢复**：Shape 漂移在过期需求被确认前检测，已注册但从未启动的 Verifier 保持可见，并附有界的恢复路径。
+- **包与 Hook 安全**：不完整的 npm 资产以一条可操作的重装消息失败；有界的 Hook 上下文失败输出简短诊断，同时放行写入；托管操作期间用户 Hook 配置和无关的暂存、工作区、未跟踪文件保持原样。
+
+### Security（安全）
+
+- **Vitest 依赖安全**：升级 Vitest、`@vitest/mocker` 和 V8 覆盖率依赖到 4.1.11，移除可触达的路径穿越和任意文件读取漏洞。
+- **Native 文档注释清理**：校验 Markdown 文档和需求时使用完整的 HTML 注释扫描，防止畸形的注释边界绕过可见内容检查。
+
+</Update>
+
 <Update label="0.4.1" description="2026-09-14" rss={{ title: "Comet 0.4.1", description: "2026-09-14 发布记录" }}>
+<Accordion title="0.4.1 版本详情" id="v0-4-1-details">
 0.4.1 提升了 Classic 与 Native 日常推进的响应速度和恢复能力，并完善了 Dashboard、个人记忆、安装更新及 Hook 兼容性。
 
 ### Added（新增）
@@ -53,6 +93,7 @@ description: "Comet 发布记录。"
 - **记忆过滤诊断**：记忆文本被拒绝时说明命中的内容类别（例如 `phone number` 或 `credential assignment`），调用方可以直接修正文本，不用再猜。
 - **Dashboard Git 快照**：以 NUL 结尾的 porcelain 模式读取 git status，非 ASCII（如中文）文件名和含空格路径按原文显示，不再是 git 的引号八进制转义形式（[#403](https://github.com/rpamis/comet/issues/403)）。
 
+</Accordion>
 </Update>
 
 <Update label="0.4.0" description="2026-09-08" rss={{ title: "Comet 0.4.0", description: "2026-09-08 发布记录" }}>
