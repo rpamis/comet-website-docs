@@ -51,8 +51,10 @@ export const DashboardWebsiteDemo = () => {
       }
     };
 
-    // Mintlify 部署会丢弃 .js/.css 静态文件（.json/.png 正常），因此资产以 JSON 包装下发，
-    // 浏览器端还原成 Blob URL 后再注入。资产解析结果缓存在 globalThis 上，SPA 内页切换时避免重复拉取。
+    // Mintlify 部署会丢弃 .js/.css 静态文件（.json/.png 正常），因此资产以 JSON 包装下发。
+    // 站点 CSP 的 script-src / style-src 均不含 blob:，所以脚本以内联 <script> 执行，
+    // 样式在 mount 后以内联 <style> 注入 shadow root；资产解析结果缓存在 globalThis 上，
+    // SPA 内页切换时避免重复拉取。
     const loadDashboardAssets = () => {
       const cache = globalThis.__cometDashboardWebsiteDemoAssets;
       if (cache) return cache;
@@ -71,51 +73,58 @@ export const DashboardWebsiteDemo = () => {
         fetchPayload(
           '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.2-website-01',
         ),
-      ])
-        .then(([jsPayload, cssPayload]) => ({
-          scriptUrl: URL.createObjectURL(new Blob([jsPayload.js], { type: 'text/javascript' })),
-          stylesheetUrl: URL.createObjectURL(new Blob([cssPayload.css], { type: 'text/css' })),
-        }))
-        .catch((error) => {
-          delete globalThis.__cometDashboardWebsiteDemoAssets;
-          throw error;
-        });
+      ]).catch((error) => {
+        delete globalThis.__cometDashboardWebsiteDemoAssets;
+        throw error;
+      });
 
       return globalThis.__cometDashboardWebsiteDemoAssets;
     };
 
-    const loadDashboardBundle = ({ scriptUrl }) => {
+    const runDashboardBundle = (jsSource) => {
       if (globalThis.CometDashboardWebsiteDemo) {
-        return Promise.resolve(globalThis.CometDashboardWebsiteDemo);
+        return globalThis.CometDashboardWebsiteDemo;
       }
 
-      return new Promise((resolve, reject) => {
-        let script = document.querySelector('script[data-comet-dashboard-website-demo]');
-        const handleLoad = () => {
-          if (globalThis.CometDashboardWebsiteDemo) resolve(globalThis.CometDashboardWebsiteDemo);
-          else reject(new Error('Dashboard 预览加载完成，但没有找到挂载入口。'));
-        };
-        const handleError = () => reject(new Error('Dashboard 预览脚本执行失败。'));
+      // 内联 <script> 同步执行；此前已有标记却拿不到入口，说明上次执行已失败，不再重复注入。
+      if (document.querySelector('script[data-comet-dashboard-website-demo]')) {
+        throw new Error('Dashboard 预览脚本执行失败。');
+      }
 
-        if (!script) {
-          script = document.createElement('script');
-          script.src = scriptUrl;
-          script.async = true;
-          script.dataset.cometDashboardWebsiteDemo = 'true';
-          document.head.append(script);
-        }
+      const script = document.createElement('script');
+      script.dataset.cometDashboardWebsiteDemo = 'true';
+      script.textContent = jsSource;
+      document.head.append(script);
 
-        script.addEventListener('load', handleLoad, { once: true });
-        script.addEventListener('error', handleError, { once: true });
-      });
+      if (globalThis.CometDashboardWebsiteDemo) {
+        return globalThis.CometDashboardWebsiteDemo;
+      }
+      throw new Error('Dashboard 预览脚本执行失败。');
+    };
+
+    // mount 会在 shadow root 里创建指向 blob: 的样式链接，站点 CSP 的 style-src 不允许 blob:；
+    // mount 返回后同步把它替换为内联 <style>，首帧渲染前生效。
+    const inlineDashboardStyles = (cssSource) => {
+      const shadow = mountPoint.shadowRoot;
+      if (!shadow) return;
+      const style = document.createElement('style');
+      style.textContent = cssSource;
+      const link = shadow.querySelector('link[rel="stylesheet"]');
+      if (link) {
+        link.replaceWith(style);
+      } else {
+        shadow.append(style);
+      }
     };
 
     startLoading(() => {
       loadDashboardAssets()
-        .then((assets) => loadDashboardBundle(assets).then((dashboard) => ({ dashboard, assets })))
-        .then(({ dashboard, assets }) => {
+        .then(([jsPayload, cssPayload]) => {
           if (cancelled) return;
-          unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: assets.stylesheetUrl });
+          const dashboard = runDashboardBundle(jsPayload.js);
+          // mount 要求提供 stylesheetUrl；传入同源占位 URL（CSP 允许），真正的样式随后以内联 <style> 注入。
+          unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: window.location.href });
+          inlineDashboardStyles(cssPayload.css);
         })
         .catch((error) => {
           if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
