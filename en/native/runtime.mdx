@@ -1,9 +1,9 @@
 ---
-title: "Native Runtime components"
-description: "Understand what Native Runtime is, which components it includes, what each component does, and the boundary of its capabilities."
+title: 'Native Runtime components'
+description: 'Understand what Native Runtime is, which components it includes, what each component does, and the boundary of its capabilities.'
 ---
 
-**Runtime** is the part of Comet that controls workflow progression, stores state, and records evidence. Builder, Reviewer, and Verifier are model-driven and handle implementation, review, and judgment. Runtime follows fixed rules and does not make model-style subjective decisions. Every Native stage transition goes through Runtime: the Agent calls `comet native`, Runtime validates current state, runs the corresponding action, and returns the next step.
+**Runtime** is the part of Comet that controls workflow progression, stores state, and records evidence. Builder and Verifier are model-driven: Builder implements and reviews its work, while Verifier independently evaluates acceptance. Runtime follows fixed rules and does not make model judgments. Every Native stage transition goes through Runtime: the Agent calls `comet native`, Runtime validates current state, runs the corresponding action, and returns the next step.
 
 You do not operate Runtime directly. In daily use, enter `/comet` or `/comet-native` in the Agent, and the Skill calls commands based on Runtime's continuation. If you suspect state issues, run `comet native doctor` to check health.
 
@@ -11,16 +11,16 @@ You do not operate Runtime directly. In daily use, enter `/comet` or `/comet-nat
 
 Runtime includes eight components:
 
-| Component | Responsibility | When you notice it |
-| --- | --- | --- |
-| State machine | Stage progression, gates, and round budgets | You cannot enter Build before goals are confirmed; it pauses when failures hit limits |
-| Continuation | Generate next commands and pending decisions | The `NEXT` prompt after each command and decision requests relayed by the Agent |
-| Check executor | Actually run test/build commands | Verify-stage check results and command logs |
-| Receipts and evidence | Bind conclusions to exact code and scope | Old verification conclusions become invalid after code changes |
-| State files | Store syncable state and local execution state | Progress is restored from `comet-state.yaml` on another device |
+| Component              | Responsibility                                           | When you notice it                                                                            |
+| ---------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| State machine          | Stage progression, gates, and round budgets              | You cannot enter Build before goals are confirmed; it pauses when failures hit limits         |
+| Continuation           | Generate next commands and pending decisions             | The `NEXT` prompt after each command and decision requests relayed by the Agent               |
+| Check executor         | Actually run test/build commands                         | Verify-stage check results and command logs                                                   |
+| Receipts and evidence  | Bind conclusions to exact code and scope                 | Old verification conclusions become invalid after code changes                                |
+| State files            | Store syncable state and local execution state           | Progress is restored from `comet-state.yaml` on another device                                |
 | Locks and transactions | Prevent concurrent conflicts and keep writes recoverable | Conflict prompts in parallel changes; archive resumes from completed steps after interruption |
-| Trace and checkpoints | Record progression history and recovery anchors | Work continues after session interruption without re-explaining finished parts |
-| Write guard | Block implementation writes outside valid stages | Agent code edits are rejected outside Build |
+| Trace and checkpoints  | Record progression history and recovery anchors          | Work continues after session interruption without re-explaining finished parts                |
+| Write guard            | Block implementation writes outside valid stages         | Agent code edits are rejected outside Build                                                   |
 
 The first four components directly participate in the acceptance loop. The last four support state persistence and write safety.
 
@@ -44,13 +44,13 @@ For field details and handling of all outcomes, see [Task advancement and interr
 
 Runtime executes Verify checks directly. It runs tests, builds, and other project commands, and records status, exit code, duration, and output for each command. Logs are stored under local `logs/`. Checks reported in Builder handoff only describe candidate implementation and do not replace Runtime execution results. Extra checks requested by Verifier are also executed and recorded by Runtime.
 
-Runtime can reuse already-passed identical checks under the same candidate and filters duplicated requests. It also provides a read-only built-in check that scans textual issues in implementation scope, such as leftover merge-conflict markers. You can rerun it with `comet native check`.
+Runtime reuses passed checks only when their inputs, commands, workspace, environment, and logs remain valid, and filters duplicate requests. Submitting a new candidate does not necessarily require repeating every check; code or check-input changes require fresh evidence. A read-only built-in check also scans implementation text for issues such as leftover merge-conflict markers, and can be rerun with `comet native check`.
 
 For where checks fit in acceptance, see [Native Loop](/en/native/native-loop) and [Verification and repair](/en/native/verification-and-repair).
 
 ## Receipts and evidence: binding conclusions to content
 
-Each check and acceptance run produces a receipt. A receipt records the conclusion and binds it to code version, acceptance scope, and content hash at that time. After implementation changes, old receipts become invalid and are not reused as current conclusions. Verifier results with identity mismatch, stale timing, or missing coverage are also rejected.
+Each check and acceptance run produces a receipt that binds its conclusion to the code version, acceptance scope, and content hash. Changed inputs invalidate affected checks; a new formal candidate still requires independent acceptance. Verifier results with mismatched identities, stale timing, or missing coverage are rejected.
 
 `verification.md` is the user-facing report for this evidence, including executed checks, per-item acceptance results, risks, and conclusion. If missing or outdated, Runtime can rebuild it from state.
 

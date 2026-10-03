@@ -1,6 +1,6 @@
 ---
-title: "Native Task Recovery"
-description: "Learn how Native continues tasks from the nearest secure node after a session interruption, device switch, workspace change, or Archive interruption."
+title: 'Native Task Recovery'
+description: 'Learn how Native continues tasks from the nearest secure node after a session interruption, device switch, workspace change, or Archive interruption.'
 ---
 
 Native will automatically resume most interrupts. It retains the provable requirements, implementation progress and acceptance results in the warehouse, and only re-executes the lost native processes or verification evidence. You can directly continue with the original Change. The Runtime will read the current state, check the working directory, and return to a safe next step.
@@ -21,17 +21,17 @@ When the Native records of Shape and Build are lost, Native will continue in the
 
 ## Session interruption recovery
 
-After the terminal is closed, the Agent session ends, or a process exits unexpectedly, Native will mark the still-running native tasks as interrupts and then determine which steps can be safely retried.
+Losing session context does not mean a background task has ended. On the same device, the Agent first checks whether the original check or Verifier is still running and waits for that task. It retries only after confirming execution failure, a lost task, or an ended task with no usable result. After switching devices or losing local execution records, recovery uses the state that can be verified.
 
-|Interrupt location|The processing method of Native|
-| --- | --- |
-| Shape |Restore the saved issues and decisions and continue with the requirement confirmation|
-| Build |Retain the current requirements and implementation scope and continue from the existing code|
-|Verify at `verify-ready`|Reuse the candidate and check information that are still valid, re-run the necessary checks, and start a new Verifier|
-|Verify wait for the result|Abandon the already disconnected Verifier and start the verification from the current candidate again|
-|Archive is ready.|Return to Verify and reconfirm the synchronized implementation and all acceptance items|
-|The repeatable check is running|Re-execute this check|
-|Tests that contain side effects and cannot be safely repeated|Return to Build, generate a new implementation candidate and then verify it|
+| Interrupt location                                            | The processing method of Native                                                                                                                 |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shape                                                         | Restore the saved issues and decisions and continue with the requirement confirmation                                                           |
+| Build                                                         | Retain the current requirements and implementation scope and continue from the existing code                                                    |
+| Verify at `verify-ready`                                      | Reuse the candidate and check information that are still valid, re-run the necessary checks, and start a new Verifier                           |
+| Verify is waiting for a result                                | Recover and wait for the original Verifier. Restart verification from the current candidate only after confirming that task was lost or failed. |
+| Archive is ready.                                             | Return to Verify and reconfirm the synchronized implementation and all acceptance items                                                         |
+| The repeatable check is running                               | Re-execute this check                                                                                                                           |
+| Tests that contain side effects and cannot be safely repeated | Return to Build, generate a new implementation candidate and then verify it                                                                     |
 
 Revalidation caused by recovery is included in the execution of recovery, and the counts of implementation failure and continuous no progress remain unchanged. When a new Verifier is actually started, the number of Verifier attempts will increase normally.
 
@@ -78,6 +78,10 @@ When continuing with the same Archive again, Native will check the transaction a
 
 The failure to wrap up the workspace occurred after Archive. Change might have completed the archiving or Git commit. At this point, check the actual Git status according to the returned `recoveryArgs`, and then continue with the merge, push or PR process.
 
+If a project `commit-msg` hook rejects a message, the Agent keeps the hook enabled, corrects the unfinished step with `--commit-message` or `--merge-message`, and runs the current recovery command. Completed commits and Spec publication are preserved, and the delivery choice does not need confirmation again. Status and Doctor identify the unfinished step rather than trying to migrate an already archived Change as a missing directory.
+
+If you already completed a local commit or merge manually under the project conventions, run `doctor` for guidance. `doctor --repair` clears the local finish record only when the Runtime can prove that archive contents, the commit, and the selected finish conditions match. Archive still verifies remote push and PR results. An archive directory alone does not prove Git delivery is complete.
+
 ## Verification report restoration
 
 `verification.md` is a readable projection of `comet-state.yaml`. When the report is missing, the write is interrupted, or the version is outdated, Native will regenerate the report based on the current state.
@@ -90,15 +94,15 @@ This distinction can preserve proven results while ensuring that the Archive use
 
 Native will pause when it automatically determines that it may cause error overwriting, duplicate side effects, or incorrect archiving. Common situations are as follows:
 
-|"Status"|The content you need to decide or handle|
-| --- | --- |
-|The workspace is not bound to Change|Confirm the correct branch or worktree|
-|The same Spec has been modified by multiple changes|Determine the Archive sequence|
-|Git synchronization causes conflicts|Merge the actual code and documentation content, and then continue the verification|
-|The execution result of the external operation cannot be confirmed|Check the remote status and then select Retry or continue|
-|Reach the upper limit of consecutive failures|Choose to continue with the current goal, adjust the requirements or stop|
-|The active and archive states are contradictory to each other|Keep the site and use `doctor` for diagnosis|
-|The old version of Change needs to be migrated|Upgrade the status according to the migration actions provided by the Runtime|
+| "Status"                                                           | The content you need to decide or handle                                            |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| The workspace is not bound to Change                               | Confirm the correct branch or worktree                                              |
+| The same Spec has been modified by multiple changes                | Determine the Archive sequence                                                      |
+| Git synchronization causes conflicts                               | Merge the actual code and documentation content, and then continue the verification |
+| The execution result of the external operation cannot be confirmed | Check the remote status and then select Retry or continue                           |
+| Reach the upper limit of consecutive failures                      | Choose to continue with the current goal, adjust the requirements or stop           |
+| The active and archive states are contradictory to each other      | Keep the site and use `doctor` for diagnosis                                        |
+| The old version of Change needs to be migrated                     | Upgrade the status according to the migration actions provided by the Runtime       |
 
 `await-user` indicates that your choice is needed for the next step. `blocked` indicates that the current status lacks a safe advancement path. The Runtime will simultaneously return the cause, the party responsible for handling, and the actions allowed to be executed.
 

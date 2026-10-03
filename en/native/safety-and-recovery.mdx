@@ -1,6 +1,6 @@
 ---
-title: "Runtime Protection and Fault Recovery of Native"
-description: "Learn how Native ensures execution reliability through write attribution, state versions, atomic files, and recoverable transactions, and safely recovers from an interrupt state. "
+title: 'Runtime Protection and Fault Recovery of Native'
+description: 'Learn how Native ensures execution reliability through write attribution, state versions, atomic files, and recoverable transactions, and safely recovers from an interrupt state. '
 ---
 
 Comet Native uses multi-layer mechanisms to protect the workflow. The Hook Router determines the ownership of the write before it occurs. The Native Guard handles the write according to the stage, and the Runtime then stabilizes the state with state versions, locks, atomic file operations, and transaction protection. The recovery process is based on the status of the order placement and does not rely on the previous round of dialogue or the Agent's self-description.
@@ -9,11 +9,11 @@ These mechanisms undertake different responsibilities. Hook is suitable for prev
 
 ## Layered runtime protection
 
-|Hierarchy|Main responsibilities|Typical result|
-| --- | --- | --- |
-|Hook Router and Native Guard|Determine which workflow and change a write belongs to and apply the phase rules|Allow, reject, return to Shape or invalidate the candidate and return to Build|
-| Native Runtime |Protect state transitions, check executions, workspace bindings, and archive conditions|Reject expired operations, pause conflicts, and rebuild the local execution state|
-|File and Transaction layer|Protect YAML, Spec, reports, directory movement and Archive|Atomic submission, content verification, continuation of unfinished transactions or retention on-site|
+| Hierarchy                    | Main responsibilities                                                                   | Typical result                                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Hook Router and Native Guard | Determine which workflow and change a write belongs to and apply the phase rules        | Allow, reject, return to Shape or invalidate the candidate and return to Build                        |
+| Native Runtime               | Protect state transitions, check executions, workspace bindings, and archive conditions | Reject expired operations, pause conflicts, and rebuild the local execution state                     |
+| File and Transaction layer   | Protect YAML, Spec, reports, directory movement and Archive                             | Atomic submission, content verification, continuation of unfinished transactions or retention on-site |
 
 ## Which change a write belongs to
 
@@ -34,16 +34,19 @@ In the old version of the global Hook, if there is no trusted request working di
 
 Native Guard divides the goals within the project into formal requirements, implementation files, and Runtime management files.
 
-|Write type| Shape | Build | Verify / Archive |
-| --- | --- | --- | --- |
-| `brief.md`、`children.yaml`、`specs/**` |Allow editing|First return the Shape, and then allow editing|First, return the Shape, start a new target cycle, and then allow editing|
-|Common implementation file|Reject. Wait for Shape's confirmation|"Allowed|Invalidate the current candidate and return to Build, then allow modifications|
-|Runtime files within `comet-state.yaml`, `verification.md` and other changes|Managed by the Runtime, Agent writes will be rejected|The same as left|The same as left|
-|The implementation file of Supervisor's parent change|Driven by child change, direct writes from the parent will be rejected|The same as left|The same as left|
+| Write type                                                                  | Shape                                                              | Build                                                                                                     | Verify / Archive                                                                           |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `brief.md`, target `spec.md`                                                | Editing allowed                                                    | Shapes confirmed under the new rules allow formatting repairs; actual requirement changes return to Shape | Same as Build; actual requirement changes invalidate prior acceptance and archive approval |
+| `children.yaml`, other formal requirement files                             | Editing allowed                                                    | Return to Shape and reconfirm the plan                                                                    | Same as Build                                                                              |
+| Implementation files                                                        | Rejected until Shape is confirmed                                  | Allowed                                                                                                   | Invalidate the candidate and return to Build before editing                                |
+| `comet-state.yaml`, `verification.md`, and other Runtime-owned change files | Runtime-managed; Agent writes are rejected                         | Same                                                                                                      | Same                                                                                       |
+| Supervisor parent implementation files                                      | Implement through child changes; direct parent writes are rejected | Same                                                                                                      | Same                                                                                       |
 
 Formal requirements and implementation files must be written separately. When a single tool call modifies two types of files simultaneously, Guard will reject the operation to prevent the sharing of a state transition that cannot be accurately attributed between requirement changes and implementation changes.
 
-During the Verify or Archive period, when it is observed that the implementation is written, RC1 will not continue to use the original candidate. The Runtime will increase the implementation rounds, clear invalid acceptance conclusions, and return to the Build. When the formal requirements change, the Runtime will return to Shape and invalidate the validation results and archiving authorizations in the old target cycle.
+Formatting repairs preserve confirmation only when content is unchanged. Runtime checks the actual documents before continuing implementation, accepting results, and archiving. Changes to goals, scope, acceptance, or other content still need confirmation. Older changes retain their original rules. See [Native artifacts and state](/en/native/artifacts-and-state#briefmd).
+
+When implementation writes are observed during Verify or Archive, Runtime invalidates the candidate, advances the implementation round, clears invalid acceptance results, and returns to Build. Actual requirement changes return to Shape and invalidate acceptance and archive approval from the old goal cycle.
 
 ## Pre-protection for observable writing
 
@@ -127,12 +130,12 @@ The recovery behavior for each scene — an interrupted check, a lost Verifier t
 
 `comet resume-probe` finds the recovery target based on the default workflow specified by `.comet/config.yaml`. It does not modify change, nor does it switch branches or workspaces.
 
-|Result|Meaning|
-| --- | --- |
-| `auto_resume` |The request clearly indicates continuation and the target is unique or has been clearly selected|
-| `ask_user` |Multiple targets, status damage or workspace mismatch require the user to make a decision|
-| `out_of_scope` |The current request is not related to recovery, the user has exited, or is already in the Comet process|
-| `none` |The current workflow has no recoverable changes|
+| Result         | Meaning                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------- |
+| `auto_resume`  | The request clearly indicates continuation and the target is unique or has been clearly selected        |
+| `ask_user`     | Multiple targets, status damage or workspace mismatch require the user to make a decision               |
+| `out_of_scope` | The current request is not related to recovery, the user has exited, or is already in the Comet process |
+| `none`         | The current workflow has no recoverable changes                                                         |
 
 `ambient_resume: false` will disable the environment-aware recovery of ordinary requests. When explicitly entering Comet, it is still processed according to the entry command. When multiple active changes exist, the probe uses an explicit name or the current selection; When the unique owner is missing, return `ask_user`.
 
@@ -146,15 +149,15 @@ comet native status <change-name> --details --json
 comet native doctor <change-name>
 ```
 
-|Abnormal|Processing method|
-| --- | --- |
-|The write was rejected due to multiple active changes|After clearly stating "change", execute `comet native select <change-name>`|
-|The operation was rejected due to the expiration of the status version|Re-read `status` and the latest `continuation`|
-|The workspace binding does not match|Return to the branch or worktree returned by the Runtime and continue|
-|The migration or Archive transaction is not completed|First, run the read-only `doctor` and only perform the recovery actions explicitly provided by it|
-|active/archive coexist or the source of the transaction is unknown|Keep both sides of the site and wait for the determined repair path|
-|Implementation modifications occur after verification|Resubmit the candidate and accept it according to the returned Build status|
-|The formal requirements have changed|Update the brief and the complete target Spec, and reconfirm the Shape|
+| Abnormal                                                               | Processing method                                                                                 |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| The write was rejected due to multiple active changes                  | After clearly stating "change", execute `comet native select <change-name>`                       |
+| The operation was rejected due to the expiration of the status version | Re-read `status` and the latest `continuation`                                                    |
+| The workspace binding does not match                                   | Return to the branch or worktree returned by the Runtime and continue                             |
+| The migration or Archive transaction is not completed                  | First, run the read-only `doctor` and only perform the recovery actions explicitly provided by it |
+| active/archive coexist or the source of the transaction is unknown     | Keep both sides of the site and wait for the determined repair path                               |
+| Implementation modifications occur after verification                  | Resubmit the candidate and accept it according to the returned Build status                       |
+| The formal requirements have changed                                   | Update the brief and the complete target Spec, and reconfirm the Shape                            |
 
 `doctor --repair` is only applicable to states that have been recognized by the Runtime and supported for recovery. When the config, YAML, transaction or directory ownership cannot be determined, it is safer to keep the on-site state than the manual splicing state.
 
