@@ -3,7 +3,7 @@ title: 'archive 阶段'
 description: 'archive 阶段在最终确认后合并 delta spec、持久化完整归档状态，并按已确认方式推送或创建 PR。'
 ---
 
-archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产物，并移动到 archive 目录。它是不可逆的收尾动作，因此 Comet 会在执行前同时确认归档和远端交付方式。
+archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产物，并移动到 archive 目录。它是不可逆的收尾动作，因此 Comet 会在执行前确认归档与交付方式。
 
 <Tip>
   正常情况下只需调用 <code>/comet</code>。配置选择 Classic 后，内部 <code>/comet-classic</code> 会在
@@ -15,26 +15,30 @@ archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产�
 - `phase: archive`
 - `verify_result: pass`
 - `branch_status: pending`
-- 当前分支与 change 的 `bound_branch` 一致
+- 协调根属于 Git 工作树时，当前分支与 change 的 `bound_branch` 一致
 
-Verify 只负责记录验证证据。`branch_status` 会一直保持 `pending`，直到用户在本阶段确认立即远端交付。
+Verify 只负责记录验证证据。`branch_status` 会一直保持 `pending`，直到本阶段按已确认的方式处理归档交付。
 
 ## 流程
 
 ```mermaid
 flowchart TD
     Entry["入口状态验证"] --> Confirm["归档与交付最终确认"]
-    Confirm -->|归档并推送| Archive["comet archive"]
+    Confirm -->|仅本地归档| Archive["comet archive"]
+    Confirm -->|归档并推送| Archive
     Confirm -->|归档、推送并创建 PR| Archive
+    Confirm -->|仅归档协调文档| Documents["归档文档并核对回执"]
     Confirm -->|调整或重新验证| Reopen["archive-reopen 回 verify"]
     Confirm -->|暂不归档| Keep["保持 active + pending"]
     Archive --> State["写 branch_status: handled"]
     State --> Guard["comet guard archive"]
     Guard --> Commit["唯一归档提交"]
-    Commit --> Push["推送一次"]
+    Commit -->|仅本地| Clear["clear-selection"]
+    Commit -->|需要远端交付| Push["推送一次"]
     Push -->|已选择 PR| PR["创建 PR"]
-    Push -->|只推送| Clear["clear-selection"]
+    Push -->|只推送| Clear
     PR --> Clear
+    Documents --> Clear
 ```
 
 ## 调用的 skill
@@ -53,9 +57,10 @@ archive 阶段不加载任何 Skill。状态检查、归档和远端交付全部
 | **需要调整或重新验证**          | `archive-reopen` 回到 verify，再调用 `/comet-verify`                                              |
 | **暂不归档**                    | 不执行 `archive-confirm` 或归档；保持 active change、`phase: archive` 和 `branch_status: pending` |
 
-前三个归档选项会执行：
+选择归档后，Comet 先保存交付选择，再确认归档：
 
 ```bash
+comet state delivery <change-name> --file <交付选择.json>
 comet state transition <change-name> archive-confirm
 ```
 
@@ -75,6 +80,20 @@ comet archive "<change-name>"
 comet archive "<change-name>" --dry-run
 ```
 
+## 非 Git 协调目录的文档归档
+
+协调根目录本身不属于 Git 工作树、业务代码分别放在独立子仓库时，选择“仅归档协调文档”。Comet 会合并主 Spec、移动 change，并保存归档时的主 Spec 快照和文件摘要回执。这项选择不创建 Git 提交；子仓库的提交和推送分别按各仓库的交付流程处理。
+
+该方式的交付选择只包含以下内容，输入文件放在 change 目录之外：
+
+```json
+{ "action": "archive-only" }
+```
+
+归档后运行 `comet guard <change-name> archive` 和 `comet state delivery <change-name> --verify`。只有核对结果为 `verification.status: complete` 才清除当前选择。保留归档目录、主 Spec 快照和 `.comet/classic-deliveries/` 中的回执；归档文件缺失或发生改动时，先处理核对失败，再继续完成流程。
+
+Git 项目仍使用本地归档、推送或创建 PR 的交付选项，并执行下面的提交步骤。
+
 ## 把最终状态放入唯一归档提交
 
 归档完成后，Comet 在提交前运行：
@@ -84,7 +103,7 @@ comet state set <change-name> branch_status handled
 comet guard <change-name> archive
 ```
 
-这里的 `handled` 表示**远端交付方式已经确认**，不表示 push 或 PR 创建已经成功。guard 必须在提交前通过，确保 `.comet.yaml` 中的 `archived: true` 和 `branch_status: handled` 一起进入唯一归档提交。
+`handled` 不表示提交、push 或 PR 已经成功，也不能代替交付选择记录。guard 必须在提交前通过，确保 `.comet.yaml` 中的 `archived: true` 和 `branch_status: handled` 一起进入唯一归档提交。
 
 Comet 只暂存能归因于当前 change 的路径：
 
@@ -107,18 +126,19 @@ git commit -m "chore: archive <change-name>"
 
 归档提交成功后，Comet 只执行确认时选择的方式：
 
+- 仅保留本地提交；或
 - 推送当前绑定分支一次；或
 - 推送一次，然后创建 PR。
 
 归档阶段不再加载 Superpowers `finishing-a-development-branch`，也不会在归档后再询问本地合并、保留分支或暂不推送。需要推迟交付时，应在不可逆归档前选择“暂不归档”。
 
-只有所选远端操作全部成功后，Comet 才运行：
+完成所选操作后，运行 `comet state delivery <change-name> --verify` 核对实际结果。只有返回 `verification.status: complete`，Comet 才运行：
 
 ```bash
 comet state clear-selection
 ```
 
-此时远端归档状态为 `handled`，本地工作区没有 Comet 遗留的未提交 `.comet.yaml`。
+此时 Runtime 已核对所选交付完成，本地工作区没有 Comet 遗留的未提交 `.comet.yaml`。
 
 ## 失败处理
 
