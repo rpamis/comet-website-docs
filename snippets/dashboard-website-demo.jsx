@@ -71,10 +71,10 @@ export const DashboardWebsiteDemo = () => {
 
       globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.5.0-website-02',
+          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.5.0-website-04',
         ),
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.5.0-website-02',
+          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.5.0-website-04',
         ),
       ]).catch((error) => {
         delete globalThis.__cometDashboardWebsiteDemoAssets;
