@@ -60,7 +60,10 @@ export const DashboardWebsiteDemo = () => {
       if (cache) return cache;
 
       const fetchPayload = (url) =>
-        fetch(url).then((response) => {
+        fetch(url).then(async (response) => {
+          if (response.status === 404) {
+            response = await fetch(url.replace('.json?', '.txt?'));
+          }
           if (!response.ok)
             throw new Error(`Dashboard 预览静态资源加载失败（${response.status}）。`);
           return response.json();
@@ -68,10 +71,10 @@ export const DashboardWebsiteDemo = () => {
 
       globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.2-website-01',
+          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.5.0-website-02',
         ),
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.2-website-01',
+          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.5.0-website-02',
         ),
       ]).catch((error) => {
         delete globalThis.__cometDashboardWebsiteDemoAssets;
