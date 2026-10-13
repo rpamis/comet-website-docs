@@ -1,52 +1,98 @@
 ---
-title: 'Workflow Runtime'
-description: 'Define workflow graphs, execution ports, user waits, and recoverable execution records.'
+title: 'Workflows and Run records'
+description: 'Understand Workflow, Run, Action, and Wait, and select the next operation from the runtime result.'
 ---
 
-A **Workflow** defines allowed steps and transitions. A **Run** saves the input, state, Actions, Waits, and evidence of one execution. A workflow can have multiple independent Runs.
+A Workflow defines permitted steps and transitions. A Run saves the input, state, actions, waits, and evidence for one execution. One workflow can have multiple independent Runs.
 
 ## Core objects
 
-| Object   | Host responsibility                                                                         |
-| -------- | ------------------------------------------------------------------------------------------- |
-| Workflow | Define identity, version, entry, steps, and allowed transitions                             |
-| Run      | Save and reuse the same Run ID to continue execution                                        |
-| Action   | Claim the current Action, invoke actual host capabilities, and report its result            |
-| Wait     | Show the proposal, obtain a user decision or required evidence, and submit the current Wait |
-| Store    | Save execution records atomically to prevent concurrent results from overwriting each other |
+| Object   | Host responsibility                                                             |
+| -------- | ------------------------------------------------------------------------------- |
+| Workflow | Define identity, version, entry, steps, and allowed transitions.                |
+| Run      | Retain the same Run ID when resuming.                                           |
+| Action   | Claim the current action, invoke real host capabilities, and report its result. |
+| Wait     | Show the proposal and submit the actual decision or required evidence.          |
+| Store    | Save atomically so concurrent results do not overwrite one another.             |
 
-Use a new version when changing a workflow definition, and retain definitions referenced by active Runs. Editing instructions or state JSON, or writing “complete,” cannot replace a valid transition.
+Use a new version when changing a definition, and retain definitions referenced by active Runs. Editing prose, state JSON, or a completion label cannot replace a valid transition.
+
+## Define the allowed path
+
+```js
+import { defineWorkflow, skill, approval, tool } from '@rpamis/comet/runtime';
+
+const workflow = defineWorkflow({
+  id: 'report',
+  version: '1',
+  entry: 'draft',
+  steps: {
+    draft: skill({ ref: 'draft' }),
+    approve: approval({ proposalFrom: 'draft' }),
+    publish: tool({ ref: 'publish' }),
+  },
+  transitions: [
+    { from: 'draft', to: 'approve' },
+    { from: 'approve', to: 'publish', on: 'approved' },
+  ],
+});
+```
+
+entry identifies initially ready steps. Keys in steps name graph steps; ref names a host handler. transitions declares permitted paths. Several steps may use one handler while retaining separate execution records.
+
+Register workflow with `createRuntime` and start a Run using its fixed id/version. See the [quickstart](/en/sdk/quickstart) for a complete runnable example.
+
+## Read progress results
+
+After `runUntilBlocked`, read reason first, then the relevant actions, waits, and business outputs.
+
+| reason              | Next operation                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| completed           | Inspect business output and the selected path.                                                 |
+| `approval-required` | Show the current proposal and collect the user's decision.                                     |
+| `evidence-required` | Collect and submit the requested evidence.                                                     |
+| `executor-required` | Register a host executor that supports the action.                                             |
+| `action-in-flight`  | Query the original executor and wait for its result.                                           |
+| `execution-unknown` | Reconcile the original operation before resuming.                                              |
+| failed              | Inspect the original Action and error, then handle the known failure.                          |
+| `action-limit`      | The invocation exhausted its action budget; inspect progress before continuing.                |
+| cancelled           | Stop progression and verify prior operations and stop evidence.                                |
+| idle                | Inspect ready steps, join conditions, and child Runs to understand why no action is available. |
+
+inspect reads records without calling models or tools. A business UI should show the current Run, pending Actions/Waits, and the last error so users can choose whether to continue, approve, or reconcile.
 
 ## Define steps
 
-Import `defineWorkflow` from `@rpamis/comet/runtime`, or use a workflow definition object as in the [quickstart](/en/sdk/quickstart).
+Import `defineWorkflow` from `@rpamis/comet/runtime`, or use a definition object as in the quickstart.
 
-| Helper          | Declared work                                        |
-| --------------- | ---------------------------------------------------- |
-| `skill`         | Ask the host to load and execute a Skill             |
-| `tool`          | Invoke a host tool or local business function        |
-| `approval`      | Wait for the user's decision on the current proposal |
-| `evidence`      | Wait for declared evidence                           |
-| `childWorkflow` | Start and associate a child workflow                 |
+| Helper        | Work declared                                     |
+| ------------- | ------------------------------------------------- |
+| skill         | Have the host load and execute a Skill.           |
+| tool          | Call a host tool or local business function.      |
+| approval      | Wait for a user decision on the current proposal. |
+| evidence      | Wait for declared evidence.                       |
+| childWorkflow | Start and link a child workflow.                  |
 
-Dependencies determine when steps can be dispatched. Parallel steps can finish in different orders; join conditions must be explicit. Loops and branches follow declared transitions. Handlers cannot jump outside the graph.
+Dependencies determine when actions become ready. Parallel steps may finish in different orders, with explicit join conditions. Loops and branches follow declared transitions; handlers cannot jump outside the graph.
 
-## Executors and results
+## Executors and outcomes
 
-`createRuntimeExecutor` registers named handlers by step `ref`. `defineRuntimeHandler` parses input before passing it to a business function, avoiding dispatch by step name inside one large function.
+`createRuntimeExecutor` registers named handlers by step ref. `defineRuntimeHandler` parses input before execution, avoiding one large function that dispatches on step names.
 
-Platforms that need to claim and report work themselves can use Runtime's `claim`, `recordOutcome`, and `retry` APIs. Retain the current Action identity, attempt, input digest, and claim credentials. A result must belong to this execution.
+Hosts that claim and report independently can use claim, `recordOutcome`, and retry. Retain the original Action identity, attempt, input hash, and claim credentials; report results for that execution.
 
-Successful results are also checked against output Schemas and business validators. Record known failures as failures. If work has been dispatched but the host throws or result reporting is interrupted, the operation may already have happened; treat the result as unknown. See [recovery and unknown results](/en/sdk/recovery) for the complete rules.
+Successful outputs also pass Schema and business validation. Report known failures as failures. Exceptions after dispatch or interrupted reporting can mean the operation happened; treat them as unknown. See [recovery](/en/sdk/recovery).
 
 ## User waits
 
-Approval decisions bind to the Wait ID and current proposal hash. If the proposal changes, show it again and obtain confirmation. Old approval, approval from another activation, or approval invented by the host cannot authorize the current Action.
+Decisions bind to the Wait ID and current proposal hash. Changed proposals require a new display and confirmation. Old approvals, approvals from another activation, and invented host approvals cannot authorize the current action.
 
-For evidence waits, the host submits actual evidence and Runtime checks its ownership and declared conditions. Step completion, evidence acceptance, and actual external service completion are separate facts; business interfaces should show them separately.
+For evidence waits, submit actual evidence; Runtime validates ownership and declared conditions. A finished step, accepted evidence, and a successful external service operation are separate facts and should be shown separately.
 
 ## Storage and host responsibilities
 
-`createMemoryRuntimeStore` suits experiments that do not need recovery across processes. `createFileRuntimeStore` saves Runs in your chosen directory. A new process can continue them after registering the same definitions and executors.
+`createMemoryRuntimeStore` is suitable for experiments that do not need process recovery. `createFileRuntimeStore` saves Runs in your chosen directory; a new process registers the same definitions and executors to continue.
 
-Runtime does not automatically call models, configure MCP, inject plugin context, or obtain authorization for the host. Use [Workflow Application](/en/sdk/applications) for pinned Skills, installation entries, business file protection, and distribution.
+Runtime does not call models, configure MCP, inject plugin context, or obtain permission for your host. Use [Workflow Application](/en/sdk/applications) for pinned Skills, installation entries, protected business files, and distribution.
+
+Continue with [executors](/en/sdk/executors), [parallel steps](/en/sdk/parallel), [child workflows](/en/sdk/subworkflows), and [business state](/en/sdk/state).

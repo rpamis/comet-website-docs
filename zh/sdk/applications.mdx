@@ -7,6 +7,12 @@ Workflow Application 把工作流与实际执行内容绑定在一个包中。�
 
 希望由 Agent 创作完整业务内容时，使用 [Comet Any](/zh/skill-creator/getting-started)。需要自行编写和接入应用时，从下面的本地报告样板开始。
 
+## 什么时候需要完整应用
+
+只在服务内部编排几个函数时，基础 Runtime 已能保存流程和结果。需要把应用交给另一个 Agent 平台、固定 Skill 依赖或安装项目入口时，使用 Application。
+
+下面的样板生成本地 Markdown 报告，保留草稿、等待审批，再执行本地发布。准备一个独立目录，避免把项目源码、运行记录和凭据一起打包。
+
 ## 最小应用包
 
 在项目内创建独立的 `local-report/` 目录，保存三份文件。
@@ -67,6 +73,51 @@ console.log(application.identity);
 
 加载应用会执行其模块，接入前应审查模块与依赖来源。固定摘要用于核对内容，不提供代码沙箱。
 
+### 生成草稿并审批发布
+
+将下面的脚本保存为项目根目录的 `app-run.mjs`，保持在应用包目录之外。它使用加载器提供的固定实现和 Store，显式推进报告子流程：
+
+```js
+import path from 'node:path';
+import { loadWorkflowApplication } from '@rpamis/comet/applications';
+import { createRuntime } from '@rpamis/comet/runtime';
+
+const application = await loadWorkflowApplication({
+  file: path.resolve('local-report/application.json'),
+  projectRoot: process.cwd(),
+  runId: 'report-1',
+});
+const runtime = createRuntime({ ...application.implementation, store: application.store });
+await runtime.start({
+  runId: 'report-1',
+  workflow: { id: 'report-publishing', version: '1' },
+  input: { title: '项目周报', body: '本周完成了三个已验收任务。', sources: ['本地任务记录'] },
+});
+let progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'report-local' });
+for (const child of progress.run.children) {
+  await runtime.runUntilBlocked({ runId: child.runId, executorId: 'report-local' });
+}
+progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'report-local' });
+const wait = progress.run.waits.find((item) => item.status === 'pending');
+console.log(progress.reason);
+if (wait) console.log(wait.proposal);
+if (process.argv.includes('--approve')) {
+  if (!wait) throw new Error('No pending approval');
+  await runtime.resolveWait({
+    runId: progress.run.runId,
+    waitId: wait.id,
+    proposalHash: wait.proposalHash,
+    decisionId: 'report-publication-1',
+    choice: 'approved',
+  });
+  progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'report-local' });
+  console.log(progress.reason);
+}
+console.log(progress.run.outputs.publish?.value);
+```
+
+先运行 `node app-run.mjs`，检查显示的草稿、路径和摘要。确认当前内容后运行 `node app-run.mjs --approve`，输出发布结果与本地报告路径。报告位于项目的 `.comet/reports/local-report/`，Run 数据由应用 Store 管理；不要把运行脚本或 Run 文件放进固定包来改变应用内容。
+
 ## 通过 CLI 运行
 
 将每次请求保存为 JSON 文件，再调用 [comet runtime](/zh/cli/runtime)：
@@ -90,7 +141,21 @@ comet runtime dispatch --application-file ./local-report/application.json --proj
 }
 ```
 
-后续使用 `--application local-report` 和同一 Run ID 查询、执行或恢复。读取实际返回的子 Run、Action 和 Wait ID；不要根据步骤名称猜测它们。
+将返回的 Run ID 保存到业务记录。后续使用 `--application local-report` 和同一 Run ID 查询、执行或恢复。读取实际返回的子 Run、Action 和 Wait ID；不要根据步骤名称猜测它们。
+
+保存下面的 `inspect.json`，然后执行查询命令：
+
+```json
+{ "operation": "inspect", "runId": "report-1" }
+```
+
+```bash
+comet runtime dispatch --application local-report --project-root . --request inspect.json --json
+```
+
+从实际响应读取当前 pending Action 与配置的执行器，按 [runtime 请求参考](/zh/cli/runtime) 提交 `execute`。需要子 Run 执行时，使用返回的真实子 Run ID。停在审批时展示实际草稿和 Wait，再提交当前决定。不要把 `start` 成功当成报告已生成。
+
+CLI 适合只能运行命令的 Agent 平台；在 Node.js 宿主中可将加载后的应用能力接入 SDK。两种方式都使用同一份固定包与 Run，不能另写一份流程状态替代它。
 
 ## 接入真实 Skill
 
@@ -99,3 +164,5 @@ comet runtime dispatch --application-file ./local-report/application.json --proj
 使用 `createApplicationSkillExecutor` 接入宿主的实际 Skill 调用、能力检查和授权。加载过 Skill、宿主声明完成、机器验证通过、独立评审通过分别记录，前一层不能替代后一层。
 
 分发与升级见 [comet application](/zh/cli/application)。应用评估见 [评估 SDK 应用](/zh/eval/applications)；必需文件与业务条件见 [阶段产物验收](/zh/sdk/artifact-validation)。
+
+下一步：[安装、分发与升级](/zh/sdk/distribution)。

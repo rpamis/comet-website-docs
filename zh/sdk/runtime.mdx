@@ -1,6 +1,6 @@
 ---
-title: 'Workflow Runtime'
-description: '定义工作流图、执行端口、用户等待与可恢复的运行记录。'
+title: '工作流与运行记录'
+description: '理解 Workflow、Run、Action 和 Wait，并按运行结果选择下一步操作。'
 ---
 
 一个 **Workflow** 定义允许执行的步骤与转移。一个 **Run** 保存某次运行的输入、状态、动作、等待和证据。同一工作流可以有多个互相独立的 Run。
@@ -16,6 +16,50 @@ description: '定义工作流图、执行端口、用户等待与可恢复的运
 | Store    | 原子保存运行记录，防止并发结果互相覆盖           |
 
 修改工作流定义时使用新版本，并保留活动 Run 引用的定义。编辑说明文字、改状态 JSON 或填写“完成”不能替代合法转移。
+
+## 定义你允许执行的路径
+
+```js
+import { defineWorkflow, skill, approval, tool } from '@rpamis/comet/runtime';
+
+const workflow = defineWorkflow({
+  id: 'report',
+  version: '1',
+  entry: 'draft',
+  steps: {
+    draft: skill({ ref: 'draft' }),
+    approve: approval({ proposalFrom: 'draft' }),
+    publish: tool({ ref: 'publish' }),
+  },
+  transitions: [
+    { from: 'draft', to: 'approve' },
+    { from: 'approve', to: 'publish', on: 'approved' },
+  ],
+});
+```
+
+`entry` 是启动时就绪的步骤，`steps` 的键是图中步骤名称，`ref` 是宿主处理函数名称。`transitions` 声明允许的后续路径。多个步骤可以调用同一个处理函数，但各自保留独立的执行记录。
+
+将 `workflow` 传入 `createRuntime`，使用固定 `id/version` 启动 Run。完整可运行示例见 [快速接入](/zh/sdk/quickstart)。
+
+## 读取推进结果
+
+调用 `runUntilBlocked` 后，优先读取 `reason`，再读取对应动作、等待和业务输出。
+
+| reason              | 你应做什么                                                     |
+| ------------------- | -------------------------------------------------------------- |
+| `completed`         | 读取业务输出，判断所选路径的结果。                             |
+| `approval-required` | 展示当前提案并接收用户决定。                                   |
+| `evidence-required` | 收集并提交当前证据等待要求的材料。                             |
+| `executor-required` | 注册能处理当前动作的宿主执行能力。                             |
+| `action-in-flight`  | 查询原执行者，等待原动作回报。                                 |
+| `execution-unknown` | 核对原操作结果，再恢复。                                       |
+| `failed`            | 查看原 Action 和错误，处理已知失败。                           |
+| `action-limit`      | 本次动作预算已用完；读取进度后决定是否继续。                   |
+| `cancelled`         | 停止推进，核对已经发生的操作和停止证据。                       |
+| `idle`              | 查看就绪步骤、合流条件和子 Run，确认当前没有可执行动作的原因。 |
+
+`inspect` 读取记录，不调用模型或工具。业务 UI 应同时显示当前 Run、待处理 Action/Wait 和最后一次错误，方便用户选择继续、审批或核对。
 
 ## 定义步骤
 
@@ -50,3 +94,5 @@ description: '定义工作流图、执行端口、用户等待与可恢复的运
 `createMemoryRuntimeStore` 适合不需要跨进程恢复的试验。`createFileRuntimeStore` 将 Run 保存在你指定的目录，新进程注册相同定义和执行器后可以继续运行。
 
 Runtime 不会自动调用模型、配置 MCP、注入插件上下文或替宿主取得授权。需要固定 Skill、安装入口、业务文件保护和分发时，使用 [Workflow Application](/zh/sdk/applications)。
+
+按功能继续学习：[执行器](/zh/sdk/executors)、[并行与合流](/zh/sdk/parallel)、[子工作流](/zh/sdk/subworkflows)、[业务状态与循环](/zh/sdk/state)。

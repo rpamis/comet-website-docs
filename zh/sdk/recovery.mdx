@@ -1,5 +1,5 @@
 ---
-title: '持久化、审批与未知结果'
+title: '失败恢复与未知结果'
 description: '保留 Run 身份与当前批准，并在重试前核对已派发操作的真实结果。'
 ---
 
@@ -28,6 +28,68 @@ description: '保留 Run 身份与当前批准，并在重试前核对已派发�
 完整应用可以通过 `reconcileApplicationSkill` 调用已配置宿主的核对能力，取得原动作结果后再回报；这个接口不会重发操作。
 
 SDK 保存 Run 和 claim，不会把本地记录与外部服务变成一个原子事务。需要业务幂等键或查询接口时，由宿主与外部服务实现。
+
+## 查找需要核对的原动作
+
+以下片段使用你已创建的 `runtime`：
+
+```js
+const run = await runtime.inspect('report-1');
+const action = run.actions.find((item) => item.status === 'unknown');
+if (!action) throw new Error('No unknown action');
+console.log({
+  actionId: action.id,
+  attempt: action.attempt,
+  inputHash: action.inputHash,
+  executorId: action.claim?.executorId,
+});
+```
+
+先用这些身份查询原宿主和业务服务。保存请求 ID、服务收据或业务幂等键，核对的是这一次执行，不是重新创建一项同名任务。
+
+## 已执行时回报原结果
+
+取得可核对的真实结果后，通过原 Action 回报。下面的函数只负责提交，`actualOutput` 必须来自业务服务查询：
+
+```js
+async function recordReconciledResult(actualOutput) {
+  if (!action.claim) throw new Error('Missing original claim');
+  return runtime.recordOutcome({
+    runId: run.runId,
+    outcome: {
+      actionId: action.id,
+      attempt: action.attempt,
+      inputHash: action.inputHash,
+      claimToken: action.claim.token,
+      outcomeId: 'reconciled-result-1',
+      status: 'succeeded',
+      output: actualOutput,
+    },
+  });
+}
+```
+
+输出仍要经过原 Schema 和业务验证器。服务只返回“收到请求”时，不能把它写成“操作成功”。
+
+## 确认未执行后重试
+
+确认原执行者及子任务已经停止、业务服务也未执行原请求，再提交核对证据：
+
+```js
+async function retryNotExecuted(actualEvidence) {
+  return runtime.retry({
+    runId: run.runId,
+    actionId: action.id,
+    attempt: action.attempt,
+    expectedRevision: run.revision,
+    reconciliation: { resolution: 'not-executed', evidence: actualEvidence },
+  });
+}
+```
+
+`actualEvidence` 记录真实查询依据，不使用固定的“未执行”占位值。重试成功后读取新 attempt，再交给执行器继续。若记录已变化，重新读取 Run；无法确认时继续保留未知状态。
+
+`retry` 策略可声明为 `idempotent`、`reconcile` 或 `manual`，描述恢复约束；它不会自动证明服务幂等或循环重发失败操作。已经派发的未知操作仍要核对。
 
 ## 数据保存在哪里
 

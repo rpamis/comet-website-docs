@@ -1,0 +1,67 @@
+---
+title: '业务状态与循环'
+description: '保存业务进度，根据已接受结果选择分支，并限制循环次数。'
+---
+
+报告最多允许两轮修订，审核通过后结束。使用业务状态记录轮次，通过转移处理器根据当前结果决定是否再次激活步骤。
+
+## 定义状态和允许的转移
+
+下面是一个工作流定义片段：
+
+```js
+import { tool } from '@rpamis/comet/runtime';
+
+const workflow = {
+  id: 'revision-loop',
+  version: '1',
+  entry: 'review',
+  initialState: { rounds: 0 },
+  stateSchema: {
+    type: 'object',
+    required: ['rounds'],
+    properties: { rounds: { type: 'integer', minimum: 0, maximum: 2 } },
+    additionalProperties: false,
+  },
+  steps: { review: tool({ ref: 'review' }) },
+  transitions: [{ from: 'review', to: 'review' }],
+  transitionHandler: { id: 'revision-policy', version: '1' },
+  maxTransitions: 10,
+};
+```
+
+`initialState` 是初始业务状态，`stateSchema` 限制可保存的结构。循环转移仍要在图中声明。`maxTransitions` 限制调度转移数量；它不等于模型调用的 Token、时间或费用预算。
+
+## 根据结果选择下一步
+
+```js
+const revisionPolicy = {
+  id: 'revision-policy',
+  version: '1',
+  apply: ({ run, event }) => {
+    if (event.kind !== 'action-outcome') {
+      return { state: run.state, next: [] };
+    }
+    const rounds = run.state.rounds + 1;
+    const approved = event.outcome.output.approved === true;
+    return {
+      state: { rounds },
+      next: approved || rounds >= 2 ? [] : ['review'],
+    };
+  },
+};
+```
+
+在 `createRuntime` 中注册 `transitionHandlers: [revisionPolicy]`，执行器的 `review` 返回 `{ status: 'succeeded', output: { approved: false } }`。这里假定已验证状态和输出结构，生产应用应给 `review` 增加对应的 `outputSchema`。
+
+首次未通过审核后再次执行，第二轮后结束；若提前通过则直接结束。可以通过 `runtime.inspect(runId)` 查看 `state.rounds` 和各轮 Action。`completed` 只表示循环结束；业务是否通过应另读 `approved`，达到次数上限不能冒充审核通过。
+
+## 为下一次激活传入参数
+
+`next` 可以返回步骤名称，也可以返回 `{ stepId: 'review', input: { round: rounds + 1 } }`。后者的输入通过处理函数的 `activation` 读取；原 Run 的业务 `input` 保持不变。
+
+同一步骤的不同激活有各自的 Action、上游结果和用户等待，不能拿上一轮的批准用于下一轮。
+
+## 保持转移处理器只计算状态
+
+`apply` 接收已接受事件，返回新状态和后续步骤，不调用模型、发布工具或直接写 Run。需要副作用的工作声明为 `skill` 或 `tool`，通过 [宿主执行器](/zh/sdk/executors) 完成。这样中断后才能区分已提交状态与仍需核对的外部操作。

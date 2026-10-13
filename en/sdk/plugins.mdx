@@ -1,13 +1,13 @@
 ---
 title: 'Plugin SDK'
-description: 'Register plugin capabilities, integrate storage and context, and retain installation, disabled-state, and scope constraints.'
+description: 'Register capabilities, connect storage and context, and enforce installation, enabled status, and scope.'
 ---
 
-Plugin SDK manages plugin registration, installation, enabled state, scope, and capability invocation. Use it with Workflow Runtime or integrate it independently into an existing host.
+Plugin SDK manages registration, installation, enabled status, scopes, and capability calls. Use it with Workflow Runtime or independently in your host.
 
-## Define named capabilities
+## Define a named capability
 
-This TypeScript example registers a plugin that calculates text length. `MemoryPluginStateStore` saves installation state only in the current process and does not access real user configuration.
+This TypeScript example registers a text-length plugin. `MemoryPluginStateStore` keeps installation state only in this process and does not access user configuration.
 
 ```ts
 import {
@@ -43,25 +43,51 @@ const plugins = new PluginRuntime({
   descriptors: [plugin],
 });
 
-// Execute after the host obtains installation authorization; this example uses only in-process state.
+// Run after host installation permission; this example keeps state in memory.
 await plugins.install(plugin.id, 'user');
 const client = createPluginClient(plugins, plugin);
 const length: number = await client.invoke('length', 'hello');
 console.log(length);
 ```
 
-Registering a descriptor does not install or enable it. A named client infers capability names, inputs, and return types, and propagates invocation errors. Disabled-state and scope constraints still apply.
+Registration is not installation or enablement. Named clients infer capability names, inputs, and outputs and propagate errors, while enabled status and scope constraints remain effective.
 
-The return shape of `parseInput` is also the client's input contract. If you need to extract text from an object, do so in `invoke`. Keep the public type consistent with the shape the parser actually accepts.
+Save as `plugin.ts` in a project with the SDK installed and run npx tsx plugin.ts. The output is 5, from the installed length capability. This example does not call a model or store knowledge.
+
+`parseInput`'s return shape is also the client input contract. If you need to extract text from an object, do so in invoke, keeping public types consistent with accepted input.
+
+## Query, disable, and enable
+
+Append this code:
+
+```ts
+console.log(await plugins.get(plugin.id));
+await plugins.disable(plugin.id);
+try {
+  await client.invoke('length', 'hello');
+} catch (error) {
+  console.log(String(error));
+}
+await plugins.enable(plugin.id);
+console.log(await client.invoke('length', 'hello'));
+```
+
+The disabled call is rejected; after enablement the output is 5 again. install, enable, disable, and uninstall manage installation and availability separately. Removing a UI button does not disable a plugin.
+
+This example uses an in-memory State Store, so a new process requires installation again. Persist installation status with `JsonPluginStateStore` and its file read/write and locking interfaces. Installation state and business storage are different responsibilities; this example has no business data.
+
+## Call a plugin from a workflow
+
+Call client.invoke inside a [host handler](/en/sdk/executors) and return its value as the actual Outcome. Workflow declares a tool step; Plugin Runtime enforces installation, enabled status, and current scope. Handle actual failure or unknown-result paths when calls throw, without returning invented success values.
 
 ## Context and experience events
 
-Plugins can provide context candidates and content for expansion on demand, and declare experience-event subscriptions. The host decides when to query, how to pass content to the Agent, and when to record actions and results.
+Plugins may provide context candidates, on-demand expansion, and experience-event subscriptions. The host decides when to query, how to supply context, and when to record behavior and results.
 
-Type inference does not establish the trustworthiness of a plugin implementation or provide a sandbox. Business data needs separate input and output checks. External side effects need actual authorization and recovery APIs.
+Type inference neither establishes implementation trust nor supplies a sandbox. Validate business input/output separately; external effects need actual permission and reconciliation.
 
-## Integrate Comet plugins
+## Connect Comet plugins
 
-`@rpamis/comet/plugins/comet` exports `CometPluginBridge` and `createDefaultCometPluginBridge` to assemble built-in personal memory, project knowledge, and host-provided plugins.
+`@rpamis/comet/plugins/comet` exports CometPluginBridge and createDefaultCometPluginBridge to assemble personal memory, project knowledge, and host plugins.
 
-See [personal memory](/en/plugins/personal-memory) and [project knowledge](/en/plugins/project-rules) for built-in plugin usage. Invoking a plugin capability does not automatically obtain workflow approval or advance Native or Classic.
+See [personal memory](/en/plugins/personal-memory) and [project knowledge](/en/plugins/project-rules). Capability calls do not grant workflow approval or advance Native or Classic automatically.

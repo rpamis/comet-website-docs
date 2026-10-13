@@ -1,13 +1,15 @@
 ---
-title: 'Stage artifacts and business validation'
-description: 'Require actual stage files and prevent missing content or failed business checks from advancing dependent work.'
+title: 'Artifacts and business acceptance'
+description: 'Require real files and stop downstream work when files, content, or business results fail checks.'
 ---
 
-When stage completion requires actual artifacts, declare file and content conditions in the application. SDK checks files and digests on disk. A host-reported path, `exists: true`, or a claim of completion is insufficient.
+Declare files and content conditions when a step must produce real artifacts. SDK checks files and hashes on disk rather than trusting returned paths, exists flags, or completion claims.
+
+For an analysis report, the executor writes reports/analysis.md with Conclusion and Evidence sections. The JSON below is an application manifest fragment for application.json. For basic Runtime output Schema, see [output validation](/en/sdk/output-validation).
 
 ## Declare required files
 
-This is an `artifactContracts` fragment for `application.json`. `workflowId` and `stepId` must match the actual workflow graph.
+workflowId and `stepId` must match the actual graph:
 
 ```json
 {
@@ -19,7 +21,7 @@ This is an `artifactContracts` fragment for `application.json`. `workflowId` and
         {
           "ref": "reports/analysis.md",
           "nonEmpty": true,
-          "requiredHeadings": ["Conclusions", "Evidence"]
+          "requiredHeadings": ["Conclusion", "Evidence"]
         }
       ]
     }
@@ -27,32 +29,59 @@ This is an `artifactContracts` fragment for `application.json`. `workflowId` and
 }
 ```
 
-| Field              | What it checks                                                    |
-| ------------------ | ----------------------------------------------------------------- |
-| `ref`              | A fixed, safe relative path within the project                    |
-| `refFrom`          | A relative file path obtained from this execution's actual output |
-| `nonEmpty`         | The file actually contains content                                |
-| `requiredText`     | Text the file must contain                                        |
-| `requiredHeadings` | Actual Markdown sections the file must contain                    |
-| `schema`           | A synchronous JSON Schema for the actual JSON file                |
-| `sha256From`       | The corresponding file digest read from the actual output         |
+| Field            | Check                                               |
+| ---------------- | --------------------------------------------------- |
+| ref              | A fixed, safe project-relative path.                |
+| refFrom          | A relative path from this actual output.            |
+| nonEmpty         | The file contains content.                          |
+| requiredText     | Required text exists.                               |
+| requiredHeadings | Actual Markdown sections exist.                     |
+| schema           | A synchronous JSON Schema for the actual JSON file. |
+| sha256From       | The output field supplying the file hash.           |
 
-Artifact references cannot target protected resources such as `.git`, installation directories, or workflow control files, or leave the project boundary. Completion reports carry actual SHA-256 values. Without `sha256From`, report the digest through the Outcome's artifact evidence.
+References cannot target .git, installation directories, workflow control files, or paths outside the project. Report an actual SHA-256; without sha256From, supply it through Outcome artifact evidence.
+
+## Write the file and report its hash
+
+This execute function writes a real project file and hashes the written content:
+
+```js
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+
+async function executeReport() {
+  const ref = 'reports/analysis.md';
+  const content =
+    '# Analysis report\n\n## Conclusion\nReady for further trials.\n\n## Evidence\nLocal acceptance records.\n';
+  await mkdir('reports', { recursive: true });
+  await writeFile(ref, content, 'utf8');
+  const sha256 = createHash('sha256').update(content).digest('hex');
+  return {
+    status: 'succeeded',
+    output: { report: ref },
+    artifacts: [{ uri: ref, sha256 }],
+  };
+}
+```
+
+Register it with the actual write-report executor. Resolve paths against an explicit project root in real applications. Runtime verifies disk content and rejects a reported path without a generated file.
 
 ## Add business conditions
 
-General file checks establish whether specified files exist and have the right structure. Conditions such as “every conclusion has a source” or “the list covers all requirements” need an actual business validator.
+File checks answer whether the required file exists and has the expected structure. Requirements such as source support for every conclusion or complete coverage need a business validator.
 
-The application author or authoring Agent writes validators and pins their versions and content. A validator reads actual inputs, outputs, and artifacts, then returns a pass or failure. Installing a generic Rule/Hook alone does not establish that these business requirements are implemented.
+The application author or creation Agent implements and pins validators. They read actual input, output, and artifacts and accept or reject. Installing generic Rules or Hooks cannot prove business requirements are implemented.
 
-SDK rechecks relevant files when accepting stage results, dispatching dependent Actions, and receiving downstream results. Modifying a completed file invalidates the original evidence. Repair steps explicitly declare replaced artifact evidence with `replaces`, then perform the repair within the original workflow.
+SDK rechecks relevant files when accepting step results, dispatching dependencies, and accepting downstream results. Later edits invalidate original evidence. Repair steps declare replacement artifact evidence through replaces and follow the original repair flow.
 
-## Validate normal and abnormal samples
+## Validate positive and negative cases
 
-Comet Any authoring must pass isolated artifact validation. Each step with artifacts supplies a normal sample. Steps with business validators also supply an abnormal sample whose format, files, and output structure are valid but whose business conditions fail.
+Comet Any creation requires isolated artifact acceptance. Provide a valid sample for every artifact-producing step. Business validators also need a negative sample with valid file, format, and output structure but an unmet business condition.
 
-For example, a normal report matches each conclusion to a source. An abnormal report retains every section and field but leaves one conclusion without a source. The validator must reject the abnormal report, rather than failing only when files are missing.
+For example, a valid report maps conclusions to sources. A negative report retains every section and field but has an unsupported conclusion. The validator must reject that report instead of only failing for missing files.
 
-Creator also checks missing files, empty content, incorrect content, and digest changes. Fix the failure or revise the plan when local validation fails. Skipping model Eval does not skip these checks.
+Creator also checks missing files, empty content, invalid content, and hash changes. Correct failures or revise the plan. Skipping model Eval does not skip these checks.
 
-See [Comet Any execution](/en/skill-creator/engine) for Rule, Hook, and host execution boundaries.
+For manual applications, test the same conditions in temporary projects: valid files pass; missing, empty, and incomplete files fail; well-formed business-invalid output is rejected. Finally edit an accepted file and verify its old hash cannot support downstream work. Use separate execution sites to protect real projects.
+
+See the [Comet Any execution guide](/en/skill-creator/engine) for Rules, Hooks, and host capability boundaries.

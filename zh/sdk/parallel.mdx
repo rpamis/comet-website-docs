@@ -1,0 +1,96 @@
+---
+title: '分支、并行与合流'
+description: '让独立步骤同时就绪，等待全部依赖后汇总，并为不同结果选择后续路径。'
+---
+
+生成周报时，初稿与来源清单可以独立准备，但汇总必须等两项结果都完成。使用多个入口声明独立任务，用 `join` 声明汇总步骤需要的上游结果。
+
+## 跑通两个入口与一个汇总
+
+保存为 `parallel.mjs`，在已安装 SDK 的目录运行 `node parallel.mjs`：
+
+```js
+import {
+  skill,
+  tool,
+  createRuntime,
+  createMemoryRuntimeStore,
+  createRuntimeExecutor,
+  defineRuntimeHandler,
+} from '@rpamis/comet/runtime';
+
+const workflow = {
+  id: 'parallel-report',
+  version: '1',
+  entry: ['draft', 'sources'],
+  steps: {
+    draft: skill({ ref: 'draft' }),
+    sources: tool({ ref: 'sources' }),
+    compose: tool({ ref: 'compose', join: ['draft', 'sources'] }),
+  },
+  transitions: [
+    { from: 'draft', to: 'compose' },
+    { from: 'sources', to: 'compose' },
+  ],
+};
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    draft: defineRuntimeHandler({
+      type: 'invoke_skill',
+      parseInput: ({ input }) => input,
+      execute: () => ({ status: 'succeeded', output: '本周交付了 SDK 使用指南。' }),
+    }),
+    sources: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ input }) => input,
+      execute: () => ({ status: 'succeeded', output: ['文档验收记录'] }),
+    }),
+    compose: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => outputs,
+      execute: ({ draft, sources }) => ({
+        status: 'succeeded',
+        output: { draft, sources },
+      }),
+    }),
+  },
+});
+const runtime = createRuntime({
+  store: createMemoryRuntimeStore(),
+  workflows: [workflow],
+  executors: [host],
+});
+await runtime.start({
+  runId: 'parallel-1',
+  workflow: { id: workflow.id, version: workflow.version },
+  input: {},
+});
+const progress = await runtime.runUntilBlocked({ runId: 'parallel-1', executorId: 'host' });
+console.log(progress.reason);
+console.log(progress.run.outputs.compose.value);
+```
+
+输出 `completed`，汇总结果包含初稿和来源清单。`compose` 只在两项依赖都完成后生成动作。上游完成顺序可以变化，汇总条件保持一致。
+
+多个入口或一个步骤的多条成功转移让工作同时就绪。`runUntilBlocked` 逐个执行动作；声明并行依赖不会自动创建线程或同时调用模型。需要真实并发时，由宿主分别领取就绪 Action，按原身份回报。
+
+## 按结果选择分支
+
+在 [快速接入](/zh/sdk/quickstart) 的审批步骤中增加拒绝路径：
+
+```js
+const transitions = [
+  { from: 'draft', to: 'approve' },
+  { from: 'approve', to: 'publish', on: 'approved' },
+  { from: 'approve', to: 'revise', on: 'rejected' },
+];
+```
+
+同时在 `steps` 中声明 `revise`，并注册对应处理函数。审批的 `choices` 应包含 `approved` 与 `rejected`。普通成功转移可以省略 `on`；已知失败路径使用 `on: 'failed'`。复杂业务条件通过 [业务状态与循环](/zh/sdk/state) 的转移处理器选择。
+
+## 避免合流一直等待
+
+`join` 中每个名称都必须对应真实上游步骤，并有进入合流步骤的转移。互斥分支不会全部执行，因此不要把互斥分支一起放进必需的 `join`。
+
+并行任务写同一文件时，依赖图不能防止业务冲突。使用独立输出文件或工作区，再由汇总步骤合并；确实需要先后写入时，声明顺序依赖。

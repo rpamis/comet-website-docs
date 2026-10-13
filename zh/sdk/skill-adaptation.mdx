@@ -1,0 +1,65 @@
+---
+title: '接入真实 Skill'
+description: '读取实际 Skill 内容，确定输入、输出、能力和副作用，再把固定依赖绑定到工作流。'
+---
+
+你已有研究、写作和评审 Skill，希望让它们共同生成一份报告。先检查实际文件，再声明每项 Skill 如何执行、交付什么结果和如何验收。Skill 名称不能证明它具备某项能力。
+
+## 读取 Skill 及其资源
+
+将实际 Skill 目录放在独立应用包中，例如 `weekly-report/skills/research/`，其中包含非空 `SKILL.md` 及其引用资源。在项目根目录运行以下脚本：
+
+```js
+import path from 'node:path';
+import { inspectApplicationSkill } from '@rpamis/comet/applications';
+
+const inspected = await inspectApplicationSkill(path.resolve('weekly-report/skills/research'));
+console.log(inspected.contentHash);
+console.log(Object.keys(inspected.files));
+```
+
+返回整个依赖目录的内容摘要和文件列表。检查器核对 Markdown 本地引用能否解析，拒绝缺失资源、符号链接和越过依赖目录的引用。摘要固定脚本与资源，不只固定 `SKILL.md`。
+
+## 为每项 Skill 写清执行契约
+
+阅读真实内容并记录以下条件，形成应用清单中的 `adapter`：
+
+| 配置                              | 需要确定什么                                           |
+| --------------------------------- | ------------------------------------------------------ |
+| `kind`                            | 作为指导、执行动作、检查还是子工作流使用。             |
+| `inputSchema`、`outputSchema`     | 接收哪些业务字段，产出哪些真实结果。                   |
+| `scope`、`requiredCapabilities`   | 工作范围与宿主必须提供的能力。                         |
+| `interaction`、`controlsApproval` | 是否交互，是否控制审批；不得转移原流程的批准职责。     |
+| `sideEffect`                      | 只读、写项目文件还是产生外部操作。                     |
+| `completion`                      | 依赖自报、机器检查还是独立评审。                       |
+| `failure`、`recovery`             | 失败时停止、修复或重试；未知结果如何核对。             |
+| `review`                          | 审查结论、内容摘要、实际文件及能力和副作用的原文证据。 |
+
+例如研究 Skill 只应生成来源与结论，不应顺带发布报告。把发布声明为独立工具步骤，在当前草稿批准后执行。写文件的 Skill 声明实际路径与 [产物契约](/zh/sdk/artifact-validation)。
+
+## 固定内容并验证适配
+
+依赖记录包含 `id`、相对目录 `root`、上述 `contentHash` 与审查完成的 `adapter`。将真实记录放入 `application.json` 的 `skills` 数组；`bindings` 将工作流步骤连接到 Skill 的已审查能力。
+
+下面的脚本读取已准备的清单并校验第一项依赖，不自动生成或批准契约：
+
+```js
+import { readFile } from 'node:fs/promises';
+import { adaptApplicationSkill } from '@rpamis/comet/applications';
+
+const packageRoot = path.resolve('weekly-report');
+const manifest = JSON.parse(await readFile(path.join(packageRoot, 'application.json'), 'utf8'));
+if (!manifest.skills.length) throw new Error('No Skill dependency');
+const adapted = await adaptApplicationSkill(manifest.skills[0], packageRoot);
+console.log(adapted);
+```
+
+此片段接在本页的读取脚本之后。内容摘要变化、契约缺失或审查证据与原文不符时，修正依赖或重新审查。不要只替换摘要来绕过变化。
+
+## 接入宿主并验证实际调用
+
+宿主提供 Skill 加载、所需工具、当前授权和真实调用结果。完整应用通过 Skill 执行器核对绑定、能力和授权，再执行固定内容；外部结果未知时使用宿主的核对能力恢复。
+
+先在临时项目验证输入与正常输出，再验证缺少工具、授权拒绝、业务输出不合格和依赖内容变化。加载器校验通过不代表模型执行正确，需要的真实模型评估见 [评估 SDK 应用](/zh/eval/applications)。
+
+希望 Agent 帮你调查 Skill、提出组合方案并编译应用时，使用 [组合任意 Skill](/zh/skill-creator/getting-started)。手动装配的入口见 [组合工作流](/zh/sdk/composition)。

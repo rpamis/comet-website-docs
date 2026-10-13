@@ -52,7 +52,33 @@ console.log(length);
 
 描述符注册不等于安装或启用。具名客户端推导能力名称、输入与返回类型，并传播调用错误；禁用和作用域约束仍然有效。
 
+将示例保存为 `plugin.ts`，在安装 SDK 的项目运行 `npx tsx plugin.ts`。控制台输出 `5`，表示已安装插件的 `length` 能力接受字符串并返回长度。这个示例不调用模型或保存知识。
+
 `parseInput` 的返回形状也是客户端输入契约。需要从对象中提取文本时，在 `invoke` 中处理，不要让对外类型与解析器实际接受的形状不同。
+
+## 查询、禁用与重新启用
+
+在示例末尾添加：
+
+```ts
+console.log(await plugins.get(plugin.id));
+await plugins.disable(plugin.id);
+try {
+  await client.invoke('length', 'hello');
+} catch (error) {
+  console.log(String(error));
+}
+await plugins.enable(plugin.id);
+console.log(await client.invoke('length', 'hello'));
+```
+
+禁用后调用被拒绝；启用后再次输出 `5`。`install`、`enable`、`disable` 和 `uninstall` 分别管理安装与可用状态，不能只删除某个 UI 按钮就认为插件已禁用。
+
+示例使用内存 State Store，新进程需要重新安装。持久化安装状态时接入 `JsonPluginStateStore`，实现其文件读写和锁接口。状态存储与插件业务存储是不同职责；文本长度示例没有业务数据。
+
+## 在工作流中调用插件
+
+在 [宿主执行器](/zh/sdk/executors) 的处理函数中调用 `client.invoke`，把返回值作为实际 Outcome。Workflow 声明工具步骤，Plugin Runtime 处理能力是否已安装、启用和可用于当前范围。插件抛错时沿实际失败或未知结果路径处理，不用固定成功值代替。
 
 ## 上下文与经验事件
 

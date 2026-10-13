@@ -1,0 +1,68 @@
+---
+title: 'Output structure and business validation'
+description: 'Validate actual tool and Skill outputs, including well-formed results that fail business requirements.'
+---
+
+A report generator returns success but may omit the body or provide conclusions without sources. Check structure with JSON Schema, then use a business validator to assess task requirements.
+
+## Declare the output structure
+
+```js
+import { skill } from '@rpamis/comet/runtime';
+
+const draft = skill({
+  ref: 'draft',
+  outputSchema: {
+    type: 'object',
+    required: ['body', 'sources'],
+    properties: {
+      body: { type: 'string', minLength: 1 },
+      sources: { type: 'array', items: { type: 'string' }, minItems: 1 },
+    },
+    additionalProperties: false,
+  },
+  validator: { id: 'report-content', version: '1' },
+});
+```
+
+Replace the corresponding workflow step and have its executor report `{ body, sources }`. Runtime checks `outputSchema` before accepting success. A string, missing sources, or empty body cannot advance as an accepted result.
+
+Schema checks types and required fields. Whether sources support conclusions or all requirements are covered needs business validation.
+
+## Register a business validator
+
+This validator implements an example requirement: the body must mention at least one source identifier. It does not verify source authenticity; add that check for your application.
+
+```js
+const contentValidator = {
+  id: 'report-content',
+  version: '1',
+  validate: ({ outcome }) => {
+    const output = outcome.output;
+    const accepted =
+      output !== null &&
+      typeof output === 'object' &&
+      !Array.isArray(output) &&
+      typeof output.body === 'string' &&
+      Array.isArray(output.sources) &&
+      output.sources.some((source) => typeof source === 'string' && output.body.includes(source));
+    return { accepted, reason: accepted ? undefined : 'The body has no source identifier' };
+  },
+};
+```
+
+Pass validators: [contentValidator] to createRuntime. The step's id/version must match the registered validator. Validators read the actual Action, Outcome, and Run without changing authoritative state or performing external side effects.
+
+## Try valid and invalid results
+
+Start separate Runs and have the generator report:
+
+| Output                                                           | Expected result                                      |
+| ---------------------------------------------------------------- | ---------------------------------------------------- |
+| `{ body: 'Based on source-1.', sources: ['source-1'] }`          | Pass structure and the example business requirement. |
+| `{ body: '', sources: [] }`                                      | Reject on structure.                                 |
+| `{ body: 'An unreferenced conclusion.', sources: ['source-1'] }` | Valid structure, rejected business requirement.      |
+
+After rejection, inspect the error and original Action. Do not relabel failed output as success. Correct the executor or business result and follow an allowed recovery path.
+
+For disk files, JSON structure alone cannot prove existence or content. Declare real files and conditions with [artifact validation](/en/sdk/artifact-validation).

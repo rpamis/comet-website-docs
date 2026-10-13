@@ -1,0 +1,96 @@
+---
+title: 'Branches, parallel steps, and joins'
+description: 'Make independent steps ready, combine their results after all dependencies finish, and select result-specific paths.'
+---
+
+A weekly report can prepare a draft and sources independently, but composition needs both results. Declare multiple entries for independent tasks and join for the upstream results required by composition.
+
+## Run two entries and one join
+
+Save as `parallel.mjs` and run node `parallel.mjs` in a directory with the SDK installed:
+
+```js
+import {
+  skill,
+  tool,
+  createRuntime,
+  createMemoryRuntimeStore,
+  createRuntimeExecutor,
+  defineRuntimeHandler,
+} from '@rpamis/comet/runtime';
+
+const workflow = {
+  id: 'parallel-report',
+  version: '1',
+  entry: ['draft', 'sources'],
+  steps: {
+    draft: skill({ ref: 'draft' }),
+    sources: tool({ ref: 'sources' }),
+    compose: tool({ ref: 'compose', join: ['draft', 'sources'] }),
+  },
+  transitions: [
+    { from: 'draft', to: 'compose' },
+    { from: 'sources', to: 'compose' },
+  ],
+};
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    draft: defineRuntimeHandler({
+      type: 'invoke_skill',
+      parseInput: ({ input }) => input,
+      execute: () => ({ status: 'succeeded', output: 'SDK user guides were delivered this week.' }),
+    }),
+    sources: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ input }) => input,
+      execute: () => ({ status: 'succeeded', output: ['Documentation acceptance records'] }),
+    }),
+    compose: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => outputs,
+      execute: ({ draft, sources }) => ({
+        status: 'succeeded',
+        output: { draft, sources },
+      }),
+    }),
+  },
+});
+const runtime = createRuntime({
+  store: createMemoryRuntimeStore(),
+  workflows: [workflow],
+  executors: [host],
+});
+await runtime.start({
+  runId: 'parallel-1',
+  workflow: { id: workflow.id, version: workflow.version },
+  input: {},
+});
+const progress = await runtime.runUntilBlocked({ runId: 'parallel-1', executorId: 'host' });
+console.log(progress.reason);
+console.log(progress.run.outputs.compose.value);
+```
+
+The output is completed, and the composed result contains the draft and sources. compose creates an action only after both dependencies finish. Completion order can vary while the join condition remains the same.
+
+Multiple entries or multiple success transitions make work ready together. `runUntilBlocked` executes actions sequentially; a parallel graph does not automatically create threads or concurrent model calls. For actual concurrency, the host claims ready Actions separately and reports each result using its original identity.
+
+## Select a result-specific branch
+
+Add a rejection path to the approval step in the [quickstart](/en/sdk/quickstart):
+
+```js
+const transitions = [
+  { from: 'draft', to: 'approve' },
+  { from: 'approve', to: 'publish', on: 'approved' },
+  { from: 'approve', to: 'revise', on: 'rejected' },
+];
+```
+
+Also declare revise in steps and register its handler. Approval choices should include approved and rejected. Ordinary success edges may omit on; known failures use on: 'failed'. Use a transition handler for more complex business conditions; see [business state and loops](/en/sdk/state).
+
+## Avoid a join that never finishes
+
+Each join dependency must name an actual upstream step with a transition into the join. Mutually exclusive branches will not all execute, so do not require them together in a join.
+
+The graph cannot prevent conflicting writes to one file. Give parallel tasks separate files or workspaces and combine results afterward. Declare ordering when shared writes must happen sequentially.

@@ -3,11 +3,24 @@ title: 'SDK 快速接入'
 description: '用一个本地报告工作流跑通执行、审批和跨进程恢复。'
 ---
 
-下面的示例用本地函数代替真实 Skill，用控制台输出代替外部发布。它不会调用模型、网络或部署服务。
+你将创建一个“生成草稿 → 用户审批 → 发布”的报告流程。第一次运行生成草稿并停在审批，第二次运行提交你的决定，再输出报告。
+
+示例用本地函数代替真实 Skill，用控制台输出代替外部发布，不需要模型密钥。完成后，你可以把这两个函数换成自己的 Agent 和工具。
+
+## 准备项目
+
+在空目录执行：
+
+```bash
+npm init -y
+npm install @rpamis/comet@0.5.0
+```
+
+需要支持的 Node.js 版本见 [安装与公开入口](/zh/sdk/overview#安装与公开入口)。若你正在试用尚未发布的 SDK 候选，请安装维护者提供的 npm tarball；npm 上的旧版本不一定包含本页入口。代码使用 `.mjs`，无需另改项目的模块配置。
 
 ## 创建工作流
 
-安装 [Comet SDK](/zh/sdk/overview#安装与公开入口)，将下面的代码保存为 `report.mjs`：
+将下面的代码保存为 `report.mjs`：
 
 ```js
 import {
@@ -76,31 +89,47 @@ console.log(progress.reason);
 console.log(progress.run.waits.filter((wait) => wait.status === 'pending'));
 ```
 
-运行 `node report.mjs` 后，流程停在 `approval-required`。再次运行同一命令会读取同一个 Run，继续等待当前审批，不重复生成初稿。
+```bash
+node report.mjs
+```
+
+你会看到 `approval-required` 和 pending Wait，其中包含草稿提案、Wait ID、提案摘要及可用选择。`report-state/` 保存本次 Run。再次运行同一命令会读取同一个 Run，继续等待当前审批，不重复生成初稿。
 
 ## 提交当前用户决定
 
-展示待处理 Wait 的提案并取得用户同意后，再执行下面的代码。它可以放在单独的审批处理函数中；不要把它作为启动脚本的自动步骤。
+把下面的代码追加到 `report.mjs`。它仅在你显式传入 `--approve` 时提交批准。实际产品中，请用 UI 接收用户对当前提案的选择，见 [用户审批](/zh/sdk/approvals)。
 
 ```js
-const wait = progress.run.waits.find((item) => item.status === 'pending');
-if (!wait) throw new Error('No pending approval');
+if (process.argv.includes('--approve')) {
+  const wait = progress.run.waits.find((item) => item.status === 'pending');
+  if (!wait) throw new Error('No pending approval');
 
-await runtime.resolveWait({
-  runId: progress.run.runId,
-  waitId: wait.id,
-  proposalHash: wait.proposalHash,
-  decisionId: 'user-decision-1',
-  choice: 'approved',
-});
-const resumed = await runtime.runUntilBlocked({
-  runId: progress.run.runId,
-  executorId: 'host',
-});
-console.log(resumed.reason);
+  await runtime.resolveWait({
+    runId: progress.run.runId,
+    waitId: wait.id,
+    proposalHash: wait.proposalHash,
+    decisionId: 'user-decision-1',
+    choice: 'approved',
+  });
+  const resumed = await runtime.runUntilBlocked({
+    runId: progress.run.runId,
+    executorId: 'host',
+  });
+  console.log(resumed.reason);
+}
 ```
 
-输出 `completed` 表示声明的流程已结束。此例的业务结果是打印报告；接入实际发布服务后，应另外核对服务返回的结果。
+先检查第一次输出的草稿，确认要发布后运行：
+
+```bash
+node report.mjs --approve
+```
+
+输出包含 `Report about SDK integration` 和 `completed`，表示声明的流程已结束。此例的业务结果是打印报告；接入实际发布服务后，应另外核对服务返回的结果。再次启动已完成 Run 不会重新发布；不要再次传入 `--approve`，因为已经没有待审批提案。
+
+## 查看结果与开始新任务
+
+在脚本末尾可以通过 `runtime.inspect('report-1')` 查看 Run。`run.outputs.publish.value` 包含 `{ published: true }`，`run.actions` 保留实际动作和结果。新报告使用新的 `runId`，例如 `report-2`；更改输入后继续使用旧 ID 会触发一致性检查。
 
 ## 接入你的 Agent 平台
 

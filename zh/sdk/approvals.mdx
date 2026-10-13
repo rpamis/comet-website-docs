@@ -1,0 +1,61 @@
+---
+title: '用户审批'
+description: '在发布或其他重要操作前展示当前结果，等待用户决定，再继续同一个 Run。'
+---
+
+你希望 Agent 自动生成报告，但发布前由用户检查。把审批放在草稿与发布之间，Run 会保存草稿和待处理提案，关闭进程后仍可继续审批。
+
+## 声明需要审批的结果
+
+在 [快速接入](/zh/sdk/quickstart) 的工作流中使用：
+
+```js
+import { approval } from '@rpamis/comet/runtime';
+
+const approve = approval({
+  proposalFrom: 'draft',
+  choices: ['approved', 'rejected'],
+});
+```
+
+`proposalFrom` 指向本次执行需要展示的上游结果。多个结果可以用数组，例如 `['draft', 'sources']`。图中仍需声明从这些步骤进入审批的转移；需要全部结果时，使用相应的 `join`。
+
+## 展示当前提案
+
+```js
+const progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'host' });
+const wait = progress.run.waits.find((item) => item.status === 'pending');
+if (!wait) throw new Error('No pending approval');
+console.log(wait.proposal);
+console.log(wait.choices);
+```
+
+此处的 `runtime` 来自快速接入示例。`progress.reason` 为 `approval-required` 时，界面应展示 `wait.proposal` 的实际内容和允许的选项，并保存 Wait ID 与提案摘要。不要只显示“是否继续”，让用户在看不到结果时批准发布。
+
+## 提交用户选择
+
+用户检查当前提案后，把真实选择作为 `userChoice` 传给处理函数：
+
+```js
+async function submitDecision(userChoice) {
+  if (!wait.choices.includes(userChoice)) throw new Error('Invalid choice');
+  await runtime.resolveWait({
+    runId: progress.run.runId,
+    waitId: wait.id,
+    proposalHash: wait.proposalHash,
+    decisionId: 'report-review-1',
+    choice: userChoice,
+  });
+  return runtime.runUntilBlocked({ runId: progress.run.runId, executorId: 'host' });
+}
+```
+
+`decisionId` 标识这次用户决定。接入 UI 时为每次新决定生成唯一 ID；相同决定的网络重交保留原 ID。提案已变化或 Wait 已过期时，重新读取并展示当前提案。
+
+批准绑定这一次 Wait 和提案摘要。另一份报告的批准、旧草稿的批准或另一次激活的批准不能用于当前发布。
+
+## 处理拒绝与修改
+
+如果拒绝后需要重写，声明 `on: 'rejected'` 的转移到修订步骤，再让新草稿进入审批。拒绝分支没有后续步骤时，流程可能结束；`completed` 不代表已经发布，应读取实际路径和业务输出。
+
+不要把 `submitDecision('approved')` 放进启动脚本自动执行。审批步骤保存用户决定，宿主负责实际获取决定；外部工具本身需要的权限仍由宿主执行。

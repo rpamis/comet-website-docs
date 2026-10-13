@@ -1,43 +1,98 @@
 ---
-title: 'Compose Native, Classic, and standalone workflows'
-description: 'Choose an application factory to extend or compose Skills within existing acceptance rules.'
+title: 'Compose Native, Classic, and independent workflows'
+description: 'Choose an application factory and extend or compose Skills within existing acceptance rules.'
 ---
 
-An application's `base` determines which workflow it uses. Choose based on the business stages, validation, and recovery you need. Editing entry Skill text alone cannot change the workflow.
+base selects the application's workflow. Choose by required phases, acceptance, and recovery, not by changing entry Skill prose.
 
-| Type            | Public factory                    | Suitable work                                                     |
-| --------------- | --------------------------------- | ----------------------------------------------------------------- |
-| Native          | `createNativeWorkflowApplication` | Add team work at candidate, parent, child, or integration checks  |
-| Classic         | `createClassicApplication`        | Compose Skills and extension steps for full, hotfix, and tweak    |
-| Standalone      | `createStandaloneApplication`     | Define steps, branches, parallel work, joins, and child workflows |
-| Report template | `createReportApplication`         | Generate, approve, and publish local reports                      |
+| Type          | Public factory                    | Suitable work                                                       |
+| ------------- | --------------------------------- | ------------------------------------------------------------------- |
+| Native        | `createNativeWorkflowApplication` | Add checks for candidates, parents, children, or integration.       |
+| Classic       | `createClassicApplication`        | Compose full, hotfix, or tweak Skills and extension steps.          |
+| Standalone    | `createStandaloneApplication`     | Define steps, branches, parallel paths, joins, and child workflows. |
+| Report sample | createReportApplication           | Generate, approve, and publish local reports.                       |
 
-## Native extensions
+## Extend Native
 
-Import the factory from `@rpamis/comet/applications/native`. Extensions declare their Skills, artifacts, validators, and scope: `candidate`, `parent`, `child`, or `integration`.
+Import the factory from @rpamis/comet/applications/native. An extension declares its Skill, artifacts, validator, and candidate, parent, child, or integration scope.
 
-Extension work binds to the current candidate and actual inputs. After requirements, the formal Spec, original candidate, approval, or artifacts change, old results cannot serve as current checks.
+Extension results bind to the current candidate and actual input. Changed requirements, formal Spec, candidate, approval, or artifacts invalidate old results for current checks.
 
-Native continues to manage its Builder, independent Verifier, Supervisor, user decisions, and Archive conditions. Extensions add their own business checks without replacing these responsibilities.
+Native retains Builder, independent Verifier, Supervisor, user decisions, and Archive conditions. Extensions add business checks without replacing those responsibilities.
 
-## Classic composition
+For example, add a team security review after the candidate's independent checks. Use this application-module fragment; securityValidator must be your implemented business validator:
 
-Import the factory from `@rpamis/comet/applications/classic` and select full, hotfix, or tweak. A replacement Skill receives the original stage's required inputs and must produce outputs that meet that stage's requirements. Place added steps at checks allowed by the domain.
+```js
+import { createNativeWorkflowApplication } from '@rpamis/comet/applications/native';
 
-Machine checks in Build, Verify, and Archive use actual commands and evidence from the current round. A missing check plan, failed command, or changed input prevents a successful result from advancing the workflow.
+export function createApplication(context) {
+  return createNativeWorkflowApplication(context, {
+    extensions: [
+      {
+        id: 'security-review',
+        skillId: 'security-review',
+        scopes: ['candidate'],
+        artifactRefs: ['reports/security-review.md'],
+        validator: securityValidator,
+      },
+    ],
+  });
+}
+```
 
-Classic's user approvals, required documents, and archive rules still apply. Git commits, pushes, and other external operations follow actual delivery authorization.
+Declare actual Skill dependencies and bindings in the manifest, and add artifact contracts for the report. An invalid security report cannot count as a completed extension. Use the corresponding scope for parent, child, or integration results and validate current input and candidate identity.
 
-## Standalone workflows
+## Compose Classic
 
-Standalone applications can declare their own workflow graphs, output Schemas, state, transition handlers, executors, and validators. Declare every transition in the graph. When parallel work writes to the same scope, specify an order or use separate workspaces.
+Import the factory from `@rpamis/comet/applications/classic` and choose full, hotfix, or tweak. Replacement Skills receive the original phase input and must deliver the required output. Add steps at allowed checkpoints.
 
-Validation follows the standalone application's own contracts. For example, `completed` in a report workflow may mean publication finished or a rejection branch ended. Read the actual business result.
+Build, Verify, and Archive machine checks use real commands and current evidence. Missing plans, failed commands, or changed input cannot be replaced with a successful claim.
 
-## Assemble from a confirmed plan
+Classic user decisions, required documents, and archive rules remain effective. Git commits, pushes, and other external operations use actual delivery permission.
 
-`@rpamis/comet/applications/compiler` provides `prepareWorkflowApplicationPlan` and `compileWorkflowApplication`. Preparation assembles the actual graph and proposal. Compile the complete package after confirmation.
+Choose the profile, then inspect its actual steps and requirements. This module uses full without replacing phase Skills:
 
-The plan pins Skill content, modules, inputs and outputs, and validation conditions. Prepare and confirm it again if documents, dependencies, or the workflow change. Do not substitute a different execution module for the confirmed graph.
+```js
+import { createClassicApplication } from '@rpamis/comet/applications/classic';
 
-If you prefer not to write the plan structure directly, [Comet Any](/en/skill-creator/overview) investigates actual Skills and prepares a proposal. [comet application](/en/cli/application) handles platform installation.
+export function createApplication(context) {
+  return createClassicApplication(context, { profile: 'full' });
+}
+```
+
+Manifest base must be classic-full to match the profile. replacements declares actual `stepId` and `skillId`; extensions declares `afterStep`, artifacts, and a validator. Read step names from the original definition, not phase display labels.
+
+## Independent workflows
+
+Independent applications declare their own graph, output Schema, state, transition handlers, executors, and validators. Every transition is declared. Order shared writes or use separate workspaces.
+
+Acceptance depends on the application's own contract. completed may mean publication or completion along a rejected path; inspect business output.
+
+Place workflow and host from the [parallel example](/en/sdk/parallel) in a module, then package them with:
+
+```js
+import { createStandaloneApplication } from '@rpamis/comet/applications';
+
+export function createApplication() {
+  return createStandaloneApplication({
+    workflows: [workflow],
+    executors: [host],
+    executorIds: ['host'],
+    validators: [],
+    validatorRefs: [],
+    transitionHandlers: [],
+  });
+}
+```
+
+This fragment follows the existing definitions. The factory checks actual executors, validators, and transition handlers against their declarations and rejects missing execution entries. This standalone factory currently has no evidence validation port. For evidence steps use basic Runtime with explicit `evidenceValidators` or implement a complete custom factory; this sample does not promise every Runtime step type.
+
+## Assemble a confirmed plan
+
+`@rpamis/comet/applications/compiler` provides `prepareWorkflowApplicationPlan` and compileWorkflowApplication. Preparation assembles the actual graph and proposal; confirmation precedes complete package compilation.
+
+The plan pins Skill content, module, input/output, and validation conditions. Prepare and confirm again after document, dependency, or graph changes. Do not substitute another execution module for the confirmed graph.
+
+To avoid manually writing the plan, use [Compose any Skill](/en/skill-creator/overview) to inspect real Skills and prepare a proposal. Installation uses [comet application](/en/cli/application).
+
+Follow this sequence: inspect Skills, prepare a plan, display and confirm it, compile, validate isolated artifacts, and preview installation. Confirm plan changes again. Test valid and business-invalid samples before distribution. See [real Skill integration](/en/sdk/skill-adaptation) for contracts.

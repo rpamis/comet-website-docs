@@ -1,0 +1,87 @@
+---
+title: '子工作流'
+description: '把可复用的一组步骤封装为子工作流，让父流程等待并读取其结果。'
+---
+
+多种报告都要执行来源检查。把这项工作单独定义为子工作流，父流程只声明它的身份与版本，不需要复制来源检查的每个步骤。
+
+## 声明父流程和子流程
+
+下面是可运行的最小示例，保存为 `child.mjs` 后执行 `node child.mjs`：
+
+```js
+import {
+  childWorkflow,
+  tool,
+  createRuntime,
+  createMemoryRuntimeStore,
+  createRuntimeExecutor,
+  defineRuntimeHandler,
+} from '@rpamis/comet/runtime';
+
+const child = {
+  id: 'source-check',
+  version: '1',
+  entry: 'check',
+  steps: { check: tool({ ref: 'check' }) },
+};
+const parent = {
+  id: 'report-with-check',
+  version: '1',
+  entry: 'facts',
+  steps: {
+    facts: childWorkflow({ workflow: { id: child.id, version: child.version } }),
+    summarize: tool({ ref: 'summarize' }),
+  },
+  transitions: [{ from: 'facts', to: 'summarize' }],
+};
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    check: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ input }) => input,
+      execute: () => ({ status: 'succeeded', output: { checked: true } }),
+    }),
+    summarize: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => outputs.facts,
+      execute: (facts) => ({ status: 'succeeded', output: facts }),
+    }),
+  },
+});
+const runtime = createRuntime({
+  store: createMemoryRuntimeStore(),
+  workflows: [parent, child],
+  executors: [host],
+});
+await runtime.start({
+  runId: 'parent-1',
+  workflow: { id: parent.id, version: parent.version },
+  input: {},
+});
+let progress = await runtime.runUntilBlocked({ runId: 'parent-1', executorId: 'host' });
+for (const childRun of progress.run.children) {
+  await runtime.runUntilBlocked({ runId: childRun.runId, executorId: 'host' });
+}
+progress = await runtime.runUntilBlocked({ runId: 'parent-1', executorId: 'host' });
+console.log(progress.reason);
+console.log(progress.run.children);
+console.log(progress.run.outputs.summarize.value);
+```
+
+输出 `completed`，`children` 中保留子 Run 的关联。父流程的 `facts` 输出包含子流程的输出；业务处理函数应按实际结构读取所需结果。示例的检查函数只返回本地标记，真实来源核验由你实现。
+
+## 传入不同任务
+
+子流程步骤可以声明 `input`，例如 `childWorkflow({ workflow: { id: 'source-check', version: '1' }, input: { topic: 'weekly-report' } })`。子 Run 的输入保留父步骤的输入封装，包含 `input`、`outputs` 和可选的 `activation`，子流程处理函数应从中解析业务值。需要按当前业务状态激活不同输入时，使用 [业务状态与循环](/zh/sdk/state) 的激活输入。
+
+注册父流程时同时注册子流程需要的定义与版本。子流程自己的工具和 Skill 仍由宿主执行器提供。
+
+## 处理子流程等待
+
+父流程创建并关联子 Run，但 `runUntilBlocked` 不会替宿主执行子 Run 的业务动作。示例显式推进每个子 Run，再推进父 Run 接收其结果。嵌套子流程需要宿主按真实关联继续调度。
+
+子流程可能等待用户或证据。读取父 Run 的 `children`，用真实子 Run ID 调用 `inspect`；在子 Run 上提交它自己的 Wait，再推进父 Run。不要把父 Run 的 Wait ID 或批准用于子 Run。
+
+恢复时保留父子关系及双方引用的版本，不能另建一个不关联的子 Run 冒充原结果。两个父任务复用同一工作流定义，并不意味着它们共享同一个执行实例。
