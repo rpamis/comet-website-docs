@@ -1,0 +1,111 @@
+---
+title: 'SDK quickstart'
+description: 'Use a local report workflow to run execution, approval, and recovery across processes.'
+---
+
+This example uses local functions in place of actual Skills and console output in place of external publishing. It does not call a model, network, or deployment service.
+
+## Create a workflow
+
+Install [Comet SDK](/en/sdk/overview#installation-and-public-entry-points) and save this code as `report.mjs`:
+
+```js
+import {
+  approval,
+  skill,
+  tool,
+  createFileRuntimeStore,
+  createRuntime,
+  createRuntimeExecutor,
+  defineRuntimeHandler,
+} from '@rpamis/comet/runtime';
+
+const workflow = {
+  id: 'report',
+  version: '1',
+  entry: 'draft',
+  steps: {
+    draft: skill({ ref: 'draft' }),
+    approve: approval({ proposalFrom: 'draft' }),
+    publish: tool({ ref: 'publish' }),
+  },
+  transitions: [
+    { from: 'draft', to: 'approve' },
+    { from: 'approve', to: 'publish', on: 'approved' },
+  ],
+};
+
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    draft: defineRuntimeHandler({
+      type: 'invoke_skill',
+      parseInput: ({ input }) => {
+        if (typeof input !== 'string') throw new Error('Expected a topic');
+        return input;
+      },
+      execute: (topic) => ({ status: 'succeeded', output: `Report about ${topic}` }),
+    }),
+    publish: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => {
+        if (typeof outputs.draft !== 'string') throw new Error('Expected a report');
+        return outputs.draft;
+      },
+      execute: (report) => {
+        console.log(report);
+        return { status: 'succeeded', output: { published: true } };
+      },
+    }),
+  },
+});
+
+const runtime = createRuntime({
+  store: createFileRuntimeStore({ rootDir: './report-state' }),
+  workflows: [workflow],
+  executors: [host],
+});
+
+await runtime.start({
+  runId: 'report-1',
+  workflow: { id: 'report', version: '1' },
+  input: 'SDK integration',
+});
+const progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'host' });
+console.log(progress.reason);
+console.log(progress.run.waits.filter((wait) => wait.status === 'pending'));
+```
+
+Run `node report.mjs`. The workflow stops at `approval-required`. Running the same command again reads the same Run and continues waiting for the current approval without generating another draft.
+
+## Submit the current user decision
+
+Show the pending Wait's proposal and obtain the user's approval before executing this code. You can place it in a separate approval handler; do not make it an automatic step in the startup script.
+
+```js
+const wait = progress.run.waits.find((item) => item.status === 'pending');
+if (!wait) throw new Error('No pending approval');
+
+await runtime.resolveWait({
+  runId: progress.run.runId,
+  waitId: wait.id,
+  proposalHash: wait.proposalHash,
+  decisionId: 'user-decision-1',
+  choice: 'approved',
+});
+const resumed = await runtime.runUntilBlocked({
+  runId: progress.run.runId,
+  executorId: 'host',
+});
+console.log(resumed.reason);
+```
+
+`completed` means the declared workflow has ended. In this example, the business result is printing a report. When integrating a real publishing service, also check the result returned by that service.
+
+## Integrate your Agent platform
+
+Replace `execute` with an actual Skill or tool call and return its actual result. Handler keys match step `ref` values; `type` matches the Action kind.
+
+`parseInput` checks current input and upstream outputs, then provides a business object to `execute`. TypeScript infers types inside this handler. JSON saved across steps still needs a Schema or validator.
+
+Supply model credentials through a host closure or the current execution environment. Do not put Tokens in Workflows, Run inputs, outputs, or approval proposals. If a result is uncertain after a disconnect, follow [recovery and unknown results](/en/sdk/recovery) first. Do not repeat an external operation to guess its result.

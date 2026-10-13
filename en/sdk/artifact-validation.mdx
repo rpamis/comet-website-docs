@@ -1,0 +1,58 @@
+---
+title: 'Stage artifacts and business validation'
+description: 'Require actual stage files and prevent missing content or failed business checks from advancing dependent work.'
+---
+
+When stage completion requires actual artifacts, declare file and content conditions in the application. SDK checks files and digests on disk. A host-reported path, `exists: true`, or a claim of completion is insufficient.
+
+## Declare required files
+
+This is an `artifactContracts` fragment for `application.json`. `workflowId` and `stepId` must match the actual workflow graph.
+
+```json
+{
+  "artifactContracts": [
+    {
+      "workflowId": "analysis",
+      "stepId": "write-report",
+      "artifacts": [
+        {
+          "ref": "reports/analysis.md",
+          "nonEmpty": true,
+          "requiredHeadings": ["Conclusions", "Evidence"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field              | What it checks                                                    |
+| ------------------ | ----------------------------------------------------------------- |
+| `ref`              | A fixed, safe relative path within the project                    |
+| `refFrom`          | A relative file path obtained from this execution's actual output |
+| `nonEmpty`         | The file actually contains content                                |
+| `requiredText`     | Text the file must contain                                        |
+| `requiredHeadings` | Actual Markdown sections the file must contain                    |
+| `schema`           | A synchronous JSON Schema for the actual JSON file                |
+| `sha256From`       | The corresponding file digest read from the actual output         |
+
+Artifact references cannot target protected resources such as `.git`, installation directories, or workflow control files, or leave the project boundary. Completion reports carry actual SHA-256 values. Without `sha256From`, report the digest through the Outcome's artifact evidence.
+
+## Add business conditions
+
+General file checks establish whether specified files exist and have the right structure. Conditions such as “every conclusion has a source” or “the list covers all requirements” need an actual business validator.
+
+The application author or authoring Agent writes validators and pins their versions and content. A validator reads actual inputs, outputs, and artifacts, then returns a pass or failure. Installing a generic Rule/Hook alone does not establish that these business requirements are implemented.
+
+SDK rechecks relevant files when accepting stage results, dispatching dependent Actions, and receiving downstream results. Modifying a completed file invalidates the original evidence. Repair steps explicitly declare replaced artifact evidence with `replaces`, then perform the repair within the original workflow.
+
+## Validate normal and abnormal samples
+
+Comet Any authoring must pass isolated artifact validation. Each step with artifacts supplies a normal sample. Steps with business validators also supply an abnormal sample whose format, files, and output structure are valid but whose business conditions fail.
+
+For example, a normal report matches each conclusion to a source. An abnormal report retains every section and field but leaves one conclusion without a source. The validator must reject the abnormal report, rather than failing only when files are missing.
+
+Creator also checks missing files, empty content, incorrect content, and digest changes. Fix the failure or revise the plan when local validation fails. Skipping model Eval does not skip these checks.
+
+See [Comet Any execution](/en/skill-creator/engine) for Rule, Hook, and host execution boundaries.

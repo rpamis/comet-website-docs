@@ -1,0 +1,52 @@
+---
+title: 'Workflow Runtime'
+description: 'Define workflow graphs, execution ports, user waits, and recoverable execution records.'
+---
+
+A **Workflow** defines allowed steps and transitions. A **Run** saves the input, state, Actions, Waits, and evidence of one execution. A workflow can have multiple independent Runs.
+
+## Core objects
+
+| Object   | Host responsibility                                                                         |
+| -------- | ------------------------------------------------------------------------------------------- |
+| Workflow | Define identity, version, entry, steps, and allowed transitions                             |
+| Run      | Save and reuse the same Run ID to continue execution                                        |
+| Action   | Claim the current Action, invoke actual host capabilities, and report its result            |
+| Wait     | Show the proposal, obtain a user decision or required evidence, and submit the current Wait |
+| Store    | Save execution records atomically to prevent concurrent results from overwriting each other |
+
+Use a new version when changing a workflow definition, and retain definitions referenced by active Runs. Editing instructions or state JSON, or writing “complete,” cannot replace a valid transition.
+
+## Define steps
+
+Import `defineWorkflow` from `@rpamis/comet/runtime`, or use a workflow definition object as in the [quickstart](/en/sdk/quickstart).
+
+| Helper          | Declared work                                        |
+| --------------- | ---------------------------------------------------- |
+| `skill`         | Ask the host to load and execute a Skill             |
+| `tool`          | Invoke a host tool or local business function        |
+| `approval`      | Wait for the user's decision on the current proposal |
+| `evidence`      | Wait for declared evidence                           |
+| `childWorkflow` | Start and associate a child workflow                 |
+
+Dependencies determine when steps can be dispatched. Parallel steps can finish in different orders; join conditions must be explicit. Loops and branches follow declared transitions. Handlers cannot jump outside the graph.
+
+## Executors and results
+
+`createRuntimeExecutor` registers named handlers by step `ref`. `defineRuntimeHandler` parses input before passing it to a business function, avoiding dispatch by step name inside one large function.
+
+Platforms that need to claim and report work themselves can use Runtime's `claim`, `recordOutcome`, and `retry` APIs. Retain the current Action identity, attempt, input digest, and claim credentials. A result must belong to this execution.
+
+Successful results are also checked against output Schemas and business validators. Record known failures as failures. If work has been dispatched but the host throws or result reporting is interrupted, the operation may already have happened; treat the result as unknown. See [recovery and unknown results](/en/sdk/recovery) for the complete rules.
+
+## User waits
+
+Approval decisions bind to the Wait ID and current proposal hash. If the proposal changes, show it again and obtain confirmation. Old approval, approval from another activation, or approval invented by the host cannot authorize the current Action.
+
+For evidence waits, the host submits actual evidence and Runtime checks its ownership and declared conditions. Step completion, evidence acceptance, and actual external service completion are separate facts; business interfaces should show them separately.
+
+## Storage and host responsibilities
+
+`createMemoryRuntimeStore` suits experiments that do not need recovery across processes. `createFileRuntimeStore` saves Runs in your chosen directory. A new process can continue them after registering the same definitions and executors.
+
+Runtime does not automatically call models, configure MCP, inject plugin context, or obtain authorization for the host. Use [Workflow Application](/en/sdk/applications) for pinned Skills, installation entries, business file protection, and distribution.

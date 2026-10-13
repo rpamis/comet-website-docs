@@ -1,0 +1,67 @@
+---
+title: 'Plugin SDK'
+description: 'Register plugin capabilities, integrate storage and context, and retain installation, disabled-state, and scope constraints.'
+---
+
+Plugin SDK manages plugin registration, installation, enabled state, scope, and capability invocation. Use it with Workflow Runtime or integrate it independently into an existing host.
+
+## Define named capabilities
+
+This TypeScript example registers a plugin that calculates text length. `MemoryPluginStateStore` saves installation state only in the current process and does not access real user configuration.
+
+```ts
+import {
+  PluginRuntime,
+  MemoryPluginStateStore,
+  definePlugin,
+  definePluginCapability,
+  createPluginClient,
+} from '@rpamis/comet/plugins';
+
+const plugin = definePlugin({
+  id: 'example.notes',
+  kind: 'third-party',
+  version: '1',
+  scopes: ['user'],
+  compatible: (version) => version === '0.5.0',
+  create: () => ({
+    capabilities: {
+      length: definePluginCapability({
+        parseInput(value: unknown) {
+          if (typeof value !== 'string') throw new Error('Expected text');
+          return value;
+        },
+        invoke: (text) => text.length,
+      }),
+    },
+  }),
+});
+
+const plugins = new PluginRuntime({
+  cometVersion: '0.5.0',
+  store: new MemoryPluginStateStore(),
+  descriptors: [plugin],
+});
+
+// Execute after the host obtains installation authorization; this example uses only in-process state.
+await plugins.install(plugin.id, 'user');
+const client = createPluginClient(plugins, plugin);
+const length: number = await client.invoke('length', 'hello');
+console.log(length);
+```
+
+Registering a descriptor does not install or enable it. A named client infers capability names, inputs, and return types, and propagates invocation errors. Disabled-state and scope constraints still apply.
+
+The return shape of `parseInput` is also the client's input contract. If you need to extract text from an object, do so in `invoke`. Keep the public type consistent with the shape the parser actually accepts.
+
+## Context and experience events
+
+Plugins can provide context candidates and content for expansion on demand, and declare experience-event subscriptions. The host decides when to query, how to pass content to the Agent, and when to record actions and results.
+
+Type inference does not establish the trustworthiness of a plugin implementation or provide a sandbox. Business data needs separate input and output checks. External side effects need actual authorization and recovery APIs.
+
+## Integrate Comet plugins
+
+`@rpamis/comet/plugins/comet` exports `CometPluginBridge` and `createDefaultCometPluginBridge` to assemble built-in personal memory, project knowledge, and host-provided plugins.
+
+See [personal memory](/en/plugins/personal-memory) and [project knowledge](/en/plugins/project-rules) for built-in plugin usage. Invoking a plugin capability does not automatically obtain workflow approval or advance Native or Classic.

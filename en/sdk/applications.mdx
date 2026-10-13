@@ -1,0 +1,101 @@
+---
+title: 'Workflow Application'
+description: 'Package a workflow, entry Skill, rules, and pinned dependencies into a runnable, installable application.'
+---
+
+Workflow Application binds a workflow and its actual execution content in one package. The package records application identity, entry Skill, execution module, actual dependencies, and their digests for the host to load and execute.
+
+Use [Comet Any](/en/skill-creator/getting-started) to have an Agent author complete business content. To write and integrate an application yourself, start with this local report template.
+
+## Minimal application package
+
+Create a separate `local-report/` directory inside your project and save three files.
+
+`application.json`:
+
+```json
+{
+  "schema": "comet.workflow.application.v1",
+  "id": "local-report",
+  "version": "1",
+  "base": "standalone",
+  "runtimeVersion": "0.5.0",
+  "entrySkill": "SKILL.md",
+  "module": "application.mjs",
+  "skills": [],
+  "bindings": []
+}
+```
+
+`application.mjs`:
+
+```js
+export { createReportApplication as createApplication } from '@rpamis/comet/applications';
+```
+
+`SKILL.md`:
+
+```markdown
+---
+name: local-report
+description: Generate a local report that requires user approval before publication.
+---
+
+# Local report
+
+Use application.json to start report-publishing@1 with title, body, and sources.
+Save the Run ID, execute the current Action, show the actual draft, and wait for the user decision.
+Publish locally after approval. If the result is unknown, check the original Action before redispatching.
+```
+
+The template's `draft` and `sources` steps can finish in parallel. `compose` produces an actual Markdown draft after both finish. The parent workflow presents the draft, path, and digest, then waits for the user's choice. It validates the declared report format and local file publication. Declare additional validation and authorization for source fact-checking or external deployment.
+
+## Load through the SDK
+
+```js
+import path from 'node:path';
+import { loadWorkflowApplication } from '@rpamis/comet/applications';
+
+const application = await loadWorkflowApplication({
+  file: path.resolve('local-report/application.json'),
+  projectRoot: process.cwd(),
+});
+console.log(application.identity);
+```
+
+An application package must occupy a separate directory. Do not use the entire project, including execution state, as the package root. The loader checks actual files, identity, and pinned dependencies. If content changes within the same version, it refuses to continue using the original identity.
+
+Loading an application executes its module. Review module and dependency sources before integration. Pinned digests check content; they do not provide a code sandbox.
+
+## Run through the CLI
+
+Save each request as a JSON file, then call [comet runtime](/en/cli/runtime):
+
+```bash
+comet runtime dispatch --application-file ./local-report/application.json --project-root . --request start.json --json
+```
+
+`start.json`:
+
+```json
+{
+  "operation": "start",
+  "runId": "report-1",
+  "workflow": { "id": "report-publishing", "version": "1" },
+  "input": {
+    "title": "Project weekly report",
+    "body": "Three accepted tasks were completed this week.",
+    "sources": ["Local task records"]
+  }
+}
+```
+
+Use `--application local-report` and the same Run ID for subsequent inspection, execution, or recovery. Read the actual child Run, Action, and Wait IDs returned. Do not guess them from step names.
+
+## Integrate actual Skills
+
+`inspectApplicationSkill` reads an actual directory. `adaptApplicationSkill` creates an adaptation contract covering content review, capabilities, inputs and outputs, side effects, and recovery conditions. Dependencies are pinned by content and do not silently switch to new files during execution.
+
+Use `createApplicationSkillExecutor` to integrate actual host Skill invocation, capability checks, and authorization. Skill loading, host-reported completion, machine validation, and independent review are recorded separately. Passing one layer does not establish that the next passed.
+
+See [comet application](/en/cli/application) for distribution and upgrades, [evaluate SDK applications](/en/eval/applications) for evaluation, and [stage artifact validation](/en/sdk/artifact-validation) for required files and business conditions.

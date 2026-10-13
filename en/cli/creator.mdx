@@ -1,123 +1,56 @@
 ---
-title: "comet creator"
-description: "Inspect, resume, and advance the creation state of /comet-any Skill Creator flows."
+title: 'comet creator'
+description: 'Start, inspect, and recover Comet Any SDK authoring Runs, and report actual Actions and current user decisions.'
 ---
 
-`comet creator` is the CLI companion for `/comet-any`. It is focused on three jobs: recovering flows, reading publishing readiness, and giving one recommended next command.
-
-For day-to-day work, start from `/comet-any`. Run `comet creator` directly when a flow is interrupted, when you need diagnostics, or when a specific step is automated.
-
-## Difference from publish
-
-| Command | What it owns | When to use it |
-| --- | --- | --- |
-| `comet creator` | Creation, recovery, candidate resolution, proposal confirmation, generation, and authoring lanes | The `/comet-any` flow has not reached publishing, or you want to know the next step |
-| `comet publish` | Review, approve, publish, distribute | The eval evidence is ready and you are preparing to publish and distribute |
-| `comet bundle` | Advanced backend | Audit, troubleshooting, platform compile debugging |
-
-The recommended main line is:
-
-```text
-/comet-any creates -> comet eval verifies -> comet creator status/next -> comet publish (review/approve/publish/distribute)
-```
-
-For command details in the publishing phase, see [comet publish](/en/cli/publish); the authoritative description of the state machine, readiness conclusions, and blocker codes is in [Publishing and distributing Skills](/en/skill-creator/publishing).
+Start everyday authoring with [Comet Any](/en/skill-creator/getting-started). `comet creator` provides the CLI for the same process, including state inspection, recovery, and host integration.
 
 ## Subcommands
 
-| Command | Purpose | Required arguments |
-| --- | --- | --- |
-| `comet creator list` | List recoverable Skill Creator candidates | - |
-| `comet creator status <name>` | Read readiness, blockers, warnings, and evidence | `<name>` |
-| `comet creator next <name>` | Print the single recommended next step | `<name>` |
-| `comet creator guide` | Read the first-run wizard, preferences, and recoverable flow summary | - |
-| `comet creator candidates` | Discover Skill candidates available for composition | - |
-| `comet creator propose <name>` | Preview the Skill Creator plan without writing state | `<name>`, `--file` |
-| `comet creator init <name>` | Initialize or update state with a confirmed plan | `<name>`, `--file` |
-| `comet creator resolve <name>` | Resolve missing or ambiguous candidates | `<name>`, `--candidate` |
-| `comet creator authoring-plan <name>` | Read the authoring lane plan of the generated Skill | `<name>` |
-| `comet creator authoring-record <name>` | Record the output of an authoring lane | `<name>`, `--lane`, `--file` |
-| `comet creator generate <name>` | Generate the Skill package from confirmed metadata | `<name>` |
+| Command           | Purpose                                                                |
+| ----------------- | ---------------------------------------------------------------------- |
+| `start <name>`    | Start recoverable authoring from a natural-language goal               |
+| `list`            | List authoring records in the project                                  |
+| `status <name>`   | Read the current Run, Actions, Waits, and evidence                     |
+| `next <name>`     | Execute local steps until a host Action or user decision is needed     |
+| `dispatch <name>` | Claim Actions, report actual results, or submit current user decisions |
+| `guide`           | Read first-use, preference, and recovery guidance                      |
+| `candidates`      | Investigate Skill candidates for authoring                             |
 
-Every subcommand supports `--project <dir>` and `--json`.
+Subcommands support `--project <dir>` and `--json`.
 
-## Common recovery commands
+## Start and inspect state
 
 ```bash
-# List recoverable flows
-comet creator list --project . --json
-
-# Read full status, readiness, and evidence
-comet creator status review-helper --project . --json
-
-# Read only what to do next
-comet creator next review-helper --project . --json
+comet creator start weekly-report --project . --host codex --goal "Summarize accepted tasks, generate a weekly report, and check sources; publish a local file after user confirmation" --install-target .comet/creator/exports/weekly-report --json
+comet creator status weekly-report --project . --json
+comet creator next weekly-report --project . --json
 ```
 
-The text output of `comet creator next` includes the current status, the current stage, the recommended action, the recommended command, the reason, and whether the step needs user confirmation.
+`--host` accepts `codex` or `claude-code`. `--install-target` is the complete application package's export directory inside the project, rather than the platform Skill entry directory.
 
-```text
-Next step for review-helper
-Status: draft
-Current step: needs-eval
-Action: Run repository eval for the generated Skill
-Command: comet eval ./generated-skill/comet/eval.yaml --quick --html
-Reason: Current draft hash is missing passing eval evidence
-Requires confirmation: yes
-```
+Optional `--eval-config <file>` points to an Eval configuration JSON file. Model credentials come from the execution environment and are not written to this configuration, the package, or reports.
 
-## Plan and generation commands
+## Host Actions and user decisions
 
-`/comet-any` normally invokes these commands for you. Manual invocation is mainly for automation pipelines or troubleshooting candidate and generation state.
+Save requests in a JSON file:
 
 ```bash
-# First-run wizard
-comet creator guide --project . --json
-
-# Discover candidate Skills
-comet creator candidates --project . --json
-
-# Preview a composition plan without writing state
-comet creator propose review-helper --file ./plan.json --json
-
-# Write state after the user confirms the plan
-comet creator init review-helper --file ./plan.json --confirmed-proposal --json
-
-# Resolve an ambiguous candidate
-comet creator resolve review-helper --candidate review-flow --source ./skills/review-flow --json
-
-# Ignore a missing candidate; a reason is required
-comet creator resolve review-helper --candidate optional-helper --ignore-missing --reason "not needed for this workflow" --json
-
-# Generate the Skill package
-comet creator generate review-helper --json
+comet creator dispatch weekly-report --project . --request request.json --json
 ```
 
-<Warning>
-  Do not bypass the proposal confirmation page and generate directly. <code>/comet-any</code> must show
-  the Skill Creator proposal confirmation page first and wait for your confirmation before it writes a
-  draft.
-</Warning>
+| Operation        | Facts the host must retain                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `claim`          | Current Run, Action, execution port, actual session, stable claimToken, and actual capabilities |
+| `record-outcome` | The same Action and claim credentials, actual result, and actual artifacts                      |
+| `resolve-wait`   | Current Wait ID, proposal hash, unique decision ID, and actual user choice                      |
 
-## Authoring lane commands
+Read the actual identities and current state returned by `status` first. Do not guess Action or Wait IDs from the authoring name. Analysis Actions use the configured `creator-host` port and require actual `skill-load` and `handoff` capabilities.
 
-A generated Skill is not a thin template. `/comet-any` uses authoring lanes to write entry content, node guidance, script contracts, reference files, and review evidence.
+Submit only choices supported by the current pending Wait. After changing the plan, content, or dependencies, approval of the old proposal cannot be reused.
 
-```bash
-# Read the quick or full authoring plan
-comet creator authoring-plan review-helper --depth quick --json
-comet creator authoring-plan review-helper --depth full --json
+## Recovery
 
-# Record the output of a lane
-comet creator authoring-record review-helper --lane skill-core --file ./lane-output.json --json
-```
+`next` does not execute unknown operations for the host or approve on the user's behalf. Follow the returned retry, revision, or rejection path when required artifacts are missing or business validation fails. Skipping model Eval does not bypass local checks.
 
-If generated content still keeps `AUTHORING PENDING` markers, the publishing readiness check reports an `[authoring]` blocker. You need to finish the corresponding lane and record its output before continuing to eval and publishing. For the full meaning of the blocker codes and their recovery suggestions, see [Publishing and distributing Skills: Blocker codes](/en/skill-creator/publishing#blocker-codes).
-
-## Next steps
-
-- [Getting started: combine any Skill](/en/skill-creator/getting-started) — run the full main line from `/comet-any`
-- [Full Skill creation workflow](/en/skill-creator/workflow) — understand every stage
-- [comet publish](/en/cli/publish) — review, approve, publish, and distribute after eval
-- [Publishing and distributing Skills](/en/skill-creator/publishing) — the authoritative state machine, readiness, and blocker codes
-- [comet bundle](/en/cli/bundle) — the advanced backend reference
+For dispatched work with unknown results, check the original Action and actual files before reporting. See [authoring, validation, and installation](/en/skill-creator/workflow) for the complete process. Use [comet runtime](/en/cli/runtime) for application execution and [comet application](/en/cli/application) for distribution.
