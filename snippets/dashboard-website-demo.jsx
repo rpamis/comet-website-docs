@@ -1,5 +1,5 @@
 export const DashboardWebsiteDemo = () => {
-  const ASSET_VERSION = '0.5.0-website-21';
+  const ASSET_VERSION = '0.5.0-website-22';
   const DESIGN_WIDTH = 1444;
   const DESIGN_HEIGHT = 901;
   const MOBILE_BREAKPOINT = 768;
