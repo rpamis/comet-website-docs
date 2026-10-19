@@ -1,4 +1,4 @@
-﻿---
+---
 title: "评分指标与双 Agent 评测（进阶）"
 description: "深入理解 Comet eval 的指标驱动评测：rubric 多维评分细则、pass@k 与 pass^k（能力上限 vs 可靠性下限）、加权评分公式，以及两个 Agent 自动交互完成评测的过程。"
 ---
@@ -44,7 +44,7 @@ rubric、pass@k、pass^k 和加权分数是诊断层信息，用来定位问题�
 | **pass@k** | k 次里至少成功一次的概率（能力上限） | 跨多次运行统计 | 否 |
 | **pass^k** | k 次全部成功的概率（可靠性下限） | 跨多次运行统计 | 否 |
 | **工作流契约检查** | 被测 Skill 是否真的按契约触发 | 硬性判定 | 是（缺必需 Skill 会失败） |
-| **任务校验器通过/失败** | 这次实现到底对不对 | 硬性判定 | 是（决定 pass/fail） |
+| **任务校验器通过/失败** | 代码实现是否满足业务验收要求 | 硬性判定 | 是（决定 pass/fail） |
 
 <Note>
   rubric 和 pass 指标用于诊断和比较。通过条件是 <code>checks_failed == []</code>。大多数失败来自任务校验器，但 profile 也会把必需 Skill 未触发等工作流契约问题写入 <code>checks_failed</code>。
@@ -83,7 +83,7 @@ eval harness 会先保存本次运行的原始 `stdout` / `stderr`，再逐行�
   因此 raw stdout/stderr 必须保留用于审计。
 </Warning>
 
-### 轨迹和事件流不是一回事
+### 运行轨迹与事件流的区别
 
 Comet Classic runtime 自己也会写 `.comet/trajectory*.jsonl`，记录状态推进，例如 `state_transitioned`。这类 trajectory 是恢复能力的证据之一，rubric 会在 `recovery_resilience` 里检查它是否存在。
 
@@ -213,7 +213,7 @@ generic/authoring 的三维度评分标准：
 | 维度 | 1.0（满分） | 0.5 | 0.0 |
 | --- | --- | --- | --- |
 | `task_completion` | 全部需求满足、产物存在且正确、基线检查通过 | 部分完成 | 关键产物缺失或为空 |
-| `output_quality` | 结构良好、完整、非平凡、有思考痕迹 | 存在但内容单薄、勉强达标 | 缺失、空、明显 stub |
+| `output_quality` | 结构良好、完整、有实质内容、有思考痕迹 | 存在但内容单薄、勉强达标 | 缺失、空、明显 stub |
 | `instruction_adherence` | 完全遵守指令和约束、无违禁模式、工具使用得当 | 轻微偏离但核心意图保留 | 严重违反、危险命令、约束失败 |
 
 judge 收集 workspace 文件时跳过 `.git`、`node_modules`、`.comet` 等目录，单文件上限 3000 字符、总预算 20000 字符，大文件（>50KB）和二进制文件会被跳过，保证 prompt 不失控。裁判必须按 `[RUBRIC-JUDGE] <dim>: <score> - <reason>` 格式逐行输出，每个 reason ≤25 词并引用具体内容。
@@ -258,7 +258,7 @@ flowchart LR
 
 ### 怎么得到多次运行
 
-重复运行由 eval harness 内部的 pytest 选项 `--count N` 驱动：它把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果（`comet eval` 单次运行只产出 pass@1/pass^1）。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
+重复运行由 eval harness 内部的 pytest 选项 `--count N` 驱动：它把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果（`comet eval` 单次运行只产出 pass@1/pass^1）。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题直接排除，flagged run 仍进入主统计，但会单独标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
 
 ```bash
 # 重复 5 次，让 pass@k/pass^k 有意义

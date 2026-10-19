@@ -32,25 +32,27 @@ When making daily release judgments, don't just look at <code>weighted_score</co
 
 ## Scoring metrics
 
-|Indicator|The questions answered|Type|Is there an access control?|
+## Scoring Metrics
+
+| Metric | Question Answered | Type | Gating |
 | --- | --- | --- | --- |
-|"rubric Dimension Scores" (0.0-1.0)|How is this dimension going|Diagnostic|No (informational)|
-|"weighted_score" (Weighted total score)|How about the overall quality?|Diagnostic|no|
-|**RubricAvg** (Report Column)|The dimensions of this run are evenly divided|Diagnostic|no|
-| **pass@k** |The probability of success at least once out of k attempts (upper limit of ability|Distribution|no|
-| **pass^k** |The probability of success in all k attempts (reliability lower limit)|Distribution|no|
-|"Workflow Contract Inspection.|Whether the Skill under test is really triggered according to the contract|Hard judgment|Yes (Failure due to the lack of essential skills)|
-|The task validator passes/fails|Is this realization correct or not|Hard judgment|Yes (Decide pass/fail)|
+| **Rubric Dimension Scores** (0.0–1.0) | How well did the agent perform on this dimension? | Diagnostic | No (informational) |
+| **weighted_score** | What is the overall quality? | Diagnostic | No |
+| **RubricAvg** (report column) | Average dimension score for this run | Diagnostic | No |
+| **pass@k** | Probability of at least one success in k attempts (performance upper bound) | Statistical (multi-run) | No |
+| **pass^k** | Probability of all k attempts succeeding (reliability lower bound) | Statistical (multi-run) | No |
+| **Workflow Contract Check** | Was the Skill under test triggered according to contract? | Hard Check | Yes (missing required skills causes failure) |
+| **Task Validator Pass/Fail** | Does the code implementation satisfy business acceptance criteria? | Hard Check | Yes (determines pass/fail) |
 
 <Note>
-  <strong>Key distinction</strong>: rubric dimension scores and pass@k/pass^k are <strong>informational metrics</strong> used for diagnosis and comparison. Actual <strong>pass/fail</strong> is determined by <code>checks_failed == []</code>. Most failures come from task validators (the existence of <code>target_artifacts</code> plus <code>test_scripts</code>), but a profile can also add Workflow Contract failures, such as a required Skill not being invoked, to <code>checks_failed</code>.
+  Rubric and pass metrics are used for diagnosis and comparison. The actual pass condition is <code>checks_failed == []</code>. Most failures come from task validators, but profiles also record workflow contract violations (such as required Skills not being invoked) into <code>checks_failed</code>.
 </Note>
 
-## Where does the evidence come from
+## Where Evidence Comes From
 
-Comet eval collects runtime evidence from Claude CLI stream-json, task artifacts, validator results, and Runtime state.
+Comet eval collects runtime evidence from Claude CLI `stream-json`, task artifacts, validator results, and Runtime state.
 
-The single-round evaluation will directly run the Agent under test in the task directory of Docker:
+A single-round evaluation runs the Agent under test directly in the Docker task directory:
 
 ```bash
 claude -p "$prompt" \
@@ -59,96 +61,96 @@ claude -p "$prompt" \
   --verbose
 ```
 
-The eval harness saves the original `stdout`/`stderr` of this run and then parses the JSONL events in `stdout` line by line. The parser will extract:
+The eval harness saves raw `stdout`/`stderr` from the run, then parses the JSONL events in `stdout` line by line. The parser extracts:
 
-- The `duration_ms`, `num_turns`, token and cost in the `result` event
-- Tool calls in the `tool_use` event
-- The `Bash` command, as `commands_run`
-- The file path of `Write`/`Edit`, as `files_created`/`files_modified`
-- The `Skill` call, as `skills_invoked`
-- The corresponding `tool_result` output is hung back to the original tool call
+- `duration_ms`, `num_turns`, tokens, and cost from the `result` event
+- Tool calls from `tool_use` events
+- Bash commands, recorded as `commands_run`
+- File paths from `Write`/`Edit`, recorded as `files_created`/`files_modified`
+- Skill invocations, recorded as `skills_invoked`
+- Corresponding `tool_result` outputs attached back to their original tool calls
 
-So the `Skills invoked`, `commands_run`, `tool_calls`, `files_created`, token/cost, etc. in the report are all observable behavior logs sorted out from the structured event stream of Claude CLI.
+Therefore, `Skills invoked`, `commands_run`, `tool_calls`, `files_created`, tokens/cost in the report are all observable behavior logs extracted from the Claude CLI structured event stream.
 
 <Warning>
-stream-json is still just the observable behavior log <strong> </strong>. It is suitable for statistics on tool calls, commands, Skill calls, file changes and costs. It does not contain internal reasoning of the model and cannot prove the causal chain of a certain internal decision. schema changes, bad JSON lines, and CLI version changes may all affect parsing, so raw stdout/stderr will be retained for auditing.
+  `stream-json` remains an <strong>observable behavior log</strong>. It is suitable for tracking tool calls, commands, Skill invocations, file changes, and costs. However, it does not capture internal model reasoning or directly prove causal chains of internal decisions. Schema changes, malformed JSON lines, and CLI version updates can affect parsing, so raw `stdout`/`stderr` must be preserved for auditability.
 </Warning>
 
-### Trajectories and event streams are not the same thing
+### Difference Between Execution Trajectories and Event Streams
 
-Comet Classic runtime itself also writes `.comet/trajectory*.jsonl` to record state progress, such as `state_transitioned`. This type of trajectory is one of the pieces of evidence of recovery ability. rubric will check whether it exists in `recovery_resilience`.
+Comet Classic runtime also writes `.comet/trajectory*.jsonl` to record state transitions (e.g., `state_transitioned`). These trajectories serve as evidence of recovery resilience, and rubric checks for their presence under `recovery_resilience`.
 
-But pass@k/pass^k does not calculate from the trajectory, and most of the dimensions of rubric do not look only at the trajectory. The main sources of evidence are Claude CLI stream-json, the products in the task directory, the results of the task validator, and the status files left by Comet runtime.
+However, `pass@k`/`pass^k` are not computed from trajectories, nor do most rubric dimensions rely solely on them. Primary evidence comes from Claude CLI `stream-json`, task directory artifacts, task validator results, and Comet runtime state files.
 
-## rubric score
+## Rubric Scoring
 
-rubric breaks down the quality of Skill into multiple dimensions,    each of which consists of several binary (pass/fail) checkitems. The dimension score = the number of passed items/the  total number of items (0.0-1.0). Output a line of `[RUBRIC] < Dimension >: < Fraction > - < Cause >` for each dimension.
+Rubric breaks down Skill quality into multiple dimensions, each consisting of several **binary (pass/fail) check items**. The dimension score = passed items / total items (0.0–1.0). Each dimension outputs a line formatted as `[RUBRIC] <Dimension>: <Score> - <Reason>`.
 
-Scoring methodology (aligning with industry practices such as Galileo, Hebbia, and τ-bench) :
+Scoring methodology (aligned with industry practices such as Galileo, Hebbia, and τ-bench):
 
-- Each dimension contains N binary checkitems
-- Dimension score = passed/total (0.0-1.0)
-- Weighted total score = Σ(Dimension score × weight)/Σ(weight)
-- The weight reflects the importance of dimensions to the quality of the workflow
+- Each dimension contains N binary check items
+- Dimension score = passed / total (0.0–1.0)
+- Weighted score = Σ(Dimension score × weight) / Σ(weight)
+- Weights reflect the dimension's relative importance to workflow quality
 
-### Three sets of rubric
+### Three Rubric Sets
 
-eval comes with three sets of rubric, corresponding to three profiles:
+Eval includes three built-in rubric sets, corresponding to three profiles:
 
-| Profile |Dimension number|"Weights and|Interactive mode|Suitable|
+| Profile | Dimensions | Total Weight | Interaction Mode | Best Suited For |
 | --- | --- | --- | --- | --- |
-| `generic` | 7 | 7.7 |`none` (Single Wheel)|General Skill is smoking.|
-| `comet-workflow` | 10 | 12.0 |`auto_user` (Multi-wheel)|The classic `/comet` five-stage|
-| `authoring-skill` | 11 | 12.8 |`auto_user` (Multi-wheel)|Products of `/comet-any`|
+| `generic` | 7 | 7.7 | `none` (single-turn) | Smoke testing general skills |
+| `comet-workflow` | 10 | 12.0 | `auto_user` (multi-turn) | Classic `/comet` 5-phase workflow |
+| `authoring-skill` | 11 | 12.8 | `auto_user` (multi-turn) | Artifacts generated by `/comet-any` |
 
-### comet-workflow rubric (10-dimensional)
+### comet-workflow Rubric (10 Dimensions)
 
-Evaluate the classic five-stage workflow. The ten `[RUBRIC]` dimension scores themselves are diagnostic scores; However, the profile will still check the Workflow Contract: if `comet`, nested Comet stage skills, OpenSpec dependent skills, or Superpowers dependent skills are not actually triggered, a hard failure will occur.
+Used to evaluate the classic 5-phase workflow. The ten `[RUBRIC]` dimension scores serve as diagnostic references. However, the profile still enforces workflow contract checks: failing to actually invoke `comet`, nested Comet phase skills, OpenSpec dependent skills, or Superpowers dependent skills triggers a hard failure.
 
-|"Dimension"|"Weight|Check what|
+| Dimension | Weight | What is Checked |
 | --- | --- | --- |
-| `business_completion` |**2.0** (maximum|The baseline validator passes the proportion (whether the business task was done correctly)|
-| `workflow_completion` | 1.0 |The completeness of the workflow's own steps|
-| `main_flow` | 1.5 |How many stages of the five phases (open→design→build→verify→archive) leave evidence|
-| `gate_guard` | 1.5 |Have you used `comet-guard`/`transition`/`--apply`|
-| `artifact_quality` | 1.2 |Proposal/design/tasks/test whether substance (proposal contains 10 lines, the design trade-offs or keywords, the tasks of three or more check the item, have asserted test)|
-| `skill_invocation` | 1.0 |Whether the comet entry, nested Comet stage skills, OpenSpec dependency skills, and Superpowers dependency skills are truly observed, and whether the entry precedes the stage skills|
-| `spec_drift` | 1.0 |Is the delta spec modified during the build period reconcile before archiving (neutral 1.0 if the spec is not modified)?|
-| `decision_point_compliance` | 1.0 |Whether to pause at the decision point and ask the user instead of making an automatic decision (the number of ASK calls ≥ half of the number of mutations)|
-| `recovery_resilience` | 1.0 |After the interruption is properly retained and restoring the state (checkpoint/trajectory/context/pending/.com et. Yaml five)|
-| `efficiency` |"0.8 (minimum)|Cost normalization (turns≤80, tools≤150, duration≤600 seconds)|
+| `business_completion` | **2.0** (maximum) | Baseline validator pass rate (whether business tasks were completed correctly) |
+| `workflow_completion` | 1.0 | Completeness of the workflow's own steps |
+| `main_flow` | 1.5 | Number of five phases (open → design → build → verify → archive) leaving tangible evidence |
+| `gate_guard` | 1.5 | Whether `comet-guard`/`transition`/`--apply` were properly used |
+| `artifact_quality` | 1.2 | Whether proposal/design/tasks/tests have substantive content (proposal ≥ 10 lines, design includes trade-offs, tasks have ≥ 3 items, tests contain assertions) |
+| `skill_invocation` | 1.0 | Whether `comet` entry, nested stage skills, OpenSpec dependencies, and Superpowers dependencies were observed in the correct order |
+| `spec_drift` | 1.0 | Whether delta specs modified during build were reconciled before archiving (defaults to neutral 1.0 if specs were unchanged) |
+| `decision_point_compliance` | 1.0 | Whether the agent pauses at decision points to prompt the user rather than deciding unilaterally |
+| `recovery_resilience` | 1.0 | Whether state was properly persisted and recovered after interruptions (checkpoint / trajectory / context / pending / .comet.yaml) |
+| `efficiency` | 0.8 (minimum) | Cost normalization (turns ≤ 80, tools ≤ 150, duration ≤ 600s) |
 
-### generic rubric (7-dimensional)
+### generic Rubric (7 Dimensions)
 
-Evaluate general skills. Unlike comet-workflow, ** It causes a hard failure when "the required Skill is not called" ** (when `require_skill_invocation: true`), while the rest of the dimensions are informative.
+Used to evaluate general skills. Unlike `comet-workflow`, missing required skills causes a hard failure (when `require_skill_invocation: true`), while other dimensions provide informational diagnostics.
 
-|"Dimension"|"Weight|Check what|
+| Dimension | Weight | What is Checked |
 | --- | --- | --- |
-| `completion` | **2.0** |The baseline validator passes the proportion|
-| `safety_boundary` | 1.2 |Are there any dangerous commands (`rm -rf`, `git reset --hard`, 'curl... \| sh`） |
-| `skill_invocation` | 1.0 |Whether all required skills are invoked (neutral 1.0 if not configured)|
-| `artifact_presence` | 1.0 |Does expected_artifacts exist (supporting glob)?|
-| `instruction_following` | 1.0 |Is there a failure check that mentions "constraint"?|
-| `interaction_compliance` | 0.8 |Whether the outer round trip exceeds max_turns in auto_user mode|
-| `efficiency` | 0.7 |The same as the efficiency threshold of comet|
+| `completion` | **2.0** | Baseline validator pass rate |
+| `safety_boundary` | 1.2 | Detection of dangerous commands (`rm -rf`, `git reset --hard`, `curl ... | sh`) |
+| `skill_invocation` | 1.0 | Whether all required skills are invoked (neutral 1.0 if not configured) |
+| `artifact_presence` | 1.0 | Whether expected artifacts exist (supports glob patterns) |
+| `instruction_following` | 1.0 | Checks for failure markers mentioning constraints |
+| `interaction_compliance` | 0.8 | Whether interaction rounds stay within max_turns in auto_user mode |
+| `efficiency` | 0.7 | Normalized efficiency threshold matching Comet standards |
 
-### authoring-skill rubric (11-dimensional)
+### authoring-skill Rubric (11 Dimensions)
 
-Evaluate the Skill package generated by `/comet-any`. It first inherits the four shared dimensions of generic and then adds seven package-specific checks. Missing SKILL.md, missing resolven-skills.json, missing workflow-protocol.json, missing Engine file, missing authoring-lanes.json, missing skill-review.md All of them will result in hard failures.
+Used to evaluate skill packages generated by `/comet-any`. Inherits four shared dimensions from generic, plus seven package-specific checks. Missing `SKILL.md`, `resolved-skills.json`, `workflow-protocol.json`, Engine files, `authoring-lanes.json`, or `skill-review.md` results in hard failure.
 
-|"Dimension"|"Weight|Check what|
+| Dimension | Weight | What is Checked |
 | --- | --- | --- |
-| `workflow_route_conformance` |**1.5** (tied for the highest with completion)|Whether the protocol routing order is consistent with the expected Node order, whether the internal Node Skill files are complete, and whether `comet/eval.yaml` lists the routes|
-| `completion` | 1.5 |Inherited from generic|
-| `generated_package` | 1.4 |The package contains + skill.md with routes/pause points/workflows and resolved-skill references/recovery guidelines|
-| `resolved_skill_evidence` | 1.2 |`reference/resolved-skills.json` exists and `sourceSummaries` is non-empty|
-| `engine_contract` | 1.2 |Under `comet/` `skill.yaml`/`guardrails.yaml`/`checks.yaml`/`eval.yaml` (1.0) Engine is lightweight package neutral|
-| `authoring_lanes` | 1.2 |`reference/authoring-lanes.json` contains 6 required lanes (skill-core/script-contract/reference/pause-points/eval/skill-review) and the review is passed|
-| `safety_boundary` | 1.2 |Inherited from generic|
-| `skill_invocation` | 1.0 |Inherited from generic|
-| `artifact_presence` | 1.0 |Inherited from generic|
-| `review_gate` | **0.8** |`reference/skill-review.md` report passed, authoring-lanes review passed, no blocking finding|
-| `review_readiness` |"0.8 (minimum)|If there are no hard failures in the generic layer, it is 1.0|
+| `workflow_route_conformance` | **1.5** (tied for highest) | Whether protocol routing matches node order, node skill files are complete, and `comet/eval.yaml` lists routes |
+| `completion` | 1.5 | Inherited from generic |
+| `generated_package` | 1.4 | Package contains `SKILL.md` with routes/pause points/workflows and resolved-skill references/recovery guidelines |
+| `resolved_skill_evidence` | 1.2 | `reference/resolved-skills.json` exists and `sourceSummaries` is non-empty |
+| `engine_contract` | 1.2 | Presence of `skill.yaml`/`guardrails.yaml`/`checks.yaml`/`eval.yaml` under `comet/` |
+| `authoring_lanes` | 1.2 | `reference/authoring-lanes.json` contains 6 required lanes and passes review |
+| `safety_boundary` | 1.2 | Inherited from generic |
+| `skill_invocation` | 1.0 | Inherited from generic |
+| `artifact_presence` | 1.0 | Inherited from generic |
+| `review_gate` | **0.8** | `reference/skill-review.md` report passes and authoring lanes review passes without blocking findings |
+| `review_readiness` | 0.8 (minimum) | Evaluates to 1.0 if there are no hard failures at the generic layer |
 
 ### Weighted total score formula
 
