@@ -1,5 +1,5 @@
-export const DashboardWebsiteDemo = () => {
-  const ASSET_VERSION = '0.5.0-website-22';
+export const DashboardWebsiteDemo = ({ language = 'zh' }) => {
+  const ASSET_VERSION = '0.5.0-website-26';
   const DESIGN_WIDTH = 1444;
   const DESIGN_HEIGHT = 901;
   const MOBILE_BREAKPOINT = 768;
@@ -141,7 +141,7 @@ export const DashboardWebsiteDemo = () => {
           if (cancelled) return;
           const dashboard = runDashboardBundle(jsPayload.js);
           // mount 要求提供 stylesheetUrl；传入同源占位 URL（CSP 允许），真正的样式随后以内联 <style> 注入。
-          unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: window.location.href });
+          unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: window.location.href, language });
           inlineDashboardStyles(cssPayload.css);
         })
         .catch((error) => {
@@ -153,7 +153,7 @@ export const DashboardWebsiteDemo = () => {
       cancelled = true;
       unmountDashboard?.();
     };
-  }, []);
+  }, [language]);
 
   const { scale, isScrollable } = viewport;
   const scaledWidth = DESIGN_WIDTH * scale;
@@ -171,7 +171,7 @@ export const DashboardWebsiteDemo = () => {
       className={`comet-dashboard-website-stage${isScrollable ? ' is-mobile-viewport' : ''}`}
       style={{ height: `${scaledHeight}px` }}
       tabIndex={isScrollable ? 0 : undefined}
-      aria-label={isScrollable ? '可横向浏览 Comet Dashboard' : undefined}
+      aria-label={isScrollable ? (language === 'en' ? 'Scroll the Comet Dashboard horizontally' : '可横向浏览 Comet Dashboard') : undefined}
       onKeyDown={handleViewportKeyDown}
     >
       <div
