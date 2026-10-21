@@ -175,3 +175,21 @@
 - 空间不足时先换行、重排元信息或切换布局，保留正文阅读宽度。状态和操作按钮不得重叠，标签页文字保持完整，窄屏可横向滚动。记忆列表中等窗口下的正文宽度至少 220px，手机至少 200px。
 - 验收使用新构建和当前缓存版本的实际页面：检查 1600px、1280px 和 390px 宽度，覆盖 Classic、Native、Any、Eval、个人记忆、项目知识、可观测、设置和预览；补查深色、英文、长文本及 125% 字号。检查计算字号、阅读列宽、按钮遮挡和水平溢出，不能只凭源码判断一致。
 - 同步官网演示时，从 Dashboard 源码重新构建资产，更新演示缓存版本，并在内嵌演示中确认加载了当前资产。记录实际执行的浏览器验证和未验证范围；布局回归加入对应浏览器测试。
+
+
+<claude-mem-context>
+# Memory Context
+
+# claude-mem status
+
+This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past work.
+
+Memory injection starts on your second session in a project.
+
+`/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo, optional). Otherwise memory builds passively as work happens.
+
+Live activity: http://localhost:37777
+How it works: `/how-it-works`
+
+This message disappears once the first observation lands.
+</claude-mem-context>

@@ -13,7 +13,9 @@ export const GradientASCII = ({
   depthOfField = 0,
   flicker = 0.2,
   softness = 0.5,
+  highlightRadius = 0,
   scale = 1,
+  rotation = 0,
   flow = 0.5,
   speed = 1,
   gradientOpacity = 0.9,
@@ -76,7 +78,9 @@ uniform int uShape;
 uniform vec3 uRamp[8];
 uniform int uCount;
 uniform float uScale;
+uniform float uRotation;
 uniform float uSoftness;
+uniform float uHighlightRadius;
 uniform float uFlow;
 uniform vec2 uSeed;
 uniform vec2 uOrigin;
@@ -135,6 +139,9 @@ vec3 horizon(vec2 p, float time, out float order) {
   float rim = 0.38 * smoothstep(-soft, 0.42, edge);
   vec2 sun = vec2(0.08 * sin(time * 0.31) * span, 0.58);
   float spread = length((p - sun) / vec2(0.95 * span, 0.75));
+  if (uHighlightRadius > 0.0) {
+    spread = length(p - sun) / (uAspect * uHighlightRadius);
+  }
   float sky = mix(0.55, 1.0, smoothstep(0.2, 0.95, spread));
   order = clamp(edge * 1.3, 0.0, 1.0);
   return vec3(rim, sky, smoothstep(0.18, 0.62, edge));
@@ -185,6 +192,8 @@ void main() {
   vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
   float time = uTime;
   vec2 q = (p - (uOrigin - 0.5) * vec2(uAspect, 1.0)) / uScale;
+  float angle = radians(uRotation);
+  q = mat2(cos(angle), -sin(angle), sin(angle), cos(angle)) * q;
   vec2 warp = vec2(
     noise(q * 1.6 + uSeed + vec2(0.0, time * 0.3)),
     noise(q * 1.6 + uSeed.yx + vec2(4.3, -time * 0.24))
@@ -470,7 +479,9 @@ const buildAtlas = (gl, characters, fontFamily) => {
     depthOfField: clamp(depthOfField, 0, 1),
     flicker: clamp(flicker, 0, 1),
     softness: clamp(softness, 0, 1),
+    highlightRadius: clamp(highlightRadius, 0, 1),
     scale: clamp(scale, 0.4, 2.5),
+    rotation,
     flow: clamp(flow, 0, 2),
     speed: Math.max(0, speed),
     gradientOpacity: clamp(gradientOpacity, 0, 1),
@@ -511,7 +522,7 @@ const buildAtlas = (gl, characters, fontFamily) => {
         flow: clamp(flow * (0.8 + Math.random() * 0.4), 0, 2),
         flicker: clamp(flicker * (0.7 + Math.random() * 0.6), 0, 1),
         origin: [
-          clamp(origin[0] + (Math.random() - 0.5) * 0.1, 0.1, 0.9),
+          clamp(origin[0] + (Math.random() - 0.5) * 0.1, 0, 1),
           clamp(origin[1] + (Math.random() - 0.5) * 0.06, 0.2, 0.8)
         ],
         phase: Math.random() * 24
@@ -650,7 +661,9 @@ const buildAtlas = (gl, characters, fontFamily) => {
       gl.uniform3fv(fu.uRamp, ramp);
       gl.uniform1i(fu.uCount, s.colors.length);
       gl.uniform1f(fu.uScale, s.scale);
+      gl.uniform1f(fu.uRotation, s.rotation);
       gl.uniform1f(fu.uSoftness, s.softness);
+      gl.uniform1f(fu.uHighlightRadius, s.highlightRadius);
       gl.uniform1f(fu.uFlow, s.flow);
       gl.uniform2f(fu.uSeed, s.variation * 3.17, s.variation * 1.91);
       gl.uniform2f(fu.uOrigin, s.origin[0], s.origin[1]);
