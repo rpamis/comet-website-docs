@@ -1,0 +1,93 @@
+---
+title: 'Plugin SDK'
+description: '注册插件能力，接入存储与上下文，并保留安装、禁用和作用域约束。'
+---
+
+Plugin SDK 管理插件注册、安装、启用状态、作用域和能力调用。它可以与 Workflow Runtime 一起使用，也可以单独接入已有 Agent 平台。
+
+## 定义具名能力
+
+下面的 TypeScript 示例注册一个计算文本长度的插件。`MemoryPluginStateStore` 仅保存当前进程的安装状态，不访问真实用户配置。
+
+```ts
+import {
+  PluginRuntime,
+  MemoryPluginStateStore,
+  definePlugin,
+  definePluginCapability,
+  createPluginClient,
+} from '@rpamis/comet/plugins';
+
+const plugin = definePlugin({
+  id: 'example.notes',
+  kind: 'third-party',
+  version: '1',
+  scopes: ['user'],
+  compatible: (version) => version === '0.5.0',
+  create: () => ({
+    capabilities: {
+      length: definePluginCapability({
+        parseInput(value: unknown) {
+          if (typeof value !== 'string') throw new Error('Expected text');
+          return value;
+        },
+        invoke: (text) => text.length,
+      }),
+    },
+  }),
+});
+
+const plugins = new PluginRuntime({
+  cometVersion: '0.5.0',
+  store: new MemoryPluginStateStore(),
+  descriptors: [plugin],
+});
+
+// Agent 平台取得安装授权后执行；本例只有进程内状态。
+await plugins.install(plugin.id, 'user');
+const client = createPluginClient(plugins, plugin);
+const length: number = await client.invoke('length', 'hello');
+console.log(length);
+```
+
+描述符注册不等于安装或启用。具名客户端推导能力名称、输入与返回类型，并传播调用错误；禁用和作用域约束仍然有效。
+
+将示例保存为 `plugin.ts`，在安装 SDK 的项目运行 `npx tsx plugin.ts`。控制台输出 `5`，表示已安装插件的 `length` 能力接受字符串并返回长度。这个示例不调用模型或保存知识。
+
+`parseInput` 的返回形状也是客户端输入契约。需要从对象中提取文本时，在 `invoke` 中处理，不要让对外类型与解析器实际接受的形状不同。
+
+## 查询、禁用与重新启用
+
+在示例末尾添加：
+
+```ts
+console.log(await plugins.get(plugin.id));
+await plugins.disable(plugin.id);
+try {
+  await client.invoke('length', 'hello');
+} catch (error) {
+  console.log(String(error));
+}
+await plugins.enable(plugin.id);
+console.log(await client.invoke('length', 'hello'));
+```
+
+禁用后调用被拒绝；启用后再次输出 `5`。`install`、`enable`、`disable` 和 `uninstall` 分别管理安装与可用状态，不能只删除某个 UI 按钮就认为插件已禁用。
+
+示例使用内存 State Store，新进程需要重新安装。持久化安装状态时接入 `JsonPluginStateStore`，实现其文件读写和锁接口。状态存储与插件业务存储是不同职责；文本长度示例没有业务数据。
+
+## 在工作流中调用插件
+
+在 [Agent 平台执行器](/zh/sdk/executors) 的处理函数中调用 `client.invoke`，把返回值作为实际 Outcome。Workflow 声明工具步骤；能力是否已安装、启用并可用于当前范围，由 Plugin Runtime 检查。插件抛错时沿实际失败或未知结果路径处理，不用固定成功值代替。
+
+## 上下文与经验事件
+
+插件可以提供上下文候选及按需展开内容，也可以声明经验事件订阅。Agent 平台决定什么时候查询、怎样将内容交给 Agent，以及何时记录行为与结果。
+
+类型推导不验证插件实现的可信性，也不提供沙箱。业务数据需要单独的输入输出检查，外部副作用需要实际授权和恢复接口。
+
+## 接入 Comet 插件
+
+`@rpamis/comet/plugins/comet` 导出 `CometPluginBridge` 和 `createDefaultCometPluginBridge`，用于组装内置个人记忆、项目知识及 Agent 平台提供的插件。
+
+内置插件的使用说明见 [个人记忆](/zh/plugins/personal-memory) 和 [项目知识](/zh/plugins/project-rules)。调用插件能力不会自动获得工作流审批，也不会自动推进 Native 或 Classic。

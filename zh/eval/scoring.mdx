@@ -1,10 +1,11 @@
-﻿---
-title: "评分指标与双 Agent 评测（进阶）"
-description: "深入理解 Comet eval 的指标驱动评测：rubric 多维评分细则、pass@k 与 pass^k（能力上限 vs 可靠性下限）、加权评分公式，以及两个 Agent 自动交互完成评测的过程。"
+---
+title: '评分指标与双 Agent 评测（进阶）'
+description: 'Comet eval 的指标驱动评测方法：rubric 多维评分细则、pass@k 与 pass^k（能力上限 vs 可靠性下限）、加权评分公式，以及双 Agent 自动交互机制。'
 ---
 
 <Tip>
-  这是进阶内容，面向想理解 eval 如何打分、指标怎么算、以及自动多轮评测怎么跑的用户。日常评估看[快速上手](/zh/eval/quickstart)即可。
+  这是进阶内容，面向想理解 eval
+  如何打分、指标怎么算、以及自动多轮评测怎么跑的用户。日常评估看[快速上手](/zh/eval/quickstart)即可。
 </Tip>
 
 <Warning>
@@ -20,34 +21,35 @@ rubric、pass@k、pass^k 和加权分数是诊断层信息，用来定位问题�
 
 阅读报告时按以下顺序检查：
 
-| 顺序 | 报告信号 | 判断什么 |
-| --- | --- | --- |
-| 1 | `checks_failed` | 这次运行是否真的失败；为空才算通过 |
-| 2 | failure attribution | 失败该归到环境、workflow、task 还是模型 |
-| 3 | `pass@k` / `pass^k` | Skill 是偶尔能成功，还是重复运行稳定 |
-| 4 | `weighted_score` | 质量维度的加权诊断分 |
-| 5 | 最低 rubric 维度 | 下一轮优化优先投到哪里 |
+| 顺序 | 报告信号            | 判断什么                                |
+| ---- | ------------------- | --------------------------------------- |
+| 1    | `checks_failed`     | 这次运行是否真的失败；为空才算通过      |
+| 2    | failure attribution | 失败该归到环境、workflow、task 还是模型 |
+| 3    | `pass@k` / `pass^k` | Skill 是偶尔能成功，还是重复运行稳定    |
+| 4    | `weighted_score`    | 质量维度的加权诊断分                    |
+| 5    | 最低 rubric 维度    | 下一轮优化优先投到哪里                  |
 
 <Note>
-  发布判断不能只看 <code>weighted_score</code>。
-  一次运行是否通过由 <code>checks_failed</code> 决定。
-  rubric、pass@k 和 pass^k 用于诊断与对比。
+  发布判断不能只看 <code>weighted_score</code>。 一次运行是否通过由 <code>checks_failed</code>{' '}
+  决定。 rubric、pass@k 和 pass^k 用于诊断与对比。
 </Note>
 
 ## 评分指标
 
-| 指标 | 回答的问题 | 类型 | 是否门禁 |
-| --- | --- | --- | --- |
-| **rubric 各维度分**（0.0–1.0） | 这个维度做得怎么样 | 诊断参考 | 否（不作为门禁） |
-| **weighted_score**（加权总分） | 综合质量如何 | 诊断参考 | 否 |
-| **RubricAvg**（报告列） | 该次运行的维度均分 | 诊断参考 | 否 |
-| **pass@k** | k 次里至少成功一次的概率（能力上限） | 跨多次运行统计 | 否 |
-| **pass^k** | k 次全部成功的概率（可靠性下限） | 跨多次运行统计 | 否 |
-| **工作流契约检查** | 被测 Skill 是否真的按契约触发 | 硬性判定 | 是（缺必需 Skill 会失败） |
-| **任务校验器通过/失败** | 这次实现到底对不对 | 硬性判定 | 是（决定 pass/fail） |
+| 指标                           | 回答的问题                           | 类型           | 是否门禁                  |
+| ------------------------------ | ------------------------------------ | -------------- | ------------------------- |
+| **rubric 各维度分**（0.0–1.0） | 这个维度做得怎么样                   | 诊断参考       | 否（不作为门禁）          |
+| **weighted_score**（加权总分） | 综合质量如何                         | 诊断参考       | 否                        |
+| **RubricAvg**（报告列）        | 该次运行的维度均分                   | 诊断参考       | 否                        |
+| **pass@k**                     | k 次里至少成功一次的概率（能力上限） | 跨多次运行统计 | 否                        |
+| **pass^k**                     | k 次全部成功的概率（可靠性下限）     | 跨多次运行统计 | 否                        |
+| **工作流契约检查**             | 被测 Skill 是否真的按契约触发        | 硬性判定       | 是（缺必需 Skill 会失败） |
+| **任务校验器通过/失败**        | 代码实现是否满足业务验收要求         | 硬性判定       | 是（决定 pass/fail）      |
 
 <Note>
-  rubric 和 pass 指标用于诊断和比较。通过条件是 <code>checks_failed == []</code>。大多数失败来自任务校验器，但 profile 也会把必需 Skill 未触发等工作流契约问题写入 <code>checks_failed</code>。
+  rubric 和 pass 指标用于诊断和比较。通过条件是 <code>checks_failed == []</code>
+  。大多数失败来自任务校验器，但 profile 也会把必需 Skill 未触发等工作流契约问题写入{' '}
+  <code>checks_failed</code>。
 </Note>
 
 ## 证据从哪里来
@@ -76,14 +78,12 @@ eval harness 会先保存本次运行的原始 `stdout` / `stderr`，再逐行�
 因此，报告里的 `Skills invoked`、`commands_run`、`tool_calls`、`files_created`、token/cost 等，都是从 Claude CLI 结构化事件流整理出的可观测行为日志。
 
 <Warning>
-  stream-json 仍然只是<strong>可观测行为日志</strong>。
-  它适合统计工具调用、命令、Skill 调用、文件变化和成本。
-  但它不包含模型内部推理，也不能直接证明内部决策的因果链。
-  schema 变化、损坏的 JSON 行、CLI 版本变化都可能影响解析。
-  因此 raw stdout/stderr 必须保留用于审计。
+  stream-json 仍然只是<strong>可观测行为日志</strong>。 它适合统计工具调用、命令、Skill
+  调用、文件变化和成本。 但它不包含模型内部推理，也不能直接证明内部决策的因果链。 schema
+  变化、损坏的 JSON 行、CLI 版本变化都可能影响解析。 因此 raw stdout/stderr 必须保留用于审计。
 </Warning>
 
-### 轨迹和事件流不是一回事
+### 运行轨迹与事件流的区别
 
 Comet Classic runtime 自己也会写 `.comet/trajectory*.jsonl`，记录状态推进，例如 `state_transitioned`。这类 trajectory 是恢复能力的证据之一，rubric 会在 `recovery_resilience` 里检查它是否存在。
 
@@ -104,11 +104,11 @@ rubric 把 Skill 的质量拆成多个维度，每个维度由若干**二元（p
 
 eval 内置三套 rubric，对应三种 profile：
 
-| Profile | 维度数 | 权重和 | 交互模式 | 适合 |
-| --- | --- | --- | --- | --- |
-| `generic` | 7 | 7.7 | `none`（单轮） | 通用 Skill 冒烟 |
-| `comet-workflow` | 10 | 12.0 | `auto_user`（多轮） | 经典 `/comet` 五阶段 |
-| `authoring-skill` | 11 | 12.8 | `auto_user`（多轮） | `/comet-any` 生成物 |
+| Profile           | 维度数 | 权重和 | 交互模式            | 适合                 |
+| ----------------- | ------ | ------ | ------------------- | -------------------- |
+| `generic`         | 7      | 7.7    | `none`（单轮）      | 通用 Skill 冒烟      |
+| `comet-workflow`  | 10     | 12.0   | `auto_user`（多轮） | 经典 `/comet` 五阶段 |
+| `authoring-skill` | 11     | 12.8   | `auto_user`（多轮） | `/comet-any` 生成物  |
 
 ### comet-workflow rubric（10 维）
 
@@ -117,50 +117,50 @@ eval 内置三套 rubric，对应三种 profile：
 但 profile 仍会做工作流契约检查。
 如果没有真实触发 `comet`、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill 或 Superpowers 依赖 Skill，会触发硬失败。
 
-| 维度 | 权重 | 检查什么 |
-| --- | --- | --- |
-| `business_completion` | **2.0**（最高） | 基线校验器通过比例（业务任务到底做对没） |
-| `workflow_completion` | 1.0 | 工作流自身步骤的完成度 |
-| `main_flow` | 1.5 | 五阶段（open→design→build→verify→archive）有多少阶段留下证据 |
-| `gate_guard` | 1.5 | 是否用了 `comet-guard` / `transition` / `--apply` |
-| `artifact_quality` | 1.2 | proposal/design/tasks/test 是否有实质内容（proposal≥10 行、design 含权衡关键词、tasks≥3 个勾选项、有断言测试） |
-| `skill_invocation` | 1.0 | 是否真实观测到 comet 入口、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill、Superpowers 依赖 Skill，且入口先于阶段 Skill |
-| `spec_drift` | 1.0 | build 期改的 delta spec 是否在归档前 reconcile（没动 spec 则中性 1.0） |
-| `decision_point_compliance` | 1.0 | 是否在决策点暂停问用户而非自动决策（ask 调用数 ≥ mutation 数的一半） |
-| `recovery_resilience` | 1.0 | 中断后是否正确保留和恢复状态（checkpoint/trajectory/context/pending/.comet.yaml 五项） |
-| `efficiency` | **0.8**（最低） | 成本归一化（turns≤80、tools≤150、duration≤600s 三项） |
+| 维度                        | 权重            | 检查什么                                                                                                            |
+| --------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `business_completion`       | **2.0**（最高） | 基线校验器通过比例（业务任务到底做对没）                                                                            |
+| `workflow_completion`       | 1.0             | 工作流自身步骤的完成度                                                                                              |
+| `main_flow`                 | 1.5             | 五阶段（open→design→build→verify→archive）有多少阶段留下证据                                                        |
+| `gate_guard`                | 1.5             | 是否用了 `comet-guard` / `transition` / `--apply`                                                                   |
+| `artifact_quality`          | 1.2             | proposal/design/tasks/test 是否有实质内容（proposal≥10 行、design 含权衡关键词、tasks≥3 个勾选项、有断言测试）      |
+| `skill_invocation`          | 1.0             | 是否真实观测到 comet 入口、嵌套 Comet 阶段 Skill、OpenSpec 依赖 Skill、Superpowers 依赖 Skill，且入口先于阶段 Skill |
+| `spec_drift`                | 1.0             | build 期改的 delta spec 是否在归档前 reconcile（没动 spec 则中性 1.0）                                              |
+| `decision_point_compliance` | 1.0             | 是否在决策点暂停问用户而非自动决策（ask 调用数 ≥ mutation 数的一半）                                                |
+| `recovery_resilience`       | 1.0             | 中断后是否正确保留和恢复状态（checkpoint/trajectory/context/pending/.comet.yaml 五项）                              |
+| `efficiency`                | **0.8**（最低） | 成本归一化（turns≤80、tools≤150、duration≤600s 三项）                                                               |
 
 ### generic rubric（7 维）
 
 评估通用 Skill。和 comet-workflow 不同，**它对"必需 Skill 未被调用"会产生硬失败**（当 `require_skill_invocation: true` 时），其余维度仅提供诊断信息。
 
-| 维度 | 权重 | 检查什么 |
-| --- | --- | --- |
-| `completion` | **2.0** | 基线校验器通过比例 |
-| `safety_boundary` | 1.2 | 是否有危险命令（`rm -rf`、`git reset --hard`、`curl ... \| sh`） |
-| `skill_invocation` | 1.0 | required skills 是否都被调用（未配置则中性 1.0） |
-| `artifact_presence` | 1.0 | expected_artifacts 是否存在（支持 glob） |
-| `instruction_following` | 1.0 | 是否有失败检查提到 "constraint" |
-| `interaction_compliance` | 0.8 | auto_user 模式下外层往返是否超 max_turns |
-| `efficiency` | 0.7 | 同 comet 的 efficiency 阈值 |
+| 维度                     | 权重    | 检查什么                                                         |
+| ------------------------ | ------- | ---------------------------------------------------------------- |
+| `completion`             | **2.0** | 基线校验器通过比例                                               |
+| `safety_boundary`        | 1.2     | 是否有危险命令（`rm -rf`、`git reset --hard`、`curl ... \| sh`） |
+| `skill_invocation`       | 1.0     | required skills 是否都被调用（未配置则中性 1.0）                 |
+| `artifact_presence`      | 1.0     | expected_artifacts 是否存在（支持 glob）                         |
+| `instruction_following`  | 1.0     | 是否有失败检查提到 "constraint"                                  |
+| `interaction_compliance` | 0.8     | auto_user 模式下外层往返是否超 max_turns                         |
+| `efficiency`             | 0.7     | 同 comet 的 efficiency 阈值                                      |
 
 ### authoring-skill rubric（11 维）
 
 评估 `/comet-any` 生成的 Skill 包。它先继承 generic 的四个共享维度，再加七个包专属检查。**缺 SKILL.md、缺 resolved-skills.json、缺 workflow-protocol.json、缺 Engine 文件、缺 authoring-lanes.json、缺 skill-review.md 都会产生硬失败**。
 
-| 维度 | 权重 | 检查什么 |
-| --- | --- | --- |
-| `workflow_route_conformance` | **1.5**（与 completion 并列最高） | 协议路由顺序是否与期望节点序一致、内部 Node Skill 文件是否齐全、`comet/eval.yaml` 是否列出路由 |
-| `completion` | 1.5 | 继承自 generic |
-| `generated_package` | 1.4 | 包存在 + SKILL.md 含路由/停顿点/workflow 与 resolved-skill 引用/恢复指引 |
-| `resolved_skill_evidence` | 1.2 | `reference/resolved-skills.json` 存在且 `sourceSummaries` 非空 |
-| `engine_contract` | 1.2 | `comet/` 下有 `skill.yaml`/`guardrails.yaml`/`checks.yaml`/`eval.yaml`（轻量包无 Engine 则中性 1.0） |
-| `authoring_lanes` | 1.2 | `reference/authoring-lanes.json` 含 6 条必需 lane（skill-core/script-contract/reference/pause-points/eval/skill-review）且 review 通过 |
-| `safety_boundary` | 1.2 | 继承自 generic |
-| `skill_invocation` | 1.0 | 继承自 generic |
-| `artifact_presence` | 1.0 | 继承自 generic |
-| `review_gate` | **0.8** | `reference/skill-review.md` 报告通过、authoring-lanes review 通过、无阻塞 finding |
-| `review_readiness` | **0.8**（最低） | generic 层无硬失败则为 1.0 |
+| 维度                         | 权重                              | 检查什么                                                                                                                               |
+| ---------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow_route_conformance` | **1.5**（与 completion 并列最高） | 协议路由顺序是否与期望节点序一致、内部 Node Skill 文件是否齐全、`comet/eval.yaml` 是否列出路由                                         |
+| `completion`                 | 1.5                               | 继承自 generic                                                                                                                         |
+| `generated_package`          | 1.4                               | 包存在 + SKILL.md 含路由/停顿点/workflow 与 resolved-skill 引用/恢复指引                                                               |
+| `resolved_skill_evidence`    | 1.2                               | `reference/resolved-skills.json` 存在且 `sourceSummaries` 非空                                                                         |
+| `engine_contract`            | 1.2                               | `comet/` 下有 `skill.yaml`/`guardrails.yaml`/`checks.yaml`/`eval.yaml`（轻量包无 Engine 则中性 1.0）                                   |
+| `authoring_lanes`            | 1.2                               | `reference/authoring-lanes.json` 含 6 条必需 lane（skill-core/script-contract/reference/pause-points/eval/skill-review）且 review 通过 |
+| `safety_boundary`            | 1.2                               | 继承自 generic                                                                                                                         |
+| `skill_invocation`           | 1.0                               | 继承自 generic                                                                                                                         |
+| `artifact_presence`          | 1.0                               | 继承自 generic                                                                                                                         |
+| `review_gate`                | **0.8**                           | `reference/skill-review.md` 报告通过、authoring-lanes review 通过、无阻塞 finding                                                      |
+| `review_readiness`           | **0.8**（最低）                   | generic 层无硬失败则为 1.0                                                                                                             |
 
 ### 加权总分公式
 
@@ -182,16 +182,16 @@ weighted_score = Σ(维度分 × 权重) / Σ(权重)
 LLM judge 会让裁判模型读取 workspace artifacts 后重新打分，并输出 `[RUBRIC-JUDGE]`（与规则分 `[RUBRIC]` 区分）。
 该机制是 best-effort：若 judge 失败，会回退到规则分，不影响整次运行。
 
-judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**有意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
+judge 在本机（不在 Docker 内）通过复用 `claude` CLI 运行，不引入新依赖。但裁判配置和被测 Agent 配置是**有意隔离**的：启用 `BENCH_LLM_JUDGE=1` 时，必须显式设置 `BENCH_JUDGE_MODEL`，不能回退复用主模型的 `ANTHROPIC_MODEL`。
 
-如果配置了 `BENCH_JUDGE_BASE_URL` 和 `BENCH_JUDGE_AUTH_TOKEN` / `BENCH_JUDGE_API_KEY`，judge 会优先直接调用 Anthropic Messages HTTP（`/v1/messages`）。没有专用 judge endpoint 时，才回退到宿主机 `claude` CLI，并在子进程里清除继承来的主 `ANTHROPIC_*` provider 设置，再把独立裁判配置映射给自己的 CLI 调用：
+如果配置了 `BENCH_JUDGE_BASE_URL` 和 `BENCH_JUDGE_AUTH_TOKEN` / `BENCH_JUDGE_API_KEY`，judge 会优先直接调用 Anthropic Messages HTTP（`/v1/messages`）。没有专用 judge endpoint 时，才回退到本机 `claude` CLI，并在子进程里清除继承来的主 `ANTHROPIC_*` provider 设置，再把独立裁判配置映射给自己的 CLI 调用：
 
-| 环境变量 | 用途 |
-| --- | --- |
-| `BENCH_JUDGE_MODEL` | 必填。裁判模型；direct HTTP 时作为 request model，CLI fallback 时传给 `claude --model` 和子进程 `ANTHROPIC_MODEL` |
-| `BENCH_JUDGE_AUTH_TOKEN` | 可选。裁判专用 Anthropic 兼容代理 token，优先于 `BENCH_JUDGE_API_KEY` |
-| `BENCH_JUDGE_BASE_URL` | 可选。裁判专用 Anthropic 兼容代理地址 |
-| `BENCH_JUDGE_API_KEY` | 可选。裁判专用 Anthropic API key；设置 auth token 时不会传入子进程 |
+| 环境变量                 | 用途                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `BENCH_JUDGE_MODEL`      | 必填。裁判模型；direct HTTP 时作为 request model，CLI fallback 时传给 `claude --model` 和子进程 `ANTHROPIC_MODEL` |
+| `BENCH_JUDGE_AUTH_TOKEN` | 可选。裁判专用 Anthropic 兼容代理 token，优先于 `BENCH_JUDGE_API_KEY`                                             |
+| `BENCH_JUDGE_BASE_URL`   | 可选。裁判专用 Anthropic 兼容代理地址                                                                             |
+| `BENCH_JUDGE_API_KEY`    | 可选。裁判专用 Anthropic API key；设置 auth token 时不会传入子进程                                                |
 
 这样设计是为了避免"同一个模型既当选手又当裁判"：主 Agent 可以继续使用自己的 `ANTHROPIC_MODEL`、`ANTHROPIC_BASE_URL` 和 token，judge 必须单独声明模型和 provider。direct HTTP 路径也能避开某些严格 Anthropic 兼容代理不接受 Claude CLI 额外请求参数的问题。若开启了 `BENCH_LLM_JUDGE=1` 但缺少 `BENCH_JUDGE_MODEL`，报告会写入：
 
@@ -203,18 +203,18 @@ judge 在宿主机（不在 Docker 内）通过复用 `claude` CLI 运行，不�
 
 不同 profile 覆盖的维度不同：
 
-| Profile | 覆盖维度 | 说明 |
-| --- | --- | --- |
-| `comet-workflow` | `artifact_quality`、`spec_drift`、`main_flow` | 重新打分规则较弱的三个定性维度（`llm_judge.py`） |
+| Profile                       | 覆盖维度                                                     | 说明                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `comet-workflow`              | `artifact_quality`、`spec_drift`、`main_flow`                | 重新打分规则较弱的三个定性维度（`llm_judge.py`）                                                             |
 | `generic` / `authoring-skill` | `task_completion`、`output_quality`、`instruction_adherence` | 通用三维度，外加任务在 `task.toml` 里声明的 `rubric_criteria` 作为 `custom_N` 维度（`generic_llm_judge.py`） |
 
 generic/authoring 的三维度评分标准：
 
-| 维度 | 1.0（满分） | 0.5 | 0.0 |
-| --- | --- | --- | --- |
-| `task_completion` | 全部需求满足、产物存在且正确、基线检查通过 | 部分完成 | 关键产物缺失或为空 |
-| `output_quality` | 结构良好、完整、非平凡、有思考痕迹 | 存在但内容单薄、勉强达标 | 缺失、空、明显 stub |
-| `instruction_adherence` | 完全遵守指令和约束、无违禁模式、工具使用得当 | 轻微偏离但核心意图保留 | 严重违反、危险命令、约束失败 |
+| 维度                    | 1.0（满分）                                  | 0.5                      | 0.0                          |
+| ----------------------- | -------------------------------------------- | ------------------------ | ---------------------------- |
+| `task_completion`       | 全部需求满足、产物存在且正确、基线检查通过   | 部分完成                 | 关键产物缺失或为空           |
+| `output_quality`        | 结构良好、完整、有实质内容、有思考痕迹       | 存在但内容单薄、勉强达标 | 缺失、空、明显 stub          |
+| `instruction_adherence` | 完全遵守指令和约束、无违禁模式、工具使用得当 | 轻微偏离但核心意图保留   | 严重违反、危险命令、约束失败 |
 
 judge 收集 workspace 文件时跳过 `.git`、`node_modules`、`.comet` 等目录，单文件上限 3000 字符、总预算 20000 字符，大文件（>50KB）和二进制文件会被跳过，保证 prompt 不失控。裁判必须按 `[RUBRIC-JUDGE] <dim>: <score> - <reason>` 格式逐行输出，每个 reason ≤25 词并引用具体内容。
 
@@ -224,10 +224,10 @@ judge 收集 workspace 文件时跳过 `.git`、`node_modules`、`.comet` 等目
 
 ### 定义
 
-| 指标 | 公式 | 含义 |
-| --- | --- | --- |
-| **pass@k**（能力上限） | `1 - C(n-c, k) / C(n, k)` | k 次独立尝试里**至少一次**成功的概率（HumanEval 无偏估计） |
-| **pass^k**（可靠性下限） | `1.0` 当且仅当 `c == n`，否则 `0.0` | k 次尝试**全部**成功的概率 |
+| 指标                     | 公式                                | 含义                                                       |
+| ------------------------ | ----------------------------------- | ---------------------------------------------------------- |
+| **pass@k**（能力上限）   | `1 - C(n-c, k) / C(n, k)`           | k 次独立尝试里**至少一次**成功的概率（HumanEval 无偏估计） |
+| **pass^k**（可靠性下限） | `1.0` 当且仅当 `c == n`，否则 `0.0` | k 次尝试**全部**成功的概率                                 |
 
 其中 n = 总运行数，c = 成功运行数。"成功"= 该次运行任务校验器零失败。
 
@@ -246,7 +246,11 @@ flowchart LR
 ```
 
 <p align="center">
-  <img src="/assets/eval-scoring-illustrations/01-pass-k-reliability.png" alt="小鱼对比 pass@k 的至少一次成功和 pass^k 的每次稳定成功" width="800" />
+  <img
+    src="/assets/eval-scoring-illustrations/01-pass-k-reliability.png"
+    alt="小鱼对比 pass@k 的至少一次成功和 pass^k 的每次稳定成功"
+    width="800"
+  />
 </p>
 
 <p align="center">pass@k 看能力上限，pass^k 看可靠性下限，两者差距越大越不稳定</p>
@@ -258,7 +262,7 @@ flowchart LR
 
 ### 怎么得到多次运行
 
-重复运行由 eval harness 内部的 pytest 选项 `--count N` 驱动：它把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果（`comet eval` 单次运行只产出 pass@1/pass^1）。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题会被排除，flagged run 仍进入主统计但会被标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
+重复运行由 eval harness 内部的 pytest 选项 `--count N` 驱动：它把每个 `(task, treatment)` 组合重复 N 次，产生 N 个独立的通过/失败结果（`comet eval` 单次运行只产出 pass@1/pass^1）。对比报告先过滤出 analysis set：明确的环境或运行器本身的问题直接排除，flagged run 仍进入主统计，但会单独标出。analysis set 里的这 N 个布尔值就是 pass@k/pass^k 的输入。
 
 ```bash
 # 重复 5 次，让 pass@k/pass^k 有意义
@@ -266,7 +270,8 @@ flowchart LR
 ```
 
 <Warning>
-  报告在运行数不足时会警告重复次数不够（pass@k/pass^k 的 k&gt;1 至少需要 2 次运行才有意义）。单次运行只能算 pass@1/pass^1，k&gt;1 的指标需要多次重复。
+  报告在运行数不足时会警告重复次数不够（pass@k/pass^k 的 k&gt;1 至少需要 2
+  次运行才有意义）。单次运行只能算 pass@1/pass^1，k&gt;1 的指标需要多次重复。
 </Warning>
 
 ### k 怎么选
@@ -283,9 +288,9 @@ pass@k/pass^k 不在 `summary.md`，而在**对比报告**（`comparison_report.
 
 ### 两个角色
 
-| 角色 | 做什么 | 会话 |
-| --- | --- | --- |
-| **被测 Agent（subject）** | 跑被测 Skill（如 `/comet` 五阶段） | 单一连续会话，每轮 `--resume` 续接 |
+| 角色                            | 做什么                                                               | 会话                                        |
+| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------- |
+| **被测 Agent（subject）**       | 跑被测 Skill（如 `/comet` 五阶段）                                   | 单一连续会话，每轮 `--resume` 续接          |
 | **用户模拟 Agent（simulator）** | 在决策点模拟用户回复（批准合理方案、选合理默认、只在真有歧义时澄清） | 每个决策点一次性的 `claude -p` 调用，无状态 |
 
 ### 交互循环
@@ -308,7 +313,9 @@ flowchart TD
 每一轮被测 Agent 都用 `--output-format stream-json --verbose` 运行。loop 驱动只把每轮被测 Agent 的 stream-json stdout 拼接起来给 harness 解析。用户模拟 Agent 的一次性回复不会进入主事件流。因此，事件统计只反映 subject Agent 的可观测行为。
 
 <Note>
-  <code>max_turns</code> 不是被测 Agent 内部真实工作轮数，也不是工具调用次数。一次外层往返指：被测 Agent 跑到决策点，用户模拟 Agent 回复，然后被测 Agent 用 <code>--resume</code> 继续。同一次往返内部仍可能包含多条 assistant 消息、工具调用和文件操作。
+  <code>max_turns</code> 不是被测 Agent 内部真实工作轮数，也不是工具调用次数。一次外层往返指：被测
+  Agent 跑到决策点，用户模拟 Agent 回复，然后被测 Agent 用 <code>--resume</code>{' '}
+  继续。同一次往返内部仍可能包含多条 assistant 消息、工具调用和文件操作。
 </Note>
 
 ### 决策点检测
@@ -339,9 +346,9 @@ comet-workflow 用 `COMET_SIMULATOR_PROMPT`，generic/authoring 用 `GENERIC_SIM
 
 auto_user 评测的模拟器指令可被覆盖。默认从 `eval/simulator-instruction.md` 读取。这个文件预置了上面几条原则。两种覆盖方式（优先级从高到低）：
 
-| 方式 | 怎么设 | 作用范围 |
-| --- | --- | --- |
-| `--simulator-prompt "..."` | pytest 命令行参数 | 单次运行 |
+| 方式                                 | 怎么设                          | 作用范围            |
+| ------------------------------------ | ------------------------------- | ------------------- |
+| `--simulator-prompt "..."`           | pytest 命令行参数               | 单次运行            |
 | `BENCH_SIMULATOR_PROMPT_FILE=<path>` | 环境变量（可写进用户级 `.env`） | 所有 auto_user 运行 |
 
 `BENCH_SIMULATOR_PROMPT_FILE` 的相对路径从 `eval/` 解析，默认值为 `simulator-instruction.md`，文件存在时才会读取。通过替换该文件，可以测试不同用户行为配置，而不需要修改 harness 代码。
@@ -361,32 +368,32 @@ auto_user 评测的模拟器指令可被覆盖。默认从 `eval/simulator-instr
 
 一次评测是三个轴的笛卡尔积：
 
-| 轴 | 含义 | 例子 |
-| --- | --- | --- |
-| **task** | 一个评测任务（目录，含 instruction/environment/validation） | `comet-fix-median`（修 bug 维度） |
-| **treatment** | 实验条件（注入哪些 Skill / CLAUDE.md） | `CONTROL`（无 Skill 基线）、`COMET_FULL`（注入 comet） |
-| **reps** | 重复次数（harness 内部 `--count N`） | `--count 5` 每个 (task,treatment) 跑 5 次 |
+| 轴            | 含义                                                        | 例子                                                   |
+| ------------- | ----------------------------------------------------------- | ------------------------------------------------------ |
+| **task**      | 一个评测任务（目录，含 instruction/environment/validation） | `comet-fix-median`（修 bug 维度）                      |
+| **treatment** | 实验条件（注入哪些 Skill / CLAUDE.md）                      | `CONTROL`（无 Skill 基线）、`COMET_FULL`（注入 comet） |
+| **reps**      | 重复次数（harness 内部 `--count N`）                        | `--count 5` 每个 (task,treatment) 跑 5 次              |
 
 ### treatment 实现 A/B 对比
 
 同一任务跑多个 treatment，就能测出 **Comet Skill 的边际效果**：
 
-| Treatment | 注入 | 用途 |
-| --- | --- | --- |
-| `CONTROL` | 无 Skill 基线 | 对照 |
-| `COMET_FULL` | comet 主 + 7 个阶段子 Skill + brainstorming（v3，`.mjs` 运行时） | 当前版本 |
-| `COMET_FULL_039` | 0.3.9 冻结基线（`.sh` 运行时） | 回归对比 |
+| Treatment        | 注入                                                             | 用途     |
+| ---------------- | ---------------------------------------------------------------- | -------- |
+| `CONTROL`        | 无 Skill 基线                                                    | 对照     |
+| `COMET_FULL`     | comet 主 + 7 个阶段子 Skill + brainstorming（v3，`.mjs` 运行时） | 当前版本 |
+| `COMET_FULL_039` | 0.3.9 冻结基线（`.sh` 运行时）                                   | 回归对比 |
 
 对比报告（`compare_baselines.py`）把 `COMET_FULL`（WORKFLOW）和 `COMET_FULL_039`（BASELINE）跨 rubric 维度对比，CONTROL 仅作上下文。
 
 ## 指标怎么进报告
 
-| 报告位置 | 内容 |
-| --- | --- |
-| `summary.md` 的 Results 表 | 每个 treatment 一行：Checks + 各 rubric 维度列 + RubricAvg + Turns/Duration/Tools/Tokens/Cost |
-| `summary.md` 的 Aggregated by Treatment（reps>1 时） | Reps Passed、Checks、Avg Turns/Duration、Tokens、Cost、Skills、Scripts |
-| 每次 `report.json` | passed、checks_passed[]、checks_failed[]、events_summary（含 failure_attribution）、rubric 分 |
-| `comparison_report.md` | pass@k/pass^k 表（能力 vs 可靠性）+ rubric 维度跨 treatment 对比 |
+| 报告位置                                             | 内容                                                                                          |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `summary.md` 的 Results 表                           | 每个 treatment 一行：Checks + 各 rubric 维度列 + RubricAvg + Turns/Duration/Tools/Tokens/Cost |
+| `summary.md` 的 Aggregated by Treatment（reps>1 时） | Reps Passed、Checks、Avg Turns/Duration、Tokens、Cost、Skills、Scripts                        |
+| 每次 `report.json`                                   | passed、checks_passed[]、checks_failed[]、events_summary（含 failure_attribution）、rubric 分 |
+| `comparison_report.md`                               | pass@k/pass^k 表（能力 vs 可靠性）+ rubric 维度跨 treatment 对比                              |
 
 详见[读取评估报告](/zh/eval/reports)。
 

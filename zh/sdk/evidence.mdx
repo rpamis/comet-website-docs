@@ -1,0 +1,73 @@
+---
+title: '等待与提交证据'
+description: '等待测试、评审或外部收据，并核对真实内容后继续工作流。'
+---
+
+报告发布前需要一份审核记录，生成报告的 Skill 不能自行宣布审核通过。声明证据步骤，让流程等待执行器提交实际记录，再由验证器核对。
+
+## 声明证据等待
+
+```js
+import { evidence } from '@rpamis/comet/runtime';
+
+const review = evidence({
+  kind: 'report-review',
+  validator: { id: 'review-receipt', version: '1' },
+});
+```
+
+在工作流中放置 `review`，声明草稿到审核、审核到发布的转移。`kind` 标识所需证据种类；验证器身份与版本对应实际注册的检查函数。
+
+## 核对真实证据内容
+
+下面是验证器配置片段，检查审核文件的真实内容和摘要。示例只接受正文为 `approved` 的 UTF-8 文件；实际应用还应核对报告身份、审查范围和业务结论。
+
+```js
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+
+const reviewValidator = {
+  id: 'review-receipt',
+  version: '1',
+  validate: async ({ ref }) => {
+    const bytes = await readFile(ref);
+    const actualHash = createHash('sha256').update(bytes).digest('hex');
+    return {
+      accepted: bytes.toString('utf8').trim() === 'approved',
+      actualHash,
+      reason: '审核记录必须明确批准',
+    };
+  },
+};
+```
+
+在 `createRuntime` 中传入 `evidenceValidators: [reviewValidator]`。示例中的 `ref` 由可信调用方提供；对外接受路径的应用必须检查路径范围，或改为通过业务收据 ID 查询。不要直接读取用户任意指定的系统文件。
+
+## 提交当前等待
+
+准备实际审核文件，再通过执行器提交。以下片段沿用已配置验证器的 `runtime`：
+
+```js
+const run = await runtime.inspect('report-1');
+const wait = run.evidenceWaits?.find((item) => item.status === 'pending');
+if (!wait) throw new Error('No pending evidence');
+const ref = './review.txt';
+const bytes = await readFile(ref);
+await runtime.recordEvidence({
+  runId: run.runId,
+  expectedRevision: run.revision,
+  evidenceId: wait.id,
+  kind: wait.kind,
+  ref,
+  contentHash: createHash('sha256').update(bytes).digest('hex'),
+  submissionId: 'review-submission-1',
+});
+```
+
+提交成功后，再调用 `runUntilBlocked` 继续执行。Runtime 核对当前等待、证据类型、revision 和实际摘要。网络重交使用同一 `submissionId`；新证据使用新 ID。
+
+## 处理不合格和过期证据
+
+缺少文件、摘要不符或业务条件不满足时，保留等待并处理返回的错误。并发提交造成 revision 冲突时，重新读取 Run，核对当前等待后再提交。
+
+证据后来失效时，可通过 `invalidateEvidence` 核对失效证据，配合已声明的恢复转移处理。恢复路径必须提前定义，不能直接编辑 Run 来取消已接受结果。文件产物的持续复验见 [阶段产物与业务验收](/zh/sdk/artifact-validation)。

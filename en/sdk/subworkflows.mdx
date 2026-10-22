@@ -1,0 +1,87 @@
+---
+title: 'Child workflows'
+description: 'Package reusable steps as a child workflow and let the parent wait for and read its results.'
+---
+
+Several reports need source checks. Define those checks as a child workflow. Parents reference its identity and version without copying each checking step.
+
+## Declare the parent and child
+
+Save this runnable example as `child.mjs` and run node `child.mjs`:
+
+```js
+import {
+  childWorkflow,
+  tool,
+  createRuntime,
+  createMemoryRuntimeStore,
+  createRuntimeExecutor,
+  defineRuntimeHandler,
+} from '@rpamis/comet/runtime';
+
+const child = {
+  id: 'source-check',
+  version: '1',
+  entry: 'check',
+  steps: { check: tool({ ref: 'check' }) },
+};
+const parent = {
+  id: 'report-with-check',
+  version: '1',
+  entry: 'facts',
+  steps: {
+    facts: childWorkflow({ workflow: { id: child.id, version: child.version } }),
+    summarize: tool({ ref: 'summarize' }),
+  },
+  transitions: [{ from: 'facts', to: 'summarize' }],
+};
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    check: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ input }) => input,
+      execute: () => ({ status: 'succeeded', output: { checked: true } }),
+    }),
+    summarize: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => outputs.facts,
+      execute: (facts) => ({ status: 'succeeded', output: facts }),
+    }),
+  },
+});
+const runtime = createRuntime({
+  store: createMemoryRuntimeStore(),
+  workflows: [parent, child],
+  executors: [host],
+});
+await runtime.start({
+  runId: 'parent-1',
+  workflow: { id: parent.id, version: parent.version },
+  input: {},
+});
+let progress = await runtime.runUntilBlocked({ runId: 'parent-1', executorId: 'host' });
+for (const childRun of progress.run.children) {
+  await runtime.runUntilBlocked({ runId: childRun.runId, executorId: 'host' });
+}
+progress = await runtime.runUntilBlocked({ runId: 'parent-1', executorId: 'host' });
+console.log(progress.reason);
+console.log(progress.run.children);
+console.log(progress.run.outputs.summarize.value);
+```
+
+The output is completed, and children retains the child Run association. The parent's facts output contains child outputs; parse the actual structure for your business values. The example check returns only a local marker; implement real source checking yourself.
+
+## Pass task-specific input
+
+A child step can declare input, for example childWorkflow(`{ workflow: { id: 'source-check', version: '1' }, input: { topic: 'weekly-report' } }`). The child Run retains the parent step input envelope containing input, outputs, and optional activation. Parse business values from that envelope. For state-dependent activation inputs, see [business state and loops](/en/sdk/state).
+
+Register child definitions and their required versions along with the parent. The host still provides the child's tools and Skills.
+
+## Handle child waits
+
+The parent creates and links the child Run, but `runUntilBlocked` does not execute child business actions for the host. This example explicitly advances each child, then the parent to accept its results. Nested children require host scheduling using their actual associations.
+
+A child may wait for a user or evidence. Read the parent's children and inspect the actual child Run ID. Submit that child's own Wait, then advance the parent. Parent Wait IDs and approvals cannot be used for a child.
+
+During recovery retain the association and both referenced versions. Do not create an unrelated child Run as a substitute. Two parents can reuse a workflow definition without sharing an execution instance.

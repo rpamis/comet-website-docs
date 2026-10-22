@@ -1,240 +1,51 @@
-﻿---
-title: "发布和分发 Skill（进阶）"
-description: "理解 /comet-any 产物如何通过 eval、readiness、approval、publish 和 distribute 进入可用状态，以及发布状态链、阻塞码和恢复建议。"
+---
+title: '安装与分发 SDK Skill 应用'
+description: '确认完整包和平台写入计划，再安装、升级或选择性卸载应用入口。'
 ---
 
-<Tip>
-  本页面向需要排查发布状态或接入自动化的用户。常规流程由 <code>/comet-any</code> 引导评估、审批、发布和分发。
-</Tip>
+Comet Any 本地验收通过后，先展示完整包导出和正式安装预览。你确认当前预览，SDK 才写入目标；应用不需要自己的安装脚本。
 
-本页是 Skill 发布状态机、readiness 与阻塞码的权威说明。命令级参考见 [comet publish](/zh/cli/publish)。
+## 安装前看什么
 
-发布前，Comet 会检查当前 hash 的 eval 证据、人工批准和目标平台要求。全部门禁通过后，Skill 才能发布和分发。
+| 预览内容    | 需要核对的事情                                           |
+| ----------- | -------------------------------------------------------- |
+| 完整包      | 应用身份、版本、入口、模块与固定依赖                     |
+| 导出目录    | 应用包实际保存在哪里                                     |
+| 平台入口    | 本项目或用户目录会安装哪些 Skill                         |
+| Rule / Hook | 写入的共享入口、平台支持和需要激活的配置                 |
+| 冲突与能力  | 现有文件是否冲突，Agent 平台是否具备加载、交接和执行能力 |
+| 证据        | 本地验收、模型 Eval 和 Agent 平台验证各自的结果          |
 
-## 发布状态链
+平台入口与完整包导出目录分开管理。不要只复制入口 `SKILL.md` 就认为整个应用及其依赖已经安装。
 
-```mermaid
-flowchart LR
-    A["draft"] --> B["eval-passed"]
-    B --> C["review-approved"]
-    C --> D["ready"]
-    D --> E["published"]
-    E --> F["distributed"]
-```
+## 分发到其他平台
 
-每个状态都有明确的门禁：
-
-| 状态 | 含义 | 进入条件 |
-| --- | --- | --- |
-| `draft` | 刚生成，还没验证 | `/comet-any` 生成完成 |
-| `eval-passed` | 有当前 hash 的 eval 证据 | `comet eval ... --html` 通过且 hash 匹配 |
-| `review-approved` | 人工批准当前 hash | `comet publish approve` |
-| `ready` | 满足所有发布门禁 | review summary 为 publishable |
-| `published` | 已发布可安装候选 | `comet publish run` |
-| `distributed` | 已分发到平台 | `comet publish distribute` |
-
-还有一个异常状态 `drift-conflict`：处于 `ready` 状态的 Bundle，如果 draft hash **和** ready hash 都发生变化，会进入冲突状态，并带上 `conflict: {draftHash, readyHash}`。只有其中一个变化则直接回退到 `draft`。
-
-## readiness 结论
-
-readiness 会给出四种结论：
-
-| 结论 | 含义 | 触发条件 |
-| --- | --- | --- |
-| `published` | 已发布 | status `ready` 且 hash 匹配且无 blocker |
-| `can-publish` | 可以发布 | status `review-approved` 且 review 匹配 hash 且 decision approved 且无 blocker |
-| `needs-confirmation` | 等待确认 | 无 blocker 但还没批准 |
-| `blocked` | 不能发布 | 存在任何 blocker |
-
-<p align="center">
-  <img src="/assets/skill-creator-publishing-illustrations/01-evidence-to-distribute-preview.png" alt="小鱼检查 eval evidence v2 的 draftHash 和 evalManifestHash，再通过 creator status/next、review、approve 和 publish preview 推进发布" width="800" />
-</p>
-
-<p align="center">发布前先确认 eval evidence 绑定当前 draft 和 manifest，再用 creator 看状态，用 publish 做评审、批准、发布和分发预览</p>
-
-非 JSON 输出会用这些标题：`published` → "Already published"。`can-publish` → "Ready to publish"。`needs-confirmation` → "Ready for review approval"。`blocked` → "Cannot publish yet"。
-
-## 发布流程
-
-`comet publish` 是 `/comet-any` 产物的发布入口。它只处理 eval 证据就绪后的 review、approval、publish 和 distribute。创建状态、恢复状态和唯一的下一步由 `comet creator` 负责。
-
-```mermaid
-flowchart LR
-    A["/comet-any 生成"] --> B["comet eval --html"]
-    B --> C["comet creator status / next"]
-    C --> D["comet publish review"]
-    D --> E["comet publish approve"]
-    E --> F["comet publish run"]
-    F --> G["comet publish distribute --preview"]
-    G --> H["comet publish distribute"]
-```
-
-## 用户命令
+在需要安装的项目中运行：
 
 ```bash
-# 查看完整 readiness 和阻塞项
-comet creator status my-skill --project . --json
-
-# 只想知道下一步该跑什么
-comet creator next my-skill --project . --json
-
-# 生成评审摘要
-comet publish review my-skill --platform claude --json
-
-# 人工批准
-comet publish approve my-skill --reviewer alice --json
-
-# 发布已批准 candidate
-comet publish run my-skill --platform claude --json
-
-# 分发预览（强制）
-comet publish distribute my-skill --platform claude --scope project --preview --json
-
-# 真实分发
-comet publish distribute my-skill --platform claude --scope project --json
+comet application distribute ./weekly-report/application.json --project . --platform codex --preview --json
 ```
 
-如果包含 hooks 或脚本，分发时需要确认可执行披露：
+阅读本次预览并取得确认后，使用它返回的确认摘要：
 
 ```bash
-comet publish distribute my-skill --platform claude --scope project --confirm-executables --json
+comet application distribute ./weekly-report/application.json --project . --platform codex --confirmation-hash <本次预览确认摘要> --json
 ```
 
-如果用户明确选择跳过 optional 能力：
+使用 `--platform all` 选择已登记的平台，或重复 `--platform` 选择多个平台。用户级安装使用 `--scope user`。平台能力以预览为准，入口安装成功不代表所有 Agent 平台能力都已经激活。
+
+## 升级与卸载
+
+升级时添加 `--upgrade` 并重新确认当前预览。SDK 更新平台入口，保留活动 Run 需要的旧版本。
+
+卸载默认先预览。可以用 `--platform` 只移除所选入口，确认后执行；选择性卸载不会连带删除共享 Rule/Hook、依赖和仍需保留的版本。
 
 ```bash
-comet publish distribute my-skill --platform claude --scope project --skip-capability <capability> --json
+comet application uninstall weekly-report --project . --platform codex --json
 ```
 
+## 安装中断
 
-## status 和 next 怎么选
+部分写入或结果未知时，先核对原动作与目标文件，再沿原 Run 恢复。文件或配置漂移后，原预览批准不能继续使用。
 
-| 你想做什么 | 用哪个命令 | 输出重点 |
-| --- | --- | --- |
-| 看完整 readiness、blocker、warning 和 evidence | `comet creator status <name>` | 完整状态和恢复上下文 |
-| 从中断流程恢复，只想知道现在跑什么 | `comet creator next <name>` | 单个推荐动作、命令、原因和是否需要用户确认 |
-
-`comet creator next` 不暴露后端 Bundle 命令。它会把后端 next action 翻译成日常可执行的命令，例如 `comet eval ... --html`、`comet publish review ...`、`comet publish approve ...`，或提示你回到 `/comet-any` 解决候选、确认方案、重新生成。
-
-## 阻塞码（blocker codes）
-
-readiness blockers 会阻止 publish。每个 blocker 都有一个**前缀码**，告诉你问题出在哪。当 `Readiness: blocked` 时，按下面的表定位：
-
-| 阻塞码 | 含义 | 恢复建议 |
-| --- | --- | --- |
-| `[candidate]` | 还有未解决的缺失/歧义候选 | 回到 `/comet-any` 选择来源，或让 `comet creator next` 给出恢复命令 |
-| `[preference]` | （strict）required Skill 缺失/歧义；偏好漂移 | 确认偏好或重新生成 |
-| `[proposal]` | proposal 未确认 | 回到 `/comet-any` 查看并确认组合方案 |
-| `[composition]` | composition 有 issue（cycle、unresolved-choice 等） | 修复组合方案 |
-| `[control-plane]` | 稳定控制面校验失败 | 检查 required capability set 是否完整 |
-| `[authoring]` | 生成物仍有 `AUTHORING PENDING` 或 substance 节点没写完 | 完成对应 authoring lane，再记录输出 |
-| `[draft]` | 缺少 `currentHash` | 重新生成 draft |
-| `[eval]` | 缺少/失败/对应旧 hash 的 Eval 证据 | 重新跑 `comet eval ... --html` |
-| `[agent]` | Claude Code custom agent 没出现在平台预览里 | 重新跑 Claude 平台分发预览 |
-| `[publish]` | status `ready` 但没有 ready metadata | 重新走 review 流程 |
-
-<Note>
-  每个 blocker 都带 <code>nextAction: { label, command }</code>，直接给出恢复建议。想看完整上下文用 <code>comet creator status</code>。只想复制下一条用户命令时，用 <code>comet creator next</code>。
-</Note>
-
-### Warning（非阻塞）
-
-这些不阻塞，但会在评审摘要里提示：
-
-- `[preference]` advisory 模式下的偏好漂移
-- `[review]` approval 对应旧 hash
-- `[capability]` optional 能力缺口
-- `[agent]` 平台 agent 预览缺失
-- `[executable]` 可执行披露待确认
-
-## 评审摘要
-
-发布前必须先看 readiness。`comet publish review` 的评审摘要至少包含：
-
-- Bundle 名称、版本、hash
-- 多个 entry 与 internal Skill 列表
-- `planHash`、`preferenceHash` 与 `reference/resolved-skills.json` 真实 Skill 证据
-- 推荐调用顺序与 `preferenceIndex`
-- 偏离偏好顺序的项和原因
-- `.comet/skill-preferences.yaml` 是否在 Factory 初始化后发生漂移
-- 稳定组合 Skill Bundle 的 required capability set 是否声明完整
-- 能力缺口和可执行披露
-- Eval 选择、token 消耗和结果摘要
-- `Validate this Skill` 与下一步提示
-
-非 JSON 输出也会明确展示 `Readiness:`、`Blockers:`、`Warnings:`、`Evidence:`，让你能直接看懂 readiness 为什么可发布或被阻塞。
-
-## 分发预览是强制的
-
-执行真实分发前，**必须先跑 preview**：
-
-```bash
-comet publish distribute my-skill --platform claude --scope project --preview --json
-```
-
-preview 是**强制检查**，不是可选附加项。它会展示：
-
-- `Install preview`
-- planned files
-- unsupported capability
-- executable disclosures
-- `No files were written`
-
-只有你确认 preview 结果后，才可以移除 `--preview` 执行真实分发。
-
-## 能力缺口和可执行披露
-
-分发前必须处理平台能力差异：
-
-| 能力类型 | 缺口处理 |
-| --- | --- |
-| required 能力缺口 | **取消该平台**，不能跳过 |
-| optional 能力缺口 | 必须**由你显式选择 skip**（`--skip-capability`） |
-| Hook/脚本披露 | 必须**由你确认**后才可分发（`--confirm-executables`） |
-
-`hooks/*.yaml` 是 **Comet portable hook descriptor**，只在 `comet publish distribute` 编译到目标平台配置后生效。直接把 hook 文件拷到平台目录不会生效。
-
-## eval-record 证据契约
-
-如果用 `comet bundle eval-record` 手工记录 eval 证据，结果 JSON 必须满足这个 schema：
-
-```json
-{
-  "schemaVersion": 2,
-  "provider": "comet-eval",
-  "level": "quick",
-  "draftHash": "<64 位 hex SHA-256>",
-  "evalManifestHash": "<64 位 hex SHA-256>",
-  "tasks": ["authoring-skill-smoke"],
-  "treatments": ["CONTROL", "COMET_FULL"],
-  "passAtK": { "authoring-skill-smoke": 1 },
-  "weightedScore": { "authoring-skill-smoke": 0.92 },
-  "instabilityGap": { "authoring-skill-smoke": 0 },
-  "failures": [],
-  "reports": ["eval/local/logs/experiments/example/summary.html"],
-  "passed": true,
-  "summary": "All quality gates passed."
-}
-```
-
-<Warning>
-  <code>draftHash</code> 必须等于当前 <code>currentHash</code>，<code>evalManifestHash</code> 必须等于当前生成的 <code>comet/eval.yaml</code> hash。旧 hash 或旧 manifest 的证据会被保留到磁盘，但不能推进 readiness。日常使用不需要手写这个文件。<code>/comet-any</code> 会通过 <code>comet eval</code> 自动产出。
-</Warning>
-
-## Bundle 和 publish 的关系
-
-`comet creator` 是创建和恢复入口，`comet publish` 是发布入口。`comet bundle` 是内部后端，负责 Bundle 状态管理、hash、readiness、publish 和 distribute。除非排障或审计，你不需要直接操作 Bundle 状态文件。
-
-| 命令 | 定位 | 适合谁 |
-| --- | --- | --- |
-| `comet creator` | 创建状态和恢复入口 | 日常使用、自动化 |
-| `comet publish` | 用户发布入口 | 日常使用、自动化 |
-| `comet bundle` | 高级 Bundle 后端 | 审计、调试、自动化集成 |
-
-需要排查后端状态时可以参考 [comet bundle](/zh/cli/bundle)。
-
-## 下一步
-
-- [comet publish 命令](/zh/cli/publish) — 完整子命令和选项参考
-- [创建 Skill 的流程](/zh/skill-creator/workflow) — 从生成到分发的处理顺序
-- [评估系统概览](/zh/eval/overview) — eval 证据如何驱动 readiness
+命令参数见 [comet application](/zh/cli/application)。生成后的实际运行记录和证据可在 [Dashboard](/zh/dashboard/overview) 的 Comet Any 页面查看。

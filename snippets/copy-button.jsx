@@ -9,6 +9,7 @@ export const CopyController = () => {
       const button = event.currentTarget;
       const value = button.getAttribute("data-copy-value");
       const label = button.getAttribute("data-copy-label") || "复制";
+      const copiedLabel = button.getAttribute("data-copy-success-label") || "已复制";
 
       if (value == null || navigator.clipboard == null) return;
 
@@ -22,8 +23,8 @@ export const CopyController = () => {
       if (existingTimer != null) window.clearTimeout(existingTimer);
 
       button.classList.add("is-copied");
-      button.setAttribute("aria-label", "已复制");
-      button.setAttribute("title", "已复制");
+      button.setAttribute("aria-label", copiedLabel);
+      button.setAttribute("title", copiedLabel);
 
       const timer = window.setTimeout(() => {
         button.classList.remove("is-copied");

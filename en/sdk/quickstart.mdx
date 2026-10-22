@@ -1,0 +1,140 @@
+---
+title: 'Your first SDK workflow'
+description: 'Build a local report workflow, approve its draft, and resume it in a new process.'
+---
+
+Build a report workflow with three steps: generate a draft, wait for user approval, and publish. The first invocation generates the draft and pauses. A second invocation submits your decision and prints the report.
+
+Local functions stand in for a real Skill, and console output stands in for an external publishing service. No model credentials are required. You can replace these functions with your Agent and tools afterward.
+
+## Prepare a project
+
+Run these commands in an empty directory:
+
+```bash
+npm init -y
+npm install @rpamis/comet@0.5.0
+```
+
+See [installation and public entry points](/en/sdk/overview#installation-and-public-entry-points) for supported Node.js versions. For an unreleased SDK candidate, install the npm tarball provided by the maintainer; an older npm release may lack these entry points. The example uses .mjs and does not require changing the project's module configuration.
+
+## Create the workflow
+
+Save this code as `report.mjs`:
+
+```js
+import {
+  approval,
+  skill,
+  tool,
+  createFileRuntimeStore,
+  createRuntime,
+  createRuntimeExecutor,
+  defineRuntimeHandler,
+} from '@rpamis/comet/runtime';
+
+const workflow = {
+  id: 'report',
+  version: '1',
+  entry: 'draft',
+  steps: {
+    draft: skill({ ref: 'draft' }),
+    approve: approval({ proposalFrom: 'draft' }),
+    publish: tool({ ref: 'publish' }),
+  },
+  transitions: [
+    { from: 'draft', to: 'approve' },
+    { from: 'approve', to: 'publish', on: 'approved' },
+  ],
+};
+
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    draft: defineRuntimeHandler({
+      type: 'invoke_skill',
+      parseInput: ({ input }) => {
+        if (typeof input !== 'string') throw new Error('Expected a topic');
+        return input;
+      },
+      execute: (topic) => ({ status: 'succeeded', output: `Report about ${topic}` }),
+    }),
+    publish: defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => {
+        if (typeof outputs.draft !== 'string') throw new Error('Expected a report');
+        return outputs.draft;
+      },
+      execute: (report) => {
+        console.log(report);
+        return { status: 'succeeded', output: { published: true } };
+      },
+    }),
+  },
+});
+
+const runtime = createRuntime({
+  store: createFileRuntimeStore({ rootDir: './report-state' }),
+  workflows: [workflow],
+  executors: [host],
+});
+
+await runtime.start({
+  runId: 'report-1',
+  workflow: { id: 'report', version: '1' },
+  input: 'SDK integration',
+});
+const progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'host' });
+console.log(progress.reason);
+console.log(progress.run.waits.filter((wait) => wait.status === 'pending'));
+```
+
+```bash
+node report.mjs
+```
+
+You will see `approval-required` and a pending Wait containing the draft proposal, Wait ID, proposal hash, and available choices. The `report-state` directory stores the Run. Repeating the command reads the same Run and waits for the same approval without generating another draft.
+
+## Submit the current user decision
+
+Append the following code to report.mjs. It submits approval only when you explicitly pass --approve. In a product, collect the user's decision on the current proposal through your UI; see [user approvals](/en/sdk/approvals).
+
+```js
+if (process.argv.includes('--approve')) {
+  const wait = progress.run.waits.find((item) => item.status === 'pending');
+  if (!wait) throw new Error('No pending approval');
+
+  await runtime.resolveWait({
+    runId: progress.run.runId,
+    waitId: wait.id,
+    proposalHash: wait.proposalHash,
+    decisionId: 'user-decision-1',
+    choice: 'approved',
+  });
+  const resumed = await runtime.runUntilBlocked({
+    runId: progress.run.runId,
+    executorId: 'host',
+  });
+  console.log(resumed.reason);
+}
+```
+
+Inspect the draft from the first invocation. Once you have decided to publish, run:
+
+```bash
+node report.mjs --approve
+```
+
+The output includes Report about SDK integration and completed, indicating that the declared path has finished. This example prints a report; when connecting a real publishing service, also verify its actual response. Starting the completed Run again does not republish. Do not pass --approve again, because there is no pending proposal.
+
+## Inspect results and start another task
+
+At the end of the script, runtime.inspect('report-1') reads the Run. The value at `run.outputs.publish.value` contains `{ published: true }`, and `run.actions` retains actual actions and results. A new report needs a new `runId`, such as report-2. Changing input while retaining the old ID triggers consistency checks.
+
+## Connect your Agent platform
+
+Replace execute with actual Skill or tool calls and return their real results. Handler keys match step ref values; type matches the action kind.
+
+`parseInput` validates current input and upstream outputs before passing a business object to execute. TypeScript infers types within that handler; persisted JSON between steps still needs a Schema or validator.
+
+Provide credentials through a host closure or the current execution environment. Do not put tokens in Workflow definitions, Run input, outputs, or approval proposals. When a disconnected operation has an uncertain result, [reconcile the original action](/en/sdk/recovery) before executing an external operation again.

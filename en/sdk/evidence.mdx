@@ -1,0 +1,73 @@
+---
+title: 'Wait for and submit evidence'
+description: 'Wait for test results, reviews, or external receipts and verify actual content before continuing.'
+---
+
+A report needs a review record before publishing. The report-writing Skill cannot approve its own review. Declare an evidence step, wait for the host to submit the actual record, and validate it.
+
+## Declare an evidence wait
+
+```js
+import { evidence } from '@rpamis/comet/runtime';
+
+const review = evidence({
+  kind: 'report-review',
+  validator: { id: 'review-receipt', version: '1' },
+});
+```
+
+Place review in the workflow and declare draft-to-review and review-to-publish transitions. kind names the required evidence. The validator identity and version refer to a registered check.
+
+## Verify actual evidence
+
+This validator fragment reads a review file and its actual hash. It accepts only a UTF-8 file containing approved. Real applications should also check report identity, review scope, and business conclusions.
+
+```js
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+
+const reviewValidator = {
+  id: 'review-receipt',
+  version: '1',
+  validate: async ({ ref }) => {
+    const bytes = await readFile(ref);
+    const actualHash = createHash('sha256').update(bytes).digest('hex');
+    return {
+      accepted: bytes.toString('utf8').trim() === 'approved',
+      actualHash,
+      reason: 'Review record must explicitly approve',
+    };
+  },
+};
+```
+
+Pass `evidenceValidators`: [reviewValidator] to createRuntime. A trusted host supplies ref here. Applications accepting paths externally must enforce path scope or query receipts by business ID instead. Do not read arbitrary system files supplied by users.
+
+## Submit the current wait
+
+Prepare the actual review file and submit it from the host. This fragment uses runtime with the validator registered:
+
+```js
+const run = await runtime.inspect('report-1');
+const wait = run.evidenceWaits?.find((item) => item.status === 'pending');
+if (!wait) throw new Error('No pending evidence');
+const ref = './review.txt';
+const bytes = await readFile(ref);
+await runtime.recordEvidence({
+  runId: run.runId,
+  expectedRevision: run.revision,
+  evidenceId: wait.id,
+  kind: wait.kind,
+  ref,
+  contentHash: createHash('sha256').update(bytes).digest('hex'),
+  submissionId: 'review-submission-1',
+});
+```
+
+After acceptance, call runUntilBlocked. Runtime checks the current wait, evidence kind, revision, and actual hash. Retain `submissionId` on network resubmission and use a new ID for new evidence.
+
+## Handle invalid or stale evidence
+
+Missing files, hash mismatches, or unmet business conditions preserve the wait; handle the returned error. On revision conflict, read the Run and current wait before submitting again.
+
+If evidence later becomes invalid, use `invalidateEvidence` to verify the invalidation and follow a declared recovery transition. Define recovery paths beforehand; do not edit Run records to revoke accepted results. See [artifact validation](/en/sdk/artifact-validation) for ongoing file checks.

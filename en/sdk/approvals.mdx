@@ -1,0 +1,61 @@
+---
+title: 'User approvals'
+description: 'Show the current result before publishing or other important operations, wait for a user decision, and continue the same Run.'
+---
+
+Let an Agent generate a report automatically while requiring user review before publishing. Place approval between draft and publish. The Run retains the draft and pending proposal across process shutdown.
+
+## Declare the result to review
+
+Use this step in the [quickstart](/en/sdk/quickstart) workflow:
+
+```js
+import { approval } from '@rpamis/comet/runtime';
+
+const approve = approval({
+  proposalFrom: 'draft',
+  choices: ['approved', 'rejected'],
+});
+```
+
+`proposalFrom` names upstream results to display for this execution. Use an array such as ['draft', 'sources'] for multiple results. Declare incoming transitions in the graph, and use join when all results are required.
+
+## Show the current proposal
+
+```js
+const progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'host' });
+const wait = progress.run.waits.find((item) => item.status === 'pending');
+if (!wait) throw new Error('No pending approval');
+console.log(wait.proposal);
+console.log(wait.choices);
+```
+
+runtime comes from the quickstart. When reason is `approval-required`, display the actual `wait.proposal` and available choices, retaining the Wait ID and proposal hash. Show the result users are approving instead of only asking whether to continue.
+
+## Submit the user's choice
+
+After the user reviews the current proposal, pass the actual choice as `userChoice`:
+
+```js
+async function submitDecision(userChoice) {
+  if (!wait.choices.includes(userChoice)) throw new Error('Invalid choice');
+  await runtime.resolveWait({
+    runId: progress.run.runId,
+    waitId: wait.id,
+    proposalHash: wait.proposalHash,
+    decisionId: 'report-review-1',
+    choice: userChoice,
+  });
+  return runtime.runUntilBlocked({ runId: progress.run.runId, executorId: 'host' });
+}
+```
+
+`decisionId` identifies this decision. Generate a unique ID for each new UI decision, retaining it when resubmitting the same decision after a network failure. If the proposal changed or the Wait expired, read and display the current proposal again.
+
+Approval binds to this Wait and its proposal hash. An approval for another report, an old draft, or another activation cannot authorize this publication.
+
+## Handle rejection and revision
+
+To revise after rejection, declare an on: 'rejected' edge to the revision step, then send the new draft through approval. A rejection path with no further steps may finish; completed does not mean published. Read the path and business output.
+
+Do not call submitDecision('approved') automatically from a startup script. The approval step records decisions; the host collects them and also enforces external tools' permissions.

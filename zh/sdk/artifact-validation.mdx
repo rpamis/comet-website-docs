@@ -1,0 +1,86 @@
+---
+title: '阶段产物与业务验收'
+description: '要求阶段生成真实文件，并让缺失、内容不符或业务失败阻止后续工作。'
+---
+
+阶段完成需要真实产物时，在应用中声明文件与内容条件。SDK 检查磁盘上的文件和摘要，不能只相信执行器回报的路径、`exists: true` 或“已经完成”。
+
+以分析报告为例，执行器必须写入 `reports/analysis.md`，正文包含“结论”和“依据”。本页的 JSON 是应用清单片段，需要放进实际应用的 `application.json`；基础 Runtime 的输出 Schema 用法见 [输出结构与业务验证](/zh/sdk/output-validation)。
+
+## 声明必需文件
+
+下面是 `application.json` 中 `artifactContracts` 的配置片段。`workflowId` 和 `stepId` 必须对应实际工作流图。
+
+```json
+{
+  "artifactContracts": [
+    {
+      "workflowId": "analysis",
+      "stepId": "write-report",
+      "artifacts": [
+        {
+          "ref": "reports/analysis.md",
+          "nonEmpty": true,
+          "requiredHeadings": ["结论", "依据"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+| 字段               | 检查什么                         |
+| ------------------ | -------------------------------- |
+| `ref`              | 项目内固定的安全相对路径         |
+| `refFrom`          | 从该次实际输出中取得相对文件路径 |
+| `nonEmpty`         | 文件确实包含内容                 |
+| `requiredText`     | 文件必须包含的文本               |
+| `requiredHeadings` | Markdown 必须包含的真实章节      |
+| `schema`           | 实际 JSON 文件的同步 JSON Schema |
+| `sha256From`       | 从实际输出读取对应文件摘要       |
+
+产物引用不能指向 `.git`、安装目录、工作流控制文件等受保护资源，也不能越过项目边界。完成回报携带真实 SHA-256；没有 `sha256From` 时，通过 Outcome 的 artifact 证据回报摘要。
+
+## 写入文件并回报摘要
+
+下面是执行器处理函数的 `execute` 示例。它在项目根目录写入真实文件，并从写入内容计算摘要：
+
+```js
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+
+async function executeReport() {
+  const ref = 'reports/analysis.md';
+  const content = '# 分析报告\n\n## 结论\n可以继续试用。\n\n## 依据\n本地验收记录。\n';
+  await mkdir('reports', { recursive: true });
+  await writeFile(ref, content, 'utf8');
+  const sha256 = createHash('sha256').update(content).digest('hex');
+  return {
+    status: 'succeeded',
+    output: { report: ref },
+    artifacts: [{ uri: ref, sha256 }],
+  };
+}
+```
+
+把函数注册给 `write-report` 的实际执行器。实际项目中按显式项目根解析文件，不依赖不确定的进程目录。Runtime 会核对磁盘内容，不接受只填路径而不生成文件的结果。
+
+## 补充业务条件
+
+通用文件检查适合判断“是否生成了指定文件、结构是否正确”。“每条结论都能对应来源”“清单覆盖了所有需求”这类条件，需要实际业务验证器。
+
+验证器由应用作者或创作 Agent 编写并固定版本与内容。它读取真实输入、输出和产物，返回通过或失败。仅安装一份通用 Rule/Hook，不能自动证明这些业务要求已经实现。
+
+SDK 在接受阶段结果、派发依赖动作及接收下游结果时复验相关文件。完成后偷偷修改文件会使原证据失效。修复步骤通过 `replaces` 明确声明替代的产物证据，再执行原流程中的修复。
+
+## 验证正常与异常样例
+
+Comet Any 创作必须通过隔离产物验收。每个有产物的步骤提供正常样例；有业务验证器时，还要提供异常样例：格式、文件和输出结构都有效，但业务条件不满足。
+
+例如，正常报告的结论与来源逐项对应；异常报告保留全部章节与字段，但其中一项结论没有对应来源。验证器必须拒绝异常报告，不能只在缺少文件时失败。
+
+Creator 还检查缺失文件、空内容、内容不符和摘要变化。本地验收失败时先修复或修订方案；选择跳过模型 Eval 不会跳过这些检查。
+
+手动接入应用时，也应在临时项目验证这些情况：正常文件通过；删除文件、清空文件、删除必需章节后失败；格式仍正确但业务结论不合格时，由业务验证器拒绝。最后修改已接受文件，确认旧摘要不能继续作为下游依据。每个场景使用独立的运行现场，避免污染真实项目。
+
+规则、Hook 和 Agent 平台执行能力的边界见 [Comet Any 执行机制](/zh/skill-creator/engine)。

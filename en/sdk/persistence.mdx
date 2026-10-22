@@ -1,0 +1,53 @@
+---
+title: 'Persistence and process recovery'
+description: 'Save Runs so decisions, execution results, and progress remain available after restarting.'
+---
+
+A report may wait hours for approval. Save the Run in a file Store and read the same Run ID when reopening the application to continue its current wait.
+
+## Choose a Store
+
+| Store                                   | Use                                            | After process exit                                                |
+| --------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------- |
+| `createMemoryRuntimeStore`()            | Single-process examples and short experiments. | Data is not retained.                                             |
+| `createFileRuntimeStore`(`{ rootDir }`) | Local persistence and process recovery.        | Read the original Run from the same directory.                    |
+| A custom RuntimeStore                   | Your own persistence system.                   | The implementation supplies revision comparison and atomic saves. |
+
+Records include input, workflow version, Actions, waits, accepted outputs, and status. File Store does not save execution functions or model credentials. Register original definitions and capabilities after restart.
+
+## Configure a stable directory
+
+```js
+import path from 'node:path';
+import { createFileRuntimeStore, createRuntime } from '@rpamis/comet/runtime';
+
+const runtime = createRuntime({
+  store: createFileRuntimeStore({ rootDir: path.resolve('./report-state') }),
+  workflows: [workflow],
+  executors: [host],
+});
+```
+
+workflow and host use the [quickstart](/en/sdk/quickstart) definitions. Relative paths resolve from the process working directory. Background services should use a stable absolute path to avoid reading another directory after restart.
+
+## Read and resume in a new process
+
+```js
+const run = await runtime.inspect('report-1');
+console.log(run.status);
+console.log(run.waits.filter((wait) => wait.status === 'pending'));
+const progress = await runtime.runUntilBlocked({ runId: run.runId, executorId: 'host' });
+console.log(progress.reason);
+```
+
+Generate the draft with the quickstart script, exit, and launch a recovery script with the same definitions. The original Run still waits for approval; the completed draft is not regenerated. See [user approvals](/en/sdk/approvals) to submit the decision.
+
+`runId` identifies a business execution. Use a new ID for a new report and retain the original ID when resuming. Repeated starts check existing input and definition; they are not a way to overwrite old tasks.
+
+## Upgrade a workflow
+
+Increase the version when changing the graph or step contracts, retaining versions referenced by active Runs. Complete applications also pin dependencies; see [distribution and upgrades](/en/sdk/distribution).
+
+A custom Store must compare revisions and save atomically to prevent two executors from overwriting results. On conflict, read the Run again before choosing the next operation. Do not overwrite state files directly.
+
+Persistence saves committed facts. If an action was dispatched without a result, query the original operation instead of repeating it because no local success is recorded. See [unknown-result recovery](/en/sdk/recovery).

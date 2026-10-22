@@ -1,0 +1,87 @@
+---
+title: 'Artifacts and business acceptance'
+description: 'Require real files and stop downstream work when files, content, or business results fail checks.'
+---
+
+Declare files and content conditions when a step must produce real artifacts. SDK checks files and hashes on disk rather than trusting returned paths, exists flags, or completion claims.
+
+For an analysis report, the executor writes reports/analysis.md with Conclusion and Evidence sections. The JSON below is an application manifest fragment for application.json. For basic Runtime output Schema, see [output validation](/en/sdk/output-validation).
+
+## Declare required files
+
+workflowId and `stepId` must match the actual graph:
+
+```json
+{
+  "artifactContracts": [
+    {
+      "workflowId": "analysis",
+      "stepId": "write-report",
+      "artifacts": [
+        {
+          "ref": "reports/analysis.md",
+          "nonEmpty": true,
+          "requiredHeadings": ["Conclusion", "Evidence"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field            | Check                                               |
+| ---------------- | --------------------------------------------------- |
+| ref              | A fixed, safe project-relative path.                |
+| refFrom          | A relative path from this actual output.            |
+| nonEmpty         | The file contains content.                          |
+| requiredText     | Required text exists.                               |
+| requiredHeadings | Actual Markdown sections exist.                     |
+| schema           | A synchronous JSON Schema for the actual JSON file. |
+| sha256From       | The output field supplying the file hash.           |
+
+References cannot target .git, installation directories, workflow control files, or paths outside the project. Report an actual SHA-256; without sha256From, supply it through Outcome artifact evidence.
+
+## Write the file and report its hash
+
+This execute function writes a real project file and hashes the written content:
+
+```js
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+
+async function executeReport() {
+  const ref = 'reports/analysis.md';
+  const content =
+    '# Analysis report\n\n## Conclusion\nReady for further trials.\n\n## Evidence\nLocal acceptance records.\n';
+  await mkdir('reports', { recursive: true });
+  await writeFile(ref, content, 'utf8');
+  const sha256 = createHash('sha256').update(content).digest('hex');
+  return {
+    status: 'succeeded',
+    output: { report: ref },
+    artifacts: [{ uri: ref, sha256 }],
+  };
+}
+```
+
+Register it with the actual write-report executor. Resolve paths against an explicit project root in real applications. Runtime verifies disk content and rejects a reported path without a generated file.
+
+## Add business conditions
+
+File checks answer whether the required file exists and has the expected structure. Requirements such as source support for every conclusion or complete coverage need a business validator.
+
+The application author or creation Agent implements and pins validators. They read actual input, output, and artifacts and accept or reject. Installing generic Rules or Hooks cannot prove business requirements are implemented.
+
+SDK rechecks relevant files when accepting step results, dispatching dependencies, and accepting downstream results. Later edits invalidate original evidence. Repair steps declare replacement artifact evidence through replaces and follow the original repair flow.
+
+## Validate positive and negative cases
+
+Comet Any creation requires isolated artifact acceptance. Provide a valid sample for every artifact-producing step. Business validators also need a negative sample with valid file, format, and output structure but an unmet business condition.
+
+For example, a valid report maps conclusions to sources. A negative report retains every section and field but has an unsupported conclusion. The validator must reject that report instead of only failing for missing files.
+
+Creator also checks missing files, empty content, invalid content, and hash changes. Correct failures or revise the plan. Skipping model Eval does not skip these checks.
+
+For manual applications, test the same conditions in temporary projects: valid files pass; missing, empty, and incomplete files fail; well-formed business-invalid output is rejected. Finally edit an accepted file and verify its old hash cannot support downstream work. Use separate execution sites to protect real projects.
+
+See the [Comet Any execution guide](/en/skill-creator/engine) for Rules, Hooks, and host capability boundaries.

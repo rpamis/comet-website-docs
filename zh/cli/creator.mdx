@@ -1,121 +1,56 @@
 ---
-title: "comet creator"
-description: "查看、恢复和推进 /comet-any Skill Creator 的创建状态。"
+title: 'comet creator'
+description: '启动、读取和恢复 Comet Any 的 SDK 创作 Run，回传实际动作与当前用户决定。'
 ---
 
-`comet creator` 是 `/comet-any` 的命令行配套入口。它专门处理三件事：恢复流程、读取发布就绪状态（readiness）、以及给出单一下一步命令。
-
-日常主线仍建议从 `/comet-any` 开始。只有在流程中断、需要排障，或要把某一步接入自动化时，再直接使用 `comet creator`。
-
-## 它和 publish 的区别
-
-| 命令 | 负责什么 | 什么时候用 |
-| --- | --- | --- |
-| `comet creator` | 创建、恢复、候选解析、方案确认、生成和 authoring lane | `/comet-any` 流程还没进入发布，或你要查下一步 |
-| `comet publish` | review、approve、publish、distribute | eval 证据就绪后，准备发布和分发 |
-| `comet bundle` | 高级后端 | 审计、排障、平台编译调试 |
-
-推荐主线是：
-
-```text
-/comet-any 创建 -> comet eval 验证 -> comet creator status/next -> comet publish（评审/批准/发布/分发）
-```
-
-发布阶段的命令细节见 [comet publish](/zh/cli/publish)；状态机、readiness 结论与阻塞码的权威说明见[发布和分发 Skill](/zh/skill-creator/publishing)。
+日常创作从 [Comet Any](/zh/skill-creator/getting-started) 开始。`comet creator` 提供同一创作过程的命令行入口，用于状态检查、恢复及 Agent 平台集成。
 
 ## 子命令
 
-| 命令 | 用途 | 必需参数 |
-| --- | --- | --- |
-| `comet creator list` | 列出可恢复的 Skill Creator candidate | - |
-| `comet creator status <name>` | 查看 readiness、blocker、warning 和 evidence | `<name>` |
-| `comet creator next <name>` | 打印单个推荐下一步 | `<name>` |
-| `comet creator guide` | 查看首次使用向导、偏好和可恢复流程摘要 | - |
-| `comet creator candidates` | 发现可用于组合的 Skill 候选 | - |
-| `comet creator propose <name>` | 预览 Skill Creator 方案，不写状态 | `<name>`、`--file` |
-| `comet creator init <name>` | 用确认后的 plan 初始化或更新状态 | `<name>`、`--file` |
-| `comet creator resolve <name>` | 解决缺失或歧义候选 | `<name>`、`--candidate` |
-| `comet creator authoring-plan <name>` | 查看生成 Skill 的创作 lane 计划 | `<name>` |
-| `comet creator authoring-record <name>` | 记录某个创作 lane 的输出 | `<name>`、`--lane`、`--file` |
-| `comet creator generate <name>` | 从已确认 metadata 生成 Skill 包 | `<name>` |
+| 命令              | 用途                                                    |
+| ----------------- | ------------------------------------------------------- |
+| `start <name>`    | 用自然语言目标启动可恢复创作                            |
+| `list`            | 列出项目中的创作记录                                    |
+| `status <name>`   | 读取当前 Run、Action、Wait 与证据                       |
+| `next <name>`     | 执行本地步骤，直到需要 Agent 平台执行操作或等待用户决定 |
+| `dispatch <name>` | 领取动作、回传真实结果或提交当前用户决定                |
+| `guide`           | 读取首次使用、偏好与恢复指引                            |
+| `candidates`      | 调查可用于创作的 Skill 候选                             |
 
-所有子命令都支持 `--project <dir>` 和 `--json`。
+子命令支持 `--project <dir>` 与 `--json`。
 
-## 常用恢复命令
+## 启动并读取状态
 
 ```bash
-# 列出可恢复流程
-comet creator list --project . --json
-
-# 查看完整状态、readiness 和证据
-comet creator status review-helper --project . --json
-
-# 只看下一步该做什么
-comet creator next review-helper --project . --json
+comet creator start weekly-report --project . --host codex --goal "整理已验收任务，生成周报并检查来源；用户确认后发布本地文件" --install-target .comet/creator/exports/weekly-report --json
+comet creator status weekly-report --project . --json
+comet creator next weekly-report --project . --json
 ```
 
-`comet creator next` 的文本输出会包含当前状态、所在阶段、推荐动作、推荐命令、原因，以及这一步是否需要用户确认。
+`--host` 可选择 `codex` 或 `claude-code`。`--install-target` 是完整应用包的项目内导出目录，不是平台 Skill 入口目录。
 
-```text
-Next step for review-helper
-Status: draft
-Current step: needs-eval
-Action: Run repository eval for the generated Skill
-Command: comet eval ./generated-skill/comet/eval.yaml --quick --html
-Reason: Current draft hash is missing passing eval evidence
-Requires confirmation: yes
-```
+可选 `--eval-config <file>` 指向 Eval 配置 JSON。模型凭据来自执行环境，不写入这个配置、包或报告。
 
-## 方案和生成命令
+## Agent 平台操作与用户决定
 
-这些命令默认由 `/comet-any` 在流程内自动调用。手工执行主要用于两类场景：一是自动化流水线需要显式控制步骤，二是你在排查候选解析或生成状态异常。
+请求保存在 JSON 文件中：
 
 ```bash
-# 首次使用向导
-comet creator guide --project . --json
-
-# 发现候选 Skill
-comet creator candidates --project . --json
-
-# 预览组合方案，不写状态
-comet creator propose review-helper --file ./plan.json --json
-
-# 用户确认方案后写入状态
-comet creator init review-helper --file ./plan.json --confirmed-proposal --json
-
-# 解决歧义候选
-comet creator resolve review-helper --candidate review-flow --source ./skills/review-flow --json
-
-# 忽略缺失候选，需要写明原因
-comet creator resolve review-helper --candidate optional-helper --ignore-missing --reason "not needed for this workflow" --json
-
-# 生成 Skill 包
-comet creator generate review-helper --json
+comet creator dispatch weekly-report --project . --request request.json --json
 ```
 
-<Warning>
-  不要绕过方案确认页直接生成。<code>/comet-any</code> 必须先展示 Skill Creator 方案确认页，等你确认后才写入 draft。
-</Warning>
+| 请求操作         | Agent 平台需要保留的执行信息                                     |
+| ---------------- | ---------------------------------------------------------------- |
+| `claim`          | 当前 Run、Action、执行端口、真实会话、稳定 claimToken 与实际能力 |
+| `record-outcome` | 同一动作与领取凭据、真实结果和实际产物                           |
+| `resolve-wait`   | 当前 Wait ID、提案摘要、唯一决定 ID 与实际用户选择               |
 
-## authoring lane 命令
+调用时应先读取 `status` 返回的具体标识与当前状态，切勿仅凭名称臆断 Action 或 Wait ID。分析动作使用配置的 `creator-host` 端口，并要求实际的 `skill-load`、`handoff` 能力。
 
-生成的 Skill 不是薄模板。`/comet-any` 会用 authoring lane 写入口正文、节点指导、脚本契约、参考文件和评审证据。
+审批只能提交当前待处理 Wait 支持的选择。若调整了方案、正文或依赖，之前已批准的旧提案将自动失效，不能继续沿用。
 
-```bash
-# 查看 quick 或 full 创作计划
-comet creator authoring-plan review-helper --depth quick --json
-comet creator authoring-plan review-helper --depth full --json
+## 恢复
 
-# 记录某个 lane 的输出
-comet creator authoring-record review-helper --lane skill-core --file ./lane-output.json --json
-```
+`next` 不会替 Agent 自动执行结果未知的操作，也不会代替用户批准。缺少必需产物或业务验收失败时，按当前返回的重试、修订或拒绝路径处理；模型 Eval 的 skip 不绕过本地检查。
 
-如果生成物里还保留 `AUTHORING PENDING` 标记，发布就绪检查会出现 `[authoring]` 阻塞项（blocker）。你需要完成对应 lane，并记录输出后再继续 eval 和发布。阻塞码的完整含义与恢复建议见[发布和分发 Skill · 阻塞码](/zh/skill-creator/publishing#阻塞码-blocker-codes)。
-
-## 下一步
-
-- [快速上手：组合任意 Skill](/zh/skill-creator/getting-started) — 从 `/comet-any` 跑完整主线
-- [创建 Skill 的完整流程](/zh/skill-creator/workflow) — 理解每个阶段
-- [comet publish](/zh/cli/publish) — eval 后的 review、approve、publish 和 distribute
-- [发布和分发 Skill](/zh/skill-creator/publishing) — 状态机、readiness 与阻塞码的权威说明
-- [comet bundle](/zh/cli/bundle) — 高级后端参考
+已经派发但结果未知时，先核对原动作和真实文件，再回传结果。完整机制见 [创作、验收与安装](/zh/skill-creator/workflow)。应用运行和分发分别使用 [comet runtime](/zh/cli/runtime) 与 [comet application](/zh/cli/application)。

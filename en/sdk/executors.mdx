@@ -1,0 +1,79 @@
+---
+title: 'Execute Skills and tools'
+description: 'Connect workflow steps to your Agent, tools, or local business functions and report actual results.'
+---
+
+You have a report-writing Agent and a publishing tool. Register a handler for each capability so Runtime can locate its execution entry by step ref.
+
+Complete the [quickstart](/en/sdk/quickstart) first. This page uses its workflow, host, and runtime; replace the corresponding configuration with the fragments below.
+
+## Choose a step type
+
+```js
+import { skill, tool } from '@rpamis/comet/runtime';
+
+const steps = {
+  draft: skill({ ref: 'draft-report' }),
+  publish: tool({ ref: 'publish-report', retry: 'reconcile' }),
+};
+```
+
+skill declares host Skill execution with action type invoke_skill. tool declares a tool call with type call_tool. Neither discovers local Skills nor connects models or MCP automatically. Handler names must match ref.
+
+## Validate input and read upstream results
+
+This local handler reads the actual output of draft. Connect your publishing interface after validating its input.
+
+```js
+import { createRuntimeExecutor, defineRuntimeHandler } from '@rpamis/comet/runtime';
+
+const host = createRuntimeExecutor({
+  id: 'host',
+  handlers: {
+    'publish-report': defineRuntimeHandler({
+      type: 'call_tool',
+      parseInput: ({ outputs }) => {
+        if (typeof outputs.draft !== 'string') {
+          throw new Error('Expected a report from draft');
+        }
+        return { report: outputs.draft };
+      },
+      execute: ({ report }, { action }) => {
+        console.log(action.id, report);
+        return { status: 'succeeded', output: { published: true } };
+      },
+    }),
+  },
+});
+```
+
+`parseInput` receives current input, upstream outputs for this activation, and optional activation input. Here `outputs.draft` is the business value; when inspecting a Run, the value is at run.outputs.draft.value.
+
+The second execute argument provides the original Action and host context. Save external service receipts and associate them with that Action for recovery. TypeScript infers one handler's input; JSON across steps still needs validation.
+
+## Register and advance
+
+Pass the executor to `createRuntime` through executors: [host], then call:
+
+```js
+const progress = await runtime.runUntilBlocked({
+  runId: 'report-1',
+  executorId: 'host',
+  maxActions: 20,
+});
+console.log(progress.reason, progress.actionsExecuted);
+```
+
+`maxActions` limits attempted actions in this invocation, not the duration of an individual model or tool call. Implement timeouts, cancellation, and model budgets in the host. For `executor-required`, check ref, type, and supported capabilities.
+
+## Report success, failure, and unknown results
+
+| Actual situation                                       | Handling                                                                     |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| A successful result is available.                      | Return status: 'succeeded' and the actual output.                            |
+| Business failure is confirmed.                         | Return status: 'failed' and error details; follow the declared failure path. |
+| Disconnection after dispatch leaves success uncertain. | Preserve the unknown result and query the original operation.                |
+
+A handler may throw after an external operation happened, so Runtime treats exceptions conservatively. Do not repeat publishing, payment, or messaging to test whether an earlier attempt succeeded. See [unknown-result recovery](/en/sdk/recovery).
+
+Provide model and tool credentials through a host closure or current environment, never Workflow, Run, output, or proposal data.

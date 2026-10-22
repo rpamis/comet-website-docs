@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from 'react';
-
 // 首页的两个演示视频合计超过 20MB，若随页面立即加载会拖慢首屏。
 // 组件仅在滚动接近视口时才挂载真实 <video>，离屏状态下只保留等比占位。
 export const SupervisorVideo = ({ src, width, height, label, fallback }) => {
@@ -30,7 +28,11 @@ export const SupervisorVideo = ({ src, width, height, label, fallback }) => {
   }, [shouldLoad]);
 
   return (
-    <div ref={containerRef} className="comet-home__supervisor-media" style={{ aspectRatio: `${width} / ${height}` }}>
+    <div
+      ref={containerRef}
+      className="comet-home__supervisor-media"
+      style={{ aspectRatio: `${width} / ${height}` }}
+    >
       {shouldLoad ? (
         <video
           autoPlay
@@ -47,11 +49,7 @@ export const SupervisorVideo = ({ src, width, height, label, fallback }) => {
           {fallback}
         </video>
       ) : (
-        <div
-          className="comet-home__supervisor-media-placeholder"
-          role="img"
-          aria-label={label}
-        />
+        <div className="comet-home__supervisor-media-placeholder" role="img" aria-label={label} />
       )}
     </div>
   );

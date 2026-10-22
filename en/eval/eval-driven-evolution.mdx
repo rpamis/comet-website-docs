@@ -12,27 +12,27 @@ This page is advanced Eval content for teams and source code maintainers. It is 
 Pull the Comet source code; Ordinary users do not need to understand these internal details. Please directly refer to [Quick Start ](/en/eval/quickstart)
 </Warning>
 
-## How does Comet integrate evaluation into the evolution closed loop
+## Integrating evaluation into the release pipeline
 
-Evaluation can only drive evolution when it is integrated into the closed loop of "creation → evaluation → release". Comet's approach is to set the eval result as a publish access: without the current draft of eval evidence, if the eval fails, or if the eval evidence corresponds to an old hash, the Skill cannot publish.
+Evaluation must integrate directly into the "author → evaluate → publish" lifecycle to reliably ensure Skill quality. Comet enforces evaluation evidence as a strict release gate: if evaluation evidence is missing for the current draft, if evaluation runs fail, or if evidence points to an outdated commit hash, the Skill cannot be published.
 
-After modifying a Skill, rerun the same task set and use the following signals to decide the next change:
+After modifying a Skill, rerun the evaluation against the same task benchmark and use the resulting signals to guide improvements:
 
 ```mermaid
 flowchart LR
-    Run["Run evaluation <br/>rubric + pass@k/pass^k<br/>+ failure attribution"] --> Read["Read the signal"]
+    Run["Run evaluation<br/>rubric + pass@k/pass^k<br/>+ failure attribution"] --> Read["Read signals"]
     Read --> Branch{"Where to invest next?"}
-    Branch -->|""gap Big"| Fix1["To enhance stability, <br/> decreases pass@k − pass^k"]
-    Branch -->|"The completion/main_flow is low"| Fix2[""Enhance capacity"]
-    Branch -->|"Low in a certain dimension"| Fix3["For the dimension modification of <br/>safety/recovery /..."]
-    Branch -->|"Attribution is harness/model"| NotSkill["It's not a Skill issue. <br/> modify the environment/model"]
+    Branch -->|"Large gap"| Fix1["Improve stability<br/>Reduce pass@k − pass^k"]
+    Branch -->|"Low completion/main_flow"| Fix2["Add capabilities"]
+    Branch -->|"Low specific dimension"| Fix3["Target specific dimension<br/>safety / recovery / ..."]
+    Branch -->|"Harness or model issue"| NotSkill["Not a Skill issue<br/>Fix environment / model"]
     Fix1 --> Improve["Improve Skill"]
     Fix2 --> Improve
     Fix3 --> Improve
-    Improve --> ReRun["Re-run the evaluation of <br/> and compare it with the frozen baseline"]
-    ReRun --> Gate{"Reach the release access control?"}
-    Gate -->|no| Run
-    Gate -->|is| Publish["Enter publish"]
+    Improve --> ReRun["Rerun evaluation<br/>Compare with frozen baseline"]
+    ReRun --> Gate{"Pass release gate?"}
+    Gate -->|No| Run
+    Gate -->|Yes| Publish["Enter publish"]
     NotSkill --> Run
 ```
 
@@ -66,22 +66,22 @@ In pure model evaluation, success is commonly defined as "the code passes tests"
 
 ### Reliability is more important than single capability
 
-Workflow skills are tools that users repeatedly use. For such tools, "getting it right every time" (high reliability) is more important than "getting it right occasionally" (high capacity limit). Comet simultaneously uses `pass@k` (the upper limit of capability) and `pass^k` (the lower limit of reliability), and the two indicators respectively answer different questions.
+Workflow skills are tools that users repeatedly use. For such tools, "getting it right every time" (high reliability) is more important than "getting it right occasionally" (high capacity limit). Comet uses both `pass@k` (capability upper bound) and `pass^k` (reliability lower bound) to evaluate peak performance versus consistent stability.
 
-## The difference from SWE-bench/SWE-bench Pro
+## Differences from SWE-bench / SWE-bench Pro
 
-The SWE-bench family is the de facto standard for code intelligence evaluation: given a real GitHub issue, see if the model can generate a patch that passes the test. The objects it evaluates are different from those evaluated by Comet eval.
+The SWE-bench family is the de facto benchmark for code intelligence evaluation: given a real GitHub issue, assess whether the model generates a patch that passes tests. Comet eval targets a fundamentally different evaluation object:
 
-|"Dimension"| SWE-bench / SWE-bench-Pro |Comet eval (Evaluation Skill)|
+| Dimension | SWE-bench / SWE-bench Pro | Comet eval (Skill Evaluation) |
 | --- | --- | --- |
-|Evaluation object|The code capabilities of the model /harness|The incremental value of Skill (whether the addition of Skill improves)|
-|Interaction form|Single-agent + sandbox environment, run to submit the answer|In multi-round interaction, the Skill pauses at the decision point and requires a response from the user (or a simulated user)|
-|The definition of "success"|patch passed the test.|Product correctness + process evidence (stage sequence, decision points, recoverable status)|
-|Whether to pay attention to the Skill being invoked|Not involved|Core concern: The Skill must be truly invoked and evidence must be left|
-|Capability vs Reliability|The key lies in the pass rate|Explicitly distinguish between `pass@k` (capability) and `pass^k` (reliability)|
-|Comparison method|Absolute pass rate|Incremental comparison with/without Skill (treatment system)|
+| Evaluation Target | Model / harness coding capabilities | Incremental value of Skill (whether adding the Skill improves outcomes) |
+| Interaction Pattern | Single-agent + sandbox environment, runs to completion | Multi-turn interaction; pauses at decision points and requires user (or simulated user) responses |
+| Definition of "Success" | Patch passes existing unit/regression tests | Correct output artifacts + process evidence (phase sequence, decision points, recoverable state) |
+| Skill Invocation Check | Not tracked | Core requirement: Skill must be verifiably invoked and leave evidence |
+| Capability vs. Reliability | Primary focus on raw pass rate | Explicitly distinguishes between `pass@k` (capability) and `pass^k` (reliability) |
+| Comparison Method | Absolute pass rate | Paired increment with/without Skill (treatment system) |
 
-The core difference lies in that: SWE-bench combines the effects of model, harness and augmentation into one pass rate; The assessment of Skill aims to answer a comparative question - on the same task and the same model, when this Skill is added, will the performance improve or decline, and by what extent. This question cannot be answered by pure model evaluation.
+The core difference is that SWE-bench conflates model capabilities, harness engineering, and prompting into a single pass rate. Skill evaluation answers a comparative question: on the same task and model, does injecting this Skill improve or degrade performance, and by how much? Pure model benchmarks cannot isolate this factor.
 
 Comet uses the treatment system for a comparison with and without Skill: `CONTROL` (baseline without Skill) versus `COMET_FULL` (injected with the complete Skill stack). The same task and the same isolated environment, with the only variable being Skill. This way, the marginal effect of Skill can be measured separately, avoiding including the model's own capabilities in the Skill benefits.
 
@@ -174,7 +174,7 @@ Source code location: CLAUDE.md contract is in `eval/local/skills/benchmarks/dep
 
 ## Bring assessment into the production environment of enterprises
 
-The evaluation concept of Comet eval is derived from LangChain's Evaluating Skills<sup>[2]</sup>: Test skills as prompts, and conduct evaluations with/without controls, isolated environments, reproducible quantitative metrics, and full observability. However, for it to be implemented in enterprises, local assessment alone is not sufficient.
+The evaluation concept of Comet eval is derived from LangChain's Evaluating Skills<sup>[2]</sup>: Test skills as prompts, and conduct evaluations with/without controls, isolated environments, reproducible quantitative metrics, and full observability. However, in production enterprise environments, local evaluation alone is not sufficient.
 
 The LangChain article emphasizes pairing Skill evaluation with observable experiment platforms like LangSmith. These platforms score each run and capture Agent actions (read files, create scripts, call Skills) for diagnosis. This is why Comet eval includes LangSmith integration.
 
@@ -208,9 +208,7 @@ None of these issues have been completely resolved yet - as SkillsBench states, 
 
 2. Xu, R. *Evaluating Skills*.langchain Blog, 2026-03-05. \[[Original link ](https://www.langchain.com/blog/evaluating-skills)\]
 
-## Next step
-
-- [Evaluation: The Compass of Skill Evolution ](/en/eval/why-eval) - Why is Evaluation the top priority for establishing capabilities? The basis for rubric, pass@k, pass^k
-- The scoring criteria and dual-agent evaluation ](/en/eval/scoring)-RUBRIC dimension details, as well as the complete mechanism of the dual-Agent interaction cycle
-- [Eval harness](/en/eval/harness) - collect/run internal mechanisms, environment variables, LangSmith integration
-- Quick Start ](/en/eval/quickstart) - Run an assessment once to see how these indicators are generated
+- [Why Eval: The Compass for Skill Evolution](/en/eval/why-eval) — Why evaluation is the foundational capability, and the rationale for rubrics, pass@k, and pass^k
+- [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) — Rubric dimensions and the dual-agent automated interaction loop
+- [Eval Harness](/en/eval/harness) — collect/run mechanics, environment variables, and LangSmith integration
+- [Quickstart](/en/eval/quickstart) — Run an evaluation to see how these metrics are generated

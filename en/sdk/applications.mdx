@@ -1,0 +1,172 @@
+---
+title: 'Workflow Application'
+description: 'Package a workflow, entry Skill, rules, and pinned dependencies as a runnable, installable application.'
+---
+
+Workflow Application binds a workflow to its actual execution content. The package records identity, entry Skill, execution module, dependencies, and hashes so the host can load and execute it.
+
+Use [Compose any Skill](/en/skill-creator/getting-started) to have an Agent author complete business content. For manual authoring and integration, start with this local report sample.
+
+## When to use an application
+
+Basic Runtime can coordinate functions and save results inside a service. Use Application when delivering to another Agent platform, pinning Skill dependencies, or installing project entries.
+
+The sample creates a local Markdown report, retains the draft, waits for approval, and publishes locally. Use a separate directory to avoid packaging source code, runtime records, and credentials together.
+
+## Minimal package
+
+Create local-report with three files.
+
+`application.json`:
+
+```json
+{
+  "schema": "comet.workflow.application.v1",
+  "id": "local-report",
+  "version": "1",
+  "base": "standalone",
+  "runtimeVersion": "0.5.0",
+  "entrySkill": "SKILL.md",
+  "module": "application.mjs",
+  "skills": [],
+  "bindings": []
+}
+```
+
+`application.mjs`:
+
+```js
+export { createReportApplication as createApplication } from '@rpamis/comet/applications';
+```
+
+`SKILL.md`:
+
+```markdown
+---
+name: local-report
+description: Generate a local report that needs user approval before publication.
+---
+
+# Local report
+
+Start report-publishing@1 with application.json and provide title, body, and sources.
+Retain the Run ID, execute current actions, show the actual draft, and wait for a user decision.
+Publish locally after approval. Reconcile unknown results without redispatching the original action.
+```
+
+draft and sources can complete independently. compose generates a real Markdown draft after both finish. The parent displays the draft, path, and hash before waiting for a decision. The sample checks report format and local publication; source fact checking and external deployment need additional validation and permission.
+
+## Load through the SDK
+
+```js
+import path from 'node:path';
+import { loadWorkflowApplication } from '@rpamis/comet/applications';
+
+const application = await loadWorkflowApplication({
+  file: path.resolve('local-report/application.json'),
+  projectRoot: process.cwd(),
+});
+console.log(application.identity);
+```
+
+Use a separate package directory instead of making the entire project and runtime state the package root. The loader checks actual files, identity, and pinned dependencies; changing one version's content cannot retain the same original identity.
+
+Loading executes the application module. Review module and dependency sources first; pinned hashes do not provide a code sandbox.
+
+### Generate and approve the report
+
+Save the following script as `app-run.mjs` at the project root, outside the application package. It uses the loader's pinned implementation and Store, explicitly advancing the report child workflow:
+
+```js
+import path from 'node:path';
+import { loadWorkflowApplication } from '@rpamis/comet/applications';
+import { createRuntime } from '@rpamis/comet/runtime';
+
+const application = await loadWorkflowApplication({
+  file: path.resolve('local-report/application.json'),
+  projectRoot: process.cwd(),
+  runId: 'report-1',
+});
+const runtime = createRuntime({ ...application.implementation, store: application.store });
+await runtime.start({
+  runId: 'report-1',
+  workflow: { id: 'report-publishing', version: '1' },
+  input: {
+    title: 'Weekly project report',
+    body: 'Three accepted tasks were completed this week.',
+    sources: ['Local task records'],
+  },
+});
+let progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'report-local' });
+for (const child of progress.run.children) {
+  await runtime.runUntilBlocked({ runId: child.runId, executorId: 'report-local' });
+}
+progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'report-local' });
+const wait = progress.run.waits.find((item) => item.status === 'pending');
+console.log(progress.reason);
+if (wait) console.log(wait.proposal);
+if (process.argv.includes('--approve')) {
+  if (!wait) throw new Error('No pending approval');
+  await runtime.resolveWait({
+    runId: progress.run.runId,
+    waitId: wait.id,
+    proposalHash: wait.proposalHash,
+    decisionId: 'report-publication-1',
+    choice: 'approved',
+  });
+  progress = await runtime.runUntilBlocked({ runId: 'report-1', executorId: 'report-local' });
+  console.log(progress.reason);
+}
+console.log(progress.run.outputs.publish?.value);
+```
+
+Run `node app-run.mjs` first and inspect the draft, path, and hash. After confirming the current content, run `node app-run.mjs --approve` to print the publication result and local report path. Reports live in `.comet/reports/local-report/`; the application Store manages Run data. Keep runner scripts and Run files outside the pinned package to preserve its content identity.
+
+## Run through the CLI
+
+Save each request as JSON and use [comet runtime](/en/cli/runtime):
+
+```bash
+comet runtime dispatch --application-file ./local-report/application.json --project-root . --request start.json --json
+```
+
+`start.json`:
+
+```json
+{
+  "operation": "start",
+  "runId": "report-1",
+  "workflow": { "id": "report-publishing", "version": "1" },
+  "input": {
+    "title": "Weekly project report",
+    "body": "Three accepted tasks were completed this week.",
+    "sources": ["Local task records"]
+  }
+}
+```
+
+Save the returned Run ID in your business record. Later queries, execution, and recovery use --application local-report with that original ID. Read actual child Run, Action, and Wait IDs instead of deriving them from step names.
+
+Save `inspect.json` and run the query:
+
+```json
+{ "operation": "inspect", "runId": "report-1" }
+```
+
+```bash
+comet runtime dispatch --application local-report --project-root . --request inspect.json --json
+```
+
+Read the current pending Action and configured executor from the actual response, then submit execute as described in the [runtime reference](/en/cli/runtime). For child execution, use the returned child Run ID. On approval, show the actual draft and Wait before submitting the decision. A successful start does not mean the report has been generated.
+
+CLI suits Agent platforms that execute commands. A Node.js host can use loaded capabilities with the SDK. Both use the same pinned package and Run; do not maintain a replacement workflow state.
+
+## Connect real Skills
+
+`inspectApplicationSkill` reads the actual directory. `adaptApplicationSkill` creates an adaptation contract covering reviewed content, capabilities, schemas, side effects, acceptance, and recovery. Pinned dependencies cannot silently change during a Run.
+
+Use `createApplicationSkillExecutor` for actual host calls, capability checks, and authorization. Skill loading, host completion claims, machine validation, and independent review are recorded separately; one cannot replace another.
+
+See [comet application](/en/cli/application) for delivery, [application evaluation](/en/eval/applications) for evaluation, and [artifact validation](/en/sdk/artifact-validation) for required files and business conditions.
+
+Next: [installation, distribution, and upgrades](/en/sdk/distribution).

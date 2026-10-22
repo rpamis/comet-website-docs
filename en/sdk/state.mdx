@@ -1,0 +1,67 @@
+---
+title: 'Business state and loops'
+description: 'Save business progress, select branches from accepted results, and bound revision rounds.'
+---
+
+A report allows at most two review rounds and finishes early on approval. Save the round count in business state and use a transition handler to decide whether to activate another round.
+
+## Define state and allowed transitions
+
+This is a workflow definition fragment:
+
+```js
+import { tool } from '@rpamis/comet/runtime';
+
+const workflow = {
+  id: 'revision-loop',
+  version: '1',
+  entry: 'review',
+  initialState: { rounds: 0 },
+  stateSchema: {
+    type: 'object',
+    required: ['rounds'],
+    properties: { rounds: { type: 'integer', minimum: 0, maximum: 2 } },
+    additionalProperties: false,
+  },
+  steps: { review: tool({ ref: 'review' }) },
+  transitions: [{ from: 'review', to: 'review' }],
+  transitionHandler: { id: 'revision-policy', version: '1' },
+  maxTransitions: 10,
+};
+```
+
+`initialState` supplies starting business state; `stateSchema` constrains saved structure. Declare loop edges in the graph. `maxTransitions` limits scheduler transitions, not model tokens, time, or cost.
+
+## Select the next step from the result
+
+```js
+const revisionPolicy = {
+  id: 'revision-policy',
+  version: '1',
+  apply: ({ run, event }) => {
+    if (event.kind !== 'action-outcome') {
+      return { state: run.state, next: [] };
+    }
+    const rounds = run.state.rounds + 1;
+    const approved = event.outcome.output.approved === true;
+    return {
+      state: { rounds },
+      next: approved || rounds >= 2 ? [] : ['review'],
+    };
+  },
+};
+```
+
+Register `transitionHandlers`: [revisionPolicy] with `createRuntime`, and make the review handler return `{ status: 'succeeded', output: { approved: false } }`. The fragment assumes validated state and output; production applications should add the corresponding `outputSchema` to review.
+
+The first rejection triggers another review; the second round finishes. Approval ends earlier. Inspect `state.rounds` and each round's Actions with runtime.inspect(`runId`). completed means the loop ended; read approved separately. Reaching a round limit is not a passed review.
+
+## Provide activation input
+
+next can contain a step name or `{ stepId: 'review', input: { round: rounds + 1 } }`. The latter is read through activation in the handler, while the original Run input stays unchanged.
+
+Different activations of a step have separate Actions, upstream results, and waits. A previous round's approval cannot authorize the next one.
+
+## Keep transition handlers free of side effects
+
+apply receives accepted events and returns state and next steps. It does not call models, publish, or write Runs directly. Declare side effects as skill or tool steps and execute them through the [host executor](/en/sdk/executors), so recovery can distinguish committed state from uncertain external operations.

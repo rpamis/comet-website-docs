@@ -1,4 +1,5 @@
-export const DashboardWebsiteDemo = () => {
+export const DashboardWebsiteDemo = ({ language = 'zh' }) => {
+  const ASSET_VERSION = '0.5.0-website-42';
   const DESIGN_WIDTH = 1444;
   const DESIGN_HEIGHT = 901;
   const MOBILE_BREAKPOINT = 768;
@@ -37,7 +38,7 @@ export const DashboardWebsiteDemo = () => {
     let cancelled = false;
     let unmountDashboard;
 
-    // 预览 bundle 约 5.9MB（gzip 后 1.7MB），与首屏渲染同时请求会抢占带宽。
+    // 预览 bundle 较大，与首屏渲染同时请求会抢占带宽。
     // 等浏览器空闲（至多 1.2s）再拉取，首屏文字与 CTA 先行渲染。
     const startLoading = (load) => {
       if (typeof window === 'undefined') {
@@ -57,46 +58,63 @@ export const DashboardWebsiteDemo = () => {
     // SPA 内页切换时避免重复拉取。
     const loadDashboardAssets = () => {
       const cache = globalThis.__cometDashboardWebsiteDemoAssets;
-      if (cache) return cache;
+      if (cache && globalThis.__cometDashboardWebsiteDemoAssetsVersion === ASSET_VERSION)
+        return cache;
 
       const fetchPayload = (url) =>
-        fetch(url).then((response) => {
+        fetch(url).then(async (response) => {
+          if (response.status === 404) {
+            response = await fetch(url.replace('.json?', '.txt?'));
+          }
           if (!response.ok)
             throw new Error(`Dashboard 预览静态资源加载失败（${response.status}）。`);
           return response.json();
         });
 
-      globalThis.__cometDashboardWebsiteDemoAssets = Promise.all([
+      globalThis.__cometDashboardWebsiteDemoAssetsVersion = ASSET_VERSION;
+      const pending = Promise.all([
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=0.4.2-website-01',
+          `/assets/dashboard-website-demo/dashboard-website-demo.js.json?v=${ASSET_VERSION}`,
         ),
         fetchPayload(
-          '/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=0.4.2-website-01',
+          `/assets/dashboard-website-demo/dashboard-website-demo.css.json?v=${ASSET_VERSION}`,
         ),
       ]).catch((error) => {
-        delete globalThis.__cometDashboardWebsiteDemoAssets;
+        if (globalThis.__cometDashboardWebsiteDemoAssets === pending) {
+          delete globalThis.__cometDashboardWebsiteDemoAssets;
+          delete globalThis.__cometDashboardWebsiteDemoAssetsVersion;
+        }
         throw error;
       });
 
-      return globalThis.__cometDashboardWebsiteDemoAssets;
+      globalThis.__cometDashboardWebsiteDemoAssets = pending;
+      return pending;
     };
 
     const runDashboardBundle = (jsSource) => {
-      if (globalThis.CometDashboardWebsiteDemo) {
+      if (
+        globalThis.CometDashboardWebsiteDemo &&
+        globalThis.__cometDashboardWebsiteDemoRuntimeVersion === ASSET_VERSION
+      ) {
         return globalThis.CometDashboardWebsiteDemo;
       }
 
       // 内联 <script> 同步执行；此前已有标记却拿不到入口，说明上次执行已失败，不再重复注入。
-      if (document.querySelector('script[data-comet-dashboard-website-demo]')) {
+      if (document.querySelector(`script[data-comet-dashboard-website-demo="${ASSET_VERSION}"]`)) {
         throw new Error('Dashboard 预览脚本执行失败。');
       }
 
       const script = document.createElement('script');
-      script.dataset.cometDashboardWebsiteDemo = 'true';
+      const previousRuntime = globalThis.CometDashboardWebsiteDemo;
+      script.dataset.cometDashboardWebsiteDemo = ASSET_VERSION;
       script.textContent = jsSource;
       document.head.append(script);
 
-      if (globalThis.CometDashboardWebsiteDemo) {
+      if (
+        globalThis.CometDashboardWebsiteDemo &&
+        globalThis.CometDashboardWebsiteDemo !== previousRuntime
+      ) {
+        globalThis.__cometDashboardWebsiteDemoRuntimeVersion = ASSET_VERSION;
         return globalThis.CometDashboardWebsiteDemo;
       }
       throw new Error('Dashboard 预览脚本执行失败。');
@@ -123,7 +141,10 @@ export const DashboardWebsiteDemo = () => {
           if (cancelled) return;
           const dashboard = runDashboardBundle(jsPayload.js);
           // mount 要求提供 stylesheetUrl；传入同源占位 URL（CSP 允许），真正的样式随后以内联 <style> 注入。
-          unmountDashboard = dashboard.mount(mountPoint, { stylesheetUrl: window.location.href });
+          unmountDashboard = dashboard.mount(mountPoint, {
+            stylesheetUrl: window.location.href,
+            language,
+          });
           inlineDashboardStyles(cssPayload.css);
         })
         .catch((error) => {
@@ -135,7 +156,7 @@ export const DashboardWebsiteDemo = () => {
       cancelled = true;
       unmountDashboard?.();
     };
-  }, []);
+  }, [language]);
 
   const { scale, isScrollable } = viewport;
   const scaledWidth = DESIGN_WIDTH * scale;
@@ -153,7 +174,13 @@ export const DashboardWebsiteDemo = () => {
       className={`comet-dashboard-website-stage${isScrollable ? ' is-mobile-viewport' : ''}`}
       style={{ height: `${scaledHeight}px` }}
       tabIndex={isScrollable ? 0 : undefined}
-      aria-label={isScrollable ? '可横向浏览 Comet Dashboard' : undefined}
+      aria-label={
+        isScrollable
+          ? language === 'en'
+            ? 'Scroll the Comet Dashboard horizontally'
+            : '可横向浏览 Comet Dashboard'
+          : undefined
+      }
       onKeyDown={handleViewportKeyDown}
     >
       <div

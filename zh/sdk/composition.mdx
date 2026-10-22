@@ -1,0 +1,98 @@
+---
+title: '组合 Native、Classic 与独立流程'
+description: '选择适合的应用工厂，在原有验收规则内扩展或组合 Skill。'
+---
+
+应用的 `base` 决定它使用哪套流程。应根据业务需要的阶段、验收和恢复方式选择 `base`；只修改入口 Skill 的文字，不会改变应用实际使用的流程。
+
+| 类型       | 公开工厂                          | 适合的工作                                     |
+| ---------- | --------------------------------- | ---------------------------------------------- |
+| Native     | `createNativeWorkflowApplication` | 在候选、父任务、子任务或集成检查中追加团队工作 |
+| Classic    | `createClassicApplication`        | 组合 full、hotfix、tweak 的 Skill 与扩展步骤   |
+| Standalone | `createStandaloneApplication`     | 自行定义步骤、分支、并行、合流和子流程         |
+| 报告样板   | `createReportApplication`         | 本地报告生成、用户审批与发布                   |
+
+## Native 扩展
+
+从 `@rpamis/comet/applications/native` 导入工厂。扩展声明自己的 Skill、产物、验证器，以及作用范围：`candidate`、`parent`、`child` 或 `integration`。
+
+扩展工作绑定当前候选与实际输入。需求、正式 Spec、原候选、批准或产物变化后，不能把旧结果作为当前检查。
+
+Native 的 Builder、独立 Verifier、Supervisor、用户决定和 Archive 条件继续由 Native 管理。扩展增加自己的业务检查，不替换这些职责。
+
+例如你要在当前候选的独立检查后增加团队安全审查。在应用模块中使用以下工厂配置片段；`securityValidator` 必须是你已实现的真实验证器：
+
+```js
+import { createNativeWorkflowApplication } from '@rpamis/comet/applications/native';
+
+export function createApplication(context) {
+  return createNativeWorkflowApplication(context, {
+    extensions: [
+      {
+        id: 'security-review',
+        skillId: 'security-review',
+        scopes: ['candidate'],
+        artifactRefs: ['reports/security-review.md'],
+        validator: securityValidator,
+      },
+    ],
+  });
+}
+```
+
+同时在应用清单声明实际 Skill 依赖与对应绑定，并为报告写产物契约。安全报告不合格时，候选不能把此扩展当成已完成。涉及父任务、子任务或集成结果时，选择对应 scope，验证当前输入与候选身份。
+
+## Classic 组合
+
+从 `@rpamis/comet/applications/classic` 导入工厂，选择 full、hotfix 或 tweak。替换的 Skill 接收原阶段所需的输入，产出仍须符合该阶段的要求；新增步骤放在领域允许的检查位置。
+
+Build、Verify 和 Archive 中的机器检查使用真实命令与当轮证据。缺少检查计划、实际命令失败或输入已经变化时，不能提交成功结果来进入下一阶段。
+
+Classic 的用户批准、必要文档与归档规则继续有效。Git 提交、推送及其他外部操作按实际交付授权执行。
+
+先选择 profile，再调查该 profile 的实际步骤与输入要求。例如不替换阶段 Skill、只使用 full 基础流程的应用模块：
+
+```js
+import { createClassicApplication } from '@rpamis/comet/applications/classic';
+
+export function createApplication(context) {
+  return createClassicApplication(context, { profile: 'full' });
+}
+```
+
+清单 `base` 使用 `classic-full`，与 profile 一致。要替换执行 Skill，通过 `replacements` 声明实际 `stepId` 和 `skillId`；新增检查通过 `extensions` 指定 `afterStep`、产物和验证器。步骤名称从原应用定义读取，不根据阶段显示名称猜测。
+
+## 独立流程
+
+独立应用可以声明自己的工作流图、输出 Schema、状态、转移处理器、执行器和验证器。每条转移都要在图中声明；并行写入同一范围时，应声明顺序或使用独立工作区。
+
+独立流程的验收取决于自己的契约。例如，一个报告流程的 `completed` 可能表示发布结束，也可能表示沿拒绝分支结束，应读取实际业务结果。
+
+将 [并行示例](/zh/sdk/parallel) 中的 `workflow` 和 `host` 放入独立模块，可按下面的配置封装：
+
+```js
+import { createStandaloneApplication } from '@rpamis/comet/applications';
+
+export function createApplication() {
+  return createStandaloneApplication({
+    workflows: [workflow],
+    executors: [host],
+    executorIds: ['host'],
+    validators: [],
+    validatorRefs: [],
+    transitionHandlers: [],
+  });
+}
+```
+
+这是接在已有定义后的配置片段。工厂核对执行器、验证器和转移处理器声明与实际配置是否一致，不接受缺少执行入口的图。该独立工厂当前不提供证据等待验证端口；需要 `evidence` 步骤时使用基础 Runtime 的显式 `evidenceValidators`，或自行实现完整应用工厂，不把这段样板当成支持所有 Runtime 步骤的承诺。
+
+## 用确认方案装配
+
+`@rpamis/comet/applications/compiler` 提供 `prepareWorkflowApplicationPlan` 和 `compileWorkflowApplication`。准备阶段装配实际图与提案，确认后再编译完整包。
+
+方案固定 Skill 内容、模块、输入输出和验证条件。文档、依赖或流程发生变化时，重新准备并确认方案。不要用另一个执行模块冒充已确认的图。
+
+不想直接编写方案结构时，由 [Comet Any](/zh/skill-creator/overview) 调查真实 Skill 并准备提案；平台安装由 [comet application](/zh/cli/application) 处理。
+
+按“检查实际 Skill → 准备方案 → 展示并确认 → 编译包 → 隔离验收 → 安装预览”的顺序接入。方案变更后重新确认；编译成功后检查正常和业务不合格样例，最后再分发。Skill 契约准备见 [接入真实 Skill](/zh/sdk/skill-adaptation)。

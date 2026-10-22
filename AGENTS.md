@@ -15,6 +15,7 @@
 ## Terminology
 
 {/* Add product-specific terms and preferred usage */}
+
 {/* Example: Use "workspace" not "project", "member" not "user" */}
 
 ## Style preferences
@@ -32,6 +33,7 @@
 - 本站是 Comet 面向用户的产品文档。所有面向网站发布的中文内容都应达到可直接发布的产品文档标准；不要把发布正文写成内部设计记录、开发过程复盘、PR 总结或研究备忘录。
 - 以用户任务和用户可感知的产品行为组织内容：用户在什么场景使用、需要做什么、会看到什么结果、有哪些限制。只有解释使用方法、行为边界或故障排查所必需时，才展开内部实现。
 - 使用产品中的正式名称和用户可见术语。不要把源码标识、内部缩写或团队黑话直接当成面向用户的表达；确需保留时，在首次出现处解释。
+- 中文内容中，表示 Docker 容器所在机器时保留“宿主机”；其他语境禁用“宿主”一词，根据实际对象使用“Agent 平台”“Agent”“执行器”或“本机”等准确名称，不要混淆平台、执行者和本机环境。
 - 使用中性、专业、自然的现代汉语。句子应符合中文语序和表达习惯，指代明确、衔接顺畅、读起来通顺；避免英文直译腔、抽象名词串、过度书面化、公文套话和口号式表达。
 - 产品化不等于营销化。可以说明价值和收益，但必须落实到具体场景、产品行为、数据或证据。
 - 开头直接说明对象、行为、适用条件或结果。不要用行业趋势、产品愿景、价值判断或“重要性”铺垫。
@@ -162,3 +164,32 @@
 - zh 做**结构/内容级改动**（新增页面、移动章节、删除小节、行为修正、术语/编号变更）后，把 en 同步成同结构、同语义的版本；纯中文措辞/文风改动不必同步 en。
 - en 同步后校验：无中文残留、无 `/zh/` 链接、代码围栏成对、mermaid/标签完整；新增页面要同时加入 `docs.json` 的 zh 与 en 导航。
 - en 若存在历史机翻残句或占位乱码（如坏 token、错位文本节点），在同步时顺带修正为自然英文。
+
+## Dashboard 与官网内嵌演示的字体规则
+
+修改 Dashboard、官网内嵌 Dashboard 或演示资产时，执行本节；Mintlify 文档正文沿用站点主题的排版。
+
+- 字体和字号以 `../domains/dashboard/web/src/styles.css` 为样式来源，Ant Design token 在 `../domains/dashboard/web/src/main.jsx` 中与之保持一致。界面使用 `--font-ui`，标题使用 `--font-display`，代码和原始记录使用 `--font-mono`；组件复用这些变量。
+- 默认 100% 下，页面标题 24px、对象标题 20px、区块标题 16px、正文及字段值 14px、说明和时间等辅助文字 13px。统计数字可放大突出层次，Markdown 正文保留阅读排版。必要信息不得缩到 10–12px；检查 Tailwind 实际计算字号，避免根字号使 rem 字号意外变小。
+- 字重采用 400、500、600，确需强调时使用 700。常规文字行高至少 1.4，正文建议 1.5–1.7。浅色和深色模式下，必要的小字号文字与实际背景对比度至少 4.5:1；禁用控件除外。
+- 通过现有 Appearance 字号设置统一缩放一次，保留根 rem 的间距基准；新组件复用同一机制。官网外层桌面画布缩放不通过减小源字号补偿。
+- 空间不足时先换行、重排元信息或切换布局，保留正文阅读宽度。状态和操作按钮不得重叠，标签页文字保持完整，窄屏可横向滚动。记忆列表中等窗口下的正文宽度至少 220px，手机至少 200px。
+- 验收使用新构建和当前缓存版本的实际页面：检查 1600px、1280px 和 390px 宽度，覆盖 Classic、Native、Any、Eval、个人记忆、项目知识、可观测、设置和预览；补查深色、英文、长文本及 125% 字号。检查计算字号、阅读列宽、按钮遮挡和水平溢出，不能只凭源码判断一致。
+- 同步官网演示时，从 Dashboard 源码重新构建资产，更新演示缓存版本，并在内嵌演示中确认加载了当前资产。记录实际执行的浏览器验证和未验证范围；布局回归加入对应浏览器测试。
+
+<claude-mem-context>
+# Memory Context
+
+# claude-mem status
+
+This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past work.
+
+Memory injection starts on your second session in a project.
+
+`/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo, optional). Otherwise memory builds passively as work happens.
+
+Live activity: http://localhost:37777
+How it works: `/how-it-works`
+
+This message disappears once the first observation lands.
+</claude-mem-context>

@@ -1,341 +1,45 @@
 ---
-title: "Overview of Skill Creator (Advanced)"
-description: "Understand /comet-any's three starting points, Workflow Contract, generated artifacts, and release gates."
+title: 'Comet Any applications and responsibilities'
+description: 'Understand what the authoring Agent, SDK, and host each do, and the boundaries of three composition types.'
 ---
 
-<Tip>
-When creating, optimizing, or combining Skills, calling <code>/comet-any</code> in the Agent and confirming prompts is enough in most cases. Evaluation, publishing, distribution, and recovery are guided by the flow. Unless you are troubleshooting or building automation integration, you do not need underlying commands, internal state, or package structure first. This page is advanced content. For a fast path, start with [Quick Start: Combining Any Skill](/en/skill-creator/getting-started).
-</Tip>
+Comet Any turns business workflows into complete SDK Skill applications. Each application contains a readable entry and business rules, plus a Runtime that manages execution, approvals, artifacts, and recovery.
 
-`/comet-any` is Comet's Skill creation entry point (also known as **Skill Creator**). You describe the desired Workflow that reads the real local Skill, compiles the target into a **Workflow Contract**, and regenerates into a ** verifiable, reviewable, and distributable ** Skill Bundle And hide the back-end complexity (Bundle, Factory, composition, resolved skills) internally.
+## Who writes what
 
-## Core design principles
+| Participant        | Responsibility                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authoring Agent    | Investigate actual Skills; write the complete entry, business Rule, execution ports, business validators, and validation samples                  |
+| SDK                | Assemble the actual workflow, pin content and dependencies, append the execution protocol, save Runs, and check Actions, approvals, and artifacts |
+| Execution host     | Load actual Skills, hand off tasks, call tools, obtain user decisions, and reconcile external results                                             |
+| Distribution entry | Preview and install platform Skills, shared Rule/Hook entries, and Runtime dependencies                                                           |
 
-The key to understanding `/comet-any` is a ** two-layer separation **
+SDK's general execution protocol cannot replace business content. For example, “the report must include sources” belongs in both business requirements and actual validation conditions. A single instruction does not establish enforcement.
 
-|layer|"Content|Who will come into contact with it|
-| --- | --- | --- |
-|"User layer|Three starting points + the adjusted vocabulary of `Retain/Add/Replace/Close` + the responsibility description of each   node|All users|
-|"Inner layer| Bundle、Factory、composition、Workflow Protocol、resolved-skills.json |View only during auditing/troubleshooting|
+## Application contents
 
-The only entry point that users need to remember is `/comet-any`. When it is necessary to restore the creation state, use `comet creator`; After entering the release, use `comet publish`; `comet bundle` is only reserved as an advanced backend for auditing and troubleshooting.
+The complete package uses `application.json` as its entry and pins application identity, version, entry Skill, execution module, and actual Skill dependencies. The authoring plan must contain complete `SKILL.md` and `rules/workflow-guard.md` content. It may include Markdown resources that are actually referenced.
 
-## Main path
+Platform installation entries refer to this pinned package. Successful file installation, Skill loading, Action completion, machine validation, and actual host validation are recorded separately.
 
-```text
-/ Comet-any to create → comet eval to verify → comet creator to check status → comet publish and distribute
-```
+## Three composition types
 
-The expanded sequence is:
+**Native extensions** add work at allowed candidate, parent, child, or integration checks. The original Builder, independent Verifier, user approvals, and archive constraints remain.
 
-```text
-Created by /comet-any
-→ comet eval --collect / --html (Verification)
-comet creator status/next (readiness and the only next step)
-→ comet publish review/approve/run
-→ comet publish distribute --preview
-→ comet publish distribute
-```
+**Classic composition** uses the full, hotfix, and tweak domain factories to add or replace Skills within required-document and stage-authorization constraints.
 
-`comet creator` inspects and resumes the `/comet-any` creation workflow. `comet bundle` is the advanced Bundle backend. `comet skill` is a low-level Skill tool, suitable for local debugging and Engine Run. None of them are the main entry points for creating skills on a daily basis.
+**Standalone applications** declare their own workflow graphs, Schemas, state, branches, parallel work, and child workflows. Their contracts define acceptance. For example, a local report's rejection branch can end normally without publication.
 
-## Three starting points
+Follow complete scenarios for [Native customization](/en/skill-creator/native-customization), [Classic customization](/en/skill-creator/classic-customization), or [independent Skill composition](/en/skill-creator/standalone-composition).
 
-The user only needs to choose one of the three starting points at the first level. They correspond to three **Skill Creator intents ** (`skillCreatorIntent`), and the back end compiles each path to the same Workflow Contract:
+## What confirmation pins
 
-|Starting point (User layer|Skill Creator Intent|Meaning|Typical scenarios|
-| --- | --- | --- | --- |
-|"Five-stage customization based on Comet's existing Skill.| `customize-comet` |Make incremental adjustments within the protected boundary of `/comet`|Add the `grill-me` requirement clarification Skill to `/comet`|
-|** Create a brand-new workflow Skill**| `new-skill` |Generate a new workflow-kernel from the target description|Establish a team-specific process|
-|** Organize existing skills **| `upgrade-existing` |Organize the existing skills into releasable standard packages|Standardize the scattered skills|
+A proposal shows complete content, actual steps, dependencies, output conditions, failure paths, and capability limitations. Approval applies to the whole proposal; a content summary or old approval cannot replace it.
 
-## Workflow Contract: A common model for all paths
+After compilation, execution uses pinned content. If files or dependencies drift, retain the current records and restore the original content, or revise the plan and obtain new confirmation.
 
-No matter which starting point you choose, `/comet-any` will eventually compile the target into the same **Workflow Contract**. This is the core concept for understanding the entire Skill Creator:
+## How stage files prevent progress
 
-|Concept|Meaning|
-| --- | --- |
-| **Workflow Node** |Recoverable nodes in the process, such as `open`, `design`, `plan`, `execute`, `review`, `verify`, `archive`|
-| **Node Responsibility** |The responsibilities of this node in the Agent workflow are to explain why it exists, what it needs to produce, and whether it can be replaced|
-| **Skill Binding** |The implementation Skill or auxiliary Skill of a certain node|
-| **Required Skill Call** |It is required that a certain Skill must be called within the node, but the implementation of the node should not be replaced. For example, if `open` is required, `grill-me` must be called to clarify the requirement|
-| **Output Schema** |The files, statuses or evidence that nodes must produce. Scripts, eval, and readiness only recognize the Output Schema, not the Skill name|
-| **Guardrail** |Inspections that block or allow the advancement of nodes|
-| **Handoff** |evidence that must be brought back when a sub-agent or cross-node handover occurs|
-| **workflow-protocol.json** |The ** single source of truth ** for the runtime state of the generated package is read by runtime/eval/review/readiness|
+Applications declare required artifacts and content conditions for actual steps. Business validators check domain conditions. SDK checks actual files and digests. Missing files or failed conditions prevent stage results from becoming successful evidence, and downstream work cannot proceed on stale evidence.
 
-<p align="center">
-  <img src="/assets/skill-creator-overview-illustrations/01-workflow-contract.png" alt="Xiaoyu organized the three starting points of new creation, upgrade and combination into the same Workflow Contract template" width="800" />
-</p>
-
-<p align="center">Whether you start by creating, upgrading, or composing, the result is the same Workflow Contract.</p>
-
-### Two types of Workflows
-
-<Columns columns={2}>
-  <Column>
-    #### `comet-five-phase-overlay`
-Make incremental adjustments based on the classic five-stage framework of Comet. Retain the main process of `/comet` and the state semantics of `.comet.yaml`, with 8 built-in nodes.
-  </Column>
-  <Column>
-    #### `workflow-kernel`
-Brand-new custom workflow. When declaring nodes, Output Schema, Guardrail and Handoff from zero, the state needs to be redeclared.
-  </Column>
-</Columns>
-
-## Protected boundary: Five-stage customization based on Comet's existing Skill
-
-When you choose "Five-stage Customization based on Comet's existing Skill", `/comet` is regarded as the "protected boundary". `comet-five-phase-overlay` has these 8 built-in nodes:
-
-|Node|Duties|Type|Available operations|
-| --- | --- | --- | --- |
-| `open` |Receive the requirements, select the change form, and initialize Comet state| control | `require`、`augment` |
-| `design` |Transform the confirmed requirements into design products and OpenSpec delta| producer | `require`、`augment`、`override` |
-| `plan` |Produce an executable implementation plan| producer | `require`、`augment`、`override` |
-| `execute` |Directly implement the execution plan| control | `require`、`augment` |
-| `subagent-execute` |Appoint a sub-agent to execute and request the return of evidence| handoff | `require`、`augment` |
-| `review` |Check the implementation with the review Skill before verification (optional)| guardrail | `require`、`augment`、`disable` |
-| `verify` |Run verification, harmonize branches, and determine whether it is completed| control | `require`、`augment` |
-| `archive` |Archive OpenSpec changes and synchronize delta| control | `require`、`augment` |
-
-There are clear rules in the normal mode:
-
-|Rules|Explanation|
-| --- | --- |
-|The control node cannot override|`open`, `execute`, `verify`, and `archive` can only be implemented in `require`/`augment` (for example, when a certain Skill is required to be called), and cannot be replaced|
-|The producer node can be overridden|`design` and `plan` can be implemented interchangeably, but the corresponding Output Schema of `satisfies` must be used|
-|Optional nodes can be disabled|`review` is marked as `optional` and can be turned off|
-|**Required Skill Call does not replace implementations **|It requires a node to internally invoke a certain Skill, while the implementation Skill of the node itself remains unchanged|
-
-<Warning>
-Want to replace the control node (<code>open</code>/<code>execute</code>/<code>verify</code>/<code>archive</code>)? Normal mode does not allow it. At this point, you need to switch to the advanced <strong>workflow-kernel</strong> and re-declare the state, Output Schema, and Guardrail.
-</Warning>
-
-### 8 built-in Output schemas
-
-`/comet-any` has 8 built-in Output schemas. runtime/eval/readiness determines whether a node meets the standards based on the Schema. Skill names are only used for identification.
-
-| Output Schema |Node|Output|
-| --- | --- | --- |
-| `comet.intake.v1` | `open` |Comet state initialization|
-| `comet.design.v1` | `design` |Design document + OpenSpec delta|
-| `comet.plan.v1` | `plan` |Implementation plan + tasks|
-| `comet.execution-evidence.v1` | `execute` |Implement summary + test evidence|
-| `comet.handoff.v1` | `subagent-execute` |Transfer request + return result|
-| `comet.review.v1` | `review` |Review summary (blockers are optional)|
-| `comet.verify.v1` | `verify` |Verification command + verification result|
-| `comet.archive.v1` | `archive` |Archived summary + Archived status|
-
-<Tip>
-When a producer node performs <code>override</code>, it must declare in <code>satisfies</code> which Output Schema it satisfies. For example, to replace the <code>design</code> implementation, you must <code>satisfies: ["comet.design.v1"]</code>, otherwise the verification will report <code> producer-missing-output-schema</code>.
-</Tip>
-
-## Solution example: Add Gray-Me requirement clarification to /comet
-
-The following `plan.json` uses Required Skill Call to force the invocation of `grill-me` on the `open` node, allowing `/comet` to clarify the requirements before entering the design - ** without replacing any node implementation ** :
-
-```json
-{
-  "goal: "Based on the five-stage customization of Comet's existing Skill, add Gray-ME clarification requirements at the open node.",
-  "skillCreatorIntent": "customize-comet",
-  "workflow": {
-    "kind": "comet-five-phase-overlay",
-    "name": "comet-with-grill-me",
-    ""goal":" In the open node, request to call Grilling-me to clarify the requirements.",
-    "nodes": {
-      "open": {
-        "requiredSkillCalls": [
-          {
-            "skill": "grill-me",
-            "reason: "Clarify the objectives, boundaries, and acceptance criteria before creating the OpenSpec change."
-          }
-        ]
-      }
-    }
-  }
-}
-```
-
-Key point: The implementation Skill of `open` remains unchanged. It only forces the invocation of the additional Skill within the node and retrievates the clarification evidence through the Output Schema.
-
-### Custom Node (workflow-kernel
-
-`workflow-kernel` allows the declaration of brand new nodes. Each node must define its responsibilities with `responsibility` and declare the Output Schema and Guardrail:
-
-```json
-{
-  "id": "delegate-notes",
-  "label": "Delegate Notes",
-  "kind": "handoff",
-  "responsibility": "Delegate release note drafting and require returned evidence.",
-  "implementation": { "skill": "handoff-coordinator", "scope": "handoff" },
-  "requiredSkillCalls": [
-    { "skill": "release-notes", "scope": "handoff" }
-  ],
-  "operations": ["require", "augment"],
-  "outputSchemas": ["release.notes.v1"],
-  "guardrails": [
-    { "id": "handoff-returned", "label": "Handoff returned evidence", "validation": "semantic" }
-  ]
-}
-```
-
-## What does comet-any do
-
-A complete call to `/comet-any` will do these things in sequence:
-
-1. First, try to restore the current creative state; Create only when there is no recoverable state.
-2. Read the preference order in `.comet/skill-preferences.yaml` (`advisory`/`strict` mode).
-3. Use `find-skill` ** to parse the real Skill content **, including `SKILL.md`, references, rules, scripts and hooks; The name is only used to locate the candidates.
-4. When dealing with ** missing or ambiguous ** candidates, it is necessary to suspend asking the user.
-5. Compile the target into a **Workflow Contract** (Workflow Nodes, Skill Bindings, Output Schemas, Guardrails, Handoffs).
-6. ** Verify ** Workflow Contract (control cannot override, producer override must satisfy, Output Schema must exist, etc.).
-7. First, display the **Skill Creator Solution Confirmation Page **, and write the draft only after the user's confirmation.
-8. Generate entry skills, internal skills of each node, `reference/workflow-protocol.json`, scripts and platform agent definitions through authoring lane.
-9. Generate the `comet/eval.yaml` evaluation list (including the Engine Package when Engine is enabled).
-10. Check readiness through `comet creator status/next`, then proceed to review, approval, publish and distribute.
-
-```mermaid
-flowchart TD
-    A["User objective"] --> B["Check the recoverable status"]
-    B --> C{"Is there anything that can be restored?"}
-    C -->|is| D["Display the recovery summary"]
-    C -->|no| E["Read.comet/skill-preferences.yaml"]
-    D --> E
-    E --> F["find-skill parses the real Skill"]
-    F --> G{"Missing or ambiguous?"}
-    G -->|is| H["Pause and allow the user to select <br/> (hard rule, not silently ignored)"]
-    G -->|no| I["Compile it into Workflow Contract<br/> and verify it"]
-    H --> I
-    I --> J["Skill Creator Solution Confirmation page"]
-    J --> K{"User confirmation?"}
-    K -->|"Modify| I
-    K -->|Cancel| End["Do not write the status"]
-    K -->|Confirm generation| L["Generate the Skill package <br/>+ workflow-protocol.json"]
-    L --> M["comet eval --collect → --html"]
-    M --> N{"Passed the assessment?"}
-    N -->|no| F
-    N -->|is| O["comet publish review → approve → run"]
-    O --> P["comet publish distribute --preview"]
-    P --> Q{"Confirm preview?"}
-    Q -->|is| R["Truly distributed to the platform"]
-    Q -->|no| End
-```
-
-## When to use /comet-any
-
-- I want to turn the team process into a reusable Skill.
-- We want to optimize the existing skills to make them evaluable and releasable.
-- Want to add, replace or close certain links on the basis of the five stages of `/comet`.
-- Want to combine multiple skills and ** retain genuine source evidence **.
-- I want to distribute the products to platforms such as Claude Code and Codex.
-
-## /comet-any output
-
-After a complete generation or optimization, the product includes:
-
-```text
-<bundle-draft>/
-Bundle.yaml # Bundle list
-  skills/<entry-skill>/
-SKILL.md # The entry point that users actually invoke
-    comet/
-skill.yaml # Engine Runtime Plan (when Engine is enabled)
-guardrails.yaml # Runtime constraints
-checks.yaml # runtime check (Runtime)
-eval.yaml # Creation Period Evaluation manifest (Pre-release Evidence)
-    reference/
-Workflow - protocol. Json # single source of truth for runtime state (shared by runtime/eval/review/readiness)
-resolved-skills.json # Real Skill Source Evidence + workflow Node Information
-composition-report.md # Composition Scheme and Deviation explanation
-decision-points.md # Decision Points
-Recovery.md # recovery path
-skill-review.md # Self-review by the author
-authoring-lanes.json # Create Lane Records (including protocolHash)
-subagents/ # Portable Sub-Agent Role Description
-    scripts/                          # required control plane
-      workflow-state.mjs
-      workflow-guard.mjs
-      workflow-handoff.mjs
-      comet-plan.mjs
-      comet-check.mjs
-      comet-hook-guard.mjs
-agents/claude/ # Claude Code custom agents (distributed when supported by the target platform)
-  rules/                              # required control plane
-  hooks/                              # required control plane（portable hook descriptor）
-```
-
-### Responsibilities of key documents
-
-|"File|Life cycle|Duties|
-| --- | --- | --- |
-| `SKILL.md` |Creation period + runtime period|The entry point that the user actually invokes|
-| `reference/workflow-protocol.json` |Creation period + runtime period|** Single source of truth for runtime state ** : node, edge, Output Schema, state, evals|
-| `reference/resolved-skills.json` |Creation period|Real Skill source, hash, workflow node binding, preference evidence|
-| `reference/composition-report.md` |Creation period|Combination scheme, deviation explanation, risk and review evidence|
-| `comet/skill.yaml` |Operating period|Internal operation plans (goals, orchestration, steps) are not handwritten entry points by users|
-| `comet/guardrails.yaml` |Operating period|Constraints generated by preferences and risk strategies (allowed lists, budgets)|
-| `comet/checks.yaml` |Operating period| runtime check（progress/step/completion） |
-| `comet/eval.yaml` |Creation period|Eval manifest (input for `comet eval`)|
-
-<Tip>
-<strong>workflow-protocol.json is the core. </strong>runtime, eval, review, and publish readiness all read this protocol to ensure that "validation at creation time" and "recovery at runtime" point to the same fact.
-</Tip>
-
-### required capability set
-
-The required capability set of the stable combination Skill Bundle is `skills/scripts/rules/hooks/references/agents`:
-
-- `skills`: Entry Skill and internal Skill of each node.
-- `scripts/rules/hooks`: **required control plane**, not an appendage file that can be deleted at will. They handle state advancement, guards, and handovers deterministically.
-- `references`: Genuine source evidence and creation audit.
-- `agents`: Native agent definition of the platform. Claude Code distribution writes the generated custom agents to the target platform preview.
-
-`hooks/*.yaml` is the **Comet portable hook descriptor**, and it will only take effect after being compiled to the target platform configuration through `comet publish distribute`.
-
-<Warning>
-<code>/comet-any</code> should not be used as the user's main process for manual <code>comet bundle</code> commands. Bundle is a deterministic backend for internal use that <code>/comet-any</code> calls automatically.
-</Warning>
-
-## hard gates
-
-`/comet-any` has several uncompromising hard rules. Understanding them can help you avoid falling into traps:
-
-- The user only invokes this Skill, and the CLI is the internal backend.
-- It is necessary to ** parse the real Skill with `find-skill` **, and it is not allowed to infer the ability merely by name.
-- Missing or ambiguous candidates must be paused. Ask the user and never silently ignore or select for the user.
-- The confirmation page of the proposal must be displayed first. Only after the user's confirmation can the draft be written.
-- Required Skill Call ** does not replace ** node implementations.
-- producer override must declare the Output Schema of `satisfies`.
-- The normal mode of the control node cannot override.
-- eval, review, and publish readiness must read ** the same `workflow-protocol.json`.
-- The products must not retain the `AUTHORING PENDING` mark. If the entry Decision Core or substance node is not completed, the release will be blocked.
-- The sub-agent Handoff must require the sub-agent to load the Required Skill Call and return the evidence.
-- The script only reads the protocol and state, and does not take the Skill name as the verification basis.
-- "Eval skipped or failed → Never enter ready."
-- "Lack of manual approval → Never ready."
-- "preview is necessary before distribution. Only after user confirmation can it be written."
-- Before installation, the user must be consulted. Automatic installation is not allowed.
-
-## validation findings code
-
-`/comet-any` will verify when compiling the Workflow Contract. If it fails, a clear finding code will be given:
-
-| finding code |Meaning|
-| --- | --- |
-| `unknown-node` |The patch references the node where the current kind does not exist|
-| `unsupported-operation` |The node does not support this operation (for example, overriding the control node).|
-| `control-node-override` |The normal mode of the control node is overridden|
-| `producer-missing-output-schema` |producer override does not declare the Output Schema of satisfies|
-| `missing-output-schema` |The node references an undefined Output Schema|
-| `orphan-output-schema` |The Output Schema has been defined, but it has not been attached to any Workflow Node|
-| `duplicate-node` |Nodes with the same id were repeatedly defined|
-| `disabled-required-node` |Required nodes are disabled (only optional nodes can be disabled)|
-
-## Next step
-
-- The complete process of creating a Skill ](/en/skill-creator/workflow) - from preparing preferences to generation, evaluation, release, and distribution
-- [Skill Preferences and Real sources ](/en/skill-creator/preferences) - Configuration `.comet/skill-preferences.yaml`
-- publish and distribute Skill](/en/skill-creator/publishing) - readiness, approval, publish and distribute
-- Skill and Engine](/en/skill-creator/engine) - Skill package structure and Engine runtime
-- Overview of the Evaluation System ](/en/eval/overview)-Eval: How Does eval Provide Evidence for Release
+See [stage artifacts and business validation](/en/sdk/artifact-validation) for details. Start everyday use with the [quickstart](/en/skill-creator/getting-started). Read the [SDK overview](/en/sdk/overview) to integrate your own execution platform.

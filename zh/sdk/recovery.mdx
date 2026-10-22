@@ -1,0 +1,106 @@
+---
+title: '失败恢复与未知结果'
+description: '保留 Run 身份与当前批准，并在重试前核对已派发操作的真实结果。'
+---
+
+恢复时先读取原 Run，区分待执行、正在执行、等待用户、已知失败和结果未知。每一种状态都有对应的处理方式。
+
+## 继续同一个 Run
+
+使用文件 Store 时，新进程重新注册相同工作流版本、执行器和验证器，然后读取原 Run ID。不要另建一个 Run 来重复执行已经完成的动作。
+
+应用按身份与版本保留固定包；活动 Run 需要的旧版本在升级后仍保留。依赖内容发生变化时，恢复原依赖或重新确认新的应用版本。
+
+| 当前情况          | 处理方式                                 |
+| ----------------- | ---------------------------------------- |
+| pending Action    | 使用配置的执行端口领取并执行             |
+| pending Wait      | 展示当前提案，提交实际用户决定或所需证据 |
+| 已知失败          | 修正失败原因，按允许的重试路径继续       |
+| running / unknown | 先核对原执行者和外部系统的结果           |
+| 需求或提案变化    | 修订并取得当前提案的新批准               |
+
+## 结果未知时先核对
+
+派发后断连，外部操作可能已经发生。例如报告已经提交到外部服务，但 Agent 平台没有成功保存回报。这时不能再次调用发布来判断结果。
+
+Agent 平台的核对接口查询原 Action 的实际结果。已执行时回报同一动作的 Outcome；确认未执行、且原执行者已经停止时，附可核对的证据后重试。无法确认时保留现场。
+
+完整应用可以通过 `reconcileApplicationSkill` 调用已配置 Agent 平台的核对能力，取得原动作结果后再回报；这个接口不会重发操作。
+
+SDK 保存 Run 和 claim，不会把本地记录与外部服务变成一个原子事务。需要业务幂等键或查询接口时，由 Agent 平台与外部服务实现。
+
+## 查找需要核对的原动作
+
+以下片段使用你已创建的 `runtime`：
+
+```js
+const run = await runtime.inspect('report-1');
+const action = run.actions.find((item) => item.status === 'unknown');
+if (!action) throw new Error('No unknown action');
+console.log({
+  actionId: action.id,
+  attempt: action.attempt,
+  inputHash: action.inputHash,
+  executorId: action.claim?.executorId,
+});
+```
+
+先用这些身份查询原执行端和业务服务。保存请求 ID、服务收据或业务幂等键，核对的是这一次执行，不是重新创建一项同名任务。
+
+## 已执行时回报原结果
+
+取得可核对的真实结果后，通过原 Action 回报。下面的函数只负责提交，`actualOutput` 必须来自业务服务查询：
+
+```js
+async function recordReconciledResult(actualOutput) {
+  if (!action.claim) throw new Error('Missing original claim');
+  return runtime.recordOutcome({
+    runId: run.runId,
+    outcome: {
+      actionId: action.id,
+      attempt: action.attempt,
+      inputHash: action.inputHash,
+      claimToken: action.claim.token,
+      outcomeId: 'reconciled-result-1',
+      status: 'succeeded',
+      output: actualOutput,
+    },
+  });
+}
+```
+
+输出仍要经过原 Schema 和业务验证器。服务只返回“收到请求”时，不能把它写成“操作成功”。
+
+## 确认未执行后重试
+
+确认原执行者及子任务已经停止、业务服务也未执行原请求，再提交核对证据：
+
+```js
+async function retryNotExecuted(actualEvidence) {
+  return runtime.retry({
+    runId: run.runId,
+    actionId: action.id,
+    attempt: action.attempt,
+    expectedRevision: run.revision,
+    reconciliation: { resolution: 'not-executed', evidence: actualEvidence },
+  });
+}
+```
+
+`actualEvidence` 记录真实查询依据，不使用固定的“未执行”占位值。重试成功后读取新 attempt，再交给执行器继续。若记录已变化，重新读取 Run；无法确认时继续保留未知状态。
+
+`retry` 策略可声明为 `idempotent`、`reconcile` 或 `manual`，描述恢复约束；它不会自动证明服务幂等或循环重发失败操作。已经派发的未知操作仍要核对。
+
+## 数据保存在哪里
+
+基础 Runtime 的 `createFileRuntimeStore` 使用你指定的 `rootDir`。
+
+通过 Comet CLI 使用 Native、Classic 和 SDK 应用时，机器本地的执行数据保存在用户 Comet 数据目录，按项目 checkout 和 Git worktree 隔离。默认根目录为 `~/.comet`，可以用 `COMET_DATA_DIR` 指定；Windows 默认位于用户目录下的 `.comet`。指定的用户数据根必须在当前工作区之外，不能设为项目子目录。
+
+需求、Spec、入口 Skill 和用户可读的状态视图继续保留在项目内。带有完整可跨设备恢复检查点的 SDK change 可以在复制后恢复；不需要手工复制或编辑本机锁、事务和 Run JSON。
+
+## Agent 平台与安装能力
+
+真实 Skill 执行要求 Agent 平台具备声明的加载、交接和授权能力。平台安装预览会列出缺失能力与需要激活的 Hook。文件写入安装目录成功，不等于 Agent 平台已经执行、Hook 已经生效或业务已经验收。
+
+完整应用安装与升级见 [comet application](/zh/cli/application)。日常运行状态可通过 [Dashboard](/zh/dashboard/overview) 观测；推进和用户决定仍使用原 Run 的执行入口。

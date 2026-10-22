@@ -1,0 +1,68 @@
+---
+title: '输出结构与业务验证'
+description: '检查工具和 Skill 的实际输出，让格式正确但业务不合格的结果也无法推进。'
+---
+
+报告生成器返回成功，但可能遗漏正文，或给出没有来源的结论。先用 JSON Schema 检查结构，再用业务验证器判断结果是否满足任务。
+
+## 为步骤声明输出结构
+
+```js
+import { skill } from '@rpamis/comet/runtime';
+
+const draft = skill({
+  ref: 'draft',
+  outputSchema: {
+    type: 'object',
+    required: ['body', 'sources'],
+    properties: {
+      body: { type: 'string', minLength: 1 },
+      sources: { type: 'array', items: { type: 'string' }, minItems: 1 },
+    },
+    additionalProperties: false,
+  },
+  validator: { id: 'report-content', version: '1' },
+});
+```
+
+把此步骤替换到你的工作流中，执行器改为回报 `{ body, sources }`。Runtime 接受成功结果前检查 `outputSchema`；返回字符串、缺少来源或空正文不能作为合格结果推进。
+
+Schema 适合字段类型和必填项。来源是否支持结论、是否覆盖全部需求等条件需要业务验证器。
+
+## 注册业务验证器
+
+下面的验证器检查示例业务条件：正文必须提及至少一个来源标识。它不核查来源真实性，真实应用应补充对应检查。
+
+```js
+const contentValidator = {
+  id: 'report-content',
+  version: '1',
+  validate: ({ outcome }) => {
+    const output = outcome.output;
+    const accepted =
+      output !== null &&
+      typeof output === 'object' &&
+      !Array.isArray(output) &&
+      typeof output.body === 'string' &&
+      Array.isArray(output.sources) &&
+      output.sources.some((source) => typeof source === 'string' && output.body.includes(source));
+    return { accepted, reason: accepted ? undefined : '正文缺少来源标识' };
+  },
+};
+```
+
+在 `createRuntime` 中传入 `validators: [contentValidator]`。步骤的验证器 `id/version` 必须与注册对象一致。验证器读取实际 Action、Outcome 和 Run，不能修改权威状态或执行外部副作用。
+
+## 用正常和异常结果验证接入
+
+分别启动不同 Run，让生成器回报以下结果：
+
+| 输出                                                          | 预期                       |
+| ------------------------------------------------------------- | -------------------------- |
+| `{ body: '依据 source-1 得出结论。', sources: ['source-1'] }` | 结构和示例业务条件都通过。 |
+| `{ body: '', sources: [] }`                                   | 结构检查拒绝。             |
+| `{ body: '结论没有标注依据。', sources: ['source-1'] }`       | 结构有效，业务验证器拒绝。 |
+
+验证失败时检查返回的错误和原 Action，不要把失败输出改标为成功。修正执行器或业务结果，再沿允许的恢复路径处理。
+
+业务结果位于磁盘文件时，JSON 输出结构不足以证明文件存在或内容正确。继续阅读 [阶段产物与业务验收](/zh/sdk/artifact-validation)，声明真实文件与内容条件。

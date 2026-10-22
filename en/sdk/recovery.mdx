@@ -1,0 +1,106 @@
+---
+title: 'Failure recovery and unknown results'
+description: 'Preserve Run identity and current approval, then reconcile dispatched operations before retrying.'
+---
+
+Read the original Run before resuming. Pending, running, waiting, known failure, and unknown results require different operations.
+
+## Resume the same Run
+
+With a file Store, register the same workflow version, executors, and validators in the new process, then read the original Run ID. Do not create another Run to repeat completed actions.
+
+Keep pinned application packages by identity and version. Upgrades retain versions referenced by active Runs. Restore original dependencies or confirm a new version when dependency content changes.
+
+| Situation                       | Handling                                                            |
+| ------------------------------- | ------------------------------------------------------------------- |
+| pending Action                  | Claim and execute through the configured port.                      |
+| pending Wait                    | Show the current proposal and submit the real decision or evidence. |
+| Known failure                   | Correct the cause and use an allowed retry path.                    |
+| running / unknown               | Query the original executor and external service first.             |
+| Changed requirement or proposal | Revise and obtain new approval for the current proposal.            |
+
+## Reconcile an unknown result first
+
+After disconnection, an external operation may already have happened. A report may have reached the service while the host failed to save its result. Do not publish again to find out.
+
+The host's reconciliation interface queries the original Action. If executed, report its original Outcome. If confirmed unexecuted and the original executor has stopped, submit verifiable evidence before retrying. Preserve the unknown state when you cannot confirm.
+
+Complete applications can call `reconcileApplicationSkill` through the configured host. It retrieves the original result and does not resend the operation.
+
+SDK records and claims do not make a local record and external service one atomic transaction. The host and service implement business idempotency keys or query interfaces as needed.
+
+## Find the original action to reconcile
+
+Use your existing runtime:
+
+```js
+const run = await runtime.inspect('report-1');
+const action = run.actions.find((item) => item.status === 'unknown');
+if (!action) throw new Error('No unknown action');
+console.log({
+  actionId: action.id,
+  attempt: action.attempt,
+  inputHash: action.inputHash,
+  executorId: action.claim?.executorId,
+});
+```
+
+Query the original host and business service using these identities. Retain the request ID, service receipt, or idempotency key. Reconcile this attempt rather than creating another task with the same name.
+
+## Report an executed result
+
+Once you have a verified actual result, report it through the original Action. This function only submits data; `actualOutput` must come from the service query:
+
+```js
+async function recordReconciledResult(actualOutput) {
+  if (!action.claim) throw new Error('Missing original claim');
+  return runtime.recordOutcome({
+    runId: run.runId,
+    outcome: {
+      actionId: action.id,
+      attempt: action.attempt,
+      inputHash: action.inputHash,
+      claimToken: action.claim.token,
+      outcomeId: 'reconciled-result-1',
+      status: 'succeeded',
+      output: actualOutput,
+    },
+  });
+}
+```
+
+Output still passes the original Schema and business validator. A service response that only acknowledges receipt is not proof of operation success.
+
+## Retry after confirming no execution
+
+Confirm that the executor and child tasks have stopped and that the service did not execute the request, then submit reconciliation evidence:
+
+```js
+async function retryNotExecuted(actualEvidence) {
+  return runtime.retry({
+    runId: run.runId,
+    actionId: action.id,
+    attempt: action.attempt,
+    expectedRevision: run.revision,
+    reconciliation: { resolution: 'not-executed', evidence: actualEvidence },
+  });
+}
+```
+
+`actualEvidence` records real query findings, not a fixed unexecuted placeholder. Read the new attempt after an accepted retry and continue through the executor. If records changed, read the Run again. Preserve unknown status when confirmation is unavailable.
+
+retry policies may be idempotent, reconcile, or manual. They describe recovery constraints; they do not prove service idempotency or automatically resend failures. Dispatched unknown operations still need reconciliation.
+
+## Where data is saved
+
+Basic Runtime uses your `createFileRuntimeStore` rootDir.
+
+For Native, Classic, and SDK applications through Comet CLI, machine execution data lives in the user's Comet data directory, isolated by project checkout and Git worktree. The default root is ~/.comet, configurable with COMET_DATA_DIR. On Windows it is .comet in the user's directory. This user data root must remain outside the workspace.
+
+Requirements, Specs, entry Skills, and readable status projections remain in the project. SDK changes with a complete portable checkpoint can recover after copying; do not manually copy or edit local locks, transactions, or Run JSON.
+
+## Host and installation capabilities
+
+Real Skill execution needs declared loading, handoff, and authorization capabilities. Installation previews list missing capabilities and Hooks requiring activation. Written installation files do not prove host execution, active Hooks, or business acceptance.
+
+See [comet application](/en/cli/application) for installation and upgrades, and [Dashboard](/en/dashboard/overview) for observation. Progress and decisions still use the original Run entry.

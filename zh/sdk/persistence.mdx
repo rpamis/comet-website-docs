@@ -1,0 +1,53 @@
+---
+title: '持久化与跨进程续跑'
+description: '保存 Run，让用户审批、执行结果和流程进度在进程重启后继续可用。'
+---
+
+报告生成后可能等待用户几个小时。使用文件 Store 保存 Run，下次打开应用时读取同一个 Run ID，就能继续当前等待。
+
+## 选择存储方式
+
+| 存储方式                              | 用途                     | 进程退出后                     |
+| ------------------------------------- | ------------------------ | ------------------------------ |
+| `createMemoryRuntimeStore()`          | 单进程示例和短期试验。   | 数据不保留。                   |
+| `createFileRuntimeStore({ rootDir })` | 本地持久化和跨进程恢复。 | 从相同目录读取原 Run。         |
+| 自定义 `RuntimeStore`                 | 接入自己的持久化系统。   | 由实现提供版本比较与原子保存。 |
+
+保存的内容包括输入、工作流版本、Action、用户等待、已接受输出和运行状态。文件 Store 不保存执行函数或模型凭据；重启时仍要注册原定义和执行能力。
+
+## 配置固定目录
+
+```js
+import path from 'node:path';
+import { createFileRuntimeStore, createRuntime } from '@rpamis/comet/runtime';
+
+const runtime = createRuntime({
+  store: createFileRuntimeStore({ rootDir: path.resolve('./report-state') }),
+  workflows: [workflow],
+  executors: [host],
+});
+```
+
+`workflow` 和 `host` 使用 [快速接入](/zh/sdk/quickstart) 中的定义。相对路径以进程当前目录解析；后台服务应使用固定绝对路径，避免重启后读到另一份目录。
+
+## 在新进程读取并继续
+
+```js
+const run = await runtime.inspect('report-1');
+console.log(run.status);
+console.log(run.waits.filter((wait) => wait.status === 'pending'));
+const progress = await runtime.runUntilBlocked({ runId: run.runId, executorId: 'host' });
+console.log(progress.reason);
+```
+
+先用快速接入脚本生成草稿并退出，再启动注册相同定义的恢复脚本。你会看到原 Run 仍停在审批；已完成的草稿不会重新生成。提交用户决定的方式见 [用户审批](/zh/sdk/approvals)。
+
+`runId` 标识一次业务运行。新的报告使用新的 ID；同一报告的恢复保留原 ID。相同 ID 的重复启动会核对已有输入和定义，不适合用来覆盖旧任务。
+
+## 升级工作流
+
+修改图或步骤契约后增加工作流版本，保留活动 Run 引用的原版本。完整应用同时固定依赖内容，升级方法见 [安装、分发与升级](/zh/sdk/distribution)。
+
+自定义 Store 必须按 revision 比较并原子保存，防止两个执行者覆盖对方的结果。冲突后重新读取 Run，再决定下一步；不要直接覆盖状态文件。
+
+文件持久化只能保存已提交事实。动作已经派发却没有回报时，需要查询原操作，不能因为本地没有成功输出就重新执行。见 [恢复与未知结果](/zh/sdk/recovery)。

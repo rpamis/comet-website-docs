@@ -1,4 +1,4 @@
-export const SelfEvolvingFlow = () => (
+export const SelfEvolvingFlow = ({ language = 'zh' }) => (
   <>
     <style>{`
       .comet-home__evolving {
@@ -244,11 +244,11 @@ export const SelfEvolvingFlow = () => (
 
     <div
       className="comet-home__evolve-editorial"
-      aria-label="个人记忆以暖色短条表示，项目知识以冷色层叠结构表示；两者选择性汇合为下一次任务上下文，并在任务完成后各自新增经验"
+      aria-label={language === 'en' ? 'Personal memory and project knowledge selectively inform the next task and gain new experience after completion.' : '个人记忆以暖色短条表示，项目知识以冷色层叠结构表示；两者选择性汇合为下一次任务上下文，并在任务完成后各自新增经验'}
     >
       <div className="comet-home__evolve-editorial-canvas">
         <svg viewBox="0 0 560 570" role="img" aria-labelledby="self-evolving-editorial-title">
-          <title id="self-evolving-editorial-title">个人记忆与项目知识持续沉淀并进入下一次任务的抽象编辑构成</title>
+          <title id="self-evolving-editorial-title">{language === 'en' ? 'Personal memory and project knowledge inform future tasks' : '个人记忆与项目知识持续沉淀并进入下一次任务的抽象编辑构成'}</title>
 
           <text className="comet-home__abstract-caption" x="58" y="62">PERSONAL MEMORY</text>
           <text className="comet-home__abstract-note" x="60" y="80">PREFERENCE · FEEDBACK · EXPERIENCE</text>
