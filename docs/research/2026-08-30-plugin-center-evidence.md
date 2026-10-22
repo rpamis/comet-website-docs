@@ -68,12 +68,12 @@ Context Director 先按 project/path/operation/phase/task 过滤，排除 `super
 
 ## 二、Project Knowledge 与 Rule / 项目指令的关系
 
-| 层 | 回答的问题 | 典型载体 | Comet 的关系 |
-| --- | --- | --- | --- |
-| Project Knowledge | 项目是什么、为什么这样、改哪里还要核对哪里 | Project Model、来源文档、结构化 Record | 建模、检索、来源复核、按需展开 |
-| Project Policy | 已接受的做法、流程、约束、故障解法是什么 | `decision/pattern/procedure/constraint/failure-resolution` | Project Knowledge 插件内的程序性知识，不是另一份 Rule 文件 |
-| Rule / Agent Instructions | Agent 在当前作用域应怎样做 | `AGENTS.md`、`CLAUDE.md`、`.claude/rules`、`.cursor/rules` | Agent 平台直接加载；仍是更高优先级项目证据；Comet 不静默改写 |
-| Hook / Check / Guard | 哪些动作要观察、阻断或确定性验证 | Hook、permission、linter、test、build、CI | 执行与强制层；Project Policy 可引用已有成功命令，不再造一套检查语义 |
+| 层                        | 回答的问题                                 | 典型载体                                                   | Comet 的关系                                                        |
+| ------------------------- | ------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| Project Knowledge         | 项目是什么、为什么这样、改哪里还要核对哪里 | Project Model、来源文档、结构化 Record                     | 建模、检索、来源复核、按需展开                                      |
+| Project Policy            | 已接受的做法、流程、约束、故障解法是什么   | `decision/pattern/procedure/constraint/failure-resolution` | Project Knowledge 插件内的程序性知识，不是另一份 Rule 文件          |
+| Rule / Agent Instructions | Agent 在当前作用域应怎样做                 | `AGENTS.md`、`CLAUDE.md`、`.claude/rules`、`.cursor/rules` | Agent 平台直接加载；仍是更高优先级项目证据；Comet 不静默改写        |
+| Hook / Check / Guard      | 哪些动作要观察、阻断或确定性验证           | Hook、permission、linter、test、build、CI                  | 执行与强制层；Project Policy 可引用已有成功命令，不再造一套检查语义 |
 
 最适合中文用户的一句话是：
 
