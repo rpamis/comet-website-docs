@@ -12,7 +12,7 @@
 - **Personal Memory（个人记忆）**回答“这个用户希望怎样协作”。它属于用户，既可全局生效，也可只在一个项目生效；默认不共享给团队，也不会变成项目规则。【S：`domains/comet-memory/plugin.ts:36-53,187-278,279-367`；D：`docs/operations/PERSONAL-MEMORY-ZH.md:1-30`】
 - **Project Knowledge（项目知识）**回答“这个项目是什么、为什么这样设计、改动时要核对什么”。一个插件内部包含 Project Model（项目模型）和 Project Policy（项目策略）；旧 Project Rules 插件和命令已经删除。【S：`domains/project-knowledge/plugin.ts:48-69,117-138`；`test/repository/project-rules-removed.test.ts:1-39`】
 - **Agent Learning Loop**回答“经验怎样变成下一次可用的上下文”。它是两个插件共享的运行机制，不是 Dashboard 中第三个独立插件，也不是模型训练。源码中的循环是事件采集、Journal、Reflection、Consolidation、Context 选择、应用结果反馈。【S：`domains/agent-learning/types.ts:1-23,79-95,146-168`；`domains/agent-learning/coordinator.ts:83-138,180-252`；`domains/comet-plugin/integration.ts:356-472`】
-- **Rule / AGENTS.md / CLAUDE.md / `.cursor/rules`**是宿主直接加载的行为指令；**Hook / linter / test / CI**负责执行时观察、拦截或确定性校验；**Project Knowledge**是可追溯、可检索、按任务激活的工程知识层。三者协作，不应在文案中互称同义词。【D：`docs/operations/PROJECT-KNOWLEDGE-ZH.md:1-17`；I：Claude、Codex、Cursor 官方资料，见下文】
+- **Rule / AGENTS.md / CLAUDE.md / `.cursor/rules`**是 Agent 平台直接加载的行为指令；**Hook / linter / test / CI**负责执行时观察、拦截或确定性校验；**Project Knowledge**是可追溯、可检索、按任务激活的工程知识层。三者协作，不应在文案中互称同义词。【D：`docs/operations/PROJECT-KNOWLEDGE-ZH.md:1-17`；I：Claude、Codex、Cursor 官方资料，见下文】
 
 ## 一、当前 Comet 的真实产品与运行时边界
 
@@ -72,14 +72,14 @@ Context Director 先按 project/path/operation/phase/task 过滤，排除 `super
 | --- | --- | --- | --- |
 | Project Knowledge | 项目是什么、为什么这样、改哪里还要核对哪里 | Project Model、来源文档、结构化 Record | 建模、检索、来源复核、按需展开 |
 | Project Policy | 已接受的做法、流程、约束、故障解法是什么 | `decision/pattern/procedure/constraint/failure-resolution` | Project Knowledge 插件内的程序性知识，不是另一份 Rule 文件 |
-| Rule / Agent Instructions | Agent 在当前作用域应怎样做 | `AGENTS.md`、`CLAUDE.md`、`.claude/rules`、`.cursor/rules` | 宿主直接加载；仍是更高优先级项目证据；Comet 不静默改写 |
+| Rule / Agent Instructions | Agent 在当前作用域应怎样做 | `AGENTS.md`、`CLAUDE.md`、`.claude/rules`、`.cursor/rules` | Agent 平台直接加载；仍是更高优先级项目证据；Comet 不静默改写 |
 | Hook / Check / Guard | 哪些动作要观察、阻断或确定性验证 | Hook、permission、linter、test、build、CI | 执行与强制层；Project Policy 可引用已有成功命令，不再造一套检查语义 |
 
 最适合中文用户的一句话是：
 
 > **项目知识让 Agent 先读懂项目；Rule 让 Agent 按团队约定行动；Hook 和检查守住必须执行的边界。**
 
-“项目规则”改为“项目知识”的根本原因：Rule 天然暗示“必须遵守的一条要求”，但该插件实际还包含拓扑、事实、依赖、决策背景和故障解法。继续叫“项目规则”会把“知道什么”和“必须怎么做”混在一起，也容易让用户误以为 Comet 会创建或覆盖宿主 Rule 文件。当前 Dashboard contribution 已只显示“项目知识”，路由也已是 `/plugins/project-knowledge`。【S：`domains/project-knowledge/plugin.ts:117-125`】
+“项目规则”改为“项目知识”的根本原因：Rule 天然暗示“必须遵守的一条要求”，但该插件实际还包含拓扑、事实、依赖、决策背景和故障解法。继续叫“项目规则”会把“知道什么”和“必须怎么做”混在一起，也容易让用户误以为 Comet 会创建或覆盖 Agent 平台的 Rule 文件。当前 Dashboard contribution 已只显示“项目知识”，路由也已是 `/plugins/project-knowledge`。【S：`domains/project-knowledge/plugin.ts:117-125`】
 
 ## 三、业界怎么做，为什么
 
@@ -110,7 +110,7 @@ Cursor Hooks 可观察、控制和扩展 Agent loop，用于审计、阻断命�
 ## 四、历史 research 中仍有效与已经演进的结论
 
 - 仍有效：普通 Memory 不能直接成为团队强制规范；不能让 Agent 自动覆盖共享 AGENTS/Rule/Hook；个人偏好、项目事实、团队规范和安全策略必须分域。【H：`docs/research/2026-08-07-agent-self-evolution-landscape.md:9-36,82-101,138-150`】
-- 仍有效：行业已普遍采用路径/相关性激活，Hook 只是宿主投递与执行适配之一；自然语言指令不等同于确定性检查。【H：`docs/research/2026-08-14-contextual-project-standards.md:9-21,23-47`】
+- 仍有效：行业已普遍采用路径/相关性激活，Hook 是 Agent 平台投递与执行能力的一种适配；自然语言指令不等同于确定性检查。【H：`docs/research/2026-08-14-contextual-project-standards.md:9-21,23-47`】
 - 仍有效：项目级个人偏好留在 Personal Memory；可由当前仓库证据验证、可复用的工程事实进入 Project Knowledge；两者都不能授权高风险操作。【H：`docs/research/2026-08-22-agent-project-knowledge-memory-retrieval-architecture.md:59-97`】
 - 已演进：2026-08-14 research 建议把能力叫 Project Standards，并讨论 `.comet/rules/*.md`；当前源码已经删除旧 Project Rules 插件，并确定一个“项目知识”入口、内部 Project Model + Project Policy。重写应以当前源码为准，只保留旧研究关于 Rule/Check/Instruction 确定性分层的术语依据。【H：`docs/research/2026-08-14-team-rules-terminology.md:9-23,81-140,170-180`；S：`test/repository/project-rules-removed.test.ts:1-39`】
 
@@ -138,7 +138,7 @@ Cursor Hooks 可观察、控制和扩展 Agent loop，用于审计、阻断命�
 
 1. 不要把 Agent Learning Loop 写成第三个可安装插件；它是共享运行机制。
 2. 不要说 Project Knowledge 会默认扫描所有 AGENTS.md / CLAUDE.md / Cursor Rules；当前默认 corpus 没有这个保证。
-3. 不要说 Project Policy 等于 Rule，或 Comet 会静默修改宿主指令、Skill、linter、测试、构建和 CI。
+3. 不要说 Project Policy 等于 Rule，或 Comet 会静默修改 Agent 平台指令、Skill、linter、测试、构建和 CI。
 4. 不要说任何自然语言策略都能“强制执行”；`enforced` 只属于绑定现有确定性验证入口的 Project Policy。
 5. 不要把 Personal Memory 的 project scope 写成团队共享知识；共享必须显式、脱敏并重新核对来源。
 6. 不要承诺“所有超出字符预算的已存记录一定出现在当前 Manifest”。源码中 Context Director 确实会把无法完整投递的候选降级为 Manifest，但 Personal Memory Provider 在它之前仍按 `profile/task` 字符限制选择候选。最稳妥的产品说法是：“Comet 优先完整提供关键策略，其余相关候选以摘要按需展开；每次任务只使用有界上下文。”【S：`domains/agent-learning/context-director.ts:399-448`；`domains/comet-memory/personal-memory.ts:2147-2204`】
