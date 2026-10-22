@@ -1,4 +1,17 @@
-export const SponsorBrands = ({ sponsors = [], tier = 'standard' }) => {
+export const SponsorBrands = ({ sponsors = [], tier = 'standard', lang = 'zh' }) => {
+  // Kept inside the component: the snippet is compiled per-page and non-exported
+  // top-level declarations can be dropped from the evaluated chunk.
+  const strings = {
+    zh: {
+      emptyStandard: '成为首位标准赞助商',
+      marqueeLabel: '标准赞助商，悬停或聚焦可暂停滚动',
+    },
+    en: {
+      emptyStandard: 'Become the first standard sponsor',
+      marqueeLabel: 'Standard sponsors — hover or focus to pause scrolling',
+    },
+  };
+  const t = strings[lang] || strings.zh;
   const Brand = ({ sponsor, duplicate = false }) => {
     const linked = tier !== 'standard' && Boolean(sponsor.url);
     const Element = linked ? 'a' : 'div';
@@ -23,13 +36,13 @@ export const SponsorBrands = ({ sponsors = [], tier = 'standard' }) => {
     return <>{sponsors.map(sponsor => <Brand key={sponsor.id} sponsor={sponsor} />)}</>;
   }
   if (!sponsors.length) {
-    return <a href="#contact" className="comet-sponsor__empty">成为首位标准赞助商 <span aria-hidden="true">↗</span></a>;
+    return <a href="#contact" className="comet-sponsor__empty">{t.emptyStandard} <span aria-hidden="true">↗</span></a>;
   }
   // Fill a wide viewport even after reducing the roster to one sponsor.
   const marqueeSponsors = Array.from({ length: Math.ceil(5 / sponsors.length) }, () => sponsors).flat();
 
   return (
-    <div className="comet-sponsor__row-body comet-sponsor__row-body--standard" role="region" aria-label="标准赞助商，悬停或聚焦可暂停滚动" tabIndex={0}>
+    <div className="comet-sponsor__row-body comet-sponsor__row-body--standard" role="region" aria-label={t.marqueeLabel} tabIndex={0}>
       <div className="comet-sponsor__track">
         {[false, true].map((duplicate) => (
           <div className="comet-sponsor__group" key={String(duplicate)} aria-hidden={duplicate ? 'true' : undefined}>
