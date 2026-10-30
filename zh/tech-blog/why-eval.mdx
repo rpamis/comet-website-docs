@@ -1,0 +1,276 @@
+---
+title: "评估：Skill 演进的罗盘"
+description: "rubric、pass@k、pass^k 指标的设计依据，评估如何决定 Skill 的演进方向，以及为什么评估应该优先建立。"
+mode: "custom"
+hidden: true
+keywords:
+  - "评估"
+  - "rubric"
+  - "pass@k"
+---
+
+<div className="comet-blog-post">
+  <div className="comet-home__loader is-hidden" aria-hidden="true"></div>
+
+  <div className="comet-blog-post__layout">
+    <div className="comet-blog-post__toc">
+      <p className="comet-blog-post__toc-title">目录</p>
+      <ol>
+        <li><a href="#limits-of-intuition">凭手感评估的局限</a></li>
+        <li><a href="#build-eval-first">为什么评估应该被最优先建立</a></li>
+        <li><a href="#why-rubric">评估为什么需要 rubric</a></li>
+        <li><a href="#pass-at-k">为什么需要 pass@k 和 pass^k</a></li>
+        <li><a href="#drive-evolution">评估如何驱动 Skill 演进</a></li>
+        <li><a href="#industry-comparison">业界实践对照</a></li>
+        <li><a href="#summary">小结</a></li>
+        <li><a href="#references">参考文献</a></li>
+      </ol>
+    </div>
+
+    <div className="comet-blog-post__main">
+      <div className="comet-blog-post__header">
+        <a className="comet-blog-post__back" href="/zh/tech-blog">← 技术博客</a>
+        <p className="comet-blog-post__meta">
+          <span className="comet-blog-post__meta-date">2026-07-02</span>
+          <span className="comet-blog-post__meta-cat">评估方法论</span>
+        </p>
+        <h1 className="comet-blog-post__title">评估：Skill 演进的罗盘</h1>
+        <p className="comet-blog-post__lede">rubric、pass@k、pass^k 指标的设计依据，评估如何决定 Skill 的演进方向，以及为什么评估应该优先建立。</p>
+        <p className="comet-blog-post__byline">
+          <span className="comet-blog-post__byline-key">作者：</span>Comet 团队 · 约 14 分钟
+        </p>
+      </div>
+
+      <div className="comet-blog-post__body">
+
+<Info>
+  本页说明评估指标的用途。要直接运行评估，请阅读[快速上手](/zh/eval/quickstart)。
+</Info>
+
+<h2 id="limits-of-intuition">凭手感评估的局限</h2>
+
+Skill 写出来后，你首先要知道它的质量是否达标。仅凭主观判断会带来几类常见问题：
+
+- **单次成功不代表稳定**：大语言模型具有随机性，一次跑通不代表每次都能跑通。
+- **产物"看起来对"不等于校验通过**：缺少文件、断言未写、混入危险命令等情况，仅靠人工检视难以发现。
+- **缺乏基线对比**：没有基线，无法判断一次改动是改善、持平还是退步。
+- **主观反馈无法归因**：反馈"不好用"时，无法区分是 Skill 设计问题、模型能力不足，还是环境问题。
+
+这些问题有同一个根源：没有可量化、可复现、可对比的评估，“质量”就无法落实为可执行的标准。
+当标准不存在时，Skill 迭代只能依赖经验。
+改动是否有效、哪里退步，也就难以判断。
+
+因此，评估是 Skill 持续演化的前提，需要作为核心流程运行。
+
+<h2 id="build-eval-first">为什么评估应该被最优先建立</h2>
+
+一个常见的顺序假设是：先做 Skill，积累到一定数量后再建立评估。这个顺序会导致前面所有设计决策都缺少反馈信号。
+
+评估应当先于第一批 Skill 建立，或至少与第一批 Skill 同步建立，原因有三：
+
+**1. 没有评估，就无法判断设计决策是否成立。**
+Skill 平台里的每个关键决策都需要反馈验证，例如路由策略、阶段守护和产物强制。
+如果评估在最后才补，前面的决策相当于盲跑，后期返工成本会明显上升。
+Comet 的实践也证明了这一点：`/comet-any` 可以生成 Skill，但若缺少 `comet eval` 的发布门禁，发布判断仍会回到主观经验。
+
+**2. 评估指标会反向塑造演进方向。**
+指标定义了什么叫“好”，而这个定义会直接影响 Skill 的设计取向。
+如果只看“能不能跑通”，Skill 往往会朝“勉强通过”演化。
+只有把可靠性和安全性一起纳入评估，Skill 才会朝“稳定且风险可控”演化。
+
+**3. 评估持续提供反馈。** Skill 平台会不断产出新的 Skill 和工作流。Skill 数量增长后，只有一套稳定的评估基线能横跨所有版本，持续反映整体是在改善还是退化。它和传统软件中测试的角色类似：单个测试不改变功能，但缺少测试的代码库会逐步腐化。
+
+<Note>
+  Skill 平台的工作循环是"造 → 评 → 发布"。评估是其中把主观判断转化为客观证据的环节。
+</Note>
+
+<h2 id="why-rubric">评估为什么需要 rubric</h2>
+
+### "通过/失败"区分不了质量差距
+
+最低限度的评估是跑一次、看任务是否通过。但"通过/失败"只回答结果对不对，不回答质量高低、差距多大。
+
+假设两个 Skill 都通过同一个任务：
+
+| Skill | 通过 | turns | 工具调用 | 产物质量 | 安全边界 |
+| --- | --- | --- | --- | --- | --- |
+| Skill A | ✅ | 35 | 60 | 有断言、有设计文档 | 无危险命令 |
+| Skill B | ✅ | 90 | 180 | 勉强生成、无测试 | 含 `rm -rf` |
+
+按“通过/失败”二元结果看，它们没有区别。
+但从产物质量、成本和安全性看，差距可能非常大。
+rubric 衡量的正是“都通过了，但谁更好”。
+
+### rubric 把质量拆成可测量的维度
+
+rubric 将 Skill 质量拆成若干维度，每个维度由若干二元（pass/fail）检查项组成，维度分 = 通过项数 ÷ 总项数（0.0–1.0），再按权重加权汇总。
+
+这种拆分方式的依据在于：
+
+- **可分解**："质量"是模糊概念，但"是否调用了必需的 Skill""产物是否包含测试断言""是否执行了危险命令"是可以精确判定的。rubric 把模糊的质量分解为一组确定性检查。
+- **可比**：两个 Skill 不再只比较一个布尔值，而是沿多个维度横向对比，可以定位各自强弱。
+- **可归因**：某个维度分低时，可以直接定位改进方向。比如 `safety_boundary` 低就查危险命令，`recovery_resilience` 低就查中断恢复流程。
+
+Comet 内置三套 rubric，对应不同类型的 Skill：
+
+| Profile | 维度数 | 评估对象 | 几个关键维度 |
+| --- | --- | --- | --- |
+| `generic` | 7 | 任意 Skill | completion、safety_boundary、skill_invocation、efficiency |
+| `comet-workflow` | 9 | 经典五阶段工作流 | main_flow、gate_guard、spec_drift、recovery_resilience |
+| `authoring-skill` | 11 | `/comet-any` 生成包 | workflow_route_conformance、resolved_skill_evidence、review_gate |
+
+每个维度有权重，反映其对工作流质量的重要性。例如 `completion`（任务是否正确完成）权重最高，`efficiency`（成本）权重较低。综合质量根据这些权重计算，反映各维度的实际影响。完整维度和权重见[评分指标](/zh/eval/scoring)。
+
+<Note>
+  rubric 评分用于诊断和对比，不决定一次运行是否通过。通过条件由任务校验器定义，包括期望产物存在和验证脚本零失败。
+</Note>
+
+### 为什么用二元检查项而非 0–100 打分
+
+一种做法是让模型直接给出 0–100 的分数。这种方式的问题在于不可复现、不可解释：同一产物在不同 prompt 或模型下分数可能相差很大，且无法说明差距来源。
+
+rubric 使用二元检查项并加权汇总。每个维度分都可以追溯到具体检查项（通过/未通过），依据包括文件是否存在、命令是否执行和断言是否成立。SWE-bench、τ-bench 和 HumanEval 等评测也采用可校验信号减少主观判断。
+
+当确实需要主观判断时（如"产物是否有实质内容"），Comet 提供可选的 LLM-as-judge：让裁判模型读取产物后打分。judge 被约束在固定维度上（`task_completion` / `output_quality` / `instruction_adherence`），并要求每个评分理由引用具体内容，从而把主观判断限制在可审计的范围内。
+
+<h2 id="pass-at-k">为什么需要 pass@k 和 pass^k</h2>
+
+### 单次通过率的局限
+
+假设一个 Skill 跑 5 次，4 次通过、1 次失败，通过率为 80%。这个数字本身无法区分两种情况：
+
+- **能力够，偶发失败**：改进方向是提高稳定性，成本往往较低。
+- **部分任务不具备完成能力**：改进方向是补充能力，投入量级不同。
+
+pass@k 和 pass^k 的目的，就是把这两类性质不同的失败分开。
+
+### 两个指标分别回答不同问题
+
+| 指标 | 公式 | 回答的问题 | 解读 |
+| --- | --- | --- | --- |
+| **pass@k**（能力上限） | `1 − C(n−c, k) / C(n, k)` | k 次尝试里至少一次成功的概率 | 衡量能力上限。接近 1.0 说明多次尝试里通常能成功一次 |
+| **pass^k**（可靠性下限） | 全部成功才 1.0，否则 0.0 | k 次尝试全部成功的概率 | 衡量可靠性。只有每次都成功才是 1.0 |
+
+其中 n = 总运行数，c = 成功数。pass@k 采用 HumanEval 的无偏估计器。
+
+### 两者的差：不稳定性间隙
+
+```
+gap = pass@k − pass^k
+```
+
+这个 gap 量化 Skill 的不稳定性：
+
+| 情况 | pass@k | pass^k | 含义 | 改进方向 |
+| --- | --- | --- | --- | --- |
+| 高能力、高可靠 | 高 | 高 | 能完成，且每次都正确 | 质量达标 |
+| 高能力、低可靠 | 高 | 低 | 能完成，但不稳定 | 提高稳定性（降 gap）|
+| 低能力 | 低 | 低 | 多次尝试也难以成功 | 补充能力 |
+
+这个区分对工作流 Skill 尤其重要。
+工作流 Skill 是会被反复调用的工具，可能每天使用、每个 PR 都使用。
+对这类工具，可靠性往往比能力上限更关键。
+`pass@5 = 1.0` 但 `pass^5 = 0` 的 Skill，表示“多跑几次总会成功”，却不能保证“这一次就成功”。
+这种结果在真实交付中风险很高。
+
+pass@k 和 pass^k 从能力和可靠性两个维度刻画 Skill，并明确指出下一步应投入的方向。
+
+### 怎么得到多次运行
+
+pass@k/pass^k 需要多次重复运行的数据。重复运行目前由 eval harness 内部的 pytest `--count N` 选项驱动，把每个任务重复 N 次，产生 N 个独立的通过/失败结果（`comet eval` 单次运行只产出 pass@1/pass^1）。报告在运行数不足（少于 2 次）时会提示增加重复次数。
+
+<h2 id="drive-evolution">评估如何驱动 Skill 演进</h2>
+
+把上述几部分结合起来，评估驱动演进的流程如下：
+
+```mermaid
+flowchart LR
+    A["运行评估<br/>rubric + pass@k/pass^k"] --> B["定位问题维度"]
+    B --> C{"gap 大吗?"}
+    C -->|大| D["方向：提高稳定性<br/>降 pass@k − pass^k"]
+    C -->|小但分低| E["方向：补能力<br/>提 completion / main_flow"]
+    C -->|某维度低| F["方向：针对性改进<br/>查 safety / recovery / ..."]
+    D --> G["改进 Skill"]
+    E --> G
+    F --> G
+    G --> H["重跑评估<br/>对比基线"]
+    H --> A
+```
+
+这套流程把 Skill 的改进变成有数据、有方向、可验证的循环：
+
+1. **评估给出定位**：rubric 标识弱维度，pass@k/pass^k 区分能力问题与稳定性问题。
+2. **改进有方向**：gap 大就提高稳定性，能力分低就补充核心能力，特定维度低就针对该维度改进。
+3. **改进可验证**：重跑评估并对比基线，分数上升说明改进有效，持平或下降则需重新评估改动。
+4. **回归有保障**：将合格版本作为基线（如 Comet 的 `COMET_FULL_039` 冻结基线），后续每次改动都与基线对比，退步会被及时发现。
+
+Comet 的失败归因把每次失败分到四个类别，指明应改 Skill 还是改环境：
+
+| 归因 | 含义 | 该改什么 |
+| --- | --- | --- |
+| `harness` | 评估环境、Docker、路径问题 | 改环境，不是 Skill |
+| `workflow` | Skill 执行流程未达预期 | 改 Skill |
+| `task` | 任务定义、验证条件问题 | 改任务，不是 Skill |
+| `model` | 模型行为、工具使用不稳定 | 换模型或调 prompt |
+
+没有归因机制，改进时容易把环境或模型的问题误判为 Skill 问题。归因使评估反馈精确指向正确的改进对象，这是评估能驱动演进而非产生噪音的前提。
+
+<h2 id="industry-comparison">业界实践对照</h2>
+
+Comet 的评估方法论并非凭空设计。Comet 评估系统开始设计时，下述文章尚未发布。在接近完成时，我们发现这些实践与国内一线团队的 Agent 评估方向高度一致。下面两篇文章可作为理解这套方法论在工业实践中的参考。
+
+### 腾讯：大规模 Agent 评测的系统性工程
+
+腾讯的评测实践强调，Agent 评测应作为系统工程对待，其核心观点与 Comet 的设计选择对应<sup>[1]</sup>：
+
+- **评测需体系化、规模化**：单个 case 的成功不代表 Skill 可靠，需要足够的任务和重复运行才能得到可信结论。对应 pass@k/pass^k 需要多 runs 的要求。
+- **任务设计是评测的根基**：任务的定义（instruction、环境、验证条件）直接决定评测有效性。Comet 用 `task.toml` + `validation/` 定义每个任务。
+- **多维评分优于单一通过率**：只看"对/错"无法指导改进，需要将质量拆成多维度才能定位问题。对应 rubric 的设计。
+- **需要可复现、可对比的基线**：评估的价值在于对比，需要稳定基线才能判断改动是改善还是退步。对应 treatment（如 `CONTROL` vs `COMET_FULL`）和冻结基线（`COMET_FULL_039`）。
+
+### 阿里：用强 Agent 构建评测 Harness
+
+阿里的方案核心是用一个强 Agent（如 Claude Code）构建评测 Harness，系统性评测一群业务 Agent，与 Comet 的设计思路一致<sup>[2]</sup>。
+
+关键要点：
+
+- **Harness 工程化**：评测本身需要工程化。环境隔离、任务调度、结果采集、报告生成。Comet 的 eval harness 用 Docker 隔离、pytest 驱动、自动生成 HTML 报告。
+- **用 Agent 评测 Agent**：阿里用强 Agent 驱动评测流程，包括模拟用户交互、采集产物、判定结果。Comet 的双 Agent 自动交互评测（被测 Agent 跑 Skill，用户模拟 Agent 在决策点回复）采用相同理念。用 Agent 替代人工，使评测可以无人值守地跑完整条工作流。
+- **评测应先于业务就绪**：评测 Harness 先搭好，业务 Agent 的迭代才有反馈，否则业务 Agent 增长后会失控。这与本文强调的"评估优先建立"一致。
+
+### Comet 和业界实践的对照
+
+| 业界共识 | Comet 的对应实现 |
+| --- | --- |
+| 评测要体系化、规模化 | eval harness 重复运行 + 多 task/profile |
+| 多维评分优于单一通过率 | 三套 rubric（7/9/11 维），加权汇总 |
+| 区分能力与可靠性 | pass@k（能力上限）vs pass^k（可靠性下限） |
+| 用 Agent 评测 Agent | 双 Agent 自动交互（被测 + 用户模拟） |
+| 需要稳定基线做回归 | treatment 体系 + 冻结基线对比 |
+| 评测要先于业务就绪 | eval 是 `/comet-any` 的发布门禁 |
+
+<h2 id="summary">小结</h2>
+
+在 Skill 平台中，评估同时承担三个角色。
+第一，用 rubric 把抽象的“质量”转成可测量、可对比的维度。
+第二，用 pass@k/pass^k 和失败归因给出明确改进方向。
+第三，作为发布门禁阻止未达标 Skill 流入使用。
+这三件事都不能只靠主观判断完成。
+
+> 想亲手跑一次评估，看这些指标怎么产生，从[快速上手](/zh/eval/quickstart)开始。
+
+<h2 id="references">参考文献</h2>
+
+1. 腾讯技术工程. *AI Agent & Skill 测评方案及落地实践*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/PUbGqheJhFMmb6hGj1ZtOw)\]
+
+2. 阿里技术. *基于顶级 Agent（Claude Code）的 Harness 工程搭建式业务 Agent 评测方案*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/n9zkbKTi3Q1j-L2vgmO1Vw)\]
+
+</div>
+
+      <div className="comet-blog-post__footer">
+        <a className="comet-blog-post__back" href="/zh/tech-blog">← 返回技术博客</a>
+        <a className="comet-blog-post__footer-link" href="https://github.com/rpamis/comet">在 GitHub 上讨论 ↗</a>
+      </div>
+    </div>
+  </div>
+</div>
