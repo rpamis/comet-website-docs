@@ -1,0 +1,179 @@
+---
+title: "Supervisor Change: One Native goal, multiple sessions"
+description: "Split large goals into independently deliverable tasks, work in isolated workspaces, and verify and deliver the integrated result."
+mode: "custom"
+hidden: true
+keywords:
+  - "Comet"
+  - "Technical blog"
+  - "Native in depth"
+---
+
+import { SupervisorVideo } from '/snippets/supervisor-video.jsx';
+
+<div className="comet-blog-post">
+  <div className="comet-home__loader is-hidden" aria-hidden="true"></div>
+  <div className="comet-blog-post__layout">
+    <div className="comet-blog-post__toc">
+      <p className="comet-blog-post__toc-title">Contents</p>
+      <ol>
+        <li><a href="#subtask-management">Manage and deliver subtasks together</a></li>
+        <li><a href="#split-by-deliverable">Split tasks by deliverable</a></li>
+        <li><a href="#choose-plan">Choose a plan and execution mode</a></li>
+        <li><a href="#isolated-workspace">Give each subtask an isolated workspace</a></li>
+        <li><a href="#codex-multi-session">Use multiple sessions in Codex</a></li>
+        <li><a href="#claude-agent-teams">Use Agent Teams in Claude Code</a></li>
+        <li><a href="#verify-then-integrate">Verify before integration</a></li>
+        <li><a href="#final-acceptance">Verify the integrated result</a></li>
+        <li><a href="#resumable-progress">Resume recorded progress</a></li>
+      </ol>
+    </div>
+    <div className="comet-blog-post__main">
+      <div className="comet-blog-post__header">
+        <a className="comet-blog-post__back" href="/en/tech-blog">← Technical blog</a>
+        <p className="comet-blog-post__meta">
+          <span className="comet-blog-post__meta-date">2026-08-31</span>
+          <span className="comet-blog-post__meta-cat">Native in depth</span>
+        </p>
+        <h1 className="comet-blog-post__title">Supervisor Change: One Native goal, multiple sessions</h1>
+        <p className="comet-blog-post__lede">Split large goals into independently deliverable tasks, work in isolated workspaces, and verify and deliver the integrated result.</p>
+        <p className="comet-blog-post__byline"><span className="comet-blog-post__byline-key">By </span>Comet team · 11 min read</p>
+      </div>
+      <div className="comet-blog-post__body">
+
+Supervisor Change is a parallel delivery mode provided by Native for large tasks. It breaks down the overall goal into sub-tasks that can be independently achieved and verified in accordance with the acceptance requirements. The Runtime is responsible for managing dependencies, isolating workspaces, recording execution status, integrating results, and completing final acceptance.
+
+No matter how many sub-tasks it is split into, there is still only one final delivery. After all the results are integrated, the main task must re-verify the complete target. A single Agent reporting completion, a sub-task passing verification, or the code entering the integration branch does not mean that the entire task has been completed.
+
+<h2 id="subtask-management">Manage and deliver subtasks together</h2>
+
+| Product capability                  | Practical function                                                                                                                                                           |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Split by acceptance items           | Each sub-task is responsible for a clear acceptance item, and the ambiguous division of labor such as "each doing a little at the front end and the back end" is not adopted |
+| Automatically advance by dependency | Runtime only arranges sub-tasks that have already met their dependencies to prevent tasks that have not yet met the conditions from starting ahead of schedule               |
+| Independent workspace               | Each sub-task only modifies the code within its own worktree to prevent multiple agents from overwriting each other                                                          |
+| Results bound to their task         | Task packages, baseline commits, and `runId` jointly identify the current execution. Late or duplicate results are rejected                                                  |
+| Overall unified acceptance          | After integrating all sub-tasks, conduct a final acceptance of the complete target once again                                                                                |
+
+For example, a permission management objective can be broken down into a permission API, a permission configuration page, and an audit log. The three results can be independently achieved and verified, but they still belong to the same product objective and require unified integration and final acceptance. This type of task is suitable for using Supervisor Change.
+
+<h2 id="split-by-deliverable">Split tasks by deliverable</h2>
+
+Comet will check whether it is worth splitting before the final Shape is confirmed. Supervisor Change is recommended only when the following conditions are met simultaneously:
+
+- At least two results can be independently implemented and verified;
+- Each acceptance item in the overall goal can be clearly assigned to a certain sub-task.
+- The dependencies among sub-tasks can be clearly expressed;
+- Parallel execution or phased delivery can indeed reduce the overall waiting time.
+
+A long demand text and numerous task items do not necessarily mean they are suitable for splitting. If multiple parts need to repeatedly modify the same core area, or the increased communication and integration costs after splitting are higher than the benefits of parallelism, it is more appropriate to continue using a single Native Change. If there is no common final acceptance target, multiple independent changes should be created.
+
+The split plan is recorded in `children.yaml`, using the `comet.native.children.v2` format in RC1. The `acceptance_index` in this file stores the acceptance items of the overall target derived from `brief.md`, including each item's acceptance ID, source, and full text; each sub-task only declares a unique name, its dependencies, and the acceptance IDs it covers. The Runtime checks for duplicate names, unknown dependencies, dependency cycles, and acceptance omissions.
+
+<h2 id="choose-plan">Choose a plan and execution mode</h2>
+
+Before confirmation, Comet will display the overall goal, sub-task list, dependencies, and acceptance mapping. Users can adjust the split, continue to use a single Native Change, or choose an advancement method:
+
+| Option | Coordination mode                         | Actual impact                                                                                                                                                           |
+| ------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A      | Multi-session collaboration (recommended) | The current session coordinates the work. Codex independent sessions or Claude Code Agent Teams execute tasks when available, with subagents as the fallback.           |
+| B      | Single-session advancement                | No independent sessions or Agent Team are created. The current session completes sub-tasks in sequence under the same scope, dependencies, and acceptance requirements. |
+
+The advancement mode only determines where sub-tasks are executed; the split results, dependencies, acceptance criteria, and integration rules stay the same under both modes. When confirming the Supervisor split, the Runtime writes the selection as `coordination_mode` to `comet-state.yaml`. Resuming the flow or re-entering Shape after a requirement change reuses this selection; only a new user-visible decision sends the flow back to Shape for you to reconfirm.
+
+Before confirmation, the Runtime will not create sub-tasks, worktrees, or external sessions. When there are two or more sub-tasks involved, the ordinary "confirmation" cannot replace the selection of the advancement method.
+
+After Comet shows the complete plan and both modes together, you can reply once, for example, "Confirm this plan and use A, multi-session collaboration." Selecting only "A" chooses the mode without confirming the complete plan. Changes to the plan, acceptance criteria, or sub-tasks require confirmation again.
+
+<h2 id="isolated-workspace">Give each subtask an isolated workspace</h2>
+
+After the Shape is confirmed, the Runtime will first create a dedicated integration branch and integration worktree for the main task, and then, starting from the current commit of the integration branch, prepare independent worktrees and task packages for each sub-task.
+
+Each task package contains:
+
+- The roles and acceptance scope of sub-tasks;
+- The only working directory;
+- Current integration baseline submission;
+- `runId` for binding sub-task result reporting;
+- Dependency conditions and stop conditions.
+
+The Runtime informs the main session through `readyChildren` which sub-tasks can start now. By default, the multi-session mode can start up to two independent sub-tasks simultaneously at most. The single-session mode runs sub-tasks in sequence. To switch to serial execution temporarily, the main session specifies the following when dispatching tasks:
+
+```bash
+comet native next <supervisor-change> --max-parallel 1
+```
+
+This parameter only limits the number of tasks running at the same time; task dependencies and the acceptance scope stay unchanged.
+
+<h2 id="codex-multi-session">Use multiple sessions in Codex</h2>
+
+After selecting multi-session collaboration in Codex, the current session becomes the main session. It is responsible for assigning tasks, continuously checking progress, handling blockages, integrating verified results into the Runtime, and completing the final Verify of the main task. The main session does not directly enter the sub-task worktree to modify the code.
+
+Each sub-task in `readyChildren` will be assigned to an independent task visible to the user. Independent tasks continue to use the current project and directly enter the subtask directory already prepared by the Runtime, without the need to create a separate worktree. When an independent task reports completion, the result still has to go through the sub-task Verify and Runtime integration; the main session continues with the next step based on the integrated state.
+
+<SupervisorVideo
+  src="/vedio/codex.mp4"
+  width={1230}
+  height={858}
+  label="Comet Supervisor Change executes subtasks through multiple independent sessions in Codex"
+  fallback=" Your browser does not support HTML5 video"
+/>
+
+<h2 id="claude-agent-teams">Use Agent Teams in Claude Code</h2>
+
+In the interactive session of Claude Code, different subtasks can be run using Agent Teams. In PowerShell, it can be enabled through the following environment variables:
+
+```powershell
+$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
+```
+
+The current session acts as the team lead and assigns a clearly named teammate to each subtask in `readyChildren`. only works within the subtask worktree specified by the Runtime and cannot create new workspaces, claim subtasks with unfulfilled dependencies, integrate main task branches, or create nested teams on its own.
+
+Agent Teams is responsible for running multiple sessions, while Native Runtime remains responsible for the workspace, task status, verification, and integration: the recorded Runtime state is authoritative, the final acceptance of the main task is also performed by the Runtime, and messages from team members serve only as a progress reference.
+
+<SupervisorVideo
+  src="/vedio/claude%20code.mp4"
+  width={1548}
+  height={1080}
+  label="Comet Supervisor Change performs subtasks in Claude Code via Agent Teams"
+  fallback=" Your browser does not support HTML5 video"
+/>
+
+<h2 id="verify-then-integrate">Verify before integration</h2>
+
+Each sub-task must go through `active → verified → integrated`:
+
+1. The Builder completes the candidate implementation in the sub-task worktree and submits the result of binding the current `runId`.
+2. The independent Verifier checks the candidate submissions and the acceptance scope of sub-tasks;
+3. The Runtime only accepts rewards that match the role, `runId`, and the current task status.
+4. After verification is passed, the Runtime submits the verified information to the integration worktree of the Supervisor and runs the necessary integration checks.
+
+Sub-tasks do not execute Archive independently, nor can they merge the main task branches by themselves. The Agent's claim that "it has been completed" cannot be used as a basis for integration. When there are unsubmitted modifications in worktree, it also indicates that the result is not yet ready. Only when the Runtime records the status as `integrated` will subsequent sub-tasks that depend on it enter `readyChildren`.
+
+<h2 id="final-acceptance">Verify the integrated result</h2>
+
+After all sub-tasks enter `integrated`, the Runtime immediately advances the final Verify of the main task. The final Verify runs at least one integration check in the integration worktree and covers the complete acceptance scope of the overall target.
+
+Only after the final verification is passed can the Supervisor Change enter the Archive. The user decides to retain the workspace, merge locally, push or create a PR according to Native's archive delivery options (the option semantics are described in [Archive and delivery](/en/native/archive-and-delivery)). The target branch will not be modified in advance before the final delivery.
+
+If the Verify fails in the end, the Runtime will retain the integration scene and will not reopen the sub-tasks that have already been integrated. The process will add a unique-named repair sub-task based on the actual failed acceptance items, supplement the acceptance mapping of the overall goal, and return a Shape for the user to confirm the new repair scope. After the last sub-task is integrated, small fixes may still be committed directly at the parent level, and the final Verify records the integration commit it actually verified; when resuming, an interrupted final-verification record is completed automatically or re-run as needed.
+
+<h2 id="resumable-progress">Resume recorded progress</h2>
+
+Sub-task summaries, `readyChildren`, integration status, and the next action are all recorded in the Runtime state; the main session reads them with `comet native status <supervisor-change> --details --json` when resuming or advancing the work. You only need to tell the Agent to continue the current task — the main session handles these queries and the handoffs automatically.
+
+When resuming a task, Comet follows the `coordination_mode` persisted by the Runtime and does not recreate existing sub-tasks or worktrees. `multi-session` continues with multi-session collaboration, and `single-session` continues with the current session advancing sub-tasks in sequence.
+
+If the original Codex standalone session or Claude Code Agent Team no longer exists, Comet will re-read the Runtime and automatically switch to subagent under `multi-session`. Tasks that have been dispatched but lost will first inactivate the old `runId` through `supervisor-cancel`, and then be redispatched using the new task package and `runId`. The late results of the old execution will be rejected. When the subagent is also unavailable, Comet will report a real block and will not automatically switch to single-session advancement.
+
+Continue reading [Native Loop](/en/native/native-loop) to understand the acceptance mechanism shared by the main task and sub-tasks. Read [Multiple Changes and Specification Conflicts](/en/native/multi-change-and-conflicts) and [Recovery Playbook](/en/native/recovery-playbook) to learn about concurrent conflicts and interrupt recovery.
+
+</div>
+
+      <div className="comet-blog-post__footer">
+        <a className="comet-blog-post__back" href="/en/tech-blog">← Back to the technical blog</a>
+        <a className="comet-blog-post__footer-link" href="https://github.com/rpamis/comet">Discuss on GitHub ↗</a>
+      </div>
+    </div>
+  </div>
+</div>

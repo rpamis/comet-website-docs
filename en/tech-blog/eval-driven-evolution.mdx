@@ -1,0 +1,262 @@
+---
+title: "How Comet uses evaluation to evolve Skills"
+description: "How Comet uses evaluation to evolve Skills: multi-turn Spec Coding, differences from model-only benchmarks, the lack of a gold standard for Skills bound to Agents, and open evaluation problems."
+mode: "custom"
+hidden: true
+keywords:
+  - "Comet"
+  - "Technical blog"
+  - "Evaluation methods"
+---
+
+<div className="comet-blog-post">
+  <div className="comet-home__loader is-hidden" aria-hidden="true"></div>
+  <div className="comet-blog-post__layout">
+    <div className="comet-blog-post__toc">
+      <p className="comet-blog-post__toc-title">Contents</p>
+      <ol>
+        <li><a href="#ci-gate">Connect evaluation to the release pipeline</a></li>
+        <li><a href="#why-new-problem">Why evaluating Spec Coding Skills is a new problem</a></li>
+        <li><a href="#vs-swe-bench">How this differs from SWE-bench and SWE-bench Pro</a></li>
+        <li><a href="#no-gold-standard">No gold standard for Skills bound to Agents</a></li>
+        <li><a href="#open-problems">Open challenges in Comet eval</a></li>
+        <li><a href="#enterprise">Bring evaluation into production</a></li>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#references">References</a></li>
+        <li><a href="#next-steps">Next steps</a></li>
+      </ol>
+    </div>
+    <div className="comet-blog-post__main">
+      <div className="comet-blog-post__header">
+        <a className="comet-blog-post__back" href="/en/tech-blog">← Technical blog</a>
+        <p className="comet-blog-post__meta">
+          <span className="comet-blog-post__meta-date">2026-07-02</span>
+          <span className="comet-blog-post__meta-cat">Evaluation methods</span>
+        </p>
+        <h1 className="comet-blog-post__title">How Comet uses evaluation to evolve Skills</h1>
+        <p className="comet-blog-post__lede">How Comet uses evaluation to evolve Skills: multi-turn Spec Coding, differences from model-only benchmarks, the lack of a gold standard for Skills bound to Agents, and open evaluation problems.</p>
+        <p className="comet-blog-post__byline"><span className="comet-blog-post__byline-key">By </span>Comet team · 21 min read</p>
+      </div>
+      <div className="comet-blog-post__body">
+
+<Info>
+This page is aimed at teams that wish to apply the assessment and extend it to the enterprise's production environment. If you only need to run an assessment once, refer to [Quick Start ](/en/eval/quickstart); to understand why assessment is important, refer to [Assessment: The Compass of Skill Evolution ](/en/tech-blog/why-eval). This page explains how Comet uses assessment to drive Skill evolution and the difference between "assessment models" and "assessment skills".
+</Info>
+
+<Warning>
+This page is advanced Eval content for teams and source code maintainers. It is necessary to reproduce the harness, tracking and experimental procedures therein
+Pull the Comet source code; Ordinary users do not need to understand these internal details. Please directly refer to [Quick Start ](/en/eval/quickstart)
+</Warning>
+
+<h2 id="ci-gate">Connect evaluation to the release pipeline</h2>
+
+Evaluation must integrate directly into the "author → evaluate → publish" lifecycle to reliably ensure Skill quality. Comet enforces evaluation evidence as a strict release gate: if evaluation evidence is missing for the current draft, if evaluation runs fail, or if evidence points to an outdated commit hash, the Skill cannot be published.
+
+After modifying a Skill, rerun the evaluation against the same task benchmark and use the resulting signals to guide improvements:
+
+```mermaid
+flowchart LR
+    Run["Run evaluation<br/>rubric + pass@k/pass^k<br/>+ failure attribution"] --> Read["Read signals"]
+    Read --> Branch{"Where to invest next?"}
+    Branch -->|"Large gap"| Fix1["Improve stability<br/>Reduce pass@k − pass^k"]
+    Branch -->|"Low completion/main_flow"| Fix2["Add capabilities"]
+    Branch -->|"Low specific dimension"| Fix3["Target specific dimension<br/>safety / recovery / ..."]
+    Branch -->|"Harness or model issue"| NotSkill["Not a Skill issue<br/>Fix environment / model"]
+    Fix1 --> Improve["Improve Skill"]
+    Fix2 --> Improve
+    Fix3 --> Improve
+    Improve --> ReRun["Rerun evaluation<br/>Compare with frozen baseline"]
+    ReRun --> Gate{"Pass release gate?"}
+    Gate -->|No| Run
+    Gate -->|Yes| Publish["Enter publish"]
+    NotSkill --> Run
+```
+
+Each fork point in the loop is determined by the evaluation signal. Among them, failure attribution divides each failure into four categories, indicating whether the Skill should be changed:
+
+|Attribution|Meaning|What should be changed?|
+| --- | --- | --- |
+| `harness` |Evaluate environmental, Docker, and path issues|Changing the environment is not a Skill|
+| `workflow` |The execution process of Skill did not meet expectations|Modify Skill|
+| `task` |Task definition and verification condition issues|Changing tasks is not a Skill|
+| `model` |The model behavior and tool usage are unstable|Change the model or adjust the prompt|
+
+Without an attribution mechanism, teams are prone to misjudging problems with the model or environment as Skill issues and making repeated modifications. Attribution enables feedback to precisely point to the correct object of improvement.
+
+<h2 id="why-new-problem">Why evaluating Spec Coding Skills is a new problem</h2>
+
+Comet assesses a multi-stage workflow Skill that pauses at the decision point and asks the user, focusing on its performance during repeated runs. This scope goes beyond the individual ability assessment of "whether the model can write code". This type of Skill has several characteristics that set it apart from traditional pure model evaluation.
+
+### Multi-turn interaction: Skills wait for user decisions
+
+The five-stage workflow Skill (`/comet`) is not a single-round task. It will pause at the stage boundary and the decision point that needs confirmation, waiting for user input - whether the solution is feasible, which default to choose, and whether to go through hotfix. This brings about two evaluation constraints:
+
+- The single-round evaluation cannot be completed. If the task is executed merely by providing a prompt, the Skill will remain at the first decision point, and the evaluation cannot proceed to subsequent stages.
+- The decision point requires a response. Decision points rely on user input, but human intervention makes the evaluation impossible to automate and repeat.
+
+This is the main difference between the Skill evaluation of the Spec Coding class and the traditional code evaluation: The evaluation needs to be able to automatically run the entire multi-turn interaction process.
+
+### Success includes workflow progress and correct artifacts
+
+In pure model evaluation, success is commonly defined as "the code passes tests". For workflow Skills, success also includes phase order (`open → design → build → verify → archive`), correct pauses at decision points, and recoverable state. These are process-level evidence and cannot be judged from output files alone.
+
+### Reliability matters alongside capability
+
+Workflow skills are tools that users repeatedly use. For such tools, "getting it right every time" (high reliability) is more important than "getting it right occasionally" (high capacity limit). Comet uses both `pass@k` (capability upper bound) and `pass^k` (reliability lower bound) to evaluate peak performance versus consistent stability.
+
+<h2 id="vs-swe-bench">How this differs from SWE-bench and SWE-bench Pro</h2>
+
+The SWE-bench family is the de facto benchmark for code intelligence evaluation: given a real GitHub issue, assess whether the model generates a patch that passes tests. Comet eval targets a fundamentally different evaluation object:
+
+| Dimension | SWE-bench / SWE-bench Pro | Comet eval (Skill Evaluation) |
+| --- | --- | --- |
+| Evaluation Target | Model / harness coding capabilities | Incremental value of Skill (whether adding the Skill improves outcomes) |
+| Interaction Pattern | Single-agent + sandbox environment, runs to completion | Multi-turn interaction; pauses at decision points and requires user (or simulated user) responses |
+| Definition of "Success" | Patch passes existing unit/regression tests | Correct output artifacts + process evidence (phase sequence, decision points, recoverable state) |
+| Skill Invocation Check | Not tracked | Core requirement: Skill must be verifiably invoked and leave evidence |
+| Capability vs. Reliability | Primary focus on raw pass rate | Explicitly distinguishes between `pass@k` (capability) and `pass^k` (reliability) |
+| Comparison Method | Absolute pass rate | Paired increment with/without Skill (treatment system) |
+
+The core difference is that SWE-bench conflates model capabilities, harness engineering, and prompting into a single pass rate. Skill evaluation answers a comparative question: on the same task and model, does injecting this Skill improve or degrade performance, and by how much? Pure model benchmarks cannot isolate this factor.
+
+Comet uses the treatment system for a comparison with and without Skill: `CONTROL` (baseline without Skill) versus `COMET_FULL` (injected with the complete Skill stack). The same task and the same isolated environment, with the only variable being Skill. This way, the marginal effect of Skill can be measured separately, avoiding including the model's own capabilities in the Skill benefits.
+
+<h2 id="no-gold-standard">No gold standard for Skills bound to Agents</h2>
+
+The evaluation of assessment models (SWE-bench, HumanEval) has become relatively mature. However, there is no universally recognized gold standard in the industry for evaluating whether the skills bound to the Agent are effective.
+
+In response to this gap, the academic paper Skillsbench <sup> [1]</sup> took Skill as the direct evaluation object and used paired evaluation experiments to measure the increment of "adding Skill vs. not adding Skill", and pointed out: Traditional agent benchmark "measure raw capability in isolation... do not answer the deployment question: will adding this Skill help my agent on this task, and by how much?"
+
+SkillsBench also lists unresolved issues: it only covers terminal and containerized tasks; Skill injection increases context length, so some gains may come from extra context instead of procedural knowledge; containerization improves state isolation but is not fully deterministic; and it does not simulate user interaction, pass@k, or LLM-as-judge scoring (it stays with deterministic testing).
+
+This field is still in its early stages at present. The following are the specific problems Comet faces and the current practices when designing and implementing eval.
+
+<h2 id="open-problems">Open challenges in Comet eval</h2>
+
+### Problem One: How to enable the Agent to automatically simulate user choices
+
+The workflow Skill will pause and wait for the user at the decision point. To enable the evaluation to run the entire workflow unattended, a mechanism is needed to simulate user responses.
+
+Comet's approach is for dual agents to interact automatically, with two independent Agent roles collaborating:
+
+|"Role"|Duties|Conversation format|
+| --- | --- | --- |
+|The tested Agent (subject|Run the Skill under test (such as `/comet` five stages)|A single consecutive session, with each round continued by `--resume`|
+|User Simulation Agent (simulator|Simulate user responses at the decision point|A one-time stateless call at each decision point|
+
+The interaction process is: The Agent under test runs to the decision point → the harness detects the decision signal (such as `?`, `confirm`, `choose`, `approve`, etc. appear in the output) → The user simulation Agent reads the Agent under test The last message is sent and a reply is generated (approve a reasonable plan, select a reasonable default, and only request clarification when there is true ambiguity) → the tested Agent continues with `--resume` → Continue until the workflow is completed (`archive complete`) or the round-trip limit is reached.
+
+The instructions of the user simulation Agent have clear constraints: do not reject, push the workflow forward, and do not write code or files. This enables the evaluation to automatically complete multi-stage processes, while the user input at the decision point remains reasonable and consistent.
+
+Source code location: Driver script `eval/scaffold/shell/run-claude-loop.sh`, simulator prompt words `eval/simulator-instruction.md` and `scaffold/python/profiles.py` in `COMET_SIMULATOR_PROMPT`/`GENERIC_SIMULATOR_PROMPT`. The simulator can be customized (`BENCH_SIMULATOR_PROMPT_FILE`), for example, to switch to a more rigorous user profile for stress testing.
+
+### Problem Two: How to Use Agents for Evaluation (LLM-as-judge)
+
+Rule-based rubric can detect structural signals (whether a file exists, whether a command is executed, whether a Skill is called), but it cannot determine whether the product has real substance - whether the agent has made meaningful designs or only generated placeholder content.
+
+Comet's approach is an optional LLM-as-judge: the judge model reads the workspace product and scores it. The key lies in confining subjective judgment within an auditable scope:
+
+- "Fixed dimension." comet-workflow's judge only evaluates three dimensions with relatively weak rules (`artifact_quality`, `spec_drift`, `main_flow`), while generic/authoring evaluates `task_completion`/`output_quality`/`instruction_adherence`.
+- Anchor the scoring criteria. prompt provides clear anchor point definitions of 1.0/0.5/0.0 for each dimension instead of allowing the model to score based on impressions.
+- **Request to cite evidence**. The output format is `[RUBRIC-JUDGE] < Dimension >: < Score > - < Reason >`. The reason should not exceed 25 words and specific   product content should be cited.
+- Supplement, not replacement. The judge score is marked as `[RUBRIC-JUDGE]`, distinct from the rule score's `[RUBRIC]`. It augments rule scoring and does not create hard failures by itself.
+
+SkillsBench, for the sake of certainty, does not use LLM-as-judge for scoring. Comet's trade-off is that deterministic testing takes on the hard judgment of "whether it is correct", while LLM judges supplement the qualitative judgment of "whether it is in-depth", and the two complement each other in terms of division of labor.
+
+Source code location: `eval/scaffold/python/llm_judge.py` (comet-workflow), `generic_llm_judge.py` (General). judge reuses the same `claude` CLI as the Agent under test without introducing additional dependencies.
+
+### Problem Three: How to design indicators
+
+Whether a Skill is qualified or not is a vague issue. The goal of index design is to break down ambiguity into measurable, comparable and attributable signals. Comet's metrics are divided into three layers:
+
+|Indicator layer|The questions answered|Type|
+| --- | --- | --- |
+|Task validator (Product presence + zero failure of verification script)|Is this time correct?|Hard judgment (deciding pass/fail|
+|rubric multi-dimensional score (7/9/11 dimension, weighted summary)|Where is strong, where is weak, and how much is the gap|Informational (Diagnostic|
+| pass@k / pass^k |Can it be done/Can it be done every time|Informational (distribution|
+
+The reason for stratification is to separate "whether it is correct" from "the level of quality". A Skill that produces all correct files but contains `rm -rf` will be approved by the task validator, but the `safety_boundary` dimension will be marked low - the former indicates whether it can be delivered, and the latter indicates whether it can be delivered safely. rubric uses binary checkitems instead of a 0-100 score (consistent with SWE-bench, τ-bench, etc.), making the scores reproducible and interpretable.
+
+Source code location: pass@k/pass^k in `eval/scaffold/python/pass_at_k.py`, rubric weighting in `validation/rubric.py`, failure attribution in `attribution.py`.
+
+### Problem Four: How to ensure a clean experimental environment
+
+The Agent is path-dependent: it explores directories, reads files, and its behavior is affected by the initial environment. If the environment of each experiment is not clean or the status is leaked, the evaluation results cannot be reproduced.
+
+Comet's approach is to provide an independent isolated Docker container for each task:
+
+- Each task has an independent container. Each task has its own `Dockerfile`. The container is destroyed as `--rm`, and the host temporary directory is mounted to the container's `/workspace`.
+- **Only mount key scripts**. The loop-driven script is mounted in read-only mode (`/opt/scaffold-shell:ro`), and the Agent cannot modify the evaluation logic.
+- "Non-root user". The container creates a dedicated `agent` user to run and restricts permissions.
+- "Key whitelist". Only the key explicitly granted by eval is forwarded, and other environment variables of the host machine do not enter the container.
+- The image is cached by hash. The hash cache image of the `Dockerfile` + dependent file is built only once in the same environment.
+
+Source code location: The isolation and mounting logic is at `eval/scaffold/shell/docker.sh`, and the host-container data is exchanged through two retained JSON files, `_test_context.json` (in) and `_test_results.json` (out).
+
+### Problem Five: How to increase the probability of Skill being triggered
+
+If the model never invokes the Skill, evaluation is measuring the bare model instead of the Skill. A LangChain practical article <sup>[2]</sup> highlighted this: even with explicit prompts requiring Skill calls, invocation rates were only around 70%.
+
+Comet ensures that the model actually uses Skill through a multi-layer mechanism:
+
+1. Write the `CLAUDE.md` contract. When evaluating comet-workflow, a mandatory `CLAUDE.md` was written in the container workspace, requiring "first call the `/comet` Skill"," Use the Skill tool to call the nested phase Skill", and "do not simulate the workflow with prose". `CLAUDE.md` is the always-loading context.
+2. The contract simultaneously injects the task prompt. The trigger instruction appears simultaneously in the system context (CLAUDE.md) and the first user message.
+3. "PreToolUse hook guardian" Register the `comet-hook-guard.mjs` that comes with the Skill as the `Write|Edit|MultiEdit` pre-hook. Run the stage guard before each file writing to ensure that the model continuously executes according to the stage logic of the Skill.
+4. "Skill call evidence serves as hard access control." The evaluation parses the real `Skill` tool_use event from `stream-json` to verify the call. If the Comet entry point, a nested stage Skill, OpenSpec, and the required Superpowers dependency Skill do not all appear as tool calls, the run fails.
+
+These mechanisms jointly ensure that the Skill is truly invoked and leaves a resolvable invocation trajectory; otherwise, the evaluation does not count as a valid result.
+
+Source code location: CLAUDE.md contract is in `eval/local/skills/benchmarks/dependency/claude-md/comet-workflow/CLAUDE.md`, call evidence resolution is in `extract_events` of `scaffold/python/logging.py`, and hard access control is in `_score_skill_invocation` of `validation/rubric.py`.
+
+<h2 id="enterprise">Bring evaluation into production</h2>
+
+The evaluation concept of Comet eval is derived from LangChain's Evaluating Skills<sup>[2]</sup>: Test skills as prompts, and conduct evaluations with/without controls, isolated environments, reproducible quantitative metrics, and full observability. However, in production enterprise environments, local evaluation alone is not sufficient.
+
+The LangChain article emphasizes pairing Skill evaluation with observable experiment platforms like LangSmith. These platforms score each run and capture Agent actions (read files, create scripts, call Skills) for diagnosis. This is why Comet eval includes LangSmith integration.
+
+Comet's LangSmith integration reuses the same set of local task suites and runs the evaluation into the real LangSmith environment:
+
+- Reuse local tasks. The LangSmith package directly reuses the local task corpus of `local/tasks/` and only enables tracing (`LANGSMITH_TRACING=true`, `TRACE_TO_LANGSMITH=true`). The same runner code and determination logic run on an enterprise-level observable platform.
+- "Credential Gate control." It is only enabled when `LANGSMITH_API_KEY` is set, and local unit tests are not affected.
+- "Distributed tracking context propagation". Through the W3C-style tracing header (`CC_LS_TRACE_ID`, `BENCH_EVAL_BAGGAGE`, etc.), the LLM calls within the Claude Code container and the LLM calls of test-script are all nested under the LangSmith run of the experiment. Form a drillable tracking chain.
+- "Bidirectional verification." In addition to uploading data, it will also verify whether the code generated by the Agent correctly uses LangSmith's `@traceable`/`wrap_openai`, and confirm the existence of trace and evaluator through the `client.read_run(trace_id)` and `/runs/rules` apis.
+
+This enables the evaluation to have two capabilities to enter production: horizontal comparison (comparing multiple runs and multiple versions in the LangSmith Experiment portal) and vertical drill-down (viewing the complete trajectory of each tool call and Skill trigger to locate the steps where failure occurred).
+
+Source code location: The LangSmith package is in `eval/langsmith/`, the tracing context is in `scaffold/python/validation/runner.py`, and the client is in `get_langsmith_client` of `scaffold/python/utils.py`.
+
+<h2 id="summary">Summary</h2>
+
+There is already a relatively mature gold standard for the evaluation model. Evaluating whether the Skill bound to the Agent is effective remains an open issue at present. Comet eval's approach is:
+
+- Treat Skill evaluation as a multi-turn interaction problem, and use dual agents to automatically interact and run the entire workflow instead of single-round execution.
+- Divide deterministic testing and qualitative judgment. The task validator undertakes hard judgment, and the LLM judge supplements in-depth evaluation.
+- Use pass@k/pass^k to distinguish capability from reliability and give evolution a clear direction;
+- Use Docker isolation, read-only mounting, and key whitelist to ensure the reproducibility of the environment;
+- Use the CLAUDE.md contract and invocation evidence hard access control to ensure that the Skill is truly invoked;
+- Integrate the assessment into the enterprise-level observability platform using LangSmith integration.
+
+None of these issues have been completely resolved yet - as SkillsBench states, this field is still in its early stages. The goal of Comet is to ensure that every aspect of the assessment process has an interpretable, auditable and reproducible engineering implementation, making the assessment an infrastructure that can run continuously and drive the evolution of Skill.
+
+<h2 id="references">References</h2>
+
+1. Li, X., et al. *SkillsBench:  Benchmarking How Well Agent Skills Work Across Diverse Tasks*.arxiv preprint arXiv:2602.12670, 2026. \[[Paper link ](https://arxiv.org/abs/2602.12670)\]
+
+2. Xu, R. *Evaluating Skills*.langchain Blog, 2026-03-05. \[[Original link ](https://www.langchain.com/blog/evaluating-skills)\]
+
+<h2 id="next-steps">Next steps</h2>
+
+- [Why Eval: The Compass for Skill Evolution](/en/tech-blog/why-eval) — Why evaluation is the foundational capability, and the rationale for rubrics, pass@k, and pass^k
+- [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) — Rubric dimensions and the dual-agent automated interaction loop
+- [Eval Harness](/en/eval/harness) — collect/run mechanics, environment variables, and LangSmith integration
+- [Quickstart](/en/eval/quickstart) — Run an evaluation to see how these metrics are generated
+
+</div>
+
+      <div className="comet-blog-post__footer">
+        <a className="comet-blog-post__back" href="/en/tech-blog">← Back to the technical blog</a>
+        <a className="comet-blog-post__footer-link" href="https://github.com/rpamis/comet">Discuss on GitHub ↗</a>
+      </div>
+    </div>
+  </div>
+</div>
