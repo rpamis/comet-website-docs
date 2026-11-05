@@ -5,6 +5,19 @@ description: '写了代码不满意、中途要改 spec、验证不通过要回 
 
 实际开发中，需求变化、代码不满意、验证失败都是常态。除了向前推进，Comet 还提供了多条合法的修改和回退路径。本页讲清楚每个场景该怎么操作。
 
+## 编辑后继续当前任务
+
+Native 和 Classic 在 Build、Verify 或归档前保留你的实际编辑，由当前 Agent 核对内容与影响，继续原 Run。无需为普通编辑单独启动审查会话，也不需要重建 change。
+
+- 代码或检查输入变化：保留仍有效的工作，只补受影响或缺失的检查。
+- brief、Spec、Design Doc 或计划仅调整措辞、契约未变：对照已批准原文核对后，保留原批准和阶段。
+- 目标、验收标准、方案或批准范围发生实质变化：说明变化与影响，再处理对应的用户决定。
+- 结果已接受、尚未交付时修改普通文档：核对影响并刷新受影响检查后，继续原归档；不重复已完成的一次性操作。
+
+Agent 按 Runtime 返回的 `comet edit-review observe` 等指引处理。未获批准的操作不会因编辑而自动获准；仍在执行或结果未知的任务也不能直接重启。
+
+下面的 transition 示例用于 Classic 的显式回退；日常编辑优先按 Runtime 当前返回的续行操作处理。Native 验收见[验证与修复](/zh/native/verification-and-repair)。
+
 ## 先理解：phase 不能手动改
 
 `.comet.yaml` 的 `phase` 由 Comet 自动维护（machine-owned）。你不能直接 `set phase build` 回退，状态机会拒绝。回退只能通过**合法的 transition 事件**，每个事件都有守卫检查。
@@ -19,16 +32,16 @@ COMET_FORCE_PHASE=1 node "$COMET_STATE" set <name> phase verify
 
 ## 可用的 transition 事件
 
-| 事件                  | 方向                    | 触发场景              |
-| --------------------- | ----------------------- | --------------------- |
-| `open-complete`       | 向前 open→design        | open 产物完成         |
-| `design-complete`     | 向前 design→build       | Design Doc 完成       |
-| `build-complete`      | 向前 build→verify       | 代码完成              |
-| `verify-pass`         | 向前 verify→archive     | 验证通过              |
+| 事件                  | 方向                    | 触发场景               |
+| --------------------- | ----------------------- | ---------------------- |
+| `open-complete`       | 向前 open→design        | open 产物完成          |
+| `design-complete`     | 向前 design→build       | Design Doc 完成        |
+| `build-complete`      | 向前 build→verify       | 代码完成               |
+| `verify-pass`         | 向前 verify→archive     | 验证通过               |
 | **`verify-fail`**     | **回退 verify→build**   | 验证不通过，用户选修复 |
-| **`preset-escalate`** | **回退 build→design**   | hotfix/tweak 范围扩大 |
-| **`archive-reopen`**  | **回退 archive→verify** | 归档前想重新验证      |
-| `archived`            | 终态                    | 归档完成              |
+| **`preset-escalate`** | **回退 build→design**   | hotfix/tweak 范围扩大  |
+| **`archive-reopen`**  | **回退 archive→verify** | 归档前想重新验证       |
+| `archived`            | 终态                    | 归档完成               |
 
 <p align="center">
   <img
@@ -46,14 +59,15 @@ delta spec 在 build 阶段可以修改。根据修改范围采用以下处理�
 
 | 规模 | 触发                         | 怎么做                                                       | 改 phase 吗            |
 | ---- | ---------------------------- | ------------------------------------------------------------ | ---------------------- |
-| 小   | 缺验收场景、边界情况         | 直接编辑 delta spec 并追加 tasks.md，提交时记录原因           | 否                     |
+| 小   | 缺验收场景、边界情况         | 直接编辑 delta spec 并追加 tasks.md，提交时记录原因          | 否                     |
 | 中   | 接口变化、新组件、数据流变化 | 暂停确认 → 加载 `brainstorming` 更新 Design Doc + delta spec | 否                     |
 | 大   | 全新 capability              | 暂停确认 → `/comet-open` 开新 change                         | 新 change 从 open 开始 |
 
 <Note>
-  轻度和中度修改<strong>不回退 phase</strong>——它们在 build 阶段原地处理。只有涉及重大范围变更时（开新
-  change），才会另起一个完整的 open→design→build 流程。full workflow <strong>没有</strong>{' '}
-  build→design 的直接回退，设计问题在 build 阶段通过 brainstorming 原地更新 Design Doc 解决。
+  轻度和中度修改<strong>不回退 phase</strong>——它们在 build
+  阶段原地处理。只有涉及重大范围变更时（开新 change），才会另起一个完整的 open→design→build
+  流程。full workflow <strong>没有</strong> build→design 的直接回退，设计问题在 build 阶段通过
+  brainstorming 原地更新 Design Doc 解决。
 </Note>
 
 ### 50% 阈值
@@ -147,11 +161,11 @@ node "$COMET_HANDOFF" <change-name> design --write
 
 恢复 `/comet` 时，如果工作区存在未提交改动，先按未提交改动的归因规则处理：
 
-| 归因                          | 处理                                                           |
-| ----------------------------- | -------------------------------------------------------------- |
-| 属于当前 change               | 折叠进当前任务，不重复编辑                                      |
+| 归因                          | 处理                                                                    |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| 属于当前 change               | 折叠进当前任务，不重复编辑                                              |
 | 不属于当前 change（用户改动） | 暂停询问：折叠进当前 change / 拆新 change / 保留不动 / 丢弃（需你确认） |
-| 来源不确定                    | 暂停，列出文件并说明判断依据，不推进 phase                       |
+| 来源不确定                    | 暂停，列出文件并说明判断依据，不推进 phase                              |
 
 <Warning>
   未提交改动只代表代码事实，<strong>不会自动推进 phase 或勾选 tasks.md</strong>
@@ -162,18 +176,18 @@ node "$COMET_HANDOFF" <change-name> design --write
 
 `build_pause: plan-ready` 是计划生成后的暂停点。恢复规则如下：
 
-| 状态                                         | 恢复行为                                         |
-| -------------------------------------------- | ------------------------------------------------ |
+| 状态                                         | 恢复行为                                          |
+| -------------------------------------------- | ------------------------------------------------- |
 | isolation/build_mode 已设但 build_pause 还在 | 残留的暂停标记（stale pause），自动清除后继续执行 |
-| isolation/build_mode 未设                    | 回到 plan-ready 恢复点让你选择（不重新生成计划） |
-| plan 文件缺失                                | 回到 `/comet-build` 处理损坏或重新生成           |
+| isolation/build_mode 未设                    | 回到 plan-ready 恢复点让你选择（不重新生成计划）  |
+| plan 文件缺失                                | 回到 `/comet-build` 处理损坏或重新生成            |
 | 所有任务已完成                               | 清除 build_pause，走 guard 到 verify              |
 
 ## 回退路径速查
 
 | 你想做的               | 操作                            | 到哪个阶段    | 保留                                            |
 | ---------------------- | ------------------------------- | ------------- | ----------------------------------------------- |
-| 改 delta spec（小改）  | 直接编辑，不回退                 | build（不变） | 全部                                            |
+| 改 delta spec（小改）  | 直接编辑，不回退                | build（不变） | 全部                                            |
 | 改 Design Doc（中改）  | 暂停 + brainstorming 原地更新   | build（不变） | 全部                                            |
 | 改代码                 | `verify-fail` → build           | build         | verification_report；branch_status 保持 pending |
 | 归档前重新验证         | `archive-reopen`                | verify        | branch_status 重置为 pending                    |
