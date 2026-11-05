@@ -15,7 +15,7 @@ every frame. It does not patch old body parts, warp anatomy, or change the
 original reference file. It normalizes only near-white neutral highlights
 and exports a dithered GIF plus the lossless decoded last frame:
 
-- `img/home-lin-entrance-original.gif`: 480 × 480, nine frames, one 5,000 ms pass.
+- `img/home-lin-entrance-original.gif`: 480 × 480, nine frames, one 3,600 ms pass.
 - `img/home-lin-original-start.png`: exact first frame, displayed while the page enters.
 - `img/home-lin-original-still.png`: pixel-identical to the final GIF frame.
 
@@ -23,9 +23,10 @@ The generated artwork uses an opaque white canvas to match the homepage.
 The original reference PNG is unchanged. Unused trial GIFs and PNGs were
 removed from `img/` after selecting this version.
 Both homepages initially display the first-frame PNG and fetch the animation
-bytes without playing them. After the hero fade finishes, a 250 ms pause
-precedes a fresh GIF playback. The movement lasts 3,600 ms, followed by a
-1,400 ms hold, then the decoded tail PNG replaces the GIF in the same position.
+bytes without playing them. The first pose is decoded before the title and
+illustration enter together in a 600 ms fade. Fresh GIF playback starts
+immediately after that entrance. Movement lasts 2,600 ms, followed by a
+1,000 ms hold, then the decoded tail PNG replaces the GIF in the same position.
 Reduced motion shows the final PNG directly and does not fetch the GIF.
 
 `comparison.png` shows the original, the preceding proportional revision,

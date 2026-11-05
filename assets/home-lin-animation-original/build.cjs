@@ -5,7 +5,12 @@ const assert=require('node:assert/strict');
 const crypto=require('node:crypto');
 const sharp=require('sharp');
 const root=path.resolve(__dirname,'../..');
-const size=480,delays=[800,350,350,800,180,350,180,590,1400];
+const size=480,delays=[250,260,260,600,150,260,150,670,1000];
+const writeAtomic=(file,data)=>{
+  const pending=`${file}.${process.pid}.tmp`;
+  fs.writeFileSync(pending,data);
+  fs.renameSync(pending,file);
+};
 (async()=>{
   const original=path.join(root,'img/home-lin.png');
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync(original)).digest('hex'),'79eee8cc3d055c1fd43c9568fea0bbf0e81142d9b17d1391e57709a124d83058');
@@ -24,13 +29,13 @@ const size=480,delays=[800,350,350,800,180,350,180,590,1400];
   }
   const gif=path.join(root,'img/home-lin-entrance-original.gif'),poster=path.join(root,'img/home-lin-original-still.png');
   const start=path.join(root,'img/home-lin-original-start.png');
-  await sharp(Buffer.concat(frames),{raw:{width:size,height:size*frames.length,channels:4,pageHeight:size}})
-    .gif({loop:1,delay:delays,dither:.75,effort:7,reuse:false}).toFile(gif);
-  await sharp(gif,{page:8}).png().toFile(poster);
-  await sharp(gif,{page:0}).png().toFile(start);
+  writeAtomic(gif,await sharp(Buffer.concat(frames),{raw:{width:size,height:size*frames.length,channels:4,pageHeight:size}})
+    .gif({loop:1,delay:delays,dither:.75,effort:7,reuse:false}).toBuffer());
+  writeAtomic(poster,await sharp(gif,{page:8}).png().toBuffer());
+  writeAtomic(start,await sharp(gif,{page:0}).png().toBuffer());
   const m=await sharp(gif,{animated:true}).metadata();
   assert.equal(m.width,size);assert.equal(m.pageHeight,size);assert.equal(m.pages,9);assert.equal(m.loop,1);
-  assert.equal(m.delay.reduce((a,b)=>a+b,0),5000);
+  assert.equal(m.delay.reduce((a,b)=>a+b,0),3600);
   const final=await sharp(gif,{page:8}).ensureAlpha().raw().toBuffer();
   assert.equal(final.compare(await sharp(poster).ensureAlpha().raw().toBuffer()),0);
   for(let f=0;f<9;f++){
@@ -51,5 +56,5 @@ const size=480,delays=[800,350,350,800,180,350,180,590,1400];
     }
     assert.ok(longest<25,`frame ${f+1}: no horizontal bottom closing stroke (${longest}px)`);
   }
-  console.log(JSON.stringify({gif,start,poster,frames:9,plays:1,durationMs:5000,finalHoldMs:1400,posterMatchesTail:true,leftContour:true,openBottom:true,bytes:fs.statSync(gif).size}));
+  console.log(JSON.stringify({gif,start,poster,frames:9,plays:1,durationMs:3600,finalHoldMs:1000,posterMatchesTail:true,leftContour:true,openBottom:true,bytes:fs.statSync(gif).size}));
 })().catch(error=>{console.error(error);process.exitCode=1;});

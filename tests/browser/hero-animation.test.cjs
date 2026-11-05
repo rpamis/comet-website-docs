@@ -85,7 +85,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
           assert.equal(hiddenPoster.width, animationSize.width);
           assert.equal(hiddenPoster.height, animationSize.height);
           await waitForPoster(page);
-          assert.ok(Date.now() - started >= 4800, "the full visible five-second pass must finish before restoring the poster");
+          assert.ok(Date.now() - started >= 3400, "the full visible pass must finish before restoring the poster");
           const restored = page.locator(".comet-home__title-inline-img--poster");
           assert.ok(await restored.evaluate((img) => img.complete && img.naturalWidth > 0));
           const restoredSize = await restored.boundingBox();
@@ -105,21 +105,22 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
 
     await t.test("slow entrance and warm reload both start at the first pose after the hero is visible", async () => {
       const context = await newContext();
+      let releasePose;
       try {
         const page = await context.newPage();
-        await page.addInitScript(() => {
-          const observer = new MutationObserver(() => {
-            const hero = document.querySelector('.comet-home__hero-entrance');
-            if (!hero) return;
-            hero.style.setProperty('transition', 'opacity 3s linear, transform 3s linear', 'important');
-            observer.disconnect();
-          });
-          observer.observe(document, {childList:true,subtree:true});
+        let poseGate;
+        await page.route('**/home-lin-original-start.png', async route => {
+          await poseGate;
+          await route.continue();
         });
         const sources = [];
         for (let visit = 0; visit < 2; visit++) {
+          poseGate = new Promise(resolve => { releasePose=resolve; });
           if (visit === 0) await page.goto(`${base}/zh/home`, {waitUntil:'domcontentloaded'});
           else await page.reload({waitUntil:'domcontentloaded'});
+          await page.waitForFunction(() => document.querySelector('.comet-home__hero-entrance')?.hasAttribute('data-hero-entrance-started'));
+          await page.addStyleTag({content:'.comet-home__hero-entrance.is-hero-visible{transition:opacity 3s linear,transform 3s linear!important}'});
+          releasePose();
           await page.waitForFunction(() => document.querySelector('.comet-home__hero-entrance')?.classList.contains('is-hero-visible'));
           await page.waitForTimeout(500);
           assert.equal(await page.locator('.comet-home__title-inline-img--animated').getAttribute('src'), firstPose,
@@ -143,7 +144,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
           sources.push(playback.src);
         }
         assert.notEqual(sources[0], sources[1], 'reload must have a fresh playback timeline');
-      } finally { await context.close(); }
+      } finally { releasePose?.(); await context.close(); }
     });
 
     await t.test("slow GIF never shows the static poster before playback", async () => {
@@ -168,7 +169,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
         await waitForAnimation(page);
         const started = Date.now();
         await waitForPoster(page);
-        assert.ok(Date.now() - started >= 4800);
+        assert.ok(Date.now() - started >= 3400);
       } finally { release(); await context.close(); }
     });
 

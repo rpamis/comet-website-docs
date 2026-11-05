@@ -20,16 +20,19 @@ test('the tail-frame PNG replaces the held GIF without a visible change', async 
         document.querySelector('.comet-home__title-illustration')?.dataset.playbackStarted &&
         img.complete && img.naturalWidth===480;
     });
-    await page.waitForTimeout(4200);
+    // Sample the settled tail after a complete pass, with the PNG still gated.
+    await page.waitForTimeout(4000);
     await page.evaluate(() => Promise.race([document.fonts.ready,new Promise(resolve=>setTimeout(resolve,3000))]));
     const slot=page.locator('.comet-home__title-illustration');
     assert.ok((await slot.getAttribute('class')).includes('is-playing'), 'keep showing the GIF while the PNG is unavailable');
     const clip=await slot.boundingBox(),cdp=await page.context().newCDPSession(page);
+    const beforeGeometry=await slot.boundingBox();
     const before=await cdp.send('Page.captureScreenshot',{clip:{...clip,scale:2}});
     release();
     await page.waitForFunction(() => document.querySelector('.comet-home__title-illustration')?.classList.contains('is-complete'));
     await page.evaluate(() => new Promise(requestAnimationFrame));
     const after=await cdp.send('Page.captureScreenshot',{clip:{...clip,scale:2}});
+    const afterGeometry=await slot.boundingBox();
     if (process.env.COMET_HOME_SCREENSHOT_DIR) {
       fs.mkdirSync(process.env.COMET_HOME_SCREENSHOT_DIR, {recursive:true});
       fs.writeFileSync(path.join(process.env.COMET_HOME_SCREENSHOT_DIR,'hero-handoff-before.png'), Buffer.from(before.data,'base64'));
@@ -47,6 +50,7 @@ test('the tail-frame PNG replaces the held GIF without a visible change', async 
       return sum/(a.length/4*3);
     },{before:before.data,after:after.data});
     t.diagnostic(`GIF → exact PNG mean pixel difference: ${difference.toFixed(6)} / 255`);
+    if(difference>=.1)t.diagnostic(JSON.stringify({beforeGeometry,afterGeometry}));
     assert.ok(difference<.1,'the handoff must not move, fade or redraw the image');
   } finally { release();await browser.close(); }
 });

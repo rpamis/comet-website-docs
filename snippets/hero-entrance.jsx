@@ -2,53 +2,49 @@ export const HeroEntranceController = () => {
   useEffect(() => {
     const element = document.querySelector(".comet-home__hero-entrance");
     const loader = document.querySelector(".comet-home__loader");
+    const hideLoader = () => loader?.classList.add("is-hidden");
+    if (element == null) { hideLoader(); return; }
 
-    // Always dismiss the page loader, even if the hero element is missing —
-    // so a failed mount never leaves the loading overlay stuck on screen.
-    const hideLoader = () => {
-      if (loader == null) return;
-      loader.classList.add("is-hidden");
-    };
-
-    // Safety net: never let the loader stay visible beyond 2.5s.
-    const fallback = window.setTimeout(hideLoader, 2500);
-
-    if (element == null) {
-      hideLoader();
-      return () => window.clearTimeout(fallback);
-    }
-
-    const showImmediately = () => {
-      element.classList.add("is-hero-visible");
-      element.style.opacity = "1";
-      element.style.transform = "none";
-      hideLoader();
-    };
-
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    if (reducedMotion.matches) {
-      showImmediately();
-      return () => window.clearTimeout(fallback);
-    }
-
-    if (element.getAttribute("data-hero-entrance-started") === "true") {
-      hideLoader();
-      return () => window.clearTimeout(fallback);
-    }
-
+    let cancelled = false;
+    let revealed = false;
+    let firstFrame;
+    let secondFrame;
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const animate = !motion.matches && !element.hasAttribute("data-hero-entrance-started");
     element.setAttribute("data-hero-entrance-started", "true");
-    element.style.removeProperty("opacity");
-    element.style.removeProperty("transform");
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
+    const reveal = (withMotion) => {
+      if (cancelled || revealed) return;
+      revealed = true;
+      window.clearTimeout(fallback);
+      if (!withMotion) {
         element.classList.add("is-hero-visible");
+        element.style.opacity = "1";
+        element.style.transform = "none";
         hideLoader();
+        return;
+      }
+      element.style.removeProperty("opacity");
+      element.style.removeProperty("transform");
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => {
+          if (cancelled) return;
+          element.classList.add("is-hero-visible");
+          hideLoader();
+        });
       });
-    });
-
-    return () => window.clearTimeout(fallback);
+    };
+    // Keep a missing image from trapping the whole page behind its loader.
+    const fallback = window.setTimeout(() => reveal(false), 2500);
+    const image = element.querySelector(".comet-home__title-inline-img--animated");
+    // Text and the first pose enter together, including on a cold connection.
+    if (image?.decode) image.decode().then(() => reveal(animate), () => reveal(animate));
+    else reveal(animate);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallback);
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
   }, []);
 
   useEffect(() => {
@@ -61,10 +57,9 @@ export const HeroEntranceController = () => {
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const loader = document.querySelector(".comet-home__loader");
     const aborter = new window.AbortController();
-    const duration = Number(animation.dataset.animationDuration) || 5000;
+    const duration = Number(animation.dataset.animationDuration) || 3600;
     let playbackUrl;
     let frame;
-    let delayTimer;
     let finishTimer;
     let safetyTimer;
     let cancelled = false;
@@ -75,7 +70,6 @@ export const HeroEntranceController = () => {
       if (finished) return;
       finished = true;
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(delayTimer);
       window.clearTimeout(finishTimer);
       window.clearTimeout(safetyTimer);
       aborter.abort();
@@ -97,7 +91,7 @@ export const HeroEntranceController = () => {
       !document.hidden &&
       hero.classList.contains("is-hero-visible") &&
       (loader == null || loader.classList.contains("is-hidden")) &&
-      Number.parseFloat(window.getComputedStyle(hero).opacity) >= 0.999;
+      Number.parseFloat(window.getComputedStyle(hero).opacity) >= 1;
 
     const waitForEntrance = () => {
       if (cancelled || finished || sourceAssigned) return;
@@ -105,17 +99,11 @@ export const HeroEntranceController = () => {
         frame = window.requestAnimationFrame(waitForEntrance);
         return;
       }
-      // Give the fully visible title a short beat before the character moves.
-      delayTimer = window.setTimeout(() => {
-        if (cancelled || finished) return;
-        if (!entranceReady()) { waitForEntrance(); return; }
-        sourceAssigned = true;
-        // Mintlify adds responsive PNG candidates in production. Remove those
-        // before using a fresh image URL, so cached GIFs also start at frame 1.
-        animation.removeAttribute("srcset");
-        animation.removeAttribute("sizes");
-        animation.src = playbackUrl;
-      }, 250);
+      sourceAssigned = true;
+      // Use a fresh timeline as soon as the short entrance finishes.
+      animation.removeAttribute("srcset");
+      animation.removeAttribute("sizes");
+      animation.src = playbackUrl;
     };
 
     if (motion.matches || slot.classList.contains("is-complete")) {
@@ -156,7 +144,6 @@ export const HeroEntranceController = () => {
       cancelled = true;
       aborter.abort();
       window.cancelAnimationFrame(frame);
-      window.clearTimeout(delayTimer);
       window.clearTimeout(finishTimer);
       window.clearTimeout(safetyTimer);
       if (playbackUrl) window.URL.revokeObjectURL(playbackUrl);
