@@ -55,7 +55,9 @@ export const CapabilityDitherController = () => {
     if (canvases.length === 0) return;
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const shadeLevels = [-0.1, -0.025, 0.045, 0.13];
+    // Keep the existing hues, but give the narrow exposed strips enough
+    // contrast and movement to read as an animated field instead of grain.
+    const shadeLevels = [-0.2, -0.06, 0.07, 0.24];
 
     const surfaces = canvases.map((canvas, index) => {
       const context = canvas.getContext("2d", { alpha: false });
@@ -84,7 +86,7 @@ export const CapabilityDitherController = () => {
 
         const pixels = image.data;
         const phase = index * 1.75;
-        const elapsed = time * 0.00016;
+        const elapsed = time * 0.0007;
         const aspect = width / height;
 
         for (let y = 0; y < height; y += 1) {
@@ -100,12 +102,12 @@ export const CapabilityDitherController = () => {
             const detail = Math.cos(
               (normalizedX + normalizedY) * 9.4 + elapsed * 0.43 - phase
             );
-            const field = 0.5 + primary * 0.13 + secondary * 0.1 + detail * 0.055;
+            const field = 0.5 + primary * 0.22 + secondary * 0.16 + detail * 0.075;
             const threshold =
               (ditherMatrix[(y % 8) * 8 + (x % 8)] - 31.5) / 64;
             const level = Math.max(
               0,
-              Math.min(3, Math.floor((field + threshold * 0.32) * 4))
+              Math.min(3, Math.floor((field + threshold * 0.24) * 4))
             );
             const shade = shadeLevels[level];
             const offset = (y * width + x) * 4;
