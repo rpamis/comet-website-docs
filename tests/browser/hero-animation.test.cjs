@@ -8,6 +8,7 @@ const base = process.env.COMET_DOCS_URL || "http://localhost:3000";
 const selector = ".comet-home__title-inline-img";
 const poster = "/img/home-lin-original-still.png";
 const gif = "/img/home-lin-entrance-original.gif";
+const firstPose = "/img/home-lin-original-start.png";
 const waitForPoster = (page) => page.waitForFunction(() => {
   const slot = document.querySelector(".comet-home__title-illustration");
   const img = slot?.querySelector(".comet-home__title-inline-img--poster");
@@ -17,7 +18,9 @@ const waitForPoster = (page) => page.waitForFunction(() => {
 const waitForAnimation = (page) => page.waitForFunction(() => {
   const hero = document.querySelector(".comet-home__hero-entrance");
   const img = hero?.querySelector(".comet-home__title-inline-img--animated");
-  return hero?.classList.contains("is-hero-visible") && img.complete && img.naturalWidth > 0;
+  return hero?.classList.contains("is-hero-visible") &&
+    document.querySelector(".comet-home__title-illustration")?.dataset.playbackStarted &&
+    img.complete && img.naturalWidth > 0;
 });
 
 test("homepage hero plays once and settles on its exact tail-frame PNG", async (t) => {
@@ -43,20 +46,20 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
       }
     } finally { await warmup.close(); }
     for (const reduced of [false, true]) {
-      await t.test(`initial HTML uses ${reduced ? "the reduced-motion poster" : "the GIF"} without JavaScript`, async () => {
+      await t.test(`initial HTML uses ${reduced ? "the reduced-motion poster" : "the first pose"} without consuming GIF playback`, async () => {
         const context = await newContext({ javaScriptEnabled: false, reducedMotion: reduced ? "reduce" : "no-preference" });
         try {
           const page = await context.newPage();
           const requests = [];
-          page.on("request", (request) => { if (request.url().endsWith(gif)) requests.push(request.url()); });
+          page.on("request", (request) => { if (new URL(request.url()).pathname === gif) requests.push(request.url()); });
           await page.goto(`${base}/zh/home`, { waitUntil: "domcontentloaded" });
           const animation = page.locator(".comet-home__title-inline-img--animated");
           await animation.evaluate((img) => img.decode());
-          assert.equal(await animation.getAttribute("src"), gif);
-          assert.ok((await animation.evaluate((img) => img.currentSrc)).endsWith(reduced ? poster : gif));
+          assert.equal(await animation.getAttribute("src"), firstPose);
+          assert.ok((await animation.evaluate((img) => img.currentSrc)).endsWith(reduced ? poster : firstPose));
           assert.equal(await page.locator(".comet-home__title-animation").evaluate((el) => getComputedStyle(el).opacity), "1");
           assert.equal(await page.locator(".comet-home__title-inline-img--poster").evaluate((el) => getComputedStyle(el).opacity), "0");
-          assert.equal(requests.length > 0, !reduced);
+          assert.deepEqual(requests, []);
         } finally { await context.close(); }
       });
     }
@@ -69,7 +72,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
           const errors = [];
           page.on("pageerror", (error) => errors.push(error.message));
           await page.goto(`${base}/${locale}/home`, { waitUntil: "domcontentloaded" });
-          const animation = page.locator(`${selector}[src="${gif}"]`);
+          const animation = page.locator('.comet-home__title-inline-img--animated');
           await waitForAnimation(page);
           const started = Date.now();
           const size = await page.locator(".comet-home__title-illustration").boundingBox();
@@ -82,7 +85,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
           assert.equal(hiddenPoster.width, animationSize.width);
           assert.equal(hiddenPoster.height, animationSize.height);
           await waitForPoster(page);
-          assert.ok(Date.now() - started >= 2600, "the full GIF must play before restoring the poster");
+          assert.ok(Date.now() - started >= 4800, "the full visible five-second pass must finish before restoring the poster");
           const restored = page.locator(".comet-home__title-inline-img--poster");
           assert.ok(await restored.evaluate((img) => img.complete && img.naturalWidth > 0));
           const restoredSize = await restored.boundingBox();
@@ -100,6 +103,49 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
       });
     }
 
+    await t.test("slow entrance and warm reload both start at the first pose after the hero is visible", async () => {
+      const context = await newContext();
+      try {
+        const page = await context.newPage();
+        await page.addInitScript(() => {
+          const observer = new MutationObserver(() => {
+            const hero = document.querySelector('.comet-home__hero-entrance');
+            if (!hero) return;
+            hero.style.setProperty('transition', 'opacity 3s linear, transform 3s linear', 'important');
+            observer.disconnect();
+          });
+          observer.observe(document, {childList:true,subtree:true});
+        });
+        const sources = [];
+        for (let visit = 0; visit < 2; visit++) {
+          if (visit === 0) await page.goto(`${base}/zh/home`, {waitUntil:'domcontentloaded'});
+          else await page.reload({waitUntil:'domcontentloaded'});
+          await page.waitForFunction(() => document.querySelector('.comet-home__hero-entrance')?.classList.contains('is-hero-visible'));
+          await page.waitForTimeout(500);
+          assert.equal(await page.locator('.comet-home__title-inline-img--animated').getAttribute('src'), firstPose,
+            'the entrance must not consume the opening frames');
+          await waitForAnimation(page);
+          const playback = await page.evaluate(async (firstPose) => {
+            const hero = document.querySelector('.comet-home__hero-entrance');
+            const animation = hero.querySelector('.comet-home__title-inline-img--animated');
+            const reference = new Image(); reference.src = firstPose; await reference.decode();
+            const pixels = (image) => {
+              const canvas = document.createElement('canvas'); canvas.width=480; canvas.height=480;
+              const ctx=canvas.getContext('2d'); ctx.drawImage(image,0,0,480,480);
+              return ctx.getImageData(0,0,480,480).data;
+            };
+            const expected=pixels(reference),actual=pixels(animation);
+            return {opacity:Number(getComputedStyle(hero).opacity),src:animation.currentSrc,
+              firstFrameMatches:actual.every((value,i)=>value===expected[i])};
+          }, firstPose);
+          assert.equal(playback.opacity, 1);
+          assert.ok(playback.firstFrameMatches, 'visible playback must begin with frame 1, even after a warm reload');
+          sources.push(playback.src);
+        }
+        assert.notEqual(sources[0], sources[1], 'reload must have a fresh playback timeline');
+      } finally { await context.close(); }
+    });
+
     await t.test("slow GIF never shows the static poster before playback", async () => {
       const context = await newContext();
       let release;
@@ -108,7 +154,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
         const page = await context.newPage();
         let requested;
         const requestStarted = new Promise((resolve) => { requested = resolve; });
-        await page.route(`**${gif}`, async (route) => {
+        await page.route(`**${gif}*`, async (route) => {
           requested();
           await gate;
           await route.continue();
@@ -116,13 +162,13 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
         await page.goto(`${base}/zh/home`, { waitUntil: "domcontentloaded" });
         await requestStarted;
         await page.waitForTimeout(3100);
-        assert.equal(await page.locator(".comet-home__title-inline-img--animated").getAttribute("src"), gif);
+        assert.equal(await page.locator(".comet-home__title-inline-img--animated").getAttribute("src"), firstPose);
         assert.equal(await page.locator(".comet-home__title-inline-img--poster").evaluate((img) => getComputedStyle(img).opacity), "0");
         release();
         await waitForAnimation(page);
         const started = Date.now();
         await waitForPoster(page);
-        assert.ok(Date.now() - started >= 2600);
+        assert.ok(Date.now() - started >= 4800);
       } finally { release(); await context.close(); }
     });
 
@@ -130,8 +176,8 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
       const context = await newContext();
       try {
         const page = await context.newPage();
-        const failed = page.waitForRequest(`**${gif}`);
-        await page.route(`**${gif}`, (route) => route.abort());
+        const failed = page.waitForRequest(request => new URL(request.url()).pathname === gif);
+        await page.route(`**${gif}*`, (route) => route.abort());
         await page.goto(`${base}/zh/home`, { waitUntil: "domcontentloaded" });
         await failed;
         await waitForPoster(page);
@@ -143,7 +189,7 @@ test("homepage hero plays once and settles on its exact tail-frame PNG", async (
       try {
         const page = await context.newPage();
         const requests = [];
-        page.on("request", (request) => { if (request.url().endsWith(gif)) requests.push(request.url()); });
+        page.on("request", (request) => { if (new URL(request.url()).pathname === gif) requests.push(request.url()); });
         await page.goto(`${base}/zh/home`, { waitUntil: "domcontentloaded" });
         await page.locator(".comet-home__hero-entrance.is-hero-visible").waitFor({ state: "visible" });
         await page.waitForTimeout(1700);

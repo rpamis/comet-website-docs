@@ -59,61 +59,109 @@ export const HeroEntranceController = () => {
     const poster = slot?.querySelector(".comet-home__title-inline-img--poster");
     if (animation == null || poster == null) return;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    let timer;
+    const loader = document.querySelector(".comet-home__loader");
+    const aborter = new window.AbortController();
+    const duration = Number(animation.dataset.animationDuration) || 5000;
+    let playbackUrl;
+    let frame;
+    let delayTimer;
+    let finishTimer;
+    let safetyTimer;
     let cancelled = false;
-    let started = false;
-    let loaded = animation.complete && animation.naturalWidth > 0;
+    let finished = false;
+    let sourceAssigned = false;
 
     const complete = () => {
-      window.clearTimeout(timer);
-      observer.disconnect();
+      if (finished) return;
+      finished = true;
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(delayTimer);
+      window.clearTimeout(finishTimer);
+      window.clearTimeout(safetyTimer);
+      aborter.abort();
       slot.classList.remove("is-playing");
       slot.classList.add("is-complete");
       picture.hidden = true;
+      if (playbackUrl) window.URL.revokeObjectURL(playbackUrl);
     };
 
     const showPoster = async () => {
       // The PNG is the GIF's exact final frame, using the same placement.
       // Decode first, then swap both layers in one paint without a fade dip.
       try { await poster.decode(); } catch { return; }
-      if (cancelled || slot.classList.contains("is-complete")) return;
+      if (cancelled || finished) return;
       complete();
     };
 
-    const start = () => {
-      if (started || cancelled || slot.classList.contains("is-complete") || !loaded || !hero.classList.contains("is-hero-visible")) return;
-      started = true;
-      observer.disconnect();
-      window.clearTimeout(timer);
-      // The GIF is the initial image, never inserted after a static poster.
-      // It has one 2,860 ms pass and cannot loop if a timer is delayed.
-      timer = window.setTimeout(showPoster, 2860);
+    const entranceReady = () =>
+      !document.hidden &&
+      hero.classList.contains("is-hero-visible") &&
+      (loader == null || loader.classList.contains("is-hidden")) &&
+      Number.parseFloat(window.getComputedStyle(hero).opacity) >= 0.999;
+
+    const waitForEntrance = () => {
+      if (cancelled || finished || sourceAssigned) return;
+      if (!entranceReady()) {
+        frame = window.requestAnimationFrame(waitForEntrance);
+        return;
+      }
+      // Give the fully visible title a short beat before the character moves.
+      delayTimer = window.setTimeout(() => {
+        if (cancelled || finished) return;
+        if (!entranceReady()) { waitForEntrance(); return; }
+        sourceAssigned = true;
+        // Mintlify adds responsive PNG candidates in production. Remove those
+        // before using a fresh image URL, so cached GIFs also start at frame 1.
+        animation.removeAttribute("srcset");
+        animation.removeAttribute("sizes");
+        animation.src = playbackUrl;
+      }, 250);
     };
 
-    const observer = new MutationObserver(start);
     if (motion.matches || slot.classList.contains("is-complete")) {
       complete();
       return;
     }
-    observer.observe(hero, { attributes: true, attributeFilter: ["class"] });
-    const handleLoad = () => { loaded = true; start(); };
+    const handleLoad = () => {
+      if (!sourceAssigned || finished || animation.currentSrc !== playbackUrl) return;
+      window.clearTimeout(safetyTimer);
+      slot.dataset.playbackStarted = String(window.performance.now());
+      finishTimer = window.setTimeout(showPoster, duration);
+    };
+    const handleError = () => { if (sourceAssigned) complete(); };
     animation.addEventListener("load", handleLoad);
-    animation.addEventListener("error", complete);
+    animation.addEventListener("error", handleError);
     const handleMotionChange = () => {
       if (motion.matches) complete();
     };
     motion.addEventListener("change", handleMotionChange);
-    timer = window.setTimeout(complete, 8000);
-    if (animation.complete && animation.naturalWidth === 0) complete();
-    else start();
+    safetyTimer = window.setTimeout(complete, 15000);
+    // Fetching bytes does not advance GIF frames. The first-frame PNG stays in
+    // place until the hero fade finishes, then the fresh blob starts one pass.
+    const sourceUrl = new window.URL(animation.dataset.animationSrc, window.location.href);
+    sourceUrl.searchParams.set("playback", String(duration));
+    window.fetch(sourceUrl.href, { signal: aborter.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Hero animation unavailable");
+        return response.blob();
+      })
+      .then((blob) => {
+        if (cancelled || finished) return;
+        playbackUrl = window.URL.createObjectURL(blob);
+        waitForEntrance();
+      })
+      .catch(() => { if (!cancelled && !finished) complete(); });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
-      observer.disconnect();
+      aborter.abort();
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(delayTimer);
+      window.clearTimeout(finishTimer);
+      window.clearTimeout(safetyTimer);
+      if (playbackUrl) window.URL.revokeObjectURL(playbackUrl);
       animation.removeEventListener("load", handleLoad);
-      animation.removeEventListener("error", complete);
+      animation.removeEventListener("error", handleError);
       motion.removeEventListener("change", handleMotionChange);
     };
   }, []);

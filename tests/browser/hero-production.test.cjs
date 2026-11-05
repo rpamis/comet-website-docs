@@ -39,7 +39,7 @@ test('production zoom wrappers do not expose the poster over the playing GIF', a
     assert.equal(layers.posterOpacity, '0', 'the static PNG must be hidden throughout GIF playback');
     assert.deepEqual(layers.animation, layers.poster, 'production wrappers must not change image placement');
     const firstFrame = await page.locator('.comet-home__title-illustration').screenshot();
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1100);
     const laterFrame = await page.locator('.comet-home__title-illustration').screenshot();
     assert.notEqual(Buffer.compare(firstFrame, laterFrame), 0, 'the visible illustration must actually animate');
   } finally { await browser.close(); }
