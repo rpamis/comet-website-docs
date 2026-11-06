@@ -153,6 +153,40 @@
 6. 确认正文服务于用户理解和使用产品，没有混入只对开发者有意义的实现过程、内部结论或项目汇报口吻；与上面正反例比较，读起来像宣传稿或统一模板时改成具体事实和自然段落。
 7. 若本次是结构/内容级改动（新增页面、移动章节、删除小节、行为修正），按"网站修改规范"同步英文。
 
+## Changelog 改写
+
+新版本发布时，以主仓库 `../CHANGELOG.md` 的对应版本条目为来源，改写成网站 `zh/changelog/index.mdx` 的新条目。本规则只用于新增版本，不回改已发布的历史条目。
+
+- 先写中文，用户同意后再按同结构写英文版 `en/changelog/index.mdx`。
+- 条目仍放在 `<Update label="x.y.z" description="YYYY-MM-DD" rss={{ ... }}>` 中，正文依次为：发布句、摘要句、Change 组、Fix 组。
+- 发布句固定写 `Comet x.y.z 已发布`。摘要句用一句话点出本次 2–3 个重点：新增了什么、优化了哪类流程、修复了哪几类问题，不罗列全部条目。
+- Change 组合并源条目的 Added 和 Changed；Fix 组对应 Fixed。源条目有 Security 时，另起 Security（安全）组。
+- 每组写 3–5 条编号列表，编号连续。新增能力排在前面，以“新增 X”开头；同一领域的多条源条目合并成一条，例如多个 Native/Classic 归档恢复修复合并为“归档恢复修复”。剩余的小项放进最后一条“其他改进”或“其他修复”，用顿号列出名称。
+- 每条写成“标题：用户能做什么、会看到什么”，必要时在括号里补充路径、命令或关键限制。删去 receipt、SDK Run、Action、checkpoint、预算语义等实现细节，只保留升级后能感知的行为。
+- Fix 组保留源条目中的 issue 编号，写在对应条目末尾括号里，格式与既有条目的 issue 链接一致；Change 组可省略。
+- 改写只压缩和转述，不新增源条目没有的行为，也不改变源条目写明的触发条件。
+
+示例：以下是用户给出的 0.5.2 改写样例，源条目见主仓库 `CHANGELOG.md`。参考它的摘要写法、分组方式、合并粒度和措辞；编号、标点和 issue 链接按上面的规则处理。
+
+```text
+Comet 0.5.2 已发布
+本次更新着重添加了 MiniMax Code 支持与变更讲解（Change Walkthroughs）功能，优化了 Native/Classic 流程继续与归档逻辑，并修复了多项归档恢复、Windows 兼容性和 Dashboard 问题
+
+Change:
+
+1.新增 MiniMax Code 支持：可安装、检测、更新、卸载项目/用户级 Comet Skills（.minimax/skills），并集成 Classic 依赖
+2.新增变更讲解：Classic Build 完成或 Native 变更时可生成独立 HTML 说明页面，按功能展示前后行为、展开关键代码，Verify 阶段同步更新验证结果，支持可选流程图
+3.Native/Classic 流程优化：编辑文档、切分支等操作后减少阶段回退，由 Agent 判断影响并仅重跑受影响检查；Verify 和 Archive 支持会话内接受与独立审查，优化增量验收
+4.新增 Native 基准测试数据集：通过 comet eval 或 Dashboard 选择固定 WorkBuddy Code 和 SkillsBench 任务，支持跨平台配置迁移与隔离评估
+5.其他改进：任务上下文交付增强（含个人记忆与项目知识）、Git 暂存解耦、编辑继续性能提升、Native 请求对齐等
+
+Fix:
+1.Native/Classic 归档恢复修复：修复多项归档中断、Spec 事务恢复、工作树查询及交付拒绝等问题（#526, #527, #528, #530）
+2.Windows 兼容性：修复命令启动（避免额外 PowerShell 进程）、doctor 诊断（无弃用警告）、进程探测等
+3.Dashboard 插件加载：修复页面重载超时，复用插件宿主，慢速本地模块不再阻断加载（#538）
+3.其他修复：文件锁释放（#529）、取消历史迁移（#513）、Shape 目标变更（#516）、Classic Doctor 发现（#515）、UTF-8 BOM 检查等
+```
+
 ## Content boundaries
 
 - 面向用户的中文页面不写源码标识、内部实现细节和开发过程复盘；机制类内容压缩为"你会看到什么、该做什么"，或链到脚本/原理页。
@@ -176,20 +210,3 @@
 - 空间不足时先换行、重排元信息或切换布局，保留正文阅读宽度。状态和操作按钮不得重叠，标签页文字保持完整，窄屏可横向滚动。记忆列表中等窗口下的正文宽度至少 220px，手机至少 200px。
 - 验收使用新构建和当前缓存版本的实际页面：检查 1600px、1280px 和 390px 宽度，覆盖 Classic、Native、Any、Eval、个人记忆、项目知识、可观测、设置和预览；补查深色、英文、长文本及 125% 字号。检查计算字号、阅读列宽、按钮遮挡和水平溢出，不能只凭源码判断一致。
 - 同步官网演示时，从 Dashboard 源码重新构建资产，更新演示缓存版本，并在内嵌演示中确认加载了当前资产。记录实际执行的浏览器验证和未验证范围；布局回归加入对应浏览器测试。
-
-<claude-mem-context>
-# Memory Context
-
-# claude-mem status
-
-This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past work.
-
-Memory injection starts on your second session in a project.
-
-`/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo, optional). Otherwise memory builds passively as work happens.
-
-Live activity: http://localhost:37777
-How it works: `/how-it-works`
-
-This message disappears once the first observation lands.
-</claude-mem-context>
