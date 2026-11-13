@@ -43,6 +43,8 @@ native:
   archive_confirmation: automatic
   # 同一需求允许的连续失败实现轮次，达到上限后暂停等你处理
   max_verify_failures: 5
+  # 多会话 Supervisor 同时进行、尚未完成集成归档的子任务上限
+  max_parallel_children: 2
 ```
 
 这会让 `/comet` 默认进入 Native，把 change 文档保存在 `docs/comet/`，使用中文生成正式产物，并以 Batch 模式完成需求澄清。
@@ -76,13 +78,27 @@ ambient_resume: false
 
 ## Native 核心字段
 
-| 字段                          | 允许值 / 默认值                             | 对你的影响                                         |
-| ----------------------------- | ------------------------------------------- | -------------------------------------------------- |
-| `native.artifact_root`        | 项目相对路径；默认 `docs`                   | change、Spec 和报告保存在 `<artifact-root>/comet/` |
-| `native.language`             | `en` \| `zh-CN`；默认 `en`                  | 决定新 change 的 brief、Spec 和报告语言            |
-| `native.clarification_mode`   | `batch` \| `sequential`；默认 `batch`       | 决定每轮集中询问还是一次询问一个选择点             |
-| `native.archive_confirmation` | `automatic` \| `required`；默认 `automatic` | 决定 Verify 通过后是否额外等待归档确认             |
-| `native.max_verify_failures`  | 正整数；默认 `5`                            | 达到连续失败上限后暂停 Loop，等待用户处理          |
+| 字段                           | 允许值 / 默认值                             | 对你的影响                                         |
+| ------------------------------ | ------------------------------------------- | -------------------------------------------------- |
+| `native.artifact_root`         | 项目相对路径；默认 `docs`                   | change、Spec 和报告保存在 `<artifact-root>/comet/` |
+| `native.language`              | `en` \| `zh-CN`；默认 `en`                  | 决定新 change 的 brief、Spec 和报告语言            |
+| `native.clarification_mode`    | `batch` \| `sequential`；默认 `batch`       | 决定每轮集中询问还是一次询问一个选择点             |
+| `native.archive_confirmation`  | `automatic` \| `required`；默认 `automatic` | 决定 Verify 通过后是否额外等待归档确认             |
+| `native.max_verify_failures`   | 正整数；默认 `5`                            | 达到连续失败上限后暂停 Loop，等待用户处理          |
+| `native.max_parallel_children` | 正整数；默认 `2`                            | Supervisor 多会话子任务并发上限；单会话始终为 `1`  |
+
+### Supervisor 子任务并发
+
+在 **Dashboard → 设置 → Comet 配置 → Native 工作流 → Supervisor 子任务并发上限** 中保存正整数，或在项目配置中设置：
+
+```yaml
+native:
+  max_parallel_children: 4
+```
+
+默认值为 `2`。上限统计已派发、尚未完成集成与归档的子任务；任务依赖仍需满足，单会话模式始终顺序执行。调整只在下一次派发时生效，不中止已有任务。降低到当前在途数量以下时，先等待已有子任务完成，再派发后续任务。
+
+配置读取主任务所在项目，子任务 worktree 中的旧值不会改变主任务调度。全局配置仅作为新项目的初始化模板，不会覆盖已有项目。SDK 流程使用此配置；旧版 Compat 的显式 `--max-parallel` 仍可覆盖当次默认值。详见 [Supervisor Change](/zh/native/supervisor-change)。
 
 ### 产物目录
 
@@ -134,7 +150,7 @@ Runtime 执行错误、缺少外部信息和无法安全恢复的状态会单独
 change_walkthrough: false
 ```
 
-初始化和更新会保留你的选择。关闭不会删除已有页面，也不会减少必要验证。
+也可以在 **Dashboard → 设置 → Comet 配置** 中切换 **变更说明**。初始化和更新会保留你的选择。关闭不会删除已有页面，也不会减少必要验证。
 
 ## 个人记忆
 
