@@ -158,33 +158,36 @@
 新版本发布时，以主仓库 `../CHANGELOG.md` 的对应版本条目为来源，改写成网站 `zh/changelog/index.mdx` 的新条目。本规则只用于新增版本，不回改已发布的历史条目。
 
 - 先写中文，用户同意后再按同结构写英文版 `en/changelog/index.mdx`。
-- 条目仍放在 `<Update label="x.y.z" description="YYYY-MM-DD" rss={{ ... }}>` 中，正文依次为：发布句、摘要句、Change 组、Fix 组。
+- 条目仍放在 `<Update label="x.y.z" description="YYYY-MM-DD" rss={{ ... }}>` 中，正文依次为：发布句、摘要句、Added 组、Changed 组、Fixed 组；没有内容的组省略。
 - 发布句固定写 `Comet x.y.z 已发布`。摘要句用一句话点出本次 2–3 个重点：新增了什么、优化了哪类流程、修复了哪几类问题，不罗列全部条目。
-- Change 组合并源条目的 Added 和 Changed；Fix 组对应 Fixed。源条目有 Security 时，另起 Security（安全）组。
-- 每组写 3–5 条编号列表，编号连续。新增能力排在前面，以“新增 X”开头；同一领域的多条源条目合并成一条，例如多个 Native/Classic 归档恢复修复合并为“归档恢复修复”。剩余的小项放进最后一条“其他改进”或“其他修复”，用顿号列出名称。
+- Added、Changed、Fixed 分别对应主仓库同名分类：新增能力、已有能力调整、问题修复。Added 与 Changed 分开展示。源条目有 Removed 或 Security 时，另起同名组并保持源条目的顺序。
+- 每组使用编号列表，从 1 开始连续编号。同一分类、同一领域的源条目可合并，例如多个 Native/Classic 归档恢复修复合并为“归档恢复修复”；条数按实际内容确定，不为压缩条数混合分类或不相关的能力。
 - 每条写成“标题：用户能做什么、会看到什么”，必要时在括号里补充路径、命令或关键限制。删去 receipt、SDK Run、Action、checkpoint、预算语义等实现细节，只保留升级后能感知的行为。
-- Fix 组保留源条目中的 issue 编号，写在对应条目末尾括号里，格式与既有条目的 issue 链接一致；Change 组可省略。
+- Fixed 组保留源条目中的 issue 编号，写在对应条目末尾括号里，格式与既有条目的 issue 链接一致；Added 和 Changed 组可省略。
 - 改写只压缩和转述，不新增源条目没有的行为，也不改变源条目写明的触发条件。
 
-示例：以下是用户给出的 0.5.2 改写样例，源条目见主仓库 `CHANGELOG.md`。参考它的摘要写法、分组方式、合并粒度和措辞；编号、标点和 issue 链接按上面的规则处理。
+示例：以下将用户给出的 0.5.2 改写样例按新分类重排，仅用于说明格式，不修改网站已发布的 0.5.2 记录。源条目见主仓库 `CHANGELOG.md`。
 
 ```text
 Comet 0.5.2 已发布
 本次更新着重添加了 MiniMax Code 支持与变更讲解（Change Walkthroughs）功能，优化了 Native/Classic 流程继续与归档逻辑，并修复了多项归档恢复、Windows 兼容性和 Dashboard 问题
 
-Change:
+Added:
 
 1.新增 MiniMax Code 支持：可安装、检测、更新、卸载项目/用户级 Comet Skills（.minimax/skills），并集成 Classic 依赖
 2.新增变更讲解：Classic Build 完成或 Native 变更时可生成独立 HTML 说明页面，按功能展示前后行为、展开关键代码，Verify 阶段同步更新验证结果，支持可选流程图
-3.Native/Classic 流程优化：编辑文档、切分支等操作后减少阶段回退，由 Agent 判断影响并仅重跑受影响检查；Verify 和 Archive 支持会话内接受与独立审查，优化增量验收
-4.新增 Native 基准测试数据集：通过 comet eval 或 Dashboard 选择固定 WorkBuddy Code 和 SkillsBench 任务，支持跨平台配置迁移与隔离评估
-5.其他改进：任务上下文交付增强（含个人记忆与项目知识）、Git 暂存解耦、编辑继续性能提升、Native 请求对齐等
+3.新增 Native 基准测试数据集：通过 comet eval 或 Dashboard 选择固定 WorkBuddy Code 和 SkillsBench 任务，支持跨平台配置迁移与隔离评估
 
-Fix:
+Changed:
+
+1.Native/Classic 流程优化：编辑文档、切分支等操作后减少阶段回退，由 Agent 判断影响并仅重跑受影响检查；Verify 和 Archive 支持会话内接受与独立审查，优化增量验收
+2.其他改进：任务上下文交付增强（含个人记忆与项目知识）、Git 暂存解耦、编辑继续性能提升、Native 请求对齐等
+
+Fixed:
 1.Native/Classic 归档恢复修复：修复多项归档中断、Spec 事务恢复、工作树查询及交付拒绝等问题（#526, #527, #528, #530）
 2.Windows 兼容性：修复命令启动（避免额外 PowerShell 进程）、doctor 诊断（无弃用警告）、进程探测等
 3.Dashboard 插件加载：修复页面重载超时，复用插件宿主，慢速本地模块不再阻断加载（#538）
-3.其他修复：文件锁释放（#529）、取消历史迁移（#513）、Shape 目标变更（#516）、Classic Doctor 发现（#515）、UTF-8 BOM 检查等
+4.其他修复：文件锁释放（#529）、取消历史迁移（#513）、Shape 目标变更（#516）、Classic Doctor 发现（#515）、UTF-8 BOM 检查等
 ```
 
 ## Content boundaries

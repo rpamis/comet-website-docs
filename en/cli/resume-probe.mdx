@@ -1,6 +1,6 @@
 ---
-title: "comet resume-probe (recovery probe)"
-description: "During long-running, cross-session, or cross-device work, read-only checks whether a request belongs to an existing Comet change and helps the Agent re-enter the correct workflow."
+title: 'comet resume-probe (recovery probe)'
+description: 'During long-running, cross-session, or cross-device work, read-only checks whether a request belongs to an existing Comet change and helps the Agent re-enter the correct workflow.'
 ---
 
 `comet resume-probe` solves the "recovery recognition" problem in long-running work.
@@ -10,21 +10,23 @@ The probe performs a read-only comparison between the current request and active
 
 It first reads project `.comet/config.yaml` to determine Native or Classic, then reads only the active changes, current phase, and user request for that workflow. Old Classic projects without valid workflow config use legacy fallback. If configuration is corrupted, probing stops and requests repair instead of scanning the other workflow.
 
-The probe only returns recognition and routing results. It does not modify changes, advance phases, choose among multiple changes, or execute commands. The Agent should call `/comet-native` or `/comet-classic` according to `nextCommand`.
+The probe returns recognition and routing results without modifying a change or advancing phases. When a new session only finds a related change, it asks whether this request should continue it, even if the target is unique or the project already has a selection. After confirmation, the Agent loads the returned `skill`. An explicit request to resume a specified change can use `nextCommand` directly when its state permits.
 
 ## Why is it necessary to restore the detection
 
 Long-distance tasks do not necessarily always remain in the same complete context. The following situations may all cause the Agent to forget that the current job was originally managed by Comet:
 
 - The dialogue undergoes context compression, window switching, or starts a new session;
-- When a user changes equipment, they continue to use the same warehouse and change.
-- The new Agent can only see the disk status and the sentence "Continue with the previous work."
-- The user naturally requested to continue the task, but did not enter `/comet` again.
+- When switching devices to continue within the same repository and change;
+- When a new Agent can only see disk state and a vague instruction like "Continue with the previous work";
+- When a user naturally asks to continue without explicitly typing `/comet`.
 
-The Comet recovery description written by the project initialization enables the Agent to invoke the recovery probe before processing such requests. The probe returns interpretable results based on configuration, active change, stage, selection, and request text: It provides the correct permanent Skill entry when the target is unique, asks only once when the target is unclear, and remains in the normal conversation when it is truly irrelevant.
+Project initialization instructions allow the Agent to run the resume probe before handling such requests. The probe identifies candidate targets and explains its reasoning based on configuration, active changes, phase, selection, and request text. Pure semantic relevance only indicates candidate existence; a new session still requires confirmation before resuming, unless the user explicitly names a target change.
 
 <Note>
-Restoring detection does not require users to remember an additional command. It is mainly called by agents and project recovery descriptions to bridge the gap between natural language continuation and the explicit <code>/comet</code> entry.
+  The resume probe does not require users to memorize an additional command. It is primarily invoked
+  by agents and project recovery instructions to bridge the gap between natural-language continuation
+  and the explicit <code>/comet</code> entry point.
 </Note>
 
 ## How does automatic detection occur
@@ -37,13 +39,17 @@ Users do not need to input `comet resume-probe`. Normal interaction still direct
 
 1. Read the project configuration to determine whether Native or Classic should be checked.
 2. Compare user requests, active changes, current stage and selection;
-3. When the target is unique, press `nextCommand` to re-enter the corresponding `/comet-native` or `/comet-classic`.
-4. When the goal is ambiguous, only ask the user one question. When the request is irrelevant, handle it normally and do not enter Comet.
+3. When only semantic relevance or a project selection identifies the target, show its name and phase and ask whether this request should continue it.
+4. After confirmation, enter the corresponding workflow without scanning again. Handle unrelated requests or declined recovery as ordinary tasks, preserving the original change, approvals, and phase write constraints.
 
-When explicitly calling `/comet`, it will directly enter the workflow according to the project configuration without relying on automatic detection. The ** non-Comet ** Skill or slash command explicitly invoked by the platform does not trigger the recovery probe either - the task intent has been clearly defined by this call, and the Skill can be directly executed. If the project is set to `ambient_resume: false`, ordinary natural language requests will not trigger environmental awareness detection, but `/comet` is still available.
+An ongoing session already in the Comet workflow reuses its prior confirmation; routine continuation, answering in-flow prompts, or context restoration will not prompt repeatedly. A new session that merely says "continue", mentions a change name, or broadly requests verification will prompt first; clear instructions like "continue cache-controls" or "commit the current change" directly identify the target.
+
+An explicit `/comet` invocation enters the configured workflow without probing. An explicitly invoked **non-Comet** Skill or slash command also bypasses the probe: execute that Skill directly. With `ambient_resume: false`, ordinary natural-language requests do not trigger Ambient Resume; explicit `/comet` remains available.
 
 <Note>
-For users, the recovery detection is automatic. The following CLI parameters are used for Agent, Hook, project instructions, and automation integration, and are not steps that must be manually executed before restoring tasks.
+  For users, the recovery detection is automatic. The following CLI parameters are used for Agent,
+  Hook, project instructions, and automation integration, and are not steps that must be manually
+  executed before restoring tasks.
 </Note>
 
 ## Reference for Agent and Automation Integration
@@ -60,26 +66,28 @@ It can also be read from standard input:
 echo "Continue with the login refactoring just now" | comet resume-probe . --stdin --json
 ```
 
-|Options|Function|
-| ------------------------- | ---------------------------------------------------------- |
-| `--utterance <text>`      |Pass in the user requests that need to be classified directly|
-| `--stdin`                 |Read the user request from the standard input|
-| `--json`                  |Output stable structured results, suitable for agents, hooks and automation|
-| `--no-workflow-work`      |Mark the current request as an information query and skip workflow advancement|
-| `--already-in-comet-flow` |When it is already within the Comet process, return `out_of_scope` to avoid duplicate routing|
+| Options                   | Function                                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| `--utterance <text>`      | Pass in the user requests that need to be classified directly                                 |
+| `--stdin`                 | Read the user request from the standard input                                                 |
+| `--json`                  | Output stable structured results, suitable for agents, hooks and automation                   |
+| `--no-workflow-work`      | Mark the current request as an information query and skip workflow advancement                |
+| `--already-in-comet-flow` | When it is already within the Comet process, return `out_of_scope` to avoid duplicate routing |
 
 ## How to understand the result
 
-| `action`       |Meaning|Next step|
-| -------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `auto_resume`  |There is a clear goal and the state allows for recovery|The Agent enters the permanent entry by pressing `nextCommand`: Native is `/comet-native`, and Classic is `/comet-classic`|
-| `ask_user`     |The target is ambiguous, abnormal in status or must be determined by the user|Ask only one question and do not choose or scan across workflows by yourself|
-| `out_of_scope` |The user clearly does not want to restore, is currently in Comet, or the request is merely an information query unrelated to workflow|Answer the current request normally and do not enter Comet|
-| `none`         |There is no active Comet Change|Do not perform recovery; If you need to start a new job, you can explicitly run `/comet`|
+| `action`       | Meaning                                                                                                                               | Next step                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `auto_resume`  | The user explicitly requests resuming a specified change, and its state permits recovery                                              | Use `nextCommand`: `/comet-native` or `/comet-classic`                                                  |
+| `ask_user`     | This request needs recovery confirmation, or its target is ambiguous, invalid, or waiting for a user decision                         | Show the target and reason, then wait; after recovery confirmation, load `skill` without scanning again |
+| `out_of_scope` | The user clearly does not want to restore, is currently in Comet, or the request is merely an information query unrelated to workflow | Answer the current request normally and do not enter Comet                                              |
+| `none`         | There is no active Comet Change                                                                                                       | Do not perform recovery; If you need to start a new job, you can explicitly run `/comet`                |
 
 JSON uses `comet.resume_probe.v2`, including `workflow`, `skill`, `entrySource`, `reasonCode`, `candidates`, `changeName`, `phase`, `nextCommand` and judgment evidence. Native restores at any stage through `/comet-native`. `comet native next` is a status advancement command, not a recovery entry. The internal v1 probe of Classic's built-in runtime remains compatible, but the top-level CLI returns v2.
 
 ## Under what circumstances will it definitely be suspended
+
+- A new session only finds a related change without an explicit request to resume that target, even when it is unique or already selected.
 
 - Multiple active changes, but the user request did not name the target.
 - Multiple active changes without valid selection or user roll call.
@@ -90,18 +98,20 @@ JSON uses `comet.resume_probe.v2`, including `workflow`, `skill`, `entrySource`,
 The unsubmitted changes of Native are only used as recovery evidence and reminders, and will not separately block strong models from entering the `/comet-native` inspection site. Classic continues to retain the rule for confirming the ownership of the working tree.
 
 <Warning>
-  <code>ask_user</code>{' '}
-This result indicates insufficient evidence or that the process is waiting for the user to make a choice, which is a normal pause state. The caller should present the reasons and ask the user. Repeated operation of the recovery detection fails to complete the required evidence.
+  <code>ask_user</code> This result indicates insufficient evidence or that the process is waiting
+  for the user to make a choice, which is a normal pause state. The caller should present the
+  reasons and ask the user. Repeated operation of the recovery detection fails to complete the
+  required evidence.
 </Warning>
 
 ## The difference from other commands
 
-|Command|Purpose|
-| -------------------- | ---------------------------------------------------- |
-| `/comet`             |Forward to `/comet-native` or `/comet-classic` according to the project configuration|
-| `comet resume-probe` |Perform a read-only recovery probe before entering the workflow|
-| `comet status`       |View active change, stages, evidence and recommend next steps|
-| `comet doctor`       |Diagnose installation, environmental or condition damage|
+| Command              | Purpose                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `/comet`             | Forward to `/comet-native` or `/comet-classic` according to the project configuration |
+| `comet resume-probe` | Perform a read-only recovery probe before entering the workflow                       |
+| `comet status`       | View active change, stages, evidence and recommend next steps                         |
+| `comet doctor`       | Diagnose installation, environmental or condition damage                              |
 
 ## Next step
 

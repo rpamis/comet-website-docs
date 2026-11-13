@@ -10,7 +10,7 @@ description: '在长程任务、跨会话或跨设备恢复时，只读判断当
 
 它会先读取项目 `.comet/config.yaml`，确认当前采用 Native 还是 Classic；再只读取该工作流下的 active changes、当前阶段与用户请求。旧 Classic 项目在没有有效 workflow 配置时走 legacy fallback；如果配置损坏，则直接停止并要求修复，不会跨工作流盲扫目录。
 
-恢复探测只返回识别和路由结论。它不会修改 change、推进阶段、替用户在多个 change 里做决定，也不会自动执行下一条命令。Agent 应根据 `nextCommand` 调用 `/comet-native` 或 `/comet-classic` 完成恢复。
+恢复探测只返回识别和路由结论，不修改 change 或推进阶段。新会话仅发现相关 change 时，即使目标唯一或项目已有 selection，也先询问本次是否继续。确认后，Agent 加载返回的 `skill`；用户明确要求继续指定 change 且状态允许时，则按 `nextCommand` 进入永久入口。
 
 ## 为什么需要恢复探测
 
@@ -21,10 +21,11 @@ description: '在长程任务、跨会话或跨设备恢复时，只读判断当
 - 新 Agent 只能看到磁盘状态和一句“继续之前的工作”；
 - 用户自然地要求继续任务，但没有再次输入 `/comet`。
 
-项目初始化写入的 Comet 恢复说明可以让 Agent 在处理这类请求前调用恢复探测。恢复探测命令根据配置、active change、阶段、selection 和请求文本返回可解释结果：目标唯一时给出正确的永久 Skill 入口，目标不明确时只询问一次，确实无关时保持在普通对话中。
+项目初始化写入的 Comet 恢复说明可以让 Agent 在处理此类请求前调用恢复探测。恢复探测根据配置、active change、阶段、selection 和请求文本给出候选目标及理由。请求仅与任务语义相关时只说明存在候选，新会话仍须先与用户确认；明确指定 change 的续行请求除外。
 
 <Note>
-  恢复探测不是要求用户记住一个额外命令。它主要供 Agent 和项目恢复说明调用，用来补上"用自然语言继续任务"和显式 <code>/comet</code> 入口之间的缺口。
+  恢复探测不是要求用户记住一个额外命令。它主要供 Agent
+  和项目恢复说明调用，用来补上"用自然语言继续任务"和显式 <code>/comet</code> 入口之间的缺口。
 </Note>
 
 ## 自动探测如何发生
@@ -37,13 +38,16 @@ description: '在长程任务、跨会话或跨设备恢复时，只读判断当
 
 1. 读取项目配置，确定应检查 Native 还是 Classic；
 2. 比较用户请求、active changes、当前阶段和 selection；
-3. 目标唯一时按 `nextCommand` 重新进入对应的 `/comet-native` 或 `/comet-classic`；
-4. 目标有歧义时只问用户一个问题；请求无关时正常处理，不进入 Comet。
+3. 仅语义相关或只有磁盘上的 selection 时，展示目标名称和阶段，询问本次是否继续；
+4. 用户确认后进入对应入口，无需再次扫描。请求无关或用户拒绝时按普通任务处理，保留原 change、批准和阶段写入约束。
+
+已在 Comet 流程中的同一会话沿用已有确认，常规继续、回答流程内提问或发生上下文恢复时不会重复询问。新会话若仅输入“继续”、仅提及 change 名称，或只提出宽泛的验证要求时，仍会先向用户确认；明确说明“继续 cache-controls”或“提交当前 change”等指令时，则可直接定位恢复目标。
 
 显式调用 `/comet` 时会直接按项目配置进入工作流，不依赖自动探测。通过平台显式调用的**非 Comet** Skill 或斜杠命令同样不触发恢复探测——任务意图已经由该调用明确，直接执行该 Skill 即可。项目若设置 `ambient_resume: false`，普通自然语言请求不会触发自动恢复探测，但 `/comet` 仍然可用。
 
 <Note>
-  对用户而言，恢复探测是自动的。下面的 CLI 参数用于 Agent、Hook、项目指令和自动化集成，不是恢复任务前必须手工执行的步骤。
+  对用户而言，恢复探测是自动的。下面的 CLI 参数用于
+  Agent、Hook、项目指令和自动化集成，不是恢复任务前必须手工执行的步骤。
 </Note>
 
 ## Agent 与自动化集成参考
@@ -65,21 +69,23 @@ echo "继续刚才的登录重构" | comet resume-probe . --stdin --json
 | `--utterance <text>`      | 直接传入需要分类的用户请求                                 |
 | `--stdin`                 | 从标准输入读取用户请求                                     |
 | `--json`                  | 输出稳定的结构化结果，适合 Agent、Hook 和自动化            |
-| `--no-workflow-work`      | 把当前请求标记为信息查询，跳过 workflow 推进   |
+| `--no-workflow-work`      | 把当前请求标记为信息查询，跳过 workflow 推进               |
 | `--already-in-comet-flow` | 当前已经在 Comet 流程内时返回 `out_of_scope`，避免重复路由 |
 
 ## 如何理解结果
 
 | `action`       | 含义                                                                      | 下一步                                                                                      |
 | -------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `auto_resume`  | 有一个明确目标且状态允许恢复                                              | Agent 按 `nextCommand` 进入永久入口：Native 为 `/comet-native`，Classic 为 `/comet-classic` |
-| `ask_user`     | 目标有歧义、状态异常或必须由用户决定                                      | 只问一个问题，不自行选择或跨工作流扫描                                                      |
+| `auto_resume`  | 用户明确要求继续指定 change，且状态允许恢复                               | Agent 按 `nextCommand` 进入永久入口：Native 为 `/comet-native`，Classic 为 `/comet-classic` |
+| `ask_user`     | 需要确认本次是否继续，或目标有歧义、状态异常、等待用户决定                | 展示目标和理由，等待明确回复；恢复确认后加载 `skill`，不重新扫描                            |
 | `out_of_scope` | 用户明确不想恢复、当前已在 Comet 内，或请求只是与 workflow 无关的信息查询 | 正常回答当前请求，不进入 Comet                                                              |
 | `none`         | 没有 active Comet change                                                  | 不执行恢复；如需开始新工作，可显式运行 `/comet`                                             |
 
 JSON 使用 `comet.resume_probe.v2`，包含 `workflow`、`skill`、`entrySource`、`reasonCode`、`candidates`、`changeName`、`phase`、`nextCommand` 和判断证据。Native 任一阶段都通过 `/comet-native` 恢复；`comet native next` 是状态推进命令，不是恢复入口。Classic 自带 runtime 的内部 v1 检查保持兼容，但顶层 CLI 返回 v2。
 
 ## 哪些情况一定会暂停
+
+- 新会话仅发现相关 change，尚未明确要求继续指定目标，即使目标唯一或 selection 有效。
 
 - 多个 active change，但用户请求没有点名目标。
 - 多个 active change 且没有有效 selection 或用户点名。
