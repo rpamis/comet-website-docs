@@ -1,6 +1,6 @@
 ---
-title: "Workflow Intermediate Products"
-description: "Understand the roles, positions, and life cycles of the intermediate products created by Comet in the five-stage workflow - handoff handover packages, brainstorm summary, subagent-progress, verification reports, and archive annotations. "
+title: 'Workflow Intermediate Products'
+description: 'Understand the roles, positions, and life cycles of the intermediate products created by Comet in the five-stage workflow - handoff handover packages, brainstorm summary, subagent-progress, verification reports, and archive annotations. '
 ---
 
 Comet creates a series of intermediate artifacts during the five-stage `/comet` flow. These working files support context compression, state recovery, evidence recording, and phase handoff, while proposal/design/tasks/code remain the final deliverables.
@@ -45,40 +45,47 @@ flowchart TD
 <p align="center">
   <img
     src="/assets/intermediate-artifacts-illustrations/01-artifact-purposes.png"
-alt=" Xiaoyu classifies Comet intermediate products by context, recovery, handover, and validation evidence"
+    alt=" Xiaoyu classifies Comet intermediate products by context, recovery, handover, and validation evidence"
     width="800"
   />
 </p>
 
-<p align="center">Each type of intermediate artifact supports context, recovery, handoff, or verification evidence.</p>
+<p align="center">
+  Each type of intermediate artifact supports context, recovery, handoff, or verification evidence.
+</p>
 
 The following text uses `<classic-root>` to represent the current Classic OpenSpec root directory: The default for new projects is `docs/openspec/`, and for projects that retain the old layout, it is `openspec/`. The actual location is determined by `classic.artifact_layout`. For details, please refer to [Project File structure ](/en/guides/project-structure)
 
 ## .comet.yaml: The status file throughout the entire process
 
-|"Attribute"|Explanation|
-| -------- | ------------------------------------------- |
-|Location| `<classic-root>/changes/<name>/.comet.yaml` |
-|Creation stage| open（`comet-state init`）                  |
-|Update stage|The corresponding fields are updated at each stage|
-|Management|machine-managed (Script writing, guard verification)|
+| "Attribute"    | Explanation                                          |
+| -------------- | ---------------------------------------------------- |
+| Location       | `<classic-root>/changes/<name>/.comet.yaml`          |
+| Creation stage | open（`comet-state init`）                           |
+| Update stage   | The corresponding fields are updated at each stage   |
+| Management     | machine-managed (Script writing, guard verification) |
 
 This is Comet's sole cross-phase state file. Fields are populated progressively across phases. For details, see [State Management](/en/concepts/state-management).
 
 <Note>
-Comet's Classic workflow still relies on <code>.comet.yaml</code> as the authoritative source of current state.
-<code>.comet/state-events.jsonl</code> is an append-only audit log used to explain the history of state transitions.
-<code>.comet/run-state.json</code> and <code>trajectory.jsonl</code> represent internal execution details maintained automatically by Comet. Cross-session recovery relies primarily on <code>.comet.yaml</code>, handoff documents, and checkpoint markdown; inspect the event log only when troubleshooting why a state transitioned.
+  Comet's Classic workflow still relies on <code>.comet.yaml</code> as the authoritative source of
+  current state.
+  <code>.comet/state-events.jsonl</code> is an append-only audit log used to explain the history of
+  state transitions.
+  <code>.comet/run-state.json</code> and <code>trajectory.jsonl</code> represent internal execution
+  details maintained automatically by Comet. Cross-session recovery relies primarily on{' '}
+  <code>.comet.yaml</code>, handoff documents, and checkpoint markdown; inspect the event log only
+  when troubleshooting why a state transitioned.
 </Note>
 
 ### State-events.jsonl (state Transition Audit)
 
-|"Attribute"|Explanation|
-| ---- | ---------------------------------------------------------------------------------- |
-|Location| `<classic-root>/changes/<name>/.comet/state-events.jsonl`                          |
-|"Create|The first successful state transition|
-|Function|Record the status changes caused by the updates of `comet-state transition`, `comet-guard --apply` and archive|
-|Management|Comet append writes are readable by users and should not be modified manually|
+| "Attribute" | Explanation                                                                                                    |
+| ----------- | -------------------------------------------------------------------------------------------------------------- |
+| Location    | `<classic-root>/changes/<name>/.comet/state-events.jsonl`                                                      |
+| "Create     | The first successful state transition                                                                          |
+| Function    | Record the status changes caused by the updates of `comet-state transition`, `comet-guard --apply` and archive |
+| Management  | Comet append writes are readable by users and should not be modified manually                                  |
 
 It is not the source of the current state. The current status is still based on `.comet.yaml`. The event log is suitable for answering: Was this `phase` modified through the guard, manual transition, or archive process? Which fields were actually changed?
 
@@ -86,32 +93,20 @@ It is not the source of the current state. The current status is still based on 
 
 The design stage is the one with the richest intermediate products, mainly serving context compression and the transition from OpenSpec to Superpowers.
 
-### handoff handover bag
+### Handoff sources and optional reading view
 
-|"Attribute"|Explanation|
-| ---- | --------------------------------------------------------------------------------- |
-|Location| `<classic-root>/changes/<name>/.comet/handoff/`                                   |
-|"Create| `comet-handoff.mjs <change> design --write`                                       |
-|Function|Organize the OpenSpec artifacts in the open phase into a context that Superpowers brainstorming can understand|
-|Management|machine-generated (guard checks script tags and hash)|
+Classic references proposal, design, tasks, and delta Specs directly. The Agent reads the materials needed for the task without generating a hash package.
 
-The handover package comes in two forms based on the `context_compression` configuration:
-
-|"Mode"|Output file|"Content|
-| ------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
-|`off` (Default)| `design-context.json` + `design-context.md` |A complete summary of artifacts, each file with source path, line range, and sha256. More than 80 lines truncated.|
-| `beta`        | `spec-context.json` + `spec-context.md`     |delta spec verbatim projection, proposal/design/tasks only store hash references. Save approximately 25 to 30% of tokens.|
-
-The handover package also writes `handoff_context` and `handoff_hash` to `.comet.yaml`. When guard leaves design, it recalculates the hash to detect drift. For details, see [Context Compression Mechanism](/en/concepts/context-compression) and [comet-handoff](/en/scripts/comet-handoff).
+For a single reading view, run `comet handoff <change-name> design --write --full`. It writes original source content to `.comet/handoff/design-context.md` in the current change. The view does not replace formal sources or design approval. See [comet handoff](/en/scripts/comet-handoff).
 
 ### brainstorm-summary.md
 
-|"Attribute"|Explanation|
-| ---- | -------------------------------------------------------------------- |
-|Location| `<classic-root>/changes/<name>/.comet/handoff/brainstorm-summary.md` |
-|"Create|Incremental writing during the brainstorming process in the design stage|
-|Function|** Recovery Checkpoint for context compression ** - Restore confirmed design decisions from here after compression occurs|
-|Management|Agent maintenance (structure and location specified by Skill)|
+| "Attribute" | Explanation                                                                                                               |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Location    | `<classic-root>/changes/<name>/.comet/handoff/brainstorm-summary.md`                                                      |
+| "Create     | Incremental writing during the brainstorming process in the design stage                                                  |
+| Function    | ** Recovery Checkpoint for context compression ** - Restore confirmed design decisions from here after compression occurs |
+| Management  | Agent maintenance (structure and location specified by Skill)                                                             |
 
 It records:
 
@@ -122,9 +117,10 @@ It records:
 - Unconfirmed items are marked as `pending`/`candidate`
 
 <Tip>
-<code>brainstorm-summary.md</code> is the most important recovery anchor point in the design stage. After context compression, the Agent
-Restore the confirmed decision from here and avoid re-brainstorming. During the brainstorming process, it incrementally updates <strong> to </strong>
-The final version will be determined after the user confirms the plan.
+  <code>brainstorm-summary.md</code> is the most important recovery anchor point in the design
+  stage. After context compression, the Agent Restore the confirmed decision from here and avoid
+  re-brainstorming. During the brainstorming process, it incrementally updates <strong> to </strong>
+  The final version will be determined after the user confirms the plan.
 </Tip>
 
 ## Product of the build stage
@@ -133,12 +129,12 @@ The intermediate products in the build stage mainly serve SubAgent scheduling re
 
 ### Implementation plan
 
-|"Attribute"|Explanation|
-| ---- | ------------------------------------------------- |
-|Location| `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`  |
-|"Create|build phase (generated by the SubAgent loading `writing-plans`)|
-|Function|Implementation plan; frontmatter is the key evidence in the verify stage|
-|Management| Agent-written                                     |
+| "Attribute" | Explanation                                                              |
+| ----------- | ------------------------------------------------------------------------ |
+| Location    | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`                         |
+| "Create     | build phase (generated by the SubAgent loading `writing-plans`)          |
+| Function    | Implementation plan; frontmatter is the key evidence in the verify stage |
+| Management  | Agent-written                                                            |
 
 The planned frontmatter is the evidence relied upon in the verification phase:
 
@@ -154,12 +150,12 @@ base-ref: <git HEAD before implementation>
 
 ### subagent-progress.md
 
-|"Attribute"|Explanation|
-| ---- | --------------------------------------------------------------------- |
-|Location| `<classic-root>/changes/<name>/.comet/subagent-progress.md`           |
-|"Create|build stage (only when `build_mode: subagent-driven-development`)|
-|Function|**SubAgent Scheduling Checkpoint ** - The counterpart of `brainstorm-summary.md` in the build phase|
-|Management|Coordination session (main session) maintenance|
+| "Attribute" | Explanation                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------- |
+| Location    | `<classic-root>/changes/<name>/.comet/subagent-progress.md`                                         |
+| "Create     | build stage (only when `build_mode: subagent-driven-development`)                                   |
+| Function    | **SubAgent Scheduling Checkpoint ** - The counterpart of `brainstorm-summary.md` in the build phase |
+| Management  | Coordination session (main session) maintenance                                                     |
 
 It records the scheduling status of the current task:
 
@@ -171,18 +167,20 @@ It records the scheduling status of the current task:
 - Current number of review-fix rounds
 
 <Warning>
-<code>subagent-progress.md</code> replace each task once. SubAgent (implementer/reviewer
-<strong> cannot </strong>
-Edit it - only the main session can write. The implementer can only write code, the reviewer can only write feedback, and the main session is responsible for advancing the checkpoint. This prevents subagents from marking task completion without authorization.
+  <code>subagent-progress.md</code> replace each task once. SubAgent (implementer/reviewer
+  <strong> cannot </strong>
+  Edit it - only the main session can write. The implementer can only write code, the reviewer can
+  only write feedback, and the main session is responsible for advancing the checkpoint. This
+  prevents subagents from marking task completion without authorization.
 </Warning>
 
 ### Check the status of tasks.md
 
-|"Attribute"|Explanation|
-| ---- | ---------------------------------------- |
-|Location| `<classic-root>/changes/<name>/tasks.md` |
-|Function|Task Completion Tracking (`- [ ]` → `- [x]`)|
-|Management|Coordinate conversation editing|
+| "Attribute" | Explanation                                  |
+| ----------- | -------------------------------------------- |
+| Location    | `<classic-root>/changes/<name>/tasks.md`     |
+| Function    | Task Completion Tracking (`- [ ]` → `- [x]`) |
+| Management  | Coordinate conversation editing              |
 
 Comet does not have a separate task checkbox file - the checkbox status is within `tasks.md`. Use `grep -c '\- \[ \]' tasks.md` to count the unfinished items and `comet-state task-checkoff <file> <text>` to verify that a specific task has been selected.
 
@@ -192,22 +190,22 @@ In the SubAgent mode, the implementer ** cannot ** select tasks - only the main 
 
 ### Verification report
 
-|"Attribute"|Explanation|
-| ---- | ------------------------------------------------------------------- |
-|Location| `docs/superpowers/reports/YYYY-MM-DD-<change-name>-verify.md`       |
-|"Create|In the verify stage, pass is marked only after the disk is written|
-|Function|Verification evidence - 6-item (light) or 7-item (full) inspection results, PASS/FAIL, reasons for acceptance|
-|Management| Agent-written                                                       |
+| "Attribute" | Explanation                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------- |
+| Location    | `docs/superpowers/reports/YYYY-MM-DD-<change-name>-verify.md`                                                 |
+| "Create     | In the verify stage, pass is marked only after the disk is written                                            |
+| Function    | Verification evidence - 6-item (light) or 7-item (full) inspection results, PASS/FAIL, reasons for acceptance |
+| Management  | Agent-written                                                                                                 |
 
 Write the `verification_report` path to `.comet.yaml`. guard requires that this file must exist when `verify-pass` is converted.
 
 ### Implementation Divergence Note (optional)
 
-|"Attribute"|Explanation|
-| ---- | ------------------------------------------------------------------ |
-|Location|Add to Design Doc (`docs/superpowers/specs/...-design.md`)|
-|Trigger|full verify discovers that there is a contradiction between the delta spec and the Design Doc, and the user chooses to accept the bias|
-|Function|Record the differences between the implementation and design documents|
+| "Attribute" | Explanation                                                                                                                            |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Location    | Add to Design Doc (`docs/superpowers/specs/...-design.md`)                                                                             |
+| Trigger     | full verify discovers that there is a contradiction between the delta spec and the Design Doc, and the user chooses to accept the bias |
+| Function    | Record the differences between the implementation and design documents                                                                 |
 
 If the user chooses to accept the bias, the acceptance reason and its impact are recorded in the verification artifacts. When archiving, the Design Doc is annotated `archived-with` through the normal flow.
 
@@ -217,39 +215,39 @@ During the archive stage, no new files are created. Instead, existing products a
 
 ### frontmatter annotation
 
-|"File|Annotation|Meaning|
-| ---------------------- | ------------------------------------------------ | ------------------------ |
-| Design Doc             | `archived-with: <archiveName>` + `status: final` |Archived ownership + final status|
-|Design Doc (if there are any deviations)|Acceptance reason recorded in the verification artifacts|The implementation deviation has been confirmed, and the main spec prevails|
-| Plan                   | `archived-with: <archiveName>`                   |Archiving ownership|
+| "File                                    | Annotation                                               | Meaning                                                                     |
+| ---------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Design Doc                               | `archived-with: <archiveName>` + `status: final`         | Archived ownership + final status                                           |
+| Design Doc (if there are any deviations) | Acceptance reason recorded in the verification artifacts | The implementation deviation has been confirmed, and the main spec prevails |
+| Plan                                     | `archived-with: <archiveName>`                           | Archiving ownership                                                         |
 
 ### Archived catalogue
 
 The entire change directory is moved to `<classic-root>/changes/archive/YYYY-MM-DD-<name>/`, including `.comet.yaml`, `.comet/handoff/`, `.comet/subagent-progress.md` and delta spec. After archiving, set `.comet.yaml` to `archived: true`.
 
-## Classify by purpose
+## Artifacts by purpose
 
-|Purpose|Product|
-| ---------------- | ------------------------------------------------------------------------- |
-|"Context compression.|handoff handover package (design-context/spec-context), brainstorming -summary.md|
-|"Status recovery"| .comet.yaml、subagent-progress.md、brainstorm-summary.md                  |
-|"Status Audit| state-events.jsonl                                                        |
-|"Phase handover"|handoff handover package (OpenSpec→Superpowers), plan base-ref (build→verify)|
-|"Evidence.|Verification report, plan frontmatter, tasks.md check, Implementation Divergence note|
-|"Life cycle annotation"| archived-with、status、archived: true                                     |
+| Purpose          | Artifacts                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Context recovery | Formal sources, brainstorm-summary.md, optional reading views                            |
+| State recovery   | `.comet.yaml`, subagent-progress.md, brainstorm-summary.md                               |
+| State audit      | state-events.jsonl                                                                       |
+| Phase handoff    | Formal OpenSpec sources, confirmed proposals, actual check results                       |
+| Evidence         | Verification report, plan metadata, tasks.md completion, Implementation Divergence notes |
+| Lifecycle        | archived-with, status, archived: true                                                    |
 
-## A quick overview of the functions of the document
+## Find the relevant artifact
 
-|What you want to know|See which product|
-| ----------------------------- | ------------------------------------------------------- |
-|The current stage and execution method| `.comet.yaml`                                           |
-|The OpenSpec context for design handover|`.comet/handoff/design-context.md` or `spec-context.md`|
-|What did brainstorming confirm| `.comet/handoff/brainstorm-summary.md`                  |
-|Which step of which task does the SubAgent achieve| `.comet/subagent-progress.md`                           |
-|Task completion progress|The checkmark status of `tasks.md`|
-|Verification result| `docs/superpowers/reports/...-verify.md`                |
-|Does handoff drift|The hash of `handoff_hash` + of `.comet.yaml` is recalculated and compared|
-|Why has phase changed|The last few lines of `.comet/state-events.jsonl`|
+| Question                          | Source                                          |
+| --------------------------------- | ----------------------------------------------- |
+| Current stage and execution mode  | `.comet.yaml`                                   |
+| Design requirements               | Formal proposal, design, tasks, and delta Specs |
+| Confirmed brainstorming decisions | `.comet/handoff/brainstorm-summary.md`          |
+| Subagent task progress            | `.comet/subagent-progress.md`                   |
+| Task completion                   | `tasks.md` checkboxes                           |
+| Verification result               | `docs/superpowers/reports/...-verify.md`        |
+| Whether a handoff needs updating  | Agent assessment against current formal sources |
+| Why the phase changed             | Recent `.comet/state-events.jsonl` entries      |
 
 ## Next step
 

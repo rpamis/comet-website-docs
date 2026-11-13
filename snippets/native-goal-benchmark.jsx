@@ -1,4 +1,5 @@
-export const NativeGoalBenchmark = () => {
+export const NativeGoalBenchmark = ({ language = 'zh' }) => {
+  const t = (zh, en) => (language === 'en' ? en : zh);
   useEffect(() => {
     const section = document.getElementById('comet-native-benchmark-title')?.closest('section');
     if (!section) return;
@@ -121,12 +122,22 @@ export const NativeGoalBenchmark = () => {
             Comet Native vs. Goal
           </p>
           <h2 id="comet-native-benchmark-title">
-            高难度场景，Native 满分率 <span>100%</span>
+            {t('高难度场景，Native 满分率', 'Hard tasks, Native scores')} <span>100%</span>
           </h2>
           <p className="comet-home__benchmark-lede">
-            Comet Native 与原生 Goal 在低、中、高难度场景中分层对照。所选高难度场景的 Native
-            原题满分率均为 <strong>100%</strong>；SkillsBench 三次全部满分比例为
-            <strong>33.3%</strong>。
+            {language === 'en' ? (
+              <>
+                Comet Native and native Goal are compared across easy, medium, and hard scenarios.
+                Native achieves a <strong>100%</strong> perfect-score rate on the selected hard
+                scenarios; its SkillsBench all-three-success rate is <strong>33.3%</strong>.
+              </>
+            ) : (
+              <>
+                Comet Native 与原生 Goal 在低、中、高难度场景中分层对照。所选高难度场景的 Native
+                原题满分率均为 <strong>100%</strong>；SkillsBench 三次全部满分比例为
+                <strong>33.3%</strong>。
+              </>
+            )}
           </p>
         </div>
 
@@ -143,31 +154,39 @@ export const NativeGoalBenchmark = () => {
           >
             <table className="comet-home__benchmark-table">
               <caption className="sr-only">
-                相同模型下，Comet Native 与原生 Goal 在 WorkBuddy-Bench 和 SkillsBench
-                各难度的满分率、平均原始得分、pass@3、pass^3。
+                {t(
+                  '相同模型下，Comet Native 与原生 Goal 在 WorkBuddy-Bench 和 SkillsBench 各难度的满分率、平均原始得分、pass@3、pass^3。',
+                  'Perfect-score rates, mean original scores, pass@3 and pass^3 for Comet Native and native Goal across WorkBuddy-Bench and SkillsBench difficulties using the same model.',
+                )}
               </caption>
               <thead>
                 <tr>
                   <th scope="col" className="comet-home__benchmark-dataset-heading">
-                    数据集
+                    {t('数据集', 'Dataset')}
                   </th>
                   <th scope="col" className="comet-home__benchmark-workflow">
-                    执行方式
+                    {t('执行方式', 'Mode')}
                   </th>
                   <th scope="col" className="comet-home__benchmark-primary">
-                    总体满分率
-                    <span className="comet-home__benchmark-metric-hint">全部难度合计</span>
+                    {t('总体满分率', 'Overall perfect-score rate')}
+                    <span className="comet-home__benchmark-metric-hint">
+                      {t('全部难度合计', 'All difficulties')}
+                    </span>
                   </th>
-                  <th scope="col">低难度</th>
-                  <th scope="col">中难度</th>
-                  <th scope="col">高难度</th>
+                  <th scope="col">{t('低难度', 'Easy')}</th>
+                  <th scope="col">{t('中难度', 'Medium')}</th>
+                  <th scope="col">{t('高难度', 'Hard')}</th>
                   <th scope="col">
                     pass@3
-                    <span className="comet-home__benchmark-metric-hint">至少一次满分</span>
+                    <span className="comet-home__benchmark-metric-hint">
+                      {t('至少一次满分', 'At least one perfect score')}
+                    </span>
                   </th>
                   <th scope="col">
                     pass^3
-                    <span className="comet-home__benchmark-metric-hint">三次全部满分</span>
+                    <span className="comet-home__benchmark-metric-hint">
+                      {t('三次全部满分', 'All three perfect')}
+                    </span>
                   </th>
                 </tr>
               </thead>
@@ -216,20 +235,29 @@ export const NativeGoalBenchmark = () => {
                             <span>%</span>
                           </strong>
                           {Number(score) > Number(group.rows[1 - index].scores[column]) && (
-                            <Trophy label="本数据集该指标领先" />
+                            <Trophy
+                              label={t('本数据集该指标领先', 'Leading metric in this dataset')}
+                            />
                           )}
                           {column <= 3 && (
                             <span
                               className={`comet-home__benchmark-average ${Number(averageAt(row, column)) > Number(averageAt(group.rows[1 - index], column)) ? 'comet-home__benchmark-average-best' : ''}`}
                             >
-                              <span className="comet-home__benchmark-average-label">均分</span>
+                              <span className="comet-home__benchmark-average-label">
+                                {t('均分', 'Mean')}
+                              </span>
                               <span className="comet-home__benchmark-average-value">
                                 {averageAt(row, column)}
                               </span>
                               {group.id === 'workbuddy-code' &&
                                 Number(averageAt(row, column)) >
                                   Number(averageAt(group.rows[1 - index], column)) && (
-                                  <Trophy label="本数据集该项均分领先" />
+                                  <Trophy
+                                    label={t(
+                                      '本数据集该项均分领先',
+                                      'Leading mean score in this dataset',
+                                    )}
+                                  />
                                 )}
                             </span>
                           )}
@@ -244,17 +272,19 @@ export const NativeGoalBenchmark = () => {
         </div>
 
         <p className="comet-home__benchmark-notes">
-          均分范围 0–1；pass@3 表示至少一次满分，pass^3
-          表示三次均满分。奖杯标记同数据集领先指标。总体满分率表示全部难度展示结果中，原题得分达到
-          1.0 的运行占比。
+          {t(
+            '均分范围 0–1；pass@3 表示至少一次满分，pass^3 表示三次均满分。奖杯标记同数据集领先指标。总体满分率表示全部难度展示结果中，原题得分达到 1.0 的运行占比。',
+            'Mean scores range from 0 to 1. pass@3 means at least one perfect score; pass^3 means all three are perfect. Trophies mark leading metrics within each dataset. The overall perfect-score rate is the share of displayed runs scoring 1.0 across all difficulties.',
+          )}
         </p>
         <div className="comet-home__benchmark-footer">
           <p>Native 0.5.3 · DeepSeek-V4.1-Flash-1017</p>
           <a
             className="comet-home__benchmark-report-link"
-            href="/zh/eval/comet-native-053-vs-goal-experiment"
+            href={`/${language === 'en' ? 'en' : 'zh'}/eval/comet-native-053-vs-goal-experiment`}
           >
-            查看完整实验报告<span aria-hidden="true">→</span>
+            {t('查看完整实验报告', 'Read the full experiment')}
+            <span aria-hidden="true">→</span>
           </a>
         </div>
       </div>

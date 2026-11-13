@@ -43,6 +43,8 @@ native:
   archive_confirmation: automatic
   # Consecutive failed implementation rounds allowed for one requirement before pausing
   max_verify_failures: 5
+  # In-flight Supervisor children awaiting Runtime integration completion
+  max_parallel_children: 2
 ```
 
 This will cause `/comet` to default to Native, save the change document in `docs/comet/`, generate the official product in Chinese, and complete the requirement clarification in Batch mode.
@@ -77,17 +79,33 @@ ambient_resume: false
 
 When explicitly calling `/comet`, the route will still follow `default_workflow`.
 
-## Native core field
+## Native core fields
 
-| Field                         | Allowed value/default value                           | The influence on you                                                                               |
-| ----------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `native.artifact_root`        | Project relative path Default: `docs`                 | change, Spec and reports are saved in `<artifact-root>/comet/`                                     |
-| `native.language`             | `en` \|`zh-CN`;" The default is `en`                  | Determine the brief, Spec and reporting language for the new change                                |
-| `native.clarification_mode`   | `batch` \|`sequential`;" The default is `batch`       | Decide whether to conduct centralized inquiries in each round or to ask one option point at a time |
-| `native.archive_confirmation` | `automatic` \|`required`;" The default is `automatic` | Decide whether to wait for additional archiving confirmation after verification is passed          |
-| `native.max_verify_failures`  | Positive integer Default: `5`                         | After reaching the continuous failure limit, pause the Loop and wait for the user to handle it     |
+| Field                          | Allowed values / default                       | Effect                                                            |
+| ------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------- |
+| `native.artifact_root`         | Project-relative path; default `docs`          | Documents in `<artifact-root>/comet/`                             |
+| `native.language`              | `en` or `zh-CN`; default `en`                  | Language of new change documents                                  |
+| `native.clarification_mode`    | `batch` or `sequential`; default `batch`       | Group questions or ask one at a time                              |
+| `native.archive_confirmation`  | `automatic` or `required`; default `automatic` | Whether to wait for additional Archive confirmation               |
+| `native.max_verify_failures`   | Positive integer; default `5`                  | Pause after the configured consecutive failures                   |
+| `native.max_parallel_children` | Positive integer; default `2`                  | Supervisor child concurrency; single-session mode always uses `1` |
 
-### Product Catalogue
+### Supervisor child concurrency
+
+Save a positive integer under **Dashboard → Settings → Comet configuration → Native workflow → Supervisor child concurrency limit**, or set:
+
+```yaml
+native:
+  max_parallel_children: 4
+```
+
+The default is `2`. Dispatched children occupy slots until Runtime finishes their integration. Dependencies still apply, and single-session mode always runs one child at a time. Changes apply at the next dispatch without interrupting active children. After lowering the limit below the in-flight count, Runtime waits for enough children to finish before dispatching more.
+
+Builders, Verifiers, and children waiting for integration all occupy slots. Runtime releases each slot after integration cleanup; you do not start a separate Archive for each child.
+
+The parent project supplies this setting; an older value in a child worktree does not override parent scheduling. Global settings remain initialization templates for new projects. SDK tasks use the project setting; legacy Compat commands retain an explicit `--max-parallel` override. See [Supervisor Change](/en/native/supervisor-change).
+
+### Artifact directory
 
 `artifact_root: docs` corresponds to `<project>/docs/comet/`; `artifact_root: .` corresponds to `<project>/comet/`. The path must be located within the project.
 
@@ -137,7 +155,7 @@ Generating explanations uses extra tokens. To disable the additional explanation
 change_walkthrough: false
 ```
 
-Initialization and updates preserve your choice. Disabling it does not delete existing pages or reduce required verification.
+You can also toggle **Change walkthrough** under **Dashboard → Settings → Comet configuration**. Initialization and updates preserve your selection. Disabling it does not delete existing pages or reduce verification.
 
 ## Personal Memory
 
