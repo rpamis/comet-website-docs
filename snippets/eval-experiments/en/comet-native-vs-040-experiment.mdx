@@ -1,0 +1,154 @@
+import { NativeClassicReport } from '/snippets/eval-report-snapshots/native-classic.jsx';
+
+<Warning>
+  This is a historical experiment report saved by the source code/maintainer, not a running tutorial
+  for ordinary users. Reproducing the experiment requires the corresponding Comet Source code, task
+  and report snapshots; Ordinary users, please use [Quick Start ](/en/eval/quickstart)
+</Warning>
+
+<Note>
+  This article is a historical experiment from July 2026. The Native samples are from beta16/ old
+  Native Product Agreement. It is used to retain the comparison of the model performance at that
+  time and cannot be used as the file layout, Verify or restore contract of beta17. The current Beta
+  is 17 With the [Native workflow ](/en/concepts/native-workflow), [Products and states
+  ](/en/native/artifacts-and-state) Please refer to the latest [Changelog](/en/changelog)].
+</Note>
+
+This experiment answers a focused question: when the model is already strong enough (such as Fable 5 and GPT-5.6), can Comet Native stay lighter than 0.4.0 Classic while retaining requirements, state, verification, and archive evidence?
+
+We aligned the Native sample size to the `pass@3` experiment that was once run in 0.4.0: using the same 16 business tasks, each task was repeated three times. There were a total of 96 runs in the two groups.
+
+<Note>
+  Native and Classic are two sets of Workflows designed for different model capabilities. There is
+  no such thing as upgrading from Native to Classic The relationship. This article compares their
+  completion capabilities, stability, and model time consumption on the same business tasks, and
+  does not require them to generate the same process products.
+</Note>
+
+<h2 id="experiment-alignment">Experiment alignment</h2>
+
+Alignment experiments do not mean applying the original checks of Classic to Native. The business goals and business validators remain consistent, while workflow checks respectively follow the real contracts of the two modes.
+
+| Observation item            | Native                                                            | 0.4.0 Classic                                                           |
+| --------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Business tasks              | The same 16 tasks                                                 | The same 16 tasks                                                       |
+| Repetition times            | Do each task 3 times, for a total of 48 times                     | Do each task 3 times, for a total of 48 times                           |
+| Business verification       | Use the same task validator                                       | Use the same task validator                                             |
+| workflow verification       | Native Skill, `comet/` products, status, trajectory and isolation | Classic Skill, OpenSpec, stages, states, and dependency Skill contracts |
+| Execution method            | Currently running concurrently locally                            | The historical operation from July 4 to 5, 2026                         |
+| Experimental identification | `experiment_20260716_104344`                                      | `combined_comet_workflow_full_k3_20260705_v3_rerun_failed`              |
+| Analysis set                | 48/48 included，high confidence                                   | 48/48 included, all flagged, medium confidence                          |
+
+Some task prompts still contain Classic terms such as Open, Design, Build, Verify, and Archive. Native treatment explicitly requires the model to retain business requirements but map them to Shape, Build, Verify, and Archive. Do not create OpenSpec, Superpowers, or the old change-local `.comet` process products. This can reduce the prior bias of the task copy on the Classic.
+
+All 48 samples of 0.4.0 were conservatively marked as `flagged` due to the words "outer runner", "API", or "environment failure" in the log, but still all entered the analysis set. `flagged` is merely an observability marker and does not indicate that the sample has been excluded or the determination has failed. This paper retains its strict pass results and incorporates this observability difference into the comparison constraints.
+
+<h2 id="key-results">Key results</h2>
+
+| Indicator                               |        Native | 0.4.0 Classic |     "Difference |
+| --------------------------------------- | ------------: | ------------: | --------------: |
+| strict pass@1                           | 46/48，95.83% | 43/48，89.58% | Native +6.25 pp |
+| pass@3                                  |   16/16，100% |   16/16，100% |          "Flat" |
+| pass^3                                  |  14/16，87.5% |    12/16，75% | Native +12.5 pp |
+| Business verification passed            |         48/48 |         47/48 |  Native +1 time |
+| Correct the average time consumption    |      183.971s |      352.375s |   Native -47.8% |
+| Correcting the median is time-consuming |      174.493s |      328.192s |   Native -46.8% |
+
+This set of results can be viewed from two perspectives. Both modes' `pass@3` is 100%, indicating that each task has been successful at least once out of the three attempts. If Native's `pass^3` is higher, it indicates that it has better stability in repeated runs: 14 out of 16 tasks pass three consecutive times, while 0.4.0 Classic has 12.
+
+<h2 id="why-measure-both-pass@3-and-pass^3">Why measure both pass@3 and pass^3</h2>
+
+`pass@3` measures at least one success in three attempts and is suitable for observing ability coverage. `pass^3` measures that all three attempts were successful and is suitable for observing the lower limit of reliability.
+
+If you only look at `pass@3 = 100%`, you won't see the actual failures that exist in the 48 runs. Native has two strict failures; There are five times for 0.4.0 Classic. The two indicators must be examined together to distinguish between "the model is capable of completing" and "the model can complete stably every time".
+
+<h2 id="execution-efficiency-on-successful-tasks">Execution efficiency on successful tasks</h2>
+
+The efficiency main view only counts the repetition of the same task that both Native and Classic have passed, totaling 41 groups. This way, operations that fail prematurely and thus consume less will not be mistaken for efficiency improvements. A "model start/recovery" indicates that the evaluator starts the model under test or re-enters the same task after the user responds and undergoes a cold recovery. It is different from calling the internal cumulative Agent rounds.
+
+| Indicator                                         |  Native | 0.4.0 Classic | Native differences |
+| ------------------------------------------------- | ------: | ------------: | -----------------: |
+| The number of times the model is started/restored |    1.80 |          2.85 |             -36.8% |
+| Agent round                                       |   39.02 |         91.66 |             -57.4% |
+| Tool invocation                                   |   36.22 |         81.80 |             -55.7% |
+| Cumulative model time consumption                 |  180.8s |        343.9s |             -47.4% |
+| Non-cached input Token                            |  16,647 |        74,903 |             -77.8% |
+| Output Token                                      |   5,471 |        13,788 |             -60.3% |
+| Total Token (including cache reads)               | 891,631 |     3,840,975 |             -76.8% |
+| Model cost                                        |  $0.658 |        $2.638 |             -75.1% |
+
+The 48 runs of Native all retained message-by-message context usage: the average peak was 34,771 tokens, the median peak was 34,568, and the maximum was 42,012. The average peak accounts for 17.4% of the 200k window. Only 9/48 of the old Classic trajectory saved data of the same granularity, so the context occupancy improvement ratio of the two Workflows cannot be reliably calculated.
+
+<h2 id="corrected-execution-time-measurement">Corrected execution-time measurement</h2>
+
+In the early report, `Duration` only retained the last segment of the `result` event. When an automatic interaction involves multiple rounds of model calls, this will miss the time consumption of the previous rounds, resulting in unreasonable 4-second or 5-second samples.
+
+This comparison is changed to accumulate all the top layers of `result.duration_ms` for each sample:
+
+- Native: 48 observable samples, with an average of 183.971 seconds and a median of 174.493 seconds.
+- 0.4.0 Classic: 47 observable samples, with an average of 352.375 seconds and a median of 328.192 seconds; Another run failed before generating a result.
+- Neither of them is included in the Docker preparation time and the task validator runtime.
+
+Under this standard, the average time consumption of Native is reduced by 47.8%, and the median time consumption is reduced by 46.8%. This is in line with the design goals of Native to reduce phase switching, dependency skills, and repetitive process reads.
+
+<Warning>
+  0.4.0 data comes from historical runs, Native The data is from the current concurrent operation.
+  The model, task and sample size are the same, but the machine load and service time periods are
+  not fully controlled. Therefore, the difference in time consumption can only be regarded as
+  directional evidence and should not be expressed as a strict causal experimental result.
+</Warning>
+
+<h2 id="failure-attribution">Failure attribution</h2>
+
+Neither of the two failures of Native was a failure in business implementation:
+
+| Task                           | Run | Failure check                                                                       | Business verification |
+| ------------------------------ | --- | ----------------------------------------------------------------------------------- | --------------------- |
+| `comet-api-cache-ttl`          | r2  | `native_state`: The evidence for brief, specification or verification is incomplete | "Through              |
+| `comet-graph-execution-review` | r3  | `native_state`: The evidence for brief, specification or verification is incomplete | "Through              |
+
+The five failures of 0.4.0 Classic include one business failure and four process contract failures:
+
+| Type                    | "Times" | Main signal                                                                |
+| ----------------------- | ------: | -------------------------------------------------------------------------- |
+| Business realization    |       1 | The `full-workflow` did not implement the required `--sentences` functions |
+| Rely on Skill contract  |       3 | No required Superpowers dependency Skill was observed                      |
+| Main process and stages |       1 | The main Comet Skill was not invoked and only 3/5 stages were observed     |
+
+This reflects the different failure situations of the two sets of models. The Classic process is more dependent. Failure may occur at any stage of the autonomous Skill, phase, OpenSpec, or dependent Skill. The Native process has fewer steps, but it still retains the final state evidence check. If the code is completed but the brief, specification or verification is incomplete, it will still not be counted as a strict pass.
+
+<h2 id="about-llm-judge">About LLM Judge</h2>
+
+This conclusion does not use the LLM Judge qualitative text from the old Native report. Upon review, it was found that when generating this report, Judge would read the `_test_results.json` transport file before adaptation, thereby mistakenly identifying the old path check within it as the Native final product.
+
+Therefore, this article only adopts:
+
+- Hard checks for task validator and workflow validator;
+- The final `passed` status of each run;
+- The cumulative time consumption in the original top-level result event;
+- Traceable causes of task-level failure.
+
+The subsequent evaluation code has excluded `_test_context.json` and `_test_results.json`, but the fixed code will not be used to reverse rewrite the qualitative Judge conclusion of this historical experiment.
+
+<h2 id="interpreting-the-results">Interpreting the results</h2>
+
+This alignment experiment supports the following judgments:
+
+1. Light execution does not sacrifice task coverage. The task-level `pass@3` for both Native and 0.4.0 Classic is 100%.
+2. The repetitive operation of Native is more stable. \*\* strict pass@1 is 6.25 percentage points higher, `pass^3` is 12.5 percentage points higher.
+3. The model execution of Native is significantly shorter. The revised average and median have both decreased by approximately 47%, but they still need to be retested in exactly the same running window to form a stronger delayed causal conclusion.
+
+It does not support the conclusion that "Classic is no longer necessary". Native serves Fable 5, GPT-5.6 and similar strong models: These models can perform complex code reasoning on their own, but still require requirement clarification, status, checking and archiving. Classic continues to serve models and tasks with lower capability levels that require more detailed stage guidance and stronger process constraints.
+
+<h2 id="full-html-report">Full HTML report</h2>
+
+The following embedded report centrally presents headline metric, reliability metrics, rounds of task completion, tool invocation, Token, cost, correction time consumption, three-run matrix of 16 tasks, failure attribution, and comparison boundaries.
+
+<NativeClassicReport title=" Comparison Report of Comet Native and 0.4.0 Classic" height={860} />
+
+<h2 id="next-steps">Next steps</h2>
+
+- Running the two modes again under the same running window and the same concurrent conditions further tightens the conclusion of time consumption.
+- Continue to enhance the integrity of Native final state evidence, with a focus on checking the archiving consistency of brief, specification, and verification.
+- [Comet Baseline True Evaluation Experiment ](/en/eval/comet-baseline-experiment) - View the complete baseline comparison between 0.3.9 and 0.4.0 Classic
+- [Scoring Metrics and Dual-Agent Evaluation ](/en/eval/scoring) - Understand the differences between `pass@k`, `pass^k`, hard validation, and LLM Judge
