@@ -1,13 +1,13 @@
 ---
 title: "迁移 Classic 布局"
-description: "将 openspec/ 安全迁移到 docs/openspec/，处理迁移中断和迁移后的恢复排查。"
+description: "将 openspec/ 安全平滑迁移到 docs/openspec/，妥善处理迁移中断与迁移后的排障指引。"
 ---
 
-Classic 有两种受支持的 OpenSpec 布局：旧项目使用仓库根目录的 `openspec/`，新建项目使用 `docs/openspec/`。布局由 `.comet/config.yaml` 中的 `classic.artifact_layout` 选择，但**不能只改这个字段来迁移目录**。
+Classic 模式目前支持两种 OpenSpec 目录布局：历史遗留项目采用仓库根目录下的 `openspec/`，新建项目则默认统一存放于 `docs/openspec/`。布局规范由 `.comet/config.yaml` 中的 `classic.artifact_layout` 控制，但**绝不能仅仅修改此配置项来搬迁物理目录**。
 
-本页只处理 Classic 布局迁移和迁移事务的恢复。普通的会话中断、换设备或上下文压缩，请直接重新输入 [`/comet`](/zh/guides/resuming-workflow)。
+本文专门介绍 Classic 目录布局的平滑迁移与事务中断抢救。若只是日常的会话中断、更换开发机或长上下文压缩，直接在对话中重新输入 [`/comet`](/zh/guides/resuming-workflow) 即可。
 
-## 先确认是否需要迁移
+## 首先确认是否确实需要迁移
 
 在项目根目录运行：
 
@@ -15,120 +15,110 @@ Classic 有两种受支持的 OpenSpec 布局：旧项目使用仓库根目录�
 comet classic root show
 ```
 
-命令会输出当前已解析的布局和路径。例如，`artifactLayout` 为 `legacy` 时，Classic 根目录是 `openspec/`；为 `docs` 时，根目录是 `docs/openspec/`。
+该命令会清晰打印当前识别出的布局模式与物理路径：若 `artifactLayout` 为 `legacy`，根目录指向 `openspec/`；若为 `docs`，根目录指向 `docs/openspec/`。
 
-| 当前布局 | 该怎么做                                                    |
-| -------- | ----------------------------------------------------------- |
-| `legacy` | 若要采用新布局，继续执行本页的 dry-run。                    |
-| `docs`   | 无需迁移。继续使用 `/comet` 恢复或推进 change。             |
-| 命令报错 | 先运行 `comet doctor`，修复配置、安装或未完成迁移，再重试。 |
+| 当前识别的布局 | 建议处置方案                                                |
+| -------------- | ----------------------------------------------------------- |
+| `legacy`       | 若希望统一拥抱新规范，请继续参考本文执行 `--dry-run` 预览   |
+| `docs`         | 已是现代规范，无需迁移。直接使用 `/comet` 推进日常开发即可   |
+| 命令报错       | 先运行 `comet doctor` 修复环境配置或未完结事务，再行重试     |
 
-`docs` 是新建 Classic 项目的默认布局，但已有项目会保留检测到的 `legacy` 布局。两种布局都在支持范围内；没有明确需要时，不必为了迁移而中断已有工作。
+`docs` 是新建 Classic 项目的推荐布局，但已有历史项目可以长期安心沿用 `legacy`。两种布局均处于官方长期支持范围，若无强迫症或团队统一部署要求，完全不必特意中断已有任务去搬迁目录。
 
-## 迁移前检查
+## 迁移前安全核查
 
-迁移会移动**完整的** `openspec/` 树，其中包括活跃 change、归档 change、规格和配置。先让所有协作者暂停对 Classic 产物的写入，并提交或暂存当前工作区改动。
+迁移会将**整个** `openspec/` 目录树原子搬迁，包含所有活跃变更、历史归档、规格 Spec 与全局配置。在执行前，请通知团队成员暂停向 Classic 目录写入内容，并先将当前 Git 工作区的改动暂存或提交。
 
-然后执行只读预检查：
+随后执行只读安全预检：
 
 ```bash
 comet classic root move docs --dry-run
 ```
 
-预检查不修改文件。它会报告源目录与目标目录、文件清单摘要、配置变更、冲突、阻塞项和可用的恢复策略。只有输出 `可执行迁移: 是` 时，才继续下一步。
+预检绝不修改磁盘文件。它会详实报告源路径与目标路径、文件清单摘要、配置变更项、潜在文件冲突以及可用的恢复预案。只有当输出明确显示 `可执行迁移: 是` 时，才可继续下一步。
 
 <Warning>
-  不要在 dry-run 和 apply 之间继续编辑 <code>openspec/</code>、
-  <code>docs/openspec/</code> 或<code>.comet/config.yaml</code>
-  。迁移会重新核对目录和配置身份；它们变了就会停止，以免覆盖新内容。
+  在执行 dry-run 预览与正式 apply 之间，<strong>切勿对源码或文档做任何修改</strong>。迁移引擎在执行时会再次核验目录指纹；若检测到中途产生新改动，会主动终止以防覆盖内容。
 </Warning>
 
-常见阻塞及处理方式：
+### 常见阻断问题及应对方案
 
-| 预检查结果                       | 原因                                              | 处理方式                                                 |
+| 预检报错现象                   | 根本成因                                          | 正确应对方式                                             |
 | ------------------------------ | ------------------------------------------------- | -------------------------------------------------------- |
-| `docs` 目标目录非空            | `docs/openspec/` 已有内容，无法确认这些内容属于本次迁移 | 先保留并检查目标内容；不要用迁移命令覆盖它。             |
-| 有待恢复的根目录迁移           | 上一次迁移留下了事务记录                          | 按“迁移中断后恢复”处理完，再重新 dry-run。               |
-| Classic 未启用或项目配置不兼容 | 当前项目不是可迁移的 Classic 项目                 | 用 `comet doctor` 诊断配置和安装；不要手工创建迁移记录。 |
-| 冲突或阻塞项                   | 源、目标或配置不满足安全条件                      | 先解决报告中的实际冲突，再重新运行 dry-run。             |
+| `docs` 目标目录已存在非空内容  | `docs/openspec/` 目录下原本就有文件，可能造成覆盖 | 先手动排查该目录内的已有文件，切勿强行覆盖               |
+| 存在未完成的事务残留           | 上一次迁移意外中断留下了中间流水                  | 先根据后文“迁移中断恢复”处理完毕，再重新运行 dry-run     |
+| Classic 未启用或配置不兼容     | 当前项目未正式初始化 Classic 模式                 | 先运行 `comet doctor` 诊断项目配置                       |
+| 出现文件权限或路径冲突         | 文件只读或被其他进程占用                          | 解除文件占用后，重新运行预检                             |
 
-## 执行迁移
+## 正式执行迁移
 
-预检查通过后，在同一项目根目录运行：
+预检确认无误后，在项目根目录执行：
 
 ```bash
 comet classic root move docs --apply
 ```
 
-当前版本的 `--apply` 不需要传入 plan ID。执行时，Comet 会再次检查预检查边界，复制并校验完整树，切换 `classic.artifact_layout` 为 `docs`，再清理旧根目录。迁移过程中会保留 change 的运行状态、检查点、轨迹、handoff 交接包和归档证据的引用。
+当前版本的 `--apply` 无需手动输入 Plan ID。Comet 会在严密的事务保护下，复制校验完整目录树、将 `classic.artifact_layout` 原子更新为 `docs`，随后安全清理历史旧目录。整个过程会完整保留所有变更的状态机、检查点、脑暴快照与归档证据。
 
-命令显示“迁移已完成”后，确认新的根目录：
+命令提示“迁移已完成”后，再次验证根目录状态：
 
 ```bash
 comet classic root show
 ```
 
-输出应显示 `artifactLayout: "docs"` 和 `openSpecRoot: "docs/openspec"`。此时可以重新输入 `/comet`，让 Classic 按新路径发现并恢复活跃 change。
+若输出显示 `artifactLayout: "docs"` 且 `openSpecRoot: "docs/openspec"`，即表示大功告成。此时重新在 Agent 中输入 `/comet`，系统会自动基于新路径识别并接管变更。
 
-## 迁移中断后恢复
+## 遭遇意外中断后的抢救指引
 
-如果 `--apply` 因为进程中断、文件变化或其他错误而停止，不要手动移动目录、删除 `.comet/classic-root-move.json`，或直接改 `classic.artifact_layout`。这些操作会破坏 Comet 用来判断哪个目录可信的证据。
+若在执行 `--apply` 期间因断电、杀进程或磁盘异常导致中断，**切勿手动强行搬移目录、切勿手动删除 `.comet/classic-root-move.json` 事务文件，也不要直接改配置文件**。这些盲目操作会毁掉系统自愈所需的物理凭证。
 
-先诊断事务：
+首先运行诊断命令：
 
 ```bash
 comet doctor
 ```
 
-诊断会说明迁移所在阶段、源和目标目录的状态，以及当前允许的恢复策略。确定要完成原迁移时，运行：
+诊断报告会明确指出当前停留在迁移事务的哪一步，并给出当前可用的自愈策略：
 
-```bash
-comet doctor --repair --strategy continue
-```
+- 若确认希望**继续完成**原迁移流程，运行：
 
-确定要放弃本次迁移，且诊断允许回滚时，运行：
+  ```bash
+  comet doctor --repair --strategy continue
+  ```
 
-```bash
-comet doctor --repair --strategy rollback
-```
+- 若确认希望**放弃本次迁移并彻底回滚**至原状（需在配置尚未切换前），运行：
 
-`continue` 和 `rollback` 各有自己的适用阶段，不能随意替换。Comet 只在当前事务阶段仍可安全执行时才接受对应策略；例如配置已经切换后就不能再回滚。命令拒绝某个策略时，保留现场，按诊断输出处理冲突或从可信备份恢复，不要强制清理目录。
+  ```bash
+  comet doctor --repair --strategy rollback
+  ```
 
-恢复完成后，重新运行：
+`continue` 与 `rollback` 策略受事务阶段严格约束，系统仅在安全的前提下放行对应操作。恢复完成后，再次运行 `comet classic root show` 确认最终状态。
 
-```bash
-comet classic root show
-comet classic root move docs --dry-run
-```
+## 迁移后的排障清单
 
-第一条确认当前权威根目录。第二条会在项目已经使用 `docs/openspec/` 时明确提示无需重复迁移；若仍是 `legacy`，它会重新给出可执行性和阻塞项。
+迁移完成后若输入 `/comet` 提示找不到任务，请按以下顺序逐项核对：
 
-## 迁移后的排查顺序
-
-迁移完成但 `/comet` 没有找到预期 change 时，按以下顺序检查：
-
-1. 运行 `comet classic root show`，确认 `changesRoot` 指向 `docs/openspec/changes/`。
-2. 确认原来的 change 位于该目录，已归档 change 位于 `docs/openspec/changes/archive/`。
-3. 运行 `comet status`，查看 change 的阶段、任务完成度和 `runtime_eval`。
-4. 运行 `comet doctor`，处理安装、配置或证据诊断。
-5. 重新输入 `/comet`，让 Classic 从当前文件状态恢复。
+1. 运行 `comet classic root show`，确认变更根目录已准确指向 `docs/openspec/changes/`；
+2. 检查既有的活跃变更确实位于该目录下，归档记录位于 `docs/openspec/changes/archive/`；
+3. 运行 `comet status`，查看变更的阶段状态与任务完成度；
+4. 运行 `comet doctor`，排查是否有损坏的残留引用；
+5. 在对话中重新输入 `/comet` 唤醒接管。
 
 <Note>
-  `classic.artifact_layout` 只决定 Classic 的 OpenSpec 根目录。Native 使用独立的
-  `native.artifact_root`，迁移 Classic 不会移动 Native 的 `comet/` 产物。
+  <code>classic.artifact_layout</code> 仅作用于 Classic 的 OpenSpec 产物目录。Native 工作流使用完全独立的 <code>native.artifact_root</code>，迁移 Classic 绝不会触碰 Native 的任何文件。
 </Note>
 
-## 不要这样做
+## 避坑禁区
 
-- 不要用文件管理器或 `mv` 手工移动 `openspec/`。
-- 不要只把 `classic.artifact_layout` 改为 `docs`。
-- 不要在迁移事务未恢复时继续创建、归档或编辑 Classic change。
-- 不要删除迁移 journal、暂存目录或隔离目录来“解除阻塞”。
+- 严禁通过操作系统资源管理器或纯命令行 `mv` 手动搬移 `openspec/` 目录；
+- 严禁仅在配置文件中将 `classic.artifact_layout` 单独改为 `docs`；
+- 严禁在迁移事务未彻底收敛前新建、归档或编辑变更；
+- 严禁擅自删除迁移事务日志或临时文件。
 
-这些目录和配置字段必须在同一个事务里一起切换。使用 `comet classic root move` 和 `comet doctor --repair`，才能让恢复逻辑验证并保留所有 Classic 状态和产物。
+只有通过官方提供的 `comet classic root move` 与 `comet doctor --repair`，才能确保所有复杂元数据与底层状态机万无一失。
 
 ## 下一步
 
-- [恢复中断的工作](/zh/guides/resuming-workflow) — 正常中断时如何恢复 Classic change
-- [状态损坏与恢复](/zh/guides/state-recovery) — 路由、状态或证据异常时如何诊断
-- [项目文件结构](/zh/guides/project-structure) — Classic 产物、运行状态与配置分别在哪里
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 了解日常异常中断后的秒级恢复
+- [状态损坏与恢复](/zh/guides/state-recovery) — 深度排障与状态机修复指南
+- [项目文件结构](/zh/guides/project-structure) — 掌握各类工程文件在磁盘上的分布规律

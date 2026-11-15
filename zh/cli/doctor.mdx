@@ -1,15 +1,15 @@
 ---
 title: 'comet doctor'
-description: '检查 Comet、OpenSpec、Skill、Runtime、项目目录和当前 change 是否可以正常工作。'
+description: '全方位诊断 Comet 环境、OpenSpec、Skill 资产、Runtime、工作目录与当前变更状态，精准定位故障并获取修复指引。'
 ---
 
-`comet doctor` 用来定位“为什么 Comet 现在跑不动”。
+`comet doctor` 专职排查“系统当前为何无法顺畅运转”。
 
-它会检查安装环境、CLI 与依赖、项目目录、Skill/Rule/Hook、Runtime、CodeGraph，以及当前 change 状态。可以把它理解成环境与现场体检：`comet status` 负责告诉你流程位置，`comet doctor` 负责告诉你故障位置。
+它会全方位深度体检 Node.js 运行环境、CLI 版本、依赖完整性、工程核心目录、Skill/Rule/Hook 部署现场、Runtime 状态机、CodeGraph 代码知识图谱以及当前 change 状态。简而言之：`comet status` 负责告诉你任务走到了哪一步，而 `comet doctor` 则负责精准揪出系统在何处抛锚。
 
-默认检查是只读的，不会因为诊断而修复或改写项目。只有显式使用 `--repair` 时，才会执行支持的修复动作。
+默认诊断执行为纯只读模式，绝不会在检查过程中私自改写任何物理文件。唯有显式指定 `--repair` 标志时，系统才会针对可自愈的故障执行修复动作。
 
-CodeGraph 部分会分成四项独立结果：CLI 安装状态、项目索引状态、MCP 注册状态、以及各 Agent 的 effective 能力。索引最新只说明数据已经同步，不等于 Agent 一定能用 CodeGraph；需要精确定位时请查看 JSON 里的 `codegraph` 对象。
+针对 CodeGraph 代码图谱，诊断会细分呈现四项独立指标：CLI 工具就绪度、工程索引新鲜度、MCP 插件服务注册状态以及各 Agent 平台的生效（effective）评级。索引处于最新状态仅说明底层数据完成落盘，并不等同于特定 Agent 一定能直接消费图谱；精准排障请查阅 JSON 中的 `codegraph` 对象。
 
 ## 基本用法
 
@@ -19,17 +19,19 @@ comet doctor --scope project
 comet doctor --json
 ```
 
-| 选项                    | 说明                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------ |
-| `--json`                | 输出结构化诊断。                                                                     |
-| `--scope <scope>`       | 诊断 `auto`、`project` 或 `global`。默认是 `auto`。                                  |
-| `--repair`              | 修复 Comet 管理的 Hook、Rule 和当前 change 选择状态。                                |
-| `--strategy <strategy>` | 恢复 Classic 根目录迁移，值为 `continue` 或 `rollback`；必须和 `--repair` 一起使用。 |
-| `--yes`                 | 确认执行需要用户同意的项目修复，例如 CodeGraph 索引；必须和 `--repair` 一起使用。    |
+常用选项参数：
 
-## 先看文本输出
+| 参数选项 | 说明 |
+| --- | --- |
+| `--json` | 输出机器可读的结构化全景诊断 JSON 数据 |
+| `--scope <scope>` | 设定诊断的作用域：支持 `auto`（自动推断）、`project`（当前项目）或 `global`（全局环境），默认为 `auto` |
+| `--repair` | 触发针对 Hook 钩子、Rule 规范及当前 change 绑定关系的自动化物理修复 |
+| `--strategy <strategy>` | 指定 Classic 根目录迁移中断时的恢复策略：可选 `continue`（接续前行）或 `rollback`（安全回滚）；必须与 `--repair` 联用 |
+| `--yes` | 免交互确认需要人工授权的项目修复动作（例如重建 CodeGraph 索引）；必须与 `--repair` 联用 |
 
-例如，在项目级 Skill 尚未安装、Classic 根目录缺失、CodeGraph 还有待同步内容时，`comet doctor --scope project` 会打印：
+## 终端文本诊断回显
+
+在项目级 Skill 尚未完整部署、Classic 产物根目录缺失且 CodeGraph 存在待同步变更的典型故障现场下，运行 `comet doctor --scope project` 将回显如下诊断报告：
 
 ```text
 Comet Doctor (scope: project)
@@ -50,53 +52,51 @@ Comet Doctor (scope: project)
   ✓ current selection: no active Comet change
 ```
 
-版本、路径和数量会随你的环境变化，但输出的结构相同。按符号理解：
+各行开头的状态符号含义如下：
 
-- `✓`：该项检查通过，不需要处理。
-- `⚠`：发现警告或可选组件缺失。多数情况下可以继续，但建议按输出提示尽快补齐。
-- `✗`：该项检查失败。优先处理这一行及其 `run:` 后面的命令。
+- `✓`：该项指标全量合规，运行健康，无需任何干预。
+- `⚠`：检测到警告或非关键的可选组件缺失。通常不影响核心流转，但强烈建议依循提示尽快补齐。
+- `✗`：致命硬伤检查未通过。请务必优先排查该行末尾 `run:` 所给出的针对性修复指令。
 
-这个例子中，真正需要优先处理的是 Classic 根目录：配置指向 `docs/openspec/`，但目录不存在。先运行 `comet classic root show` 查看实际配置，再恢复该目录或使用 `comet classic root move`。`current selection: no active Comet change` 不是错误，只表示当前没有选中的 Comet change。
+在上述示例中，首要矛盾在于 Classic 产物根目录：配置声明了 `docs/openspec/`，但物理磁盘上目录缺失。先运行 `comet classic root show` 核准实际配置，再手动检出该目录或运行 `comet classic root move` 迁移。末尾的 `current selection: no active Comet change` 纯属中性事实，仅说明当前工程内暂无聚焦的活动中变更。
 
-## 检查哪些问题
+## 核心诊断检查项全览
 
-输出中的每一行对应一类检查：
+| 检查项名称 | 核心诊断职责与判定边界 |
+| --- | --- |
+| `Environment` | 探查当前的 Node.js 版本、底层操作系统平台、当前项目物理路径及全局主目录 |
+| `Comet CLI` / `openspec CLI` | 核查核心命令行工具的安装就绪情况及当前版本号 |
+| `Superpowers` | 探查外部 Superpowers 依赖套件在当前环境中的可用性 |
+| `Classic artifact layout` / `Classic OpenSpec root` | 深度校验 Classic 模式配置的产物根目录是否存在、文件是否具备正常读写权限 |
+| `working directories` | 校验 `changes`、历史归档目录及 `specs` 规范等工作子目录是否健全 |
+| `Comet skills` / `scripts present` | 检查当前作用域下的业务 Skill 资产与 Runtime 运行时脚本是否齐备 |
+| `CodeGraph CLI` | 校验 CodeGraph 底层命令行工具是否已成功安装 |
+| `CodeGraph project index` | 判定当前工程图谱索引是处于最新、残缺、过期滞后还是尚未初始化状态 |
+| `CodeGraph MCP registration` | 核查已检测到的 Agent 客户端中是否合规注册了有效的 CodeGraph MCP 协议服务 |
+| `CodeGraph effective for <Agent>` | 判定特定 Agent 是否同时齐备 CLI、最新索引数据及合法的 MCP 注册服务 |
+| `current selection` | 确认当前是否存在明确绑定的活动中 Comet change 写入上下文 |
 
-| 输出项                                              | 检查作用                                           |
-| --------------------------------------------------- | -------------------------------------------------- |
-| `Environment`                                       | 当前 Node、平台、项目路径和全局目录是什么。        |
-| `Comet CLI` / `openspec CLI`                        | CLI 是否安装，以及当前版本。                       |
-| `Superpowers`                                       | 外部 Superpowers 是否可用。                        |
-| `Classic artifact layout` / `Classic OpenSpec root` | Classic 配置的根目录是否存在、是否可读。           |
-| `working directories`                               | `changes`、归档目录和 `specs` 等工作目录是否完整。 |
-| `Comet skills` / `scripts present`                  | 当前 scope 的 Skill 和 Runtime 脚本是否完整。      |
-| `CodeGraph CLI`                                     | CodeGraph CLI 是否已经安装。                       |
-| `CodeGraph project index`                           | 当前项目索引是否最新、不完整、过期或未初始化。     |
-| `CodeGraph MCP registration`                        | 检测到的 Agent 是否注册了有效的 CodeGraph MCP。    |
-| `CodeGraph effective for <Agent>`                   | Agent 是否同时具备 CLI、最新索引和有效 MCP 注册。  |
-| `current selection`                                 | 是否存在当前写入归属的 Comet change。              |
+## 科学选定诊断作用域
 
-## 选择检查范围
+- `--scope auto`（默认）：智能联动诊断。优先全量体检当前项目工程；若当前工程未独立初始化，则无缝 fallback 探测可用的全局共享资产。
+- `--scope project`：严格仅诊断当前项目上下文，专用于确认当前仓库是否已合规完成本地工程化初始化。
+- `--scope global`：严格仅体检用户全局主目录，适合排查跨项目共享的全局 Skill、Rule 规范、Hook 钩子或 Runtime 运行时。
 
-- `--scope auto`：默认值。先检查当前项目；如果项目没有完整安装，再检查可用的全局安装。
-- `--scope project`：只检查当前项目，适合确认项目是否已经完成本地初始化。
-- `--scope global`：只检查全局安装，适合排查全局 Skill、Rule、Hook 或 Runtime。
-
-如果全局 Comet 安装完整，但当前项目没有项目级 Skill 副本，`--scope auto` 会报告全局安装可用，并把项目级副本视为可选项。只有当项目需要自己的 Comet 配置和 Skill 副本时，才运行：
+若全局 Comet 运行环境完备，但当前项目尚未拷贝项目级私有 Skill，`--scope auto` 会提示全局环境可用并将项目级副本标记为建议项。仅在团队明确要求将工程配置与 Skill 随仓库提交纳管时，方需运行：
 
 ```bash
 comet init --scope project
 ```
 
-## JSON 输出怎么看
+## 结构化 JSON 诊断报文
 
-需要自动化处理时，使用：
+当需要编写 CI/CD 自动化流水线或对接监控报警时，使用：
 
 ```bash
 comet doctor --json
 ```
 
-输出顶层会先告诉你整体结果：
+顶层数据包清晰提炼整体健康态：
 
 ```json
 {
@@ -119,39 +119,39 @@ comet doctor --json
 }
 ```
 
-`healthy: false` 表示至少有一项 `fail`；具体处理方式在 `results[].message` 中。`status: passed` 且 `healthy: true` 才表示本次诊断没有失败项。`runtime` 和 `codegraph` 字段还会提供 Runtime 来源和 CodeGraph 的详细状态。
+`healthy: false` 明确表明至少存在一项 `fail` 级别的致命问题；具体的修复建议承载于 `results[].message` 文本中。唯有当 `status: passed` 且 `healthy: true` 时，方准判定本次环境体检全绿合格。
 
-`codegraph` 对象包含 `cliStatus`、`indexStatus`、`mcpStatus`、`agents` 和 `effectiveForAgent`。只有 CLI 已安装、项目索引最新，并且对应 MCP 配置指向 CodeGraph 服务时，该 Agent 才会被标记为 effective。
+`codegraph` 对象深入展开 `cliStatus`、`indexStatus`、`mcpStatus`、`agents` 及 `effectiveForAgent`。只有当 CLI 完备、工程索引新鲜度达标、且平台 MCP 配置精准指向 CodeGraph 服务时，目标 Agent 才会获得生效认证。
 
-## 什么时候使用 `--repair`
+## 何时追加 `--repair` 执行物理修复
 
-先运行不带 `--repair` 的 `comet doctor`，确认问题和建议动作。只有输出明确指向修复，或者你已经确认要修复 Comet 管理的 Hook、Rule、selection 或迁移现场时，才运行：
+推荐始终遵循“先无害诊断、后授权修复”的原则：先运行不带 `--repair` 的 `comet doctor` 审阅案发现场。唯有当回显明确指明支持自动修复、或者你已确认需要重置 Hook、Rule、selection 绑定或恢复迁移中断现场时，方追加参数执行：
 
 ```bash
 comet doctor --repair
 ```
 
-`--repair` 会执行写操作。Classic 根目录迁移中断时，根据现场选择 `continue` 或 `rollback`；涉及 CodeGraph 等需要你确认的项目修复时，再加 `--yes`。如果只想重新检查，请省略 `--repair`。
+`--repair` 会引发真实的物理文件写操作。若 Classic 产物根目录迁移中断，请结合现场明确追加 `--strategy continue` 或 `--strategy rollback`；若涉及 CodeGraph 等需要人工确认的重构项目，还须合并追加 `--yes`。若仅用于排障复查，请务必省略 `--repair`。
 
-## 共享安装与插件存储的遗留锁
+## 共享存储与插件残留文件锁排查
 
-需要排查共享存储中的旧锁记录时，只读检查指定文件：
+若需深度排查共享存储目录中可能残留的僵尸锁，可对特定物理文件执行只读透视：
 
 ```bash
 comet doctor --lock-file <锁文件路径> --json
 ```
 
-它不会加载项目集成，也不会终止仍在进行的事务。只有诊断明确给出可执行的修复命令时，才按该命令处理。普通 Native / Classic 流程已不再创建协调锁；不要把共享存储诊断当成日常任务恢复步骤。
+该透视操作绝不会加载复杂的项目集成逻辑，更不会擅自杀死正在安全执行中的合法事务。唯有在诊断明确输出可执行指令时方可依循操作。标准的 Native 与 Classic 工作流已彻底告别繁杂的跨进程协调锁，切勿把底层共享存储排障当作日常断点恢复的前置动作。
 
-## 排障顺序
+## 推荐的自愈排障决策树
 
 ```mermaid
 flowchart TD
-  A["不知道 change 走到哪一步"] --> B["comet status"]
-  B --> C{"输出包含 error 或 fail"}
-  C -->|是| D["comet doctor"]
-  D --> E{"输出包含 run 命令"}
-  E -->|是| F["执行对应修复或恢复命令"]
-  E -->|否| G["检查 scope 和项目配置"]
-  C -->|否| H["按 next 进入下一阶段"]
+  A["不确定当前变更进展到哪一步"] --> B["运行 comet status"]
+  B --> C{"输出中是否包含 error 或 fail 报警?"}
+  C -->|是| D["运行 comet doctor 深度体检"]
+  D --> E{"诊断输出中是否包含 run: 修复命令?"}
+  E -->|是| F["复制并执行对应的修复或恢复命令"]
+  E -->|否| G["核查 scope 范围与项目配置文件合法性"]
+  C -->|否| H["依照建议的 next 指令顺畅进入下一阶段"]
 ```

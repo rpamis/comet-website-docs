@@ -1,56 +1,50 @@
 ---
 title: 'build 阶段'
-description: '了解 Classic build 阶段如何生成实施计划、选择执行方式并逐项完成任务。'
+description: '了解 Classic build 阶段如何起草实施计划、联合选定执行模式并按部就班完成子任务。'
 ---
 
-build 阶段先生成实施计划，再由用户选择执行、TDD 和审查方式。随后按任务逐个实现、检查并提交改动，同时记录 spec 增量更新和调试结果。
+build 阶段首先起草具体的实施计划，随后交由你联合选定执行方式、TDD 测试策略与代码审查模式。选定后，系统会按照任务计划逐项编写代码、执行自动化测试并规范提交，同时严谨记录 Spec 增量变动与调试证据。
 
 <Tip>
-  正常情况下你只需要 <code>/comet</code>。 配置选择 Classic 后，内部 <code>/comet-classic</code>{' '}
-  会读取状态，并在 design 完成后自动调用 <code>/comet-build</code>。本文描述的是内部阶段
-  Skill；只有想
-  <strong>手动控制</strong>
-  时才需要直接输入。详见<a href="#本阶段如何触发">本阶段如何触发</a>。
+  日常开发直接输入 <code>/comet</code> 即可。当项目选用 Classic 时，系统会自动读取状态机，并在 design 阶段完结后自动流转至 <code>/comet-build</code>。
 </Tip>
 
 ## 本阶段如何触发
 
-`/comet-build` 通常由 `/comet-classic` 自动衔接。
+`/comet-build` 通常由内部调度引擎自动流转唤起。
 
-### 默认：用 /comet 自动衔接
+### 默认：通过 /comet 自动流转
 
-design 阶段退出后（`phase: build`），`/comet-classic` 会自动衔接调用 `/comet-build`。下一次调用 `/comet-classic` 时，如果检测到 `phase: build` 或有 Design Doc 但执行未完成，也会路由到 build：hotfix 走 `/comet-hotfix`、tweak 走 `/comet-tweak`、full 走 `/comet-build`。详见[自动推进机制](/zh/concepts/auto-transition)。
+design 阶段守卫检查放行后（推进至 `phase: build`），系统会自动链式调用 `/comet-build`。在对话中断后重新输入 `/comet` 时，若检测到任务正处于 build 阶段或已有设计文档但尚未完工，系统也会精准路由到此：hotfix 走 `/comet-hotfix`、tweak 走 `/comet-tweak`、完整全流程走 `/comet-build`。详见 [自动推进机制](/zh/concepts/auto-transition)。
 
-### 手动：什么时候才需要直接 /comet-build
+### 手动触发场景
 
-- 关闭了自动衔接（`auto_transition: false`）：design 完成后 `/comet-classic` 会停下并打印 HINT。
-- 只想单独跑 build（恢复一个 `phase: build` 的 change 继续执行）。
-- verify 失败后通过 `comet-state transition verify-fail` 回滚，需要重新进入 build 修复。
-
-**正常使用统一入口 `/comet`；只有手动控制阶段时才直接调用阶段命令。**
+- 当全局关闭了自动推进（`auto_transition: false`）时，design 完成后系统会打印提示，需手动输入 `/comet-build` 触发；
+- 单独调试或接续某个处于 `phase: build` 的既有变更；
+- verify 验收失败后触发 `verify-fail` 回滚，需要重新进入 build 阶段修复缺陷。
 
 ---
 
-## 你会经历什么
+## 阶段执行全流程
 
-build 阶段有 2 个停顿点（全局编号 6-7，整个五阶段工作流共 10 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）。下面按发生顺序讲。
+build 阶段包含两个重要的决策停顿点（全局编号 6 与 7，详见 [决策停顿点全景速查](/zh/concepts/decision-points)）。
 
 ```mermaid
 flowchart TD
-    Entry["入口状态验证"] --> S1["子代理写实施计划<br/>（失败回退主会话）"]
-    S1 --> Stop2["停顿点 6：build 联合决策<br/>plan-ready 继续 / 暂停切换模型"]
-    Stop2 -->|继续| Exec["停顿点 6 内一次选定<br/>执行 + TDD + 审查，再按 build_mode 执行"]
-    Stop2 -->|暂停切换模型| PauseDone["本次停止，稍后恢复"]
-    Exec --> Debug{"崩溃/测试失败/构建失败?"}
-    Debug -->|是| DebugGate["强制加载 systematic-debugging<br/>先定位根因再修复"]
+    Entry["入口状态验证"] --> S1["起草落地实施计划<br/>（优先子代理，失败回退主会话）"]
+    S1 --> Stop2["停顿点 6：build 联合决策<br/>确认 plan-ready 并选定工作模式"]
+    Stop2 -->|立即继续| Exec["敲定执行模式 + TDD + 审查模式<br/>按选定方式逐任务编写代码"]
+    Stop2 -->|暂停切换模型| PauseDone["保存检查点，暂停会话稍后继续"]
+    Exec --> Debug{"是否出现构建/测试报错？"}
+    Debug -->|是| DebugGate["强制加载 systematic-debugging<br/>坚持先定位根因再修复代码"]
     DebugGate --> Exec
-    Debug -->|否| SpecUpd{"需要改 spec?"}
-    SpecUpd -->|中/大| SpecPause["停顿点：确认 spec 更新"]
-    SpecUpd -->|小/无| TaskLoop["勾选任务 + 提交 + 下一任务"]
+    Debug -->|否| SpecUpd{"是否涉及 Spec 变更？"}
+    SpecUpd -->|中重度变更| SpecPause["主动暂停：确认 Spec 更新方案"]
+    SpecUpd -->|轻微/无需修改| TaskLoop["主会话核验打勾 + 提交代码 + 派发下一任务"]
     SpecPause --> TaskLoop
-    TaskLoop --> Done{"全部完成?"}
+    TaskLoop --> Done{"任务列表是否全部完工？"}
     Done -->|否| Exec
-    Done -->|是| Exit["comet-guard build --apply<br/>推进到 verify"]
+    Done -->|是| Exit["运行 comet-guard build --apply<br/>守卫放行进入 verify"]
 ```
 
 <p align="center">
@@ -61,222 +55,138 @@ flowchart TD
   />
 </p>
 
-<p align="center">build 阶段把计划拆成任务卡片，逐张执行、排错、勾选并留下提交证据</p>
+<p align="center">build 阶段将计划细化为任务卡片，逐张编码、排错、核验打勾并留下提交证据</p>
 
-### Step 0：入口状态验证
+### 第一步：起草落地实施计划
 
-```bash
-node "$COMET_STATE" check <name> build
-```
-
-读取 plan 头部的 `base-ref`，`grep` 找第一个未完成任务。幂等：已提交的任务不会重复提交。
-
-### Step 1：创建实施计划
-
-Comet **派子代理**加载 `writing-plans` 写计划（这样不占主会话上下文），子代理失败时回退到主会话内联加载。计划 frontmatter 必须含：
+Comet 会优先**派发后台子代理**调用 `writing-plans` 工具起草计划（避免占用主会话上下文），若子代理启动受限则平滑回退至主会话编写。计划文档头（frontmatter）必须严格包含：
 
 ```yaml
 ---
 change: <change-name>
 design-doc: docs/superpowers/specs/...-design.md
-base-ref: <git rev-parse HEAD> # 实现前的 commit，verify 用它算变更规模
+base-ref: <git rev-parse HEAD> # 编码前的基准 commit，verify 据此客观核算改动规模
 ---
 ```
 
 ### 停顿点 6：build 联合决策
 
-计划写好后，Comet **暂停等你选**：
+计划起草完毕后，系统主动**暂停等待你做全局决策**：
 
-| 选项               | 行为                                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| **A 继续执行**     | 保持在当前模型，接着在下方一次选定执行方式、TDD 和审查模式                                                          |
-| **B 暂停切换模型** | 记录 `build_pause: plan-ready`，本次 `/comet-build` 停止；换模型后正常用 `/comet` 恢复，也可手动调用 `/comet-build` |
-
-<Tip>
-  选项 B 的用途是<strong>换模型</strong>
-  ，比如用一个模型写计划、换一个更强的编码模型执行。恢复时 Comet 会检测到{' '}
-  <code>build_pause: plan-ready</code> 且 plan 存在，告诉你停在
-  plan-ready，你确认继续后清除暂停标志，<strong>不会重新生成 plan</strong>
-  ，直接进入工作模式选择。
-</Tip>
-
-#### 同一次决策里再选三种工作模式
-
-选 A 继续后，Comet 在**同一次联合决策**里让你一次选定执行方式、TDD 模式和审查模式。工作区隔离不在这里。它已在 open 阶段的工作区决策（停顿点 3）确定：选择结果写入 `isolation`，实际执行目录的当前分支记录为 `bound_branch`，build 阶段只验证目录与分支匹配，不会静默换目录。选择 `branch` 时的分支名在 open 阶段一并确认（hotfix/tweak 预设默认 `hotfix/YYYYMMDD/<name>`、`tweak/YYYYMMDD/<name>`）。
-
-#### 1. 执行方式（build_mode）
-
-| 选项                                | 说明                                                                                        | 推荐                                                      |
-| ----------------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| **A `subagent-driven-development`** | 主会话只协调，后台子代理实现；每个任务在隔离的实现者子代理里运行，审查由 `review_mode` 驱动 | 任务数 ≥ 3、复杂度高                                      |
-| **B `executing-plans`**             | 轻量执行，不需子代理环境                                                                    | 任务 ≤ 2、无跨模块依赖；来自 hotfix 路径                  |
-| `direct`                            | 直接实现                                                                                    | 仅 hotfix/tweak 默认；full 需显式 `direct_override: true` |
-
-<Warning>
-  选 <code>subagent-driven-development</code> 需要平台有真实后台调度能力，否则 Comet 会暂停让你改选{' '}
-  <code>executing-plans</code>。full workflow 默认不能用 <code>direct</code>，除非你显式设{' '}
-  <code>direct_override: true</code>。
-</Warning>
-
-#### 2. TDD 模式（tdd_mode）
-
-| 选项      | 说明                                                                          |
-| --------- | ----------------------------------------------------------------------------- |
-| **`tdd`** | 每个任务先写失败测试，Red-Green-Refactor（**推荐**，涉及业务逻辑/新功能/API） |
-| `direct`  | 直接实现，不强制 TDD（hotfix/tweak 默认）                                     |
-
-#### 3. 审查模式（review_mode）
-
-| 选项           | 说明                                                                    | 推荐                           |
-| -------------- | ----------------------------------------------------------------------- | ------------------------------ |
-| `off`          | 不自动审查                                                              | 文档、配置、文案、小范围低风险 |
-| **`standard`** | 默认不逐任务派 reviewer。命中风险信号时才派。最终综合审查在 verify 阶段 | **默认推荐**，大多数普通改动   |
-| `thorough`     | 每个任务都派 reviewer（spec + 质量）；最终综合审查在 verify 阶段        | 高风险、多模块、架构/安全      |
-
-详见[代码审查机制](/zh/concepts/review-mode)。
-
-### Step 3：逐任务执行
-
-选定后，按 `build_mode` 执行。两种执行方式的差别如下：
-
-| 维度     | `executing-plans`                                                                                                  | `subagent-driven-development`                                                         |
-| -------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| 谁写代码 | 主会话直接做                                                                                                       | 主会话**只协调**，后台子代理实现（禁止主会话直接写代码）                              |
-| 任务推进 | 顺序执行，逐个勾选                                                                                                 | 每个任务派新子代理，通过验收后立即派下一个，**不停下问你要不要继续**                  |
-| 审查     | 强度随 `review_mode` 调整。standard 不做 build 内整变更审查；thorough 每 3 个任务做分段审查。最终综合审查在 verify | 按 review_mode 派任务级 reviewer + 修复 agent（thorough=每任务；standard=仅风险任务） |
-| 模型选择 | 主会话直接执行                                                                                                     | **每次派发必须显式指定模型**（实现者/修复者/reviewer 分别指定）                       |
-| 进度可见 | 对话里直接看到                                                                                                     | 维护 `.comet/subagent-progress.md` 检查点                                             |
+| 选项名称           | 实际后续动作                                                                                        |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| **A：立即继续执行** | 留在当前会话，在同一次决策面板中一次性选定执行方式、TDD 策略与审查模式                                |
+| **B：暂停切换模型** | 记录 `build_pause: plan-ready` 并停止会话；切换到更强力的模型后直接输入 `/comet` 继续，计划完好保留 |
 
 <Tip>
-  <code>subagent-driven-development</code> 下，每个 task 通过验收并被勾选后会
-  <strong>立即派发下一个 task</strong>
-  ，不会停下来总结或问你。只有四种情况会暂停：审查修复轮数耗尽（BLOCKED）、遇到真实歧义、平台无后台调度、你明确要求暂停。审查强度由{' '}
-  <code>review_mode</code> 决定（thorough=每任务审查；standard=仅风险任务审查）。
+  选项 B 专为<strong>“高阶模型做规划、高性价比模型做实现”</strong>而设计。恢复时系统会精准识别 plan-ready 状态，<strong>绝不重复生成计划</strong>，直接唤起后续工作模式选择。
 </Tip>
 
-<Note>
-  子代理（implementer）<strong>不能自己勾选任务</strong>
-  ，只有主会话在双阶段验收通过后才勾选。reviewer 拿到的是完整任务 + 实现 commit/diff + RED/GREEN
-  证据（TDD 时），
-  <strong>不能只看实现者摘要就下结论</strong>。
-</Note>
+#### 一次性敲定三项核心工作参数
 
-### Step 3b：异常调试协议（强制）
+选定继续后，在同一决策面板中一次性敲定以下三项参数（工作区隔离模式在 open 阶段已由停顿点 3 固化，此处不再重复询问）：
 
-执行中出现**崩溃、测试失败、构建失败或异常行为**时，Comet **强制加载** `systematic-debugging`：
+1. **执行方式（build_mode）**：
+   - `subagent-driven-development`：主会话专注调度，后台启动只读子代理逐项编码，由 `review_mode` 驱动审查（推荐用于复杂度高、包含 3 个以上任务的变更）；
+   - `executing-plans`：轻量模式，直接在当前主会话中按序编码（推荐用于 1–2 个任务的小型改动）；
+   - `direct`：极速实现模式（仅限 hotfix / tweak 默认使用；full 流程需开启覆盖参数）。
+2. **TDD 测试策略（tdd_mode）**：
+   - `tdd`：严格遵循红绿重构流程，每个任务先写失败测试（涉及核心业务逻辑时强烈推荐）；
+   - `direct`：直接实现业务代码，不强制先写失败用例，但仍需补充关联测试与回归证据。
+3. **审查严格度（review_mode）**：
+   - `off`：免除自动化审查（适用于文案、文档等低风险调整）；
+   - `standard`：默认推荐，低风险任务快速放行，高风险任务即时审查；
+   - `thorough`：对每个子任务均启动独立审查（适用于架构重构与安全核心模块）。
 
-1. **先定位根因**：读完整错误、查最近改动、追数据流。**根因调查完成前不得提任何修复。**
-2. 根因是源码 bug 时，先加一个最小失败测试复现，再修源码。
-3. 修完跑失败测试、相关测试、项目构建/验证命令确认全过。
-4. 失败测试、源码修复和 tasks.md 勾选都保留在当前 change 内，不要另开“写测试用例”change 替代当前验证循环。
+### 第二步：按选定模式逐任务执行
 
-#### 多失败的并行排查
+选定模式后，系统严格按约定分派执行：
 
-进入四阶段流程前，先做一个**失败独立性评估**，决定串行还是并行：
+| 关键维度     | `executing-plans` 模式                                                              | `subagent-driven-development` 模式                                                    |
+| ------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **谁写代码** | 当前主会话直接按序编写                                                               | 主会话**只负责协调与核查**，后台隔离子代理编写代码（严禁主会话越俎代庖）             |
+| **推进节奏** | 顺序完成，逐项打勾                                                                   | 每项任务派发专属子代理，核验达标后自动触发下一任务，**无需中途频繁打扰你**            |
+| **审查机制** | standard 模式在 build 阶段不作全量审查；thorough 模式每 3 个任务做一次分段审查       | 根据 review_mode 即时派发任务级审查员与独立修复 Agent                                 |
+| **模型调度** | 主会话统一执行                                                                       | **每次派发子任务均需明确指定匹配的模型档位**                                          |
+| **进度可视** | 在对话流中直接呈现                                                                   | 同步更新 `.comet/subagent-progress.md` 物理检查点                                     |
 
-| 情况                                                       | 处理                                                                                |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| **串行**（沿用 `systematic-debugging`）                    | 失败 ≤ 2 个；失败相关（修一个可能修另一个）；共享状态；会动同一批文件；独立性未确立 |
-| **并行**（加载 Superpowers `dispatching-parallel-agents`） | **≥ 3 个失败来自不同问题域**（不同测试文件、不同根因、不同子系统独立损坏）          |
+<Tip>
+  在 <code>subagent-driven-development</code> 模式下，子任务核验通过后会<strong>立即自动启动下一个子任务</strong>，绝不会停下来输出无效的客套话。只有在审查重修达到上限（BLOCKED）、遭遇明确技术分歧、或平台缺少后台调度能力时才会主动暂停。
+</Tip>
 
-满足并行条件时：
+### 第三步：强制规范的异常调试机制
 
-1. 用 Skill 工具加载 Superpowers `dispatching-parallel-agents`。
-2. **每个独立失败派一个后台排查 agent**（按问题域分组，全部派发放在**同一条响应**里并发执行）。每个 prompt 都包含完整上下文（具体失败、错误信息、允许排查范围、禁止动其他问题域代码）。
-3. 所有 agent 仍受“根因定位前不得改源码”约束。它们只**定位根因并返回发现**，不直接提交修复。
-4. 所有排查返回后，主会话**串行**汇总发现并修复；修复仍走当前 `review_mode` 的验证和审查循环。
+如果在执行过程中遭遇**进程崩溃、测试报错、构建失败或逻辑异常**，Comet **强制启动规范排错机制**（`systematic-debugging`）：
+
+1. **先查明根本原因**：完整通读报错日志、排查最近代码改动并跟踪数据流。**在根因彻底查明前，严禁盲目尝试性修改代码。**
+2. 若确认为业务代码缺陷，先补充一个最小化的失败测试精准复现 Bug，随后再修正源码。
+3. 修复完毕后，必须运行相关测试用例与项目构建命令，确认全量绿灯。
+
+#### 多重独立报错的并发排查策略
+
+若遇到多项报错，系统会先行评估各错误的独立性：
+- **串行排查**：报错数量 ≤ 2，或各错误之间存在依赖、共享状态、涉及同一组代码文件时，按序逐一排查；
+- **并行排查**：当 **≥ 3 个报错来自互不相干的独立问题域**（属于不同的测试文件、不同的底层模块）时，系统可调起并行子代理同时排查。
 
 <Warning>
-  <strong>并行只用于排查，不用于修复。</strong>修复始终串行，避免多个 agent
-  同时改同一批文件冲突。这与 <code>subagent-driven-development</code>
-  “不要并行派发多个实现子代理”的红线一致。即使 <code>review_mode: off</code>
-  ，异常调试协议也
-  <strong>不跳过</strong>，<code>off</code> 只跳过代码审查，不跳过真实问题的调试。
+  <strong>并行策略仅用于排查根因，绝不用于修改代码。</strong>实际的代码修改必须始终串行执行，避免多个 Agent 同时修改同一批文件造成代码冲突。
 </Warning>
 
-### Step 4：spec 增量更新
+### 第四步：Spec 规格增量更新
 
-执行中发现需要改 spec 时，按规模处理：
+在编码过程中若发现需要修正 Spec 规格，按改动规模分类处理：
 
-| 规模   | 触发条件                       | 做法                                                                       |
-| ------ | ------------------------------ | -------------------------------------------------------------------------- |
-| 小     | 遗漏验收场景、边界条件         | 直接编辑 delta spec + design.md，追加 tasks 任务                           |
-| 中     | 接口变更、新增组件、数据流变化 | **暂停等你确认**，加载 `brainstorming` 更新 Design Doc + delta spec        |
-| 大     | 全新 capability                | **暂停等你确认拆分**，通过 `/comet-open` 开新 change（不能用 `/opsx:new`） |
-| 超 50% | 新增任务数超初始任务总数一半   | **停顿点 7**：拆分为新 change / 继续在当前 change 内完成                   |
+| 变更规模 | 触发条件                       | 处理机制                                                                   |
+| -------- | ------------------------------ | -------------------------------------------------------------------------- |
+| **轻微** | 补充遗漏的测试用例或边界条件   | 直接修订增量 Spec 与 `design.md`，并在 `tasks.md` 中追加任务               |
+| **中度** | 涉及公共接口变动或底层数据流调整 | **主动暂停等待你确认**，重新唤起头脑风暴更新 Design Doc 与增量 Spec        |
+| **重大** | 引入全新的业务 capability      | **主动暂停建议拆分**，通过标准入口开启全新的独立 change                    |
+| **超量** | 新增任务数超过初始任务列表的 50% | **触发停顿点 7**：由你选择拆分为新变更，还是扩大当前变更的范围             |
 
-### Step 5：勾选 + 提交
+### 第五步：任务核验打勾与规范提交
 
-每个任务：按 `build_mode` 执行 → 按 `review_mode` 审查（如适用）→ **主会话**勾选 tasks.md → 提交。勾选用定向验证：
+每个子任务落地后，必须经过验证：按约定实现 → 执行审查（如开启）→ **主会话严格核验打勾** → 规范提交 Git。系统通过定向命令校验勾选有效性：
 
 ```bash
 node "$COMET_STATE" task-checkoff "$PLAN_FILE" "$PLAN_TASK_TEXT"
 ```
 
-任务文本必须唯一出现且已勾选，验证失败不得进入下一个任务。可用 `grep -c '\- \[ \]' tasks.md` 查剩余未勾选数。
+### 阶段退出：推进至 verify
 
-### 退出
+所有子任务均打勾且构建通过后，执行守卫命令：
 
 ```bash
 node "$COMET_GUARD" <change-name> build --apply
 ```
 
-推进到 `phase: verify`，设 `verify_result: pending`。
+状态机正式跃迁至 `phase: verify`，并将 `verify_result` 标记为 `pending`。
 
----
+## 调用的核心 Skill 一览
 
-## 调用的 skill
+| Skill 标识                    | 承担职责               | 触发条件                                                      |
+| ----------------------------- | ---------------------- | ------------------------------------------------------------- |
+| `writing-plans`               | 细化实施计划           | 编码第一步，优先由子代理执行                                  |
+| `subagent-driven-development` | 子代理多阶段驱动实现   | 选用 `subagent-driven-development` 模式时                     |
+| `executing-plans`             | 轻量按序实现           | 选用 `executing-plans` 模式时                                 |
+| `systematic-debugging`        | 严谨根因排错           | 遭遇测试报错、构建失败或崩溃时强制触发                        |
+| `dispatching-parallel-agents` | 多故障并发排查         | 出现 ≥ 3 个独立问题域报错时触发（仅用于排查）                  |
+| `brainstorming`               | 中重度 Spec 变更重对齐 | 发现接口或组件架构产生重大偏差时触发                          |
 
-| Skill                         | 用途               | 何时调用                                                                                                                      |
-| ----------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `writing-plans`               | 生成实施计划       | Step 1，子代理执行，失败回退主会话                                                                                            |
-| `executing-plans`             | 轻量执行计划       | Step 3，`build_mode: executing-plans`                                                                                         |
-| `subagent-driven-development` | 子代理驱动执行     | Step 3，`build_mode: subagent-driven-development`                                                                             |
-| `test-driven-development`     | 强制 TDD           | Step 3，`tdd_mode: tdd` 时                                                                                                    |
-| `requesting-code-review`      | 代码审查门禁       | Step 3，`review_mode: standard`/`thorough` 时（executing-plans 随 review_mode 调整强度；subagent 模式按任务/风险派 reviewer） |
-| `systematic-debugging`        | 异常调试           | Step 3b，崩溃/测试失败/构建失败时强制加载                                                                                     |
-| `dispatching-parallel-agents` | 多失败并行排查     | Step 3b，≥ 3 个独立失败时加载（仅排查，修复串行）                                                                             |
-| `brainstorming`               | 中等规模 spec 更新 | Step 4，发现接口/组件/数据流变化时                                                                                            |
+## 阶段退出门槛（守卫核验）
 
-## 产物
+- `tasks.md` 中所有任务项已全部勾选；
+- 业务代码已规范提交 Git；
+- **显式运行**并通过了项目构建与测试命令（如 `npm run build`、`npm test` 或编译命令）；
+- 工作区环境与绑定的 Git 分支完全吻合；
+- 执行模式、TDD 策略与审查模式均已合法选定。
 
-| 产物                 | 位置                                             | 说明                                            |
-| -------------------- | ------------------------------------------------ | ----------------------------------------------- |
-| 实施计划             | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` | 含 `change`/`design-doc`/`base-ref` frontmatter |
-| subagent-progress.md | `.comet/subagent-progress.md`                    | 子代理调度检查点（仅 subagent 模式）            |
-| tasks.md 勾选        | `tasks.md`                                       | `- [ ]` → `- [x]`                               |
-| 代码改动             | 仓库代码                                         | 提交到隔离分支/worktree                         |
+## 变更讲解页（Walkthrough）
 
-## 退出条件（阶段守卫检查）
-
-- tasks.md 全部勾选
-- 代码已提交
-- **显式运行**项目 build/test 命令并通过（不要只依赖 guard 自动猜测）
-- `isolation` 是 `current`、`branch` 或 `worktree`，且当前 Git 分支与 `bound_branch` 一致
-- `build_mode` 已选（subagent 模式需 `subagent_dispatch: confirmed`）
-- `tdd_mode` 已选
-- `review_mode` 已选（thorough 已按每 3 个任务完成分段审查并修复 CRITICAL/IMPORTANT，或记录非 CRITICAL 接受原因；standard/off 已记录对应原因）
-
-guard 会自动识别项目构建入口（例如 `npm run build`、Maven 或 Cargo）并把失败输出作为证据。`.comet.yaml` 和仓库根配置不再支持 `build_command` / `verify_command`；需要固定团队级验证流程时，请把它放进项目自己的构建脚本。
-
-## 恢复
-
-build 阶段幂等。恢复时 `grep -n '\- \[ \]' tasks.md | head -1` 找第一个未完成任务继续。`build_pause: plan-ready` 的恢复见[停顿点 6](#停顿点-6-build-联合决策plan-ready)。上下文压缩后用 `comet-state check <name> build --recover` 拿恢复上下文；subagent 模式重读 `.comet/subagent-progress.md` 恢复当前任务和审查轮数，**不能在主会话直接执行任务**。`full` workflow 如果停在 plan-ready，恢复动作必须先确认已有的工作区绑定，再补齐或确认三个执行选择：`build_mode`、`tdd_mode` 和 `review_mode`。
-
-## 推荐路径
-
-<Tip>
-  多人协作或高风险改动优先用 worktree + <code>review_mode: thorough</code>
-  。小型明确改动用 branch + <code>standard</code>。
-</Tip>
-
-## 查看变更说明
-
-Build 完成时，Comet 默认提供 `walkthrough.html` 链接，按功能说明前后行为、原因和关键代码。Verify 会更新同一页的实际验证结果。页面供你阅读，不代替验收；关闭方式见[变更说明配置](/zh/native/configuration#变更说明)。
+当 build 阶段顺利完结时，Comet 默认会在本地生成 `walkthrough.html` 变更讲解页面，以直观的形式按功能模块梳理修改前后的行为变化、关键代码 Diff 与设计意图。后续的 verify 阶段会在该页面实时同步测试结果。该页面供开发者方便通读，若不需要可随时在配置中关闭。
 
 ## 下一步
 
-- [verify 阶段](/zh/phases/verify) — build 完成后进入验证
-- [代码审查机制](/zh/concepts/review-mode) — review_mode 详解
-- [状态管理](/zh/concepts/state-management) — build_mode/isolation/tdd_mode 字段
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — build 的停顿点
+- [verify 阶段](/zh/phases/verify) — build 完成后进入严谨的质量验收
+- [代码审查机制](/zh/concepts/review-mode) — 深入理解多档审查模式的执行边界
+- [状态管理](/zh/concepts/state-management) — 掌握各执行字段在状态机中的定义
+- [决策停顿点速查](/zh/concepts/decision-points) — 掌握 build 阶段的关键决策项

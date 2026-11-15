@@ -1,43 +1,45 @@
 ---
 title: 'comet runtime'
-description: '通过 JSON 请求启动、读取、执行和恢复 SDK 应用的 Run。'
+description: '借助标准 JSON 报文启动、读取、执行与恢复 SDK 应用的 Run 运行时生命周期。'
 ---
 
-`comet runtime dispatch` 接收请求文件并返回结构化结果。Agent 平台可以在不同进程间保留同一个 Run，接着处理当前动作，或继续等待用户决定。
+`comet runtime dispatch` 专职接收结构化的 JSON 请求报文并回显规范的执行结论。Agent 平台能够跨越不同的底层进程稳妥持有同一个 Run 运行时实例，从容接续推进在途动作，或保持挂起等待人类裁决。
 
 ## 调用方式
 
-首次使用完整包：
+首次唤起并传入完整应用清单包：
 
 ```bash
 comet runtime dispatch --application-file ./local-report/application.json --project-root . --request start.json --json
 ```
 
-后续使用应用身份和原 Run：
+后续调用复用已注册的应用标识及原 Run 凭据：
 
 ```bash
 comet runtime dispatch --application local-report --project-root . --request request.json --json
 ```
 
-不要把当前应用的 Run 交给另一个应用身份，也不要另建 Run 来重复完成外部操作。
+严禁将属于当前应用的 Run 实例错位派发给其他应用标识，亦切忌另起炉灶新建 Run 实例去盲目重复调用已具有外部副作用的操作。
 
-## 常用请求
+## 常用操作类型（operation）
 
-| operation         | 用途                                    |
-| ----------------- | --------------------------------------- |
-| `start`           | 固定工作流版本和输入，启动 Run          |
-| `inspect`         | 读取保存的状态、动作和等待              |
-| `next`            | 根据依赖与当前状态准备下一步            |
-| `execute`         | 通过已配置的端口执行当前 pending Action |
-| `claim`           | 领取当前动作，交由 Agent 平台执行       |
-| `record-outcome`  | 回传原动作的实际结果                    |
-| `resolve-wait`    | 提交当前审批决定                        |
-| `record-evidence` | 提交声明的实际证据                      |
-| `retry`           | 在允许的失败恢复路径中重试              |
+| 操作指令 | 核心业务职责与语义 |
+| --- | --- |
+| `start` | 锁定当前工作流版本契约及输入参数，正式拉起 Run 运行时 |
+| `inspect` | 探查并读取落盘的状态数据、当前动作与挂起的等待事件 |
+| `next` | 依据依赖拓扑及实时状态机，推演并准备下一步待办 |
+| `execute` | 通过已绑定的适配器端口真实触发执行当前挂起的 pending Action |
+| `claim` | 原子领取当前动作，交由特定 Agent 平台接管执行 |
+| `record-outcome` | 将外部动作的真实执行输出与状态码回传至状态机 |
+| `resolve-wait` | 提交针对当前挂起审批的人工决策结论 |
+| `record-evidence` | 正式提交声明的客观测试或执行证据 |
+| `retry` | 在状态机允许的容错恢复路径内安全发起重试 |
 
-开始请求包含 `runId`、工作流 `id/version` 与业务 `input`。Action 和 Wait 请求使用读取到的真实身份，不猜测或复用过期提案。
+启动请求必须规范内嵌 `runId`、工作流 `id/version` 及业务级 `input` 参数。针对 Action 推进与 Wait 等待的交互必须采用通过读取探查到的真实执行身份，切勿凭空猜测或套用陈旧过期的历史提案。
 
-## 执行与等待
+## 动作执行与等待判定
+
+执行指令示例如下：
 
 ```json
 {
@@ -48,10 +50,10 @@ comet runtime dispatch --application local-report --project-root . --request req
 }
 ```
 
-输出经过 Schema、业务验证器和应用产物契约检查。`completed` 表示声明的执行路径已经走完，还应读取实际业务结果，例如报告可能已发布，也可能沿拒绝分支结束。
+所有的输出报文均会严格经过 Schema 规范、业务验证器契约以及应用产物约束的严密校验。状态显示 `completed` 仅代表声明的流程分支已经走完，依然必须深度解析真实的业务返回值（例如任务可能顺利发布，亦可能依循拒绝分支正常结束）。
 
-## 接入边界
+## 安全与接入边界
 
-JSON 请求不会自行加载未注册的 Agent 平台能力，也不会获取用户授权。凭据由 Agent 平台执行上下文提供，不放入请求文件或持久化结果。
+JSON 请求报文自身绝不会动态越权加载未注册的外部 Agent 平台能力，亦无权绕过权限体系直接获取系统授权。敏感鉴权凭据必须统一由 Agent 平台的执行上下文安全注入，严禁明文硬编码于请求数据包中，亦绝不会在持久化状态中留存。
 
-外部结果未知时先查询原执行者与外部系统，再根据证据回传或重试。详见 [SDK 恢复](/zh/sdk/recovery)。完整报告样板见 [Workflow Application](/zh/sdk/applications)。
+面对外部第三方服务调用结果未明的异常现场，首要工序是向原执行端与外部系统发起状态复核，随后再依循确证的事实补传证据或触发重试。详细机理请参阅 [SDK 恢复协议](/zh/sdk/recovery)，完整实战范例请参考 [Workflow Application 指南](/zh/sdk/applications)。

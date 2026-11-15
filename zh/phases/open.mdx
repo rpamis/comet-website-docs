@@ -1,71 +1,64 @@
 ---
 title: "open 阶段"
-description: "了解 Classic open 阶段如何澄清需求、选择工作区并创建 OpenSpec change。"
+description: "了解 Classic open 阶段如何澄清需求、选择工作区隔离模式并创建规范的 OpenSpec change。"
 ---
 
-open 阶段会把你的想法变成一个可执行的 change：探索需求、澄清范围、创建 proposal/design/tasks，并初始化 Comet 状态。你会经历一段**引导式对话**。Comet 会反复提问，确认理解一致后再写文档。
+open 阶段的核心任务是将你的原始想法转化为可落地的开发变更：深入探索需求、厘清业务边界、产出规范的 proposal / design / tasks 文档，并初始化状态机。在此期间，你会经历一段**引导式对齐对话**：Comet 会围绕目标针对性提问，在确保双方理解完全一致后再落盘文档。
 
 <Tip>
-  正常使用时只要运行 <code>/comet</code>。
-  项目配置为 Classic 后，请求会转发到 <code>/comet-classic</code>，再根据文件状态判断当前阶段并调用{' '}
-  <code>/comet-open</code>。
-  本文介绍的是内部阶段 Skill。只有你想<strong>手动控制</strong>
-  阶段时，才需要直接输入。详见
-  <a href="#本阶段如何触发">本阶段如何触发</a>。
+  日常开发直接输入 <code>/comet</code> 即可。当项目配置为 Classic 时，系统会自动通过 <code>/comet-classic</code> 路由根据物理文件状态智能调用 <code>/comet-open</code>。本文详细介绍该阶段的底层运作机制。
 </Tip>
 
 ## 本阶段如何触发
 
-`/comet-open` 通常由 `/comet` 进入 Classic 后自动路由。内部 `/comet-classic` 会读取 active change 列表与文件状态，整理路由上下文，再由运行时评分决定路由到哪个阶段。
+`/comet-open` 通常由统一入口 `/comet` 自动路由唤起。系统底层会实时检索当前活跃变更列表与磁盘文件，计算最优路由走向。
 
-### 默认：用 /comet 自动识别
+### 默认：通过 /comet 智能识别
 
-`/comet-classic` 每次调用都重新读取文件状态（不依赖对话历史），按以下条件路由到 open 阶段：
+系统每次被调用时均直接扫描真实文件状态（完全不依赖脆弱的聊天历史），并按以下规则路由至 open 阶段：
 
-| 触发条件                                                     | 行为                                        |
+| 触发条件                                                     | 系统的实际响应                              |
 | ------------------------------------------------------------ | ------------------------------------------- |
-| route 为 `full` 且项目里没有活跃 change                      | 自动调用 `/comet-open`                      |
-| route 为 `full`，但已有 active change 且用户没有指定         | 暂停询问：继续已有 change 还是创建新 change |
-| active change 的 `.comet.yaml` 缺失                          | 自动调用 `/comet-open` 补齐状态             |
-| 置信度不足、多个 active change 或 hotfix/tweak/full 信号冲突 | 暂停询问，不自动创建                        |
+| 路由判定为 `full` 且当前项目中无任何活跃变更                 | 自动调用 `/comet-open` 开启全新变更          |
+| 路由判定为 `full`，但已有活跃变更且输入中未指明目标          | 暂停并询问：是继续未完变更，还是创建新变更  |
+| 活跃变更的 `.comet.yaml` 状态机缺失                          | 自动唤起 `/comet-open` 补齐状态文件并接管   |
+| 置信度不足、存在多个待恢复变更，或存在模式冲突               | 暂停请示，等待人工明确确认                  |
 
-输入 `/comet` 并描述想做什么即可。配置选择 Classic 后，内部 `/comet-classic` 会判断是否需要新建 change，并在 open 完成后自动衔接 design。详见[自动推进机制](/zh/concepts/auto-transition)。
+在日常开发中，输入 `/comet` 并附带需求描述即可。系统在 open 阶段顺利完结后会自动无缝流转至 design 阶段，详见 [自动推进机制](/zh/concepts/auto-transition)。
 
-### 手动：什么时候才需要直接 /comet-open
+### 手动触发场景
 
-- 关闭了自动衔接（`auto_transition: false`）时，`/comet-classic` 推进完一个阶段会停下。你需要手动调用下一个阶段 Skill。
-- 只想单独跑 open 阶段（调试、或在阶段之间插入人工审核）。
+- 当全局关闭了自动推进（`auto_transition: false`）时，上一阶段完工后会暂停，等待你手动输入下一阶段命令；
+- 在独立调试或希望在阶段之间插入严格的人工方案走查时。
 
-**正常使用统一入口 `/comet`；只有手动控制阶段时才直接调用阶段命令。**
+### 创建变更时的环境隔离选择
 
-### 创建 Change 时选择工作区
+在正式生成规格文档和状态机之前，Comet 会提示你明确工作区隔离方式：
 
-创建 Classic change 时，Comet 会在生成 OpenSpec 产物和状态文件之前确认工作区：
+- `current`：直接在当前 Git 分支上串行开发；
+- `branch`：自动创建专属的 Git 分支，仍在当前目录开发；
+- `worktree`：创建或复用独立的 Git worktree，非常适合多任务并行或当前目录已有未提交改动的场景。
 
-- `current`：在当前分支串行工作；
-- `branch`：创建独立分支，但仍使用当前目录；
-- `worktree`：创建或复用独立 worktree，适合并行工作或当前目录已有改动。
-
-如果已有登记且分支匹配的 worktree，Comet 会直接复用。分支仍存在但 worktree 缺失时，会在恢复过程中重建。你按 `/comet` 的提示选择即可，不要手工复制 change 目录。
+若本地已有分支完全匹配的既有 worktree，系统会自动复用；若分支存在但目录缺失，会在恢复时自动重建。按照命令行向导提示选择即可，切勿手动随意搬移目录。
 
 ---
 
-## 你会经历什么
+## 阶段执行全流程
 
-open 阶段通过**多轮对话 + 多个停顿点**逐步生成文档。全程用你触发工作流时用的语言提问和产出文档。
+open 阶段通过**针对性对话 + 关键决策点**循序渐进生成文档，全程严格使用你所选定的语言进行交互与文档撰写。
 
 ```mermaid
 flowchart TD
-    Start["你说出想法"] --> S1["加载 openspec-explore<br/>反复提问澄清"]
-    S1 --> S1a{"大型 PRD /<br/>多个独立能力?"}
-    S1a -->|是| Stop1["停顿点 2：PRD 拆分预检查<br/>三选一"]
-    S1a -->|否| S1sum["生成澄清摘要<br/>5 个必备部分"]
+    Start["输入需求想法"] --> S1["加载 openspec-explore<br/>深入提问对齐需求"]
+    S1 --> S1a{"是否属于大型 PRD /<br/>多项独立能力？"}
+    S1a -->|是| Stop1["停顿点 2：PRD 拆分预检查<br/>三选一决策"]
+    S1a -->|否| S1sum["生成结构化澄清摘要<br/>包含 5 个核心要素"]
     Stop1 --> S1sum
-    S1sum --> S2["加载 openspec-new-change<br/>推导唯一的 change 名并告诉你"]
-    S2 --> S2b{"停顿点 3：工作区决策<br/>current / branch / worktree"}
-    S2b --> S3["入口状态验证 + 内容完整性检查"]
-    S3 --> Stop4["停顿点 4：审视三个文档并确认"]
-    Stop4 --> Exit["comet-guard open --apply<br/>推进到下一阶段"]
+    S1sum --> S2["加载 openspec-new-change<br/>推导规范的英文变更标识"]
+    S2 --> S2b{"停顿点 3：工作区隔离决策<br/>current / branch / worktree"}
+    S2b --> S3["状态机校验 + 文档完整性核验"]
+    S3 --> Stop4["停顿点 4：全局审阅并最终确认"]
+    Stop4 --> Exit["运行 comet-guard open --apply<br/>推进放行到下一阶段"]
 ```
 
 <p align="center">
@@ -76,109 +69,96 @@ flowchart TD
   />
 </p>
 
-<p align="center">open 阶段把模糊想法过滤成三份可执行的 OpenSpec 产物</p>
+<p align="center">open 阶段将模糊的想法提炼为三份扎实可执行的 OpenSpec 规格产物</p>
 
-### 第一步：探索想法与澄清需求
+### 第一步：需求探索与范围澄清
 
-Comet 加载 `openspec-explore`，**围绕你的想法持续提问**，直到能整理出一份完整的**澄清摘要**。它不会把一次问答当成“够了”。会一直问到这五个部分都清楚：
+Comet 唤起 `openspec-explore` 核心工具，**围绕你的核心目标展开针对性探讨**，直至能够梳理出一份内容完整的**澄清摘要**。系统严禁把敷衍的一问一答当作对齐完成，必须把以下五个维度彻底理清：
 
-| 澄清摘要的五个必备部分 | 你要想清楚的事                      |
-| ---------------------- | ----------------------------------- |
-| **目标**               | 真正要解决的问题、期望的结果        |
-| **非目标**             | 明确不做什么                        |
-| **范围边界**           | 涉及/不涉及的模块、用户、平台、数据 |
-| **关键未知项**         | 假设、风险、依赖                    |
-| **验收场景草案**       | 核心成功场景 + 关键边界场景         |
+| 澄清摘要必备的五个部分 | 核心确认事项                                |
+| ---------------------- | ------------------------------------------- |
+| **核心目标**           | 真正要解决的业务痛点与最终期望达成的产品效果 |
+| **明确的非目标**       | 明确划定本次绝不涉及、暂不做的事情           |
+| **边界范围**           | 牵涉或排除的具体模块、用户角色、平台环境与数据实体 |
+| **关键技术未知项**     | 前置假设、潜在技术风险与外部依赖            |
+| **验收场景草案**       | 核心主干成功路径 + 关键边界异常场景         |
 
 ### 停顿点 2：PRD 拆分预检查（条件触发）
 
-如果你的输入是一个**大型 PRD、路线图或完整产品计划**，或者澄清摘要里出现了**多个独立能力**，Comet 会在这里暂停，给你一份**候选拆分清单**（每个拆分项含建议名称、目标范围、非目标、依赖顺序、核心验收场景），然后让你三选一：
+若输入是一份**规模庞大的 PRD、完整版本路线图**，或澄清摘要中显式包含了**多项互不依赖的独立能力**，Comet 会主动暂停，呈上一份**建议的拆分方案清单**（包含各子任务的建议标识、目标边界、依赖先后次序与核心验收用例），并提供三项选择：
 
-| 选项                          | 含义                                                            |
+| 备选方案                      | 实际效果                                                        |
 | ----------------------------- | --------------------------------------------------------------- |
-| **创建多个 OpenSpec changes** | 按拆分清单创建多个独立 change（每个都要用自己的 `/comet-open`） |
-| **保持为一个 change**         | 不拆，继续单 change 流程，把不拆的原因记进文档                  |
-| **调整拆分方案后继续**        | 你描述调整，Comet 重新出清单再问一次                            |
+| **创建多个 OpenSpec changes** | 按照拆分方案生成多个相互独立的子变更（分别通过对应流程推进）   |
+| **保持为一个 change 继续**    | 放弃拆分，以单一大任务继续执行，并在文档中记录不拆分的理由      |
+| **调整拆分方案后再确认**      | 根据你的反馈重新规划拆分子项，刷新方案后再次呈现供你定夺        |
 
 <Tip>
-  拆分后 Comet <strong>不会</strong>自动推进任何单个 change 到
-  design。它会暂停问你想先做哪一个，只推进你选的那个，其余保持活跃，之后用{" "}
-  <code>/comet</code> 恢复。
+  在确认拆分后，系统<strong>绝不会</strong>擅自一口气把所有子任务全部推向实现阶段。它会停下来询问你想优先推进哪一个，仅流转你选定的那一项，其余子任务保持就绪状态，后续随时可无缝唤醒。
 </Tip>
 
-### 停顿点 3：工作区决策
+### 停顿点 3：工作区隔离决策
 
-创建产物和 `.comet.yaml` 之前，Comet 让你确定工作区隔离方式（这一步不能推迟到 build）：
+在正式生成规格文档与状态机之前，系统会提示你选定工作区隔离模式（该决定必须在 open 阶段敲定，严禁拖延至编码阶段）：
 
-| 选项       | 说明                                         |
+| 隔离模式   | 详细机制与适用场景                           |
 | ---------- | -------------------------------------------- |
-| `current`  | 在当前分支直接工作，如实绑定当前 Git 分支    |
-| `branch`   | 在当前仓库创建新分支，并确认分支名           |
-| `worktree` | 独立工作区，可并行开发（你明确要并行时直接用） |
+| `current`  | 直接在当前分支开发，紧密绑定当前 Git 分支    |
+| `branch`   | 在本地仓库中拉出全新的独立分支，并确认分支名 |
+| `worktree` | 创建完全独立的物理工作区，适合多任务并行开发 |
 
-选择结果写入 `isolation`，实际目录的当前分支记录为 `bound_branch`，后续入口检查会阻止意外切换分支。hotfix/tweak 预设默认 `current`。
+选定后参数将写入 `isolation`，并把对应的 Git 分支记录为 `bound_branch`，后续各阶段守卫将严格阻断意外的分支偏离。hotfix 与 tweak 预设默认采用 `current`。
 
-需求澄清和命名是**非阻塞**的：范围和命名都明确时，Comet 从需求推导**唯一的 kebab-case 英文名**（如 `refine-requirements-doc`）并直接展示；只有存在会改变范围或 change 身份的互斥选择、或名字与已有 change 冲突时才单独询问。确认前不会创建 proposal/design/tasks，也不会用 `openspec-propose` 一次性生成。
+在需求与命名均很清晰时，系统会自动推导规范的 **kebab-case 英文标识**（如 `avatar-upload`）并直接呈现；只有在存在分歧或名称与既有变更冲突时才会单独提问。
 
-### 第二步：创建 change 结构
+### 第二步：规范生成规格文档
 
-加载 `openspec-new-change`。完整工作流**默认不加载** `openspec-propose`（一次性生成全部），只有你明确要求时才允许。Comet 用**标准产物循环**逐个生成 proposal → design → tasks：
+加载 `openspec-new-change`。在标准全流程中，**默认严禁使用一键式全量生成**（`openspec-propose`），必须严格按照 proposal → design → tasks 的科学次序依次生成：
 
-1. 刷新状态：`openspec status --change "<name>" --json`
-2. 获取指令：`openspec instructions proposal|design|tasks --change "<name>" --json`
-3. 读取 `dependencies`、遵循 `template` 和 `instruction`、应用 `context`/`rules` 约束（**不复制到文档内容里**）、写入 `resolvedOutputPath`
-4. 每个 artifact 后再刷新状态确认
+1. 刷新状态机：`openspec status --change "<name>" --json`；
+2. 拉取生成指令：`openspec instructions proposal|design|tasks --change "<name>" --json`；
+3. 解析依赖关系、套用标准模板与项目规则（绝不生搬硬套冗余信息），规范写入指定输出路径；
+4. 每生成一份文档均执行一次校验。
 
 <Warning>
-  如果 <code>openspec instructions</code> 失败、返回无效 JSON、或没提供可用的{" "}
-  <code>resolvedOutputPath</code>，Comet 会<strong>立即停止</strong>并报告
-  OpenSpec 错误，
-  <strong>不会</strong>回退成硬编码文档结构——那会绕过项目规则。change
-  名必须是你确认过的 kebab-case 名，Comet 不会自作主张扩大或缩小范围。
+  若在生成过程中检测到指令异常或输出路径失效，Comet 会<strong>立即停止并明确报错</strong>，绝不擅自回退为硬编码的临时文件结构。
 </Warning>
 
-### 第三步：入口状态验证 + 内容完整性检查
+### 第三步：状态验证与内容完整性自检
 
 ```bash
 node "$COMET_STATE" check <name> open
 ```
 
-然后逐个确认三个文件存在且非空：proposal（背景/目标/范围）、design（架构决策/选型/数据流）、tasks（任务描述）。任何一个缺失或为空，Comet 都不会继续，而是回到创建步骤。
+系统会逐一复核三份核心文件在磁盘上是否真实存在且内容扎实：proposal（背景与边界）、design（架构与选型）、tasks（可执行任务列表）。任何一项缺失或空白，流程都会坚决拒绝放行。
 
-### 停顿点 4：审视三个文档并确认
+### 停顿点 4：全局审阅并最终确认
 
-Comet 把三个文档的摘要摆给你看（proposal 的背景目标范围、design 的架构决策选型、tasks 的任务数和关键任务），然后让你**二选一**：
+系统将三份文档的核心骨架整理后清晰呈现给你：
 
-| 选项                   | 含义                                       |
+| 选项                   | 实际效果                                   |
 | ---------------------- | ------------------------------------------ |
-| **确认，继续下一阶段** | 文档符合预期，运行阶段 guard 推进          |
-| **需要调整**           | 你给修改意见，Comet 改完相关文件再请求确认 |
+| **确认无误，进入下一阶段** | 规格符合预期，守卫放行进入后续阶段         |
+| **需要进一步调整**     | 根据你的反馈修订对应文件，再次呈现供你审阅 |
 
-### 退出：推进到下一阶段
+### 阶段退出：放行推进
 
 ```bash
 node "$COMET_GUARD" <change-name> open --apply
 ```
 
-`--apply` 是必须的——没有它 `.comet.yaml` 会停在 `phase: open`，下一阶段的入口检查会失败。full workflow 推进到 `phase: design`；hotfix/tweak 直接跳到 `phase: build`（跳过 design）。
+必须带上 `--apply` 参数以更新状态机。full 完整流程将推进至 `phase: design`；hotfix 与 tweak 预设则直接跳转至 `phase: build`。
 
----
+## 调用的核心 Skill
 
-## 调用的 skill
-
-| Skill                 | 用途                   | 何时调用                   |
+| Skill 标识            | 承担职责               | 触发条件                   |
 | --------------------- | ---------------------- | -------------------------- |
-| `openspec-explore`    | 探索问题空间、澄清需求 | Step 1，立即执行，不可跳过 |
-| `openspec-new-change` | 创建 change 骨架       | Step 2，立即执行，不可跳过 |
+| `openspec-explore`    | 探索问题边界、对齐需求 | 第一步，立即启动，不可跳过 |
+| `openspec-new-change` | 初始化变更骨架         | 第二步，规范创建，不可跳过 |
 
-<Warning>
-  完整工作流默认<strong>不加载</strong> <code>openspec-propose</code>
-  （一次性生成全部产物）。只有用户明确要求时才允许。
-</Warning>
+## 产物结构树
 
-## 产物
-
-下图用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。实际位置由 `.comet/config.yaml` 中的 `classic.artifact_layout` 决定。
+产物保存在 `<classic-root>/changes/<name>/` 目录下：
 
 <Tree>
   <Tree.Folder name="<classic-root>/changes/<name>/" defaultOpen>
@@ -193,56 +173,29 @@ node "$COMET_GUARD" <change-name> open --apply
   </Tree.Folder>
 </Tree>
 
-初始化 Comet 状态：
+## 幂等性与安全重试
 
-```bash
-node "$COMET_STATE" init <name> full
-```
+open 阶段的所有操作均具备严格的幂等性保护。若流程中途中断，重新输入 `/comet` 时，系统会自动识别已完成的步骤并直接跳过，准确从第一个未完成处接续，绝不会搞乱仓库状态。
 
-## 幂等性：可以安全重复
-
-open 阶段所有操作都可以安全重复执行。如果 `.comet.yaml` 已经在 `phase: open` 且三个产物都已存在，Comet 会**跳过已完成步骤**，从第一个缺失的步骤继续。所以中断后重新调用 `/comet` 也不会搞乱状态。
-
-## 停顿点一览
-
-open 阶段有 3 个停顿点（全局编号 2-4，整个五阶段工作流共 10 个，见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)）：
-
-| 停顿点          | 何时出现                                | 你要做什么                              |
-| --------------- | --------------------------------------- | --------------------------------------- |
-| 2 PRD 拆分      | 输入是大 PRD 或多个独立能力             | 拆分 / 不拆 / 调整方案                  |
-| 3 工作区决策    | 创建产物和 `.comet.yaml` 前             | current / branch / worktree             |
-| 4 文档审视      | proposal/design/tasks 生成后            | 确认名称、范围和三个文档 / 要调整       |
-
-需求澄清和命名默认**非阻塞**：范围和命名都明确时直接继续，Comet 从需求推导唯一的 kebab-case 英文名并直接展示；只有存在会改变范围或 change 身份的互斥选择时才单独询问。
-
-所有停顿点都遵循[决策点协议](/zh/concepts/decision-points)——Comet 不能用推荐规则、默认值或"用户应该会同意"来代替你的明确选择。
-
-## 常见问题
+## 常见疑问解答
 
 <AccordionGroup>
-  <Accordion title=".comet.yaml 缺失怎么办">
-    不要用 `/opsx:new` 绕过。它只创建 OpenSpec artifacts，不会创建 `.comet.yaml`，change 会落在 Comet 状态机之外。重新运行 `/comet`；配置进入 Classic 后会通过 `/comet-open` 补齐状态。
+  <Accordion title=".comet.yaml 文件缺失怎么办？">
+    切勿直接通过原始外部命令绕过。这会导致变更脱离状态机管理。只需在对话中重新调用 `/comet`，系统会自动接管该目录并补齐状态。
   </Accordion>
 
-<Accordion title="change 名称有什么限制">
-  必须是 kebab-case 英文（小写字母、数字、连字符）。中文或非合规名称会被转换成
-  kebab-case；只有一个名字时直接使用并展示，存在多个候选或与已有 change 冲突时才报告让你选择。
-</Accordion>
+  <Accordion title="变更标识（change name）有什么命名规则？">
+    必须为标准的 kebab-case 格式（小写英文、数字与中划线组合）。系统会自动从需求中提炼出合规英文名称，遇到重名冲突时会提示你微调。
+  </Accordion>
 
-<Accordion title="openspec instructions 失败了怎么办">
-  Comet 会立即停止 artifact 创建并报告 OpenSpec
-  错误，不会回退为硬编码文档结构。检查 OpenSpec CLI
-  是否正常、`template`/`instruction`/`dependencies` 是否满足。
-</Accordion>
-
-  <Accordion title="大型 PRD 一定要拆吗">
-    不一定。拆分预检查会给你三选一（拆分 / 保持一个 / 调整方案），你可以选择保持为一个 change，但要把不拆的原因记进文档。
+  <Accordion title="大型 PRD 必须强制拆分吗？">
+    不强制。系统提供拆分预检查供你权衡。你完全可以选择保持为一个完整的 change 继续推进，只需在文档中简要注明不拆分的理由即可。
   </Accordion>
 </AccordionGroup>
 
 ## 下一步
 
-- [design 阶段](/zh/phases/design) — open 完成后进入深度设计
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — open 的停顿点详解
-- [大型 PRD 拆分](/zh/guides/prd-splitting) — 拆分预检查的完整机制
-- [自动推进机制](/zh/concepts/auto-transition) — open 完成后如何自动衔接 design
+- [design 阶段](/zh/phases/design) — open 完成后深入展开技术架构设计
+- [决策停顿点速查](/zh/concepts/decision-points) — 掌握各阶段需要人工确认的决策项
+- [大型 PRD 拆分指南](/zh/guides/prd-splitting) — 学习复杂需求拆解的最佳实践
+- [自动推进机制](/zh/concepts/auto-transition) — 了解阶段间的无缝衔接逻辑

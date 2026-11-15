@@ -1,37 +1,37 @@
 ---
 title: '工作流中间产物'
-description: '理解 Comet 在五阶段工作流中创建的中间产物（handoff 交接包、brainstorm-summary、subagent-progress、验证报告和归档标注），以及各自的作用、位置和生命周期。'
+description: '详解 Comet 在五阶段工作流中创建的各类中间文件（交接摘要、脑暴快照、子代理进度、验证报告与归档标记）的作用、存放位置与完整生命周期。'
 ---
 
-Comet 在 `/comet` 五阶段流程中会创建一系列中间产物。
-这些工作文件用于**上下文压缩、状态恢复、证据记录和阶段交接**。proposal、design、tasks 和代码仍是最终交付物。
+在运行 `/comet` 的五阶段流程中，Comet 会在各个阶段动态生成一系列中间工作文件。
+这些文件专用于**长上下文压缩、意外断点恢复、质量证据留存以及各阶段间的可靠交接**。最终交付给用户的，依然是干净的业务代码、需求文档与标准架构方案。
 
-理解这些产物能帮你在上下文压缩后快速恢复，在排障时快速定位文件，也能在归档前检查生命周期是否完整。
+深入了解这些中间文件的作用，能帮助你在会话被压缩后胸有成竹地恢复进度，在遇到异常时快速定位排查，并在归档前确认交付物是否完备。
 
-## 产物总览
+## 中间产物流转全景
 
 ```mermaid
 flowchart TD
   subgraph open["open 阶段"]
-    O1[".comet.yaml 状态文件"]
+    O1[".comet.yaml 状态机"]
   end
   subgraph design["design 阶段"]
-    D1["handoff 交接包<br/>design-context.json/md"]
-    D2["brainstorm-summary.md<br/>压缩恢复检查点"]
-    D3["design_doc 路径写入 .comet.yaml"]
+    D1["权威交接材料<br/>proposal / design / tasks"]
+    D2["brainstorm-summary.md<br/>脑暴恢复检查点"]
+    D3["design_doc 路径写入状态机"]
   end
   subgraph build["build 阶段"]
-    B1["plan 实施计划<br/>含 base-ref frontmatter"]
-    B2["subagent-progress.md<br/>SubAgent 调度检查点"]
-    B3["tasks.md 勾选状态"]
+    B1["落地实施计划 plan<br/>带 base-ref 元数据"]
+    B2["subagent-progress.md<br/>子代理调度检查点"]
+    B3["tasks.md 逐项完成勾选"]
   end
   subgraph verify["verify 阶段"]
-    V1["验证报告"]
-    V2["Implementation Divergence 注记<br/>可选"]
+    V1["结构化验证报告"]
+    V2["实现偏差记录 Divergence<br/>可选"]
   end
   subgraph archive["archive 阶段"]
-    A1["archived-with / status 标注"]
-    A2["移动到 archive 目录"]
+    A1["写入归档标记与最终状态"]
+    A2["目录整体归档搬迁"]
   end
   O1 --> D1
   D1 --> D2
@@ -51,202 +51,176 @@ flowchart TD
   />
 </p>
 
-<p align="center">每类中间产物分别服务上下文、恢复、交接和验证证据</p>
+<p align="center">各类中间产物分别负责上下文唤醒、断点恢复、阶段交接与验收留证</p>
 
-下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。实际位置由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
+下文中使用 `<classic-root>` 指代当前 Classic OpenSpec 根目录：新项目默认保存在 `docs/openspec/`，保留旧版布局的项目为 `openspec/`。实际位置由配置项 `classic.artifact_layout` 决定，详见 [项目文件结构](/zh/guides/project-structure)。
 
-## .comet.yaml：贯穿全程的状态文件
+## 贯穿全局的状态机：.comet.yaml
 
-| 属性     | 说明                                        |
+| 关键属性 | 具体说明                                    |
 | -------- | ------------------------------------------- |
-| 位置     | `<classic-root>/changes/<name>/.comet.yaml` |
-| 创建阶段 | open（`comet-state init`）                  |
-| 更新阶段 | 每个阶段都更新对应字段                      |
-| 管理     | machine-managed（脚本写、guard 校验）       |
+| **存放路径** | `<classic-root>/changes/<name>/.comet.yaml` |
+| **创建时机** | open 阶段初始由 `comet-state init` 自动生成 |
+| **更新时机** | 每个阶段守卫放行时自动更新对应字段          |
+| **维护方式** | 机器严格维护（由脚本读写、guard 命令校验）  |
 
-这是 Comet 唯一的跨阶段状态文件。字段随阶段推进逐步填写。详见[状态管理](/zh/concepts/state-management)。
+这是 Comet 唯一的跨阶段权威状态文件。随着工作流稳步推进，其中的状态字段会逐步固化，详见 [状态管理](/zh/concepts/state-management)。
 
 <Note>
-  Comet 的经典工作流仍以 <code>.comet.yaml</code> 作为当前状态来源。
-  <code>.comet/state-events.jsonl</code> 是追加式审计日志，用来解释状态转换历史。
-  <code>.comet/run-state.json</code> 和 <code>trajectory.jsonl</code> 属于 Comet 自动维护的
-  运行细节。跨会话恢复主要靠 <code>.comet.yaml</code>、handoff 文件和检查点
-  markdown，排查状态为何变化时再看事件日志。
+  在 Classic 工作流中，<code>.comet.yaml</code> 始终是当前运行状态的唯一权威来源。
+  <code>.comet/state-events.jsonl</code> 是只允许追加的审计日志，用于回溯状态变更原因。
+  <code>.comet/run-state.json</code> 与 <code>trajectory.jsonl</code> 属于底层运行缓存。
+  在跨会话断点恢复时，系统主要依赖 <code>.comet.yaml</code> 与 Markdown 物理检查点，日常无须手动修改底层日志。
 </Note>
 
-### state-events.jsonl（状态转换审计）
+### state-events.jsonl（状态变更审计流水）
 
-| 属性 | 说明                                                                               |
-| ---- | ---------------------------------------------------------------------------------- |
-| 位置 | `<classic-root>/changes/<name>/.comet/state-events.jsonl`                          |
-| 创建 | 第一次成功 state transition 时                                                     |
-| 作用 | 记录 `comet-state transition`、`comet-guard --apply` 和 archive 更新造成的状态变化 |
-| 管理 | Comet 追加写入，用户可读，不要手工改                                               |
+| 关键属性 | 具体说明                                                                           |
+| -------- | ---------------------------------------------------------------------------------- |
+| **存放路径** | `<classic-root>/changes/<name>/.comet/state-events.jsonl`                          |
+| **创建时机** | 首次成功触发状态流转（state transition）时自动创建                                 |
+| **核心作用** | 完整记录由守卫检查、状态流转以及归档操作引起的每一次字段变迁                      |
+| **维护方式** | 由 Comet 自动追加写入，纯文本可读，切勿手动篡改                                    |
 
-它不是当前状态来源。当前状态仍以 `.comet.yaml` 为准。事件日志适合回答：这次 `phase` 是由 guard、手工 transition，还是 archive 流程改的？实际改了哪些字段？
+该文件不作为当前状态的判决依据，但在复盘排查时极具价值，能清晰回答：当前 `phase` 是何时由哪个守卫推进的？当时更新了哪些具体字段？
 
-## design 阶段产物
+## design 阶段中间产物
 
-design 阶段是中间产物最丰富的阶段，主要服务于上下文压缩和 OpenSpec→Superpowers 交接。
+design 阶段主要负责需求澄清与方案定稿，确保上下文能够丝滑传递给后续的编码阶段。
 
-### handoff 原文与可读视图
+### 原文复用与集中阅读视图
 
-Classic 默认直接引用 proposal、design、tasks 和 delta Specs。Agent 按任务需要读取正式材料，不要求生成 hash 交接包。
+Classic 模式直接引用 proposal、design、tasks 与增量 Specs 原始文档，Agent 根据任务需要按需加载，无需重复生成冗余的 Hash 镜像包。
 
-只有需要集中阅读时才运行 `comet handoff <change-name> design --write --full`，在当前 change 的 `.comet/handoff/design-context.md` 生成原文视图；该视图不替代正式来源或设计批准。详见 [comet handoff](/zh/scripts/comet-handoff)。
+只有当你希望在一个独立的 Markdown 文件中集中通读全部上下文时，才需要运行 `comet handoff <change-name> design --write --full`。该命令会在 `.comet/handoff/design-context.md` 生成只读的汇总视图，仅供人类阅读，不能替代原始材料，详见 [comet handoff 脚本](/zh/scripts/comet-handoff)。
 
-### brainstorm-summary.md
+### 脑暴进展快照：brainstorm-summary.md
 
-| 属性 | 说明                                                                 |
-| ---- | -------------------------------------------------------------------- |
-| 位置 | `<classic-root>/changes/<name>/.comet/handoff/brainstorm-summary.md` |
-| 创建 | design 阶段 brainstorming 过程中增量写入                             |
-| 作用 | **上下文压缩的恢复检查点**，压缩发生后从这里恢复已确认的设计决策     |
-| 管理 | Agent 维护（结构和位置由 Skill 规定）                                |
+| 关键属性 | 具体说明                                                             |
+| -------- | -------------------------------------------------------------------- |
+| **存放路径** | `<classic-root>/changes/<name>/.comet/handoff/brainstorm-summary.md` |
+| **创建时机** | 在 design 阶段方案头脑风暴讨论中增量生成                             |
+| **核心作用** | **长上下文压缩后的关键恢复依据**，会话压缩后可直接从这里找回方案决策 |
+| **维护方式** | 由 Agent 自主维护（格式结构受 Skill 严格约束）                       |
 
-它记录：
-
-- 已确认的技术方案
-- 关键权衡和风险
-- 测试策略
-- Spec Patch（如果有）
-- 未确认项标记为 `pending`/`candidate`
+该快照负责记录：
+- 双方已达成共识的技术架构与选型；
+- 方案的核心取舍与潜在风险点；
+- 预先拟定的测试策略；
+- 尚未最终敲定的待定选项（明确标注为 `pending` 或 `candidate`）。
 
 <Tip>
-  <code>brainstorm-summary.md</code> 是 design 阶段最重要的恢复检查点。上下文压缩后，Agent
-  从这里恢复已确认决策，省去重新 brainstorming。它在 brainstorming 过程中<strong>增量更新</strong>
-  ，在用户确认方案后定稿。
+  <code>brainstorm-summary.md</code> 是方案设计阶段极其关键的物理断点。一旦遭遇对话窗口压缩，Agent 会直接从该文件中唤醒既定结论，免去了重新展开冗长讨论的痛苦。它在头脑风暴中<strong>增量更新</strong>，并在方案敲定后最终定稿。
 </Tip>
 
-## build 阶段产物
+## build 阶段中间产物
 
-build 阶段的中间产物主要服务于 SubAgent 调度恢复和任务跟踪。
+build 阶段的中间文件专注于任务拆解跟踪与多子代理（Subagent）的调度恢复。
 
-### 实施计划（plan）
+### 落地实施计划（plan）
 
-| 属性 | 说明                                                |
-| ---- | --------------------------------------------------- |
-| 位置 | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`    |
-| 创建 | build 阶段（由 SubAgent 加载 `writing-plans` 生成） |
-| 作用 | 实施计划。frontmatter 是 verify 阶段的关键证据      |
-| 管理 | Agent-written                                       |
+| 关键属性 | 具体说明                                            |
+| -------- | --------------------------------------------------- |
+| **存放路径** | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`    |
+| **创建时机** | build 阶段由子代理调用计划生成工具编写产出          |
+| **核心作用** | 编码落地指南，其文档头（frontmatter）是后续验收的关键证据 |
+| **维护方式** | 由 Agent 自主编写并由用户确认                       |
 
-计划的 frontmatter 是验证阶段依赖的证据：
+该计划的文档头记录了代码验证所需的重要元数据：
 
 ```yaml
 ---
 change: <openspec-change-name>
 design-doc: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-base-ref: <实现前的 git HEAD>
+base-ref: <编码前的 git HEAD commit hash>
 ---
 ```
 
-`base-ref` 是实现开始前的 commit SHA，verify 用它重新计算变更规模。`plan` 路径写入 `.comet.yaml`。
+其中 `base-ref` 记录了实际编码前的 Commit SHA，在 verify 阶段用它来客观统计本次代码改动的真实边界。
 
-### subagent-progress.md
+### 子代理调度检查点：subagent-progress.md
 
-| 属性 | 说明                                                                      |
-| ---- | ------------------------------------------------------------------------- |
-| 位置 | `<classic-root>/changes/<name>/.comet/subagent-progress.md`               |
-| 创建 | build 阶段（仅 `build_mode: subagent-driven-development` 时）             |
-| 作用 | **SubAgent 调度检查点**，是 `brainstorm-summary.md` 在 build 阶段的对应物 |
-| 管理 | 主会话（main session）维护                                                |
+| 关键属性 | 具体说明                                                                  |
+| -------- | ------------------------------------------------------------------------- |
+| **存放路径** | `<classic-root>/changes/<name>/.comet/subagent-progress.md`               |
+| **创建时机** | build 阶段（仅在启用 `subagent-driven-development` 模式时创建）            |
+| **核心作用** | **子代理调度的物理检查点**，确保任务逐项推进且状态不丢失                  |
+| **维护方式** | 严格由**主会话**写入，后台子代理无权编辑                                  |
 
-它记录当前任务的调度状态：
-
-- 当前 plan 任务文本 + 对应的 OpenSpec 任务文本
-- 当前阶段（`implementing`/`task-review`/`checkoff`/`done`/`blocked`）
-- 实现的 commit hash、改动文件、RED/GREEN 证据
-- 选定的 `review_mode`
-- 已通过的审查阶段 + 未解决的 reviewer 反馈
-- 当前 review-fix 轮数
+该文件记录了当前子任务的详细执行状态：
+- 当前正在执行的子任务描述及其对应的 OpenSpec 原始任务；
+- 当前子状态（`implementing` 编码中 / `task-review` 审查中 / `checkoff` 勾选中 / `done` 已完成）；
+- 本次改动关联的 Commit Hash、变更文件列表与红绿测试证据；
+- 既定的代码审查严格度（`review_mode`）；
+- 审查反馈意见与当轮重修轮次。
 
 <Warning>
-  <code>subagent-progress.md</code> 每个任务替换一次。SubAgent（implementer/reviewer）
-  <strong>不能</strong>
-  编辑它。只有主会话能写。实现者只能写代码，reviewer 只能写反馈，主会话负责推进检查点。这避免
-  SubAgent 擅自标记任务完成。
+  <code>subagent-progress.md</code> 每完成一个子任务便会刷新一次。负责编码或审查的后台 Subagent <strong>严禁编辑该文件</strong>，该文件完全由主调度会话统一管理。这从物理层面杜绝了子代理擅自把自己标记为“已通过”的隐患。
 </Warning>
 
-### tasks.md 勾选状态
+### 任务完成跟踪：tasks.md 勾选
 
-| 属性 | 说明                                     |
-| ---- | ---------------------------------------- |
-| 位置 | `<classic-root>/changes/<name>/tasks.md` |
-| 作用 | 任务完成跟踪（`- [ ]` → `- [x]`）        |
-| 管理 | 主会话编辑                               |
+| 关键属性 | 具体说明                                 |
+| -------- | ---------------------------------------- |
+| **存放路径** | `<classic-root>/changes/<name>/tasks.md` |
+| **核心作用** | 真实的进度跟踪看板（`- [ ]` → `- [x]`）   |
+| **维护方式** | 主会话在审查通过后逐项勾选               |
 
-Comet 没有单独的任务勾选文件。勾选状态就在 `tasks.md` 内。用 `grep -c '\- \[ \]' tasks.md` 统计未完成项，用 `comet-state task-checkoff <file> <text>` 验证特定任务已勾选。
+Comet 不设立多余的任务完成计数器，直接以 `tasks.md` 内的标准复选框作为唯一事实。系统使用 `comet-state task-checkoff` 验证任务项是否被合法勾选。在子代理模式下，只有主会话确认审查通过后才会在文档中打勾，实现严格的权责分离。
 
-SubAgent 模式下，实现者**不能**勾选任务，只有主会话按 review_mode 规定的任务级审查通过后才勾选（off 模式无 reviewer，靠自测证据勾选）。
+## verify 阶段中间产物
 
-## verify 阶段产物
+### 结构化验证报告
 
-### 验证报告
+| 关键属性 | 具体说明                                                            |
+| -------- | ------------------------------------------------------------------- |
+| **存放路径** | `docs/superpowers/reports/YYYY-MM-DD-<change-name>-verify.md`       |
+| **创建时机** | verify 验收阶段，全部通过并落盘后方可标记为 pass                    |
+| **核心作用** | 严谨的验收凭据：包含各项检查结果明细、PASS/FAIL 状态及例外接受理由  |
+| **维护方式** | 由 Agent 自动生成并保存                                             |
 
-| 属性 | 说明                                                                |
-| ---- | ------------------------------------------------------------------- |
-| 位置 | `docs/superpowers/reports/YYYY-MM-DD-<change-name>-verify.md`       |
-| 创建 | verify 阶段，写盘后才标记 pass                                      |
-| 作用 | 验证证据：6 项（light）或 7 项（full）检查结果、PASS/FAIL、接受原因 |
-| 管理 | Agent-written                                                       |
+报告路径会同步记录在 `.comet.yaml` 中。阶段守卫在放行进入归档前，会强制校验该验证报告在磁盘上是否存在且状态达标。
 
-`verification_report` 路径写入 `.comet.yaml`。guard 要求 `verify-pass` 转换时这个文件必须存在。
+### 实现偏差记录（Implementation Divergence，可选）
 
-### Implementation Divergence 注记（可选）
+| 关键属性 | 具体说明                                                           |
+| -------- | ------------------------------------------------------------------ |
+| **存放路径** | 追加记录在 Design Doc（`docs/superpowers/specs/...-design.md`）末尾 |
+| **触发时机** | 完整验收时发现代码实现与最初设计存在分歧，且用户选择接受偏差时      |
+| **核心作用** | 客观记录代码实现与原始设计文档之间的合理偏差及决策背景             |
 
-| 属性 | 说明                                                               |
-| ---- | ------------------------------------------------------------------ |
-| 位置 | 追加到 Design Doc（`docs/superpowers/specs/...-design.md`）        |
-| 触发 | full verify 发现 delta spec 和 Design Doc 矛盾，用户选择接受偏差时 |
-| 作用 | 记录实现和设计文档的差异                                           |
-
-如果用户选择接受偏差，接受原因和影响会记录在验证产物中。归档时 Design Doc 按常规流程标注 `archived-with`。
+若你确认接受该偏差，接受的原因与影响范围会一并沉淀在验证报告中备查，主 Spec 始终保持为最新权威准绳。
 
 ## archive 阶段产物
 
-archive 阶段不创建新文件，而是给已有产物加标注并移动目录。
+进入归档阶段后，系统不再创建冗余文件，而是对已有产物进行规范标注，并将目录统一搬迁至归档仓库。
 
-### frontmatter 标注
+### 归档元数据标注
 
-| 文件                   | 标注                                             | 含义                         |
+| 目标文件               | 标注内容                                         | 具体含义                     |
 | ---------------------- | ------------------------------------------------ | ---------------------------- |
-| Design Doc             | `archived-with: <archiveName>` + `status: final` | 归档归属 + 最终状态          |
-| Design Doc（如有偏差） | 接受原因记录在验证产物中                         | 实现偏离已确认，主 spec 为准 |
-| Plan                   | `archived-with: <archiveName>`                   | 归档归属                     |
+| Design Doc 设计文档    | `archived-with: <archiveName>` + `status: final` | 标明所属归档版本与定稿状态   |
+| 实施计划 Plan          | `archived-with: <archiveName>`                   | 标明所属归档版本             |
 
-### 归档目录
+### 规范归档目录
 
-整个 change 目录移动到 `<classic-root>/changes/archive/YYYY-MM-DD-<name>/`，包括 `.comet.yaml`、`.comet/handoff/`、`.comet/subagent-progress.md` 和 delta spec。归档后 `.comet.yaml` 设 `archived: true`。
+整个 change 目录会被完整移动至 `<classic-root>/changes/archive/YYYY-MM-DD-<name>/`，包括所有的状态机、过程快照、子任务进度与增量 Spec。搬迁完成后，`.comet.yaml` 状态正式更新为 `archived: true`。
 
-## 按目的分类
+## 中间产物速查清单
 
-| 目的             | 产物                                                                      |
-| ---------------- | ------------------------------------------------------------------------- |
-| **上下文压缩**   | 正式材料、brainstorm-summary.md 与可选阅读视图                            |
-| **状态恢复**     | .comet.yaml、subagent-progress.md、brainstorm-summary.md                  |
-| **状态审计**     | state-events.jsonl                                                        |
-| **阶段交接**     | OpenSpec 正式材料、已确认方案与实际检查结果                               |
-| **证据**         | 验证报告、plan frontmatter、tasks.md 勾选、Implementation Divergence 注记 |
-| **生命周期标注** | archived-with、status、archived: true                                     |
-
-## 文件作用速览
-
-| 你想知道的                    | 看哪个产物                                  |
+| 日常开发诉求                  | 查阅对应的中间产物                          |
 | ----------------------------- | ------------------------------------------- |
-| 当前阶段和执行方式            | `.comet.yaml`                               |
-| design 交接的 OpenSpec 上下文 | 正式 proposal、design、tasks 与 delta Specs |
-| brainstorming 确认了什么      | `.comet/handoff/brainstorm-summary.md`      |
-| SubAgent 做到哪个任务的哪一步 | `.comet/subagent-progress.md`               |
-| 任务完成进度                  | `tasks.md` 的勾选状态                       |
-| 验证结果                      | `docs/superpowers/reports/...-verify.md`    |
-| handoff 是否漂移              | Agent 对照当前正式材料判断实际变化          |
-| phase 为什么变了              | `.comet/state-events.jsonl` 的最后几行      |
+| 查看当前阶段、执行模式与审查配置 | 直接查看 `.comet.yaml`                      |
+| 查阅方案设计时的需求背景      | 查看正式的 proposal、design、tasks 原始文档 |
+| 了解头脑风暴达成了哪些共识    | 查阅 `.comet/handoff/brainstorm-summary.md` |
+| 掌握子代理当前正在做哪一步    | 查阅 `.comet/subagent-progress.md`          |
+| 检查任务列表完成进度          | 查看 `tasks.md` 复选框的勾选情况            |
+| 查阅自动化测试与验收结果      | 查看 `docs/superpowers/reports/...-verify.md` |
+| 探究当前阶段为什么发生流转    | 查看 `.comet/state-events.jsonl` 的最新事件 |
 
 ## 下一步
 
-- [工作流概念](/zh/concepts/workflow) — 这些产物在五阶段中的位置
-- [状态管理](/zh/concepts/state-management) — `.comet.yaml` 字段详解
-- [上下文压缩机制](/zh/concepts/context-compression) — handoff 交接包详解
-- [comet-handoff](/zh/scripts/comet-handoff) — 交接包生成的脚本细节
-- [运维与排查](/zh/guides/resuming-workflow) — 用这些产物恢复中断的工作
+- [工作流核心概念](/zh/concepts/workflow) — 了解中间文件在五阶段中的演变逻辑
+- [状态管理](/zh/concepts/state-management) — 掌握 `.comet.yaml` 的每一个配置字段
+- [上下文交接与原文复用](/zh/concepts/context-compression) — 深入理解无损交接机制
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 借助物理产物瞬间恢复工作现场

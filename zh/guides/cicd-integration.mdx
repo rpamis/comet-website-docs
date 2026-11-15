@@ -1,18 +1,18 @@
 ---
 title: 'CI/CD 集成'
-description: '在 CI/CD 里用 comet status --json 和 comet doctor --json 做自动化门禁、安装完整性检查和阶段状态报告。'
+description: '在 CI/CD 流水线中通过 comet status --json 和 comet doctor --json 实现自动化质量门禁、安装完整性校验与阶段状态报告。'
 ---
 
-Comet CLI 为自动化场景提供了结构化 JSON 输出和非交互模式。你可以在 CI/CD 流水线里用它们做安装完整性门禁、变更阶段报告和发布前检查，不需要 Agent 平台参与。
+Comet CLI 为自动化运维与持续集成提供了完善的结构化 JSON 输出与非交互执行模式。你可以在 CI/CD 流水线中将它们作为安装完整性门禁、变更进度监测以及发布前的健康自检，全程无需 Agent 平台参与。
 
-## 适合自动化的场景
+## 典型自动化场景
 
-| 场景           | 用什么                    | 说明                                    |
-| -------------- | ------------------------- | --------------------------------------- |
-| CI 环境初始化  | `comet init --yes --json` | 非交互安装，跳过交互式 CodeGraph 安装 |
-| 安装完整性门禁 | `comet doctor --json`     | 检查 Skill、脚本、工作目录、change 状态 |
-| 变更阶段报告   | `comet status --json`     | 输出活跃 change 的阶段、进度和下一步    |
-| PR 检查        | `comet doctor --json`     | 阻止状态损坏的 change 进入主干          |
+| 应用场景       | 推荐使用命令              | 核心作用                                          |
+| -------------- | ------------------------- | ------------------------------------------------- |
+| CI 环境快速就绪 | `comet init --yes --json` | 非交互一键静默安装，安全跳过交互式 CodeGraph 步骤 |
+| 安装完整性门禁 | `comet doctor --json`     | 严格检查 Skill、底层脚本、工作区目录与状态机健康度 |
+| 变更阶段报告   | `comet status --json`     | 结构化输出当前活跃变更所处阶段、任务进度与下一步建议 |
+| PR 质量门禁    | `comet doctor --json`     | 阻断状态损坏或未通过合规校验的变更合并入主干      |
 
 <p align="center">
   <img
@@ -22,13 +22,13 @@ Comet CLI 为自动化场景提供了结构化 JSON 输出和非交互模式。�
   />
 </p>
 
-<p align="center">CI 里只做安装和状态门禁；需要 Agent 或人工决策的流程不要放进流水线</p>
+<p align="center">在 CI 中专注于状态检查与安装完整性门禁；需要模型推理或人工决策的流程不要放入流水线</p>
 
-## comet doctor --json
+## comet doctor --json：健康诊断门禁
 
-`comet doctor` 检查项目级和全局安装健康、Skill 完整性、脚本、工作目录和活跃 change 状态。`--json` 输出结构化结果，适合脚本解析。
+`comet doctor` 能够全面体检项目级与全局配置环境、Skill 完整度、脚本状态、工作区以及各个活跃变更的健康度。`--json` 参数输出标准的结构化数据，非常便于流水线脚本解析。
 
-### 输出结构
+### 标准输出结构
 
 ```json
 {
@@ -58,34 +58,33 @@ Comet CLI 为自动化场景提供了结构化 JSON 输出和非交互模式。�
 }
 ```
 
-每个 `results` 条目的 `status` 是三态之一：
+每个检测项的 `status` 遵循三态定义：
 
-| status | 含义           | CI 处理          |
-| ------ | -------------- | ---------------- |
-| `pass` | 检查通过       | 继续             |
-| `warn` | 有问题但不阻塞 | 可继续，建议修复 |
-| `fail` | 有阻塞性问题   | 应中断           |
+| 状态标识 | 核心含义       | CI 处置策略     |
+| -------- | -------------- | --------------- |
+| `pass`   | 检查通过       | 放行，继续推进流水线 |
+| `warn`   | 存在告警但不阻塞 | 允许继续，建议排查修复 |
+| `fail`   | 存在阻断性硬伤 | 强制阻断 CI 流水线 |
 
-`doctor` 检查的项包括：Comet CLI、openspec CLI、Superpowers、工作目录、Skill 完整性、脚本存在、CodeGraph、以及每个活跃 change 的 `.comet.yaml` 有效性。
-
-### 用作 CI 门禁
+### 在 CI 中构建质量门禁脚本
 
 ```bash
 #!/bin/bash
-# 只要有 fail 就中断 CI
+# 只要存在 fail 项即阻断 CI
 RESULT=$(comet doctor --json)
 echo "$RESULT" | jq -r '.results[] | select(.status == "fail") | .check + ": " + .message'
+
 if echo "$RESULT" | jq -e '.results[] | select(.status == "fail")' > /dev/null; then
-  echo "Comet doctor reported failures — blocking CI"
+  echo "❌ Comet doctor 报告了失败项，阻断 CI 合并"
   exit 1
 fi
 ```
 
-## comet status --json
+## comet status --json：状态与进度汇总
 
-`comet status` 输出活跃 change 的状态。`--json` 输出每个 change 的完整状态字段。
+`comet status` 用于输出当前活跃变更的状态。加 `--json` 参数后会输出每个 change 的全量结构化元数据。
 
-### 输出结构
+### 输出结构示例
 
 ```json
 [
@@ -114,50 +113,37 @@ fi
 ]
 ```
 
-关键字段：
-
-| 字段                            | 含义                                                 |
-| ------------------------------- | ---------------------------------------------------- |
-| `phase`                         | 当前阶段：`open`/`design`/`build`/`verify`/`archive` |
-| `nextCommand`                   | 推荐的下一步命令                                     |
-| `tasksCompleted` / `tasksTotal` | 任务进度                                             |
-| `verifyResult`                  | `pending`/`pass`/`fail`                              |
-| `runtimeEval.passed`            | 当前 runtime check 是否通过                          |
-| `runtimeEval.missingEvidence`   | 缺失的证据                                           |
-
-### 变更阶段报告
+### 打印变更进度报告
 
 ```bash
-# 输出所有活跃 change 的进度
-comet status --json | jq -r '.[] | "\(.name): phase=\(.phase) tasks=\(.tasksCompleted)/\(.tasksTotal) next=\(.nextCommand)"'
+# 格式化输出所有活跃变更的进展
+comet status --json | jq -r '.[] | "\(.name): 阶段=\(.phase) 任务进度=\(.tasksCompleted)/\(.tasksTotal) 推荐下一步=\(.nextCommand)"'
 ```
 
-输出示例：
+输出效果直观明了：
 
 ```text
-add-login: phase=build tasks=7/12 next=/comet-build
-fix-token-refresh: phase=verify tasks=3/3 next=/comet-verify
+add-login: 阶段=build 任务进度=7/12 推荐下一步=/comet-build
+fix-token-refresh: 阶段=verify 任务进度=3/3 推荐下一步=/comet-verify
 ```
 
-## CI 环境初始化
+## CI 环境静默初始化
 
-CI 环境通常需要非交互安装。`--yes` 跳过所有提示，`--json` 抑制 banner 日志并跳过交互式 CodeGraph：
+在自动化流水线容器中，通常需要完全无人值守的非交互安装。`--yes` 会跳过所有确认提示，`--json` 会关闭 Banner 打印并自动跳过交互式 CodeGraph：
 
 ```bash
 comet init --yes --scope project --language zh --json
 ```
 
-`--yes` 的默认行为：
+`--yes` 的默认策略：
+- 安装范围默认采用 `project`；
+- 语言默认遵从指定参数（如 `--language zh`）；
+- 平台自动探测；
+- **遇到已存在的组件默认安全跳过**，绝不粗暴覆盖。若需要强制重装刷新，请显式传 `--overwrite`。
 
-- 范围默认 `project`。
-- 语言默认 `en`（指定 `--language zh` 覆盖）。
-- 平台自动检测（检测不到则全选）。
-- **已存在组件默认跳过**（不是覆盖）。强制刷新用 `--overwrite`。
-
-### 典型 CI 流程
+### GitHub Actions 流水线配置范例
 
 ```yaml
-# GitHub Actions 示例
 - name: Install Comet
   run: npm install -g @rpamis/comet
 
@@ -167,7 +153,6 @@ comet init --yes --scope project --language zh --json
 - name: Verify install health
   run: |
     comet doctor --json > doctor-report.json
-    # 有 fail 就中断
     if jq -e '.results[] | select(.status == "fail")' doctor-report.json > /dev/null; then
       cat doctor-report.json
       exit 1
@@ -177,63 +162,36 @@ comet init --yes --scope project --language zh --json
   run: comet status --json || true
 ```
 
-## PR 检查：阻止损坏的 change 合并
+## 不适宜放入 CI 的重型操作
 
-在 PR 检查里用 `doctor` 确保合并到主干的 change 状态健康：
+以下操作深度依赖人机交互或大模型调用，切勿直接写入常规 CI 脚本中：
 
-```bash
-#!/bin/bash
-# PR 检查脚本
-echo "Checking Comet change health..."
-
-# 1. 安装完整性
-if ! comet doctor --json | jq -e 'all(.results[]; .status != "fail")' > /dev/null; then
-  echo "❌ Comet doctor found failures"
-  comet doctor --json | jq '.results[] | select(.status == "fail")'
-  exit 1
-fi
-
-# 2. 活跃 change 状态有效
-CHANGES=$(comet status --json)
-if echo "$CHANGES" | jq -e 'length > 0' > /dev/null; then
-  echo "Active changes:"
-  echo "$CHANGES" | jq -r '.[] | "  - \(.name) [\(.phase)]"'
-fi
-
-echo "✅ Comet checks passed"
-```
-
-## 不适合 CI 的操作
-
-以下操作依赖 Agent 平台交互，不适合在 CI 里运行：
-
-| 操作                                  | 原因                                |
+| 操作指令                              | 不适宜放入 CI 的核心原因            |
 | ------------------------------------- | ----------------------------------- |
-| `/comet`、`/comet-open` 等 Skill 调用 | 需要 Agent 平台                     |
-| `comet eval ... --html`               | 执行真实模型任务，消耗 token 和时间 |
-| `comet publish approve`               | 需要人工评审决策                    |
+| `/comet`、`/comet-open` 等 Skill 命令 | 属于对话式 Skill，必须在 Agent 交互平台中运行 |
+| `comet eval ... --html`               | 调用真实大模型跑评测，会消耗大量 Token 与时间 |
+| `comet publish approve`               | 涉及发布签名与人工安全审核决策      |
 
-CI 里只做**状态检查和安装完整性**，不做需要 Agent 或人工决策的操作。
+在持续集成流水线中，**始终保持轻量化：聚焦于静态状态检查与代码健康门禁**。
 
-## 常见问题
+## 常见疑问解答
 
-<Accordion title="CI 里 status 输出空数组">
-  说明没有活跃 change，或 change 缺少 `.comet.yaml`（被静默跳过）。缺少 `.comet.yaml` 的 change
-  需要在 Agent 平台调用 `/comet`，进入 Classic
-  后由 Comet 接管。详见[存量项目接入](/zh/guides/existing-project)。
-</Accordion>
+<AccordionGroup>
+  <Accordion title="CI 中运行 status 输出空数组是怎么回事？">
+    这表示当前项目中没有正在推进的活跃变更，或者已有变更缺失了必要的 `.comet.yaml` 状态机。若为后者，只需在日常开发环境中输入 `/comet` 接管即可。
+  </Accordion>
 
-<Accordion title="doctor 的 warn 要不要中断 CI">
-  取决于你的规范。`warn` 通常不阻塞（如 openspec CLI 未装但项目不依赖），`fail` 才是阻塞（如 Skill
-  缺失、状态损坏）。建议只对 `fail` 退出非零。
-</Accordion>
+  <Accordion title="遇到 doctor 的 warn 告警需要让 CI 报错退出吗？">
+    通常不需要。`warn` 仅表示非致命建议（例如项目暂未安装可选的外部 CLI），只有 `fail` 才代表结构性损坏或文件缺失。建议仅对 `fail` 退出非零错误码。
+  </Accordion>
 
-<Accordion title="--json 模式输出能稳定解析吗">
-  能。JSON 结构是 CLI 契约的一部分，`status` 和 `doctor` 的字段不会无通知变更。
-</Accordion>
+  <Accordion title="--json 模式的输出结构在未来版本中稳定吗？">
+    是的。结构化 JSON 是 Comet CLI 严格承诺的机器契约之一，核心字段不会在无兼容预警的情况下变更。
+  </Accordion>
+</AccordionGroup>
 
 ## 下一步
 
-- [comet status](/zh/cli/status) — 完整状态字段说明
-- [comet doctor](/zh/cli/doctor) — 完整诊断范围
-- [存量项目接入](/zh/guides/existing-project) — CI 初始化时的组件检测
+- [comet status 命令参考](/zh/cli/status) — 深入了解所有状态字段定义
+- [comet doctor 命令参考](/zh/cli/doctor) — 掌握完整的健康自检范围
+- [存量项目接入指南](/zh/guides/existing-project) — 了解既有代码库的初始化技巧

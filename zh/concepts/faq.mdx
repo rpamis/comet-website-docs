@@ -3,148 +3,129 @@ title: '经典 Spec 模式常见问题'
 description: '解答 /comet 进入经典 Spec 模式后的五阶段工作流、状态恢复、阶段守卫和轻量预设常见疑问。'
 ---
 
-本页回答 Classic 五阶段、状态恢复、Guard 和轻量预设的常见问题。
+本文集中解答关于 Classic 五阶段工作流、断点状态恢复、阶段守卫拦截与轻量预设的常见疑问。
 
 ## 基础概念
 
 <AccordionGroup>
-  <Accordion title="Comet 和 OpenSpec、Superpowers 是什么关系">
-    Comet 不替代任何一方。OpenSpec 负责 WHAT（需求、提案、spec 生命周期、归档），Superpowers 负责 HOW（brainstorming、技术设计、计划、执行、验证）。Comet 把两者串成一条可恢复的五阶段工作流，并用状态机和守卫保证交接可靠。详见[工作流概念](/zh/concepts/workflow)。
+  <Accordion title="Comet 与 OpenSpec、Superpowers 是什么关系？">
+    Comet 并非两者的替代品，而是将它们有机融合的工程框架。OpenSpec 负责 **WHAT**（梳理需求、生成技术提案、维护 Spec 生命周期与版本归档），Superpowers 负责 **HOW**（脑暴探索、技术方案设计、拆解计划、编码执行与功能验证）。Comet 则负责把二者串联为一条具备严密质量门禁、支持中断恢复的五阶段开发工作流，确保每个环节都有据可查。详见 [工作流核心概念](/zh/concepts/workflow)。
   </Accordion>
 
-<Accordion title="/comet 和 /comet-any 有什么区别">
-  用户统一调用 `/comet`；项目配置选择 Classic 后，内部永久入口 `/comet-classic` 驱动
-  open/design/build/verify/archive 五阶段流程。`/comet` 是项目配置驱动的统一别名，可能进入 Native 或
-  Classic。`/comet-any` 是 Skill Creator，用来创建、优化、组合可复用的 Skill；三者职责不同。
-</Accordion>
+  <Accordion title="/comet 与 /comet-any 有什么区别？">
+    在日常编码中，统一调用 `/comet` 即可。当项目配置为 Classic 时，系统会自动交由内部路由 `/comet-classic` 驱动 open、design、build、verify、archive 五阶段流程；若配置为 Native 则进入轻量工作流。而 `/comet-any` 是专门的 Skill Creator 创作工具，用于创建、优化和组合可复用的 Skill Bundle。两者的分工与职责截然不同。
+  </Accordion>
 
-<Accordion title="我必须用 OpenSpec 和 Superpowers 吗">
-  经典 Spec 模式依赖两者——OpenSpec 记录需求规格，Superpowers 提供设计/执行方法论。使用 `comet init
-  --workflow classic` 时会安装两者；新的项目级 `comet init` 默认使用不依赖它们的
-  Native。如果你只想用 Comet 的 Skill 平台能力（用 `/comet-any` 组合任意
-  Skill，生成可验证、可评审、可分发的 Skill Bundle），可以从[组合任意 Skill
-  快速上手](/zh/skill-creator/getting-started)开始。
-</Accordion>
-
+  <Accordion title="我必须同时使用 OpenSpec 与 Superpowers 吗？">
+    Classic 模式深度依赖这两者：OpenSpec 负责沉淀规格文档，Superpowers 提供成熟的架构设计与任务拆解方法论。在执行 `comet init --workflow classic` 时系统会自动安装二者；而全新的项目初始化默认推荐使用不依赖外部框架的 Native 工作流。如果你只是想利用 Comet 创作与发布可复用的自定义 Skill，可以直接阅读 [组合任意 Skill 快速上手](/zh/skill-creator/getting-started)。
+  </Accordion>
 </AccordionGroup>
 
 ## 与相似产品的区别
 
 <AccordionGroup>
-  <Accordion title="Comet 和 superpowers-bridge 有什么区别">
-    两者都想把 OpenSpec 和 Superpowers 结合成一条工作流，但实现形态和保障级别完全不同。
+  <Accordion title="Comet 与 superpowers-bridge 有什么本质区别？">
+    两者都致力于把 OpenSpec 与 Superpowers 串联起来，但实现路径与保障机制存在本质差异：
 
-    **superpowers-bridge** 是一个 [OpenSpec 原生 schema bundle](https://github.com/JiangWay/openspec-schemas)：你把它拷进项目当前 OpenSpec 根目录的 `schemas/`（Classic 新项目默认是 `docs/openspec/schemas/`，保留旧布局的项目是 `openspec/schemas/`），用 `--schema superpowers-bridge` 按 change 选择。它是**纯 prompt 层集成**——不改 Superpowers 源码、不改 OpenSpec CLI，靠 `schema.yaml` 里的产物 DAG（`brainstorm → proposal → design → specs → tasks → plan → verify → retrospective`）和纯文字的 `PRECHECK` 约束顺序。它还补了一个 Superpowers 原生缺失的、以证据为先的 `retrospective` 产物。
+    **superpowers-bridge** 是一个 [OpenSpec 原生 schema bundle](https://github.com/JiangWay/openspec-schemas)：需要将其拷入项目的 `schemas/` 目录中，通过 `--schema superpowers-bridge` 参数逐任务调用。它属于**纯 Prompt 层的松散集成**——不触及底层源码，依赖 `schema.yaml` 中的任务 DAG 规则和纯文本形式的 `PRECHECK` 提示词来约束模型顺序。
 
-    **Comet** 是一个独立的 npm 包（`@rpamis/comet`），带跨平台 Node runtime、`.comet.yaml` 状态机、hook 硬拦截、诊断和恢复。两者核心差异：
+    **Comet** 则是现代化的完整工程工具包（`@rpamis/comet`），内置跨平台 Node 运行时、`.comet.yaml` 状态机、PreToolUse hook 物理拦截、自动化诊断与零依赖断点恢复。二者的核心差异如下：
 
     | 维度 | superpowers-bridge | Comet |
-    |------|--------------------|-------|
-    | 形态 | OpenSpec schema bundle，拷进当前 OpenSpec 根目录的 `schemas/` | 独立 npm 包 + CLI + Node runtime |
-    | 集成层 | 纯 prompt 层，不改源码/CLI | prompt 层 + 工程化 runtime（状态机、hook、guard） |
-    | 编排 | 产物 DAG + 文字说明，靠模型/人工按序调 `/opsx:*` | 五阶段状态机，脚本驱动的[自动过渡](/zh/concepts/auto-transition) |
-    | 状态/恢复 | 只有产物文件本身，无显式阶段状态 | [`.comet.yaml` 状态机](/zh/concepts/state-management) + [压缩恢复](/zh/concepts/context-compression) |
-    | 约束强度 | 纯文字 `PRECHECK`（读到但不强制） | [phase-guard 规则每轮注入 + hook 硬拦截](/zh/concepts/decision-points) |
-    | 平台要求 | 必须 subagent 平台，否则退回 spec-driven | 跨平台，不强制 subagent，有降级路径 |
-    | 入口 | 只在 `/opsx:*` 命令生效，自然语言触发不会进入流程 | [意图路由](/zh/concepts/intent-routing)从任意输入路由到阶段 |
-    | 分级 | 靠人工判断"要不要建 change" | 内置 [hotfix](/zh/presets/hotfix)/[tweak](/zh/presets/tweak) 预设 |
-    | 范围 | 一个开发工作流 schema | 工作流 + Skill 平台（[组合](/zh/skill-creator/getting-started)/[评估](/zh/cli/eval)/[可视化](/zh/cli/dashboard)） |
-
+    | ---- | ------------------ | ----- |
+    | **产品形态** | 静态 OpenSpec schema 模板包 | 独立 npm CLI 工具包 + Node 跨平台运行时 |
+    | **集成深度** | 纯 Prompt 提示词级约束 | Prompt + 物理级工程运行时（状态机、Hook 守卫、阶段拦截） |
+    | **流程编排** | 依赖纯文本说明，靠人工或模型自觉调用 `/opsx:*` | 严密的五阶段状态机，支持脚本驱动的 [自动推进机制](/zh/concepts/auto-transition) |
+    | **断点恢复** | 仅依赖散落的 Markdown 文件，无显式状态机 | 完备的 [`.comet.yaml` 状态机](/zh/concepts/state-management) 与物理检查点恢复 |
+    | **约束强度** | 纯文本 `PRECHECK`（模型可读到却常忽视） | 阶段规则注入 + PreToolUse Hook 物理阻断，违规写入直接拦截 |
+    | **平台门槛** | 强依赖具备子代理能力的平台 | 跨 39 个主流平台，无论是否支持 Subagent 均有完善的降级支持 |
+    | **交互入口** | 仅能在 `/opsx:*` 系列命令下起效 | 基于 [智能意图识别](/zh/concepts/intent-routing)，自然语言需求直接精准分发 |
+    | **流程分级** | 需人工费心判断“是否值得新建完整 change” | 内置开箱即用的 [hotfix](/zh/presets/hotfix) 与 [tweak](/zh/presets/tweak) 轻量预设 |
+    | **生态延展** | 仅限单一开发工作流 schema | 全流程工作流 + Skill 创作与评测平台（[组合](/zh/skill-creator/getting-started) / [评测](/zh/cli/eval) / [可视化看板](/zh/cli/dashboard)） |
   </Accordion>
 
-  <Accordion title="既然都是 OpenSpec + Superpowers，Comet 的优势在哪">
-    相对 superpowers-bridge 这类纯 schema 集成，Comet 的优势集中在四点：
+  <Accordion title="既然底层都是 OpenSpec + Superpowers，Comet 的优势体现在哪里？">
+    相比单纯的 Prompt 模板堆砌，Comet 的优势集中体现在四个工程维度：
 
-    1. **可恢复的状态机**：`.comet.yaml` 显式记录 `phase`、`build_mode`、`tdd_mode`、`review_mode`，长任务或上下文压缩后可以直接从这些状态精确恢复断点。
-    2. **硬性执行防线**：Comet 有 `comet-hook-guard.mjs`（PreToolUse hook）做硬拦截，加上每轮注入的 phase-guard 规则——比如 design 阶段禁止写源码、非法跳过阶段会被拦下。纯 schema 的 `PRECHECK` 只是文字约束，模型可以"读到但不执行"。
-    3. **入口稳定且跨平台**：意图路由可以从自然语言请求直接进入对应阶段，不依赖固定的 `/opsx:*` 触发方式；同时不强制绑定 subagent 平台。
-    4. **其他产品入口**：`/comet-any` 创建和组合 Skill，`comet eval` 评估本地 Skill，`comet dashboard` 查看 change。
+    1. **确定性状态机与零丢失恢复**：`.comet.yaml` 严格维护 `phase`、`build_mode`、`tdd_mode`、`review_mode` 等元数据。即使在遭遇超长任务或对话上下文被强行压缩后，也能基于物理检查点分毫不差地恢复现场。
+    2. **物理级防违规拦截**：Comet 具备底层 PreToolUse hook 守卫（如 `comet-hook-guard.mjs`），配合阶段守卫规则，在 design 阶段物理禁止编辑业务代码、非法跳步时强制抛错。纯文本提示词往往防不住模型幻觉，而 Hook 能够做到绝对硬性阻断。
+    3. **稳定且全自动的意图路由**：系统能够直接从你的自然语言输入中推断真实意图并路由到对应流程，无需开发者死记硬背各类底层参数。
+    4. **完善的生态工具链**：集成 `/comet-any`（可视化创建组合 Skill）、`comet eval`（沙箱化测试与量化打分）以及 `comet dashboard`（全景只读看板）。
 
-    如果你只想在 OpenSpec 里加一层 Superpowers 且不介意手动驱动，superpowers-bridge 更轻量；要长任务可恢复性、防漂移强约束、多平台和 Skill 平台能力，Comet 更合适。想了解 Comet 的运行时、工作流、评估和 Skill 创作分别对应哪些业界实践，可以进一步阅读 [Comet 与业界实践对照](/zh/concepts/comet-vs-industry)。
-
-  </Accordion>
-
-</AccordionGroup>
-
-## 状态与恢复
-
-<AccordionGroup>
-  <Accordion title="中断后再回来，Agent 怎么知道做到哪了">
-    Comet 不依赖聊天历史。每次调用 `/comet` 并由配置进入 Classic 后，内部 `/comet-classic` 都会重新读取活跃 change 的 `.comet.yaml` 和 OpenSpec artifacts，判断当前阶段和证据是否一致，然后路由到正确的阶段 Skill。
-  </Accordion>
-
-<Accordion title="comet status 看不到我的 change">
-  这个 change 可能是用原始 `/opsx:new` 创建的，缺少 `.comet.yaml`，会被 `comet status`
-  静默跳过。你可以在 Agent 平台中调用 `/comet` 并选择 Classic，让 Comet 接管该 change
-  并补齐状态文件。详见[存量项目接入](/zh/guides/existing-project)的"孤儿 change"。
-</Accordion>
-
-  <Accordion title=".comet.yaml 能手工编辑吗">
-    用户可见字段（workflow、phase、build_mode 等）原则上通过 `/comet-classic` 和阶段守卫流转，不要手工改 `phase`。由 Comet 自动维护的运行状态字段（machine-owned，在 `.comet/run-state.json` 或 `.comet/runs/<run-id>`）绝对不要手工改。排障时可以用 `comet-state` 命令，详见[状态管理](/zh/concepts/state-management)。
-  </Accordion>
-
-  <Accordion title="对话窗口被压缩导致进度丢失怎么办">
-    design 阶段写了 `brainstorm-summary.md` 作为恢复检查点，build 阶段的子代理有持久化 checkpoint。恢复时调用 `/comet`；配置进入 Classic 后，内部路由会直接读取文件状态并定位断点。详见[恢复中断的工作](/zh/guides/resuming-workflow)。
+    如果你只需要在 OpenSpec 中简单引入 Superpowers 的设计模板，且不介意全程手动敲命令，superpowers-bridge 相对轻巧；但若追求复杂任务的稳定性、防跑偏的物理约束、多平台兼容以及完善的评测体系，Comet 能够提供更专业的工程保障。了解更多背景请查阅 [Comet 与业界实践对照](/zh/concepts/comet-vs-industry)。
   </Accordion>
 </AccordionGroup>
 
-## 阶段与守卫
+## 状态与断点恢复
 
 <AccordionGroup>
-  <Accordion title="为什么不能跳过 design 直接 build">
-    Comet 的核心原则是 brainstorming 不可跳过（hotfix/tweak 预设除外）。完整工作流的守卫会检查 `design_doc` 是否存在，缺失时会直接阻断流程。跳过设计会导致后续阶段缺乏技术依据。
+  <Accordion title="对话中断后再回来，Agent 如何知道进度停在哪了？">
+    Comet 从不依赖脆弱的聊天历史。重新在项目中输入 `/comet` 时，系统底层会自动扫描当前活跃 change 的 `.comet.yaml` 状态机以及磁盘中的真实产物，核对无误后准确切回对应的阶段 Skill 继续执行。
   </Accordion>
 
-<Accordion title="verify 失败了怎么办">
-  不要直接归档。前 3 次可修复的失败会自动回 build 修复，不会问你；第 4 次失败或需要接受
-  WARNING/SUGGESTION 偏差时才暂停让你选择：继续修复、接受偏差（记录原因）或退回重新
-  brainstorming。`verify_result: fail` 时归档会被 guard 阻止。
-</Accordion>
+  <Accordion title="运行 comet status 为何看不到刚刚创建的 change？">
+    该变更可能是在外部直接通过原始命令（如 `/opsx:new`）创建的，缺少必要的 `.comet.yaml` 状态机，因此会被系统作为非受控目录跳过。此时只需在 Agent 中输入 `/comet`，系统会自动识别该目录并为你补齐状态文件完成接管。详见 [存量项目接入](/zh/guides/existing-project) 中的“孤儿 change”处置说明。
+  </Accordion>
 
-<Accordion title="阶段是怎么推进的，我需要手动操作吗">
-  阶段推进由 guard 脚本 `comet-guard.mjs --apply` 完成。`auto_transition:
-  true`（默认）时，一个阶段完成后自动调用下一个阶段 Skill；`auto_transition: false` 时暂停，按 HINT
-  手动运行。阶段总是会向前推进；该设置只影响是否自动调用下一个阶段的 Skill。
-</Accordion>
+  <Accordion title=".comet.yaml 可以手动直接修改吗？">
+    用户可见字段（如 `workflow`、`build_mode` 等）建议通过正常的流程流转更新，尽量不要手动修改 `phase`，避免造成状态机与物理文件不一致。而存储在本地缓存中的运行时底层文件（如 `.comet/run-state.json`），严禁手动篡改。若需排查或修复异常状态，请使用标准的 `comet-state` 工具，详见 [状态管理](/zh/concepts/state-management)。
+  </Accordion>
 
-  <Accordion title="修改设计后需要重新生成交接包吗">
-    当前 Classic 直接读取正式材料，不再要求重算 handoff hash。Agent 先核对修改影响，必要时更新设计与计划；目标或批准范围变化时先重新确认。只有需要一份集中阅读的 Markdown 视图时才生成 handoff。见 [comet handoff](/zh/scripts/comet-handoff)和[上下文交接与原文复用](/zh/concepts/context-compression)。
+  <Accordion title="窗口历史记录被意外清空或压缩，会不会导致开发进度丢失？">
+    完全不会。在方案设计阶段系统会自动沉淀设计摘要，在编码阶段每个子任务也都有持久化的检查点。恢复时只需在对话中输入 `/comet`，系统会直接读取物理文件重新定位，代码与进度完好如初。详见 [恢复中断的工作](/zh/guides/resuming-workflow)。
   </Accordion>
 </AccordionGroup>
 
-## 轻量预设与大需求
+## 阶段守卫与质量门禁
 
 <AccordionGroup>
-  <Accordion title="hotfix 和 tweak 有什么区别">
-    两者都跳过完整 brainstorming，保留 OpenSpec 状态、验证和归档。hotfix 适合复现路径明确的 bug 修复；tweak 适合范围明确的小改动。出现跨模块协调、新 public API、schema 变更时应升级 full。详见[hotfix 预设](/zh/presets/hotfix)。
+  <Accordion title="为什么不能跳过 design 阶段，直接开始写代码（build）？">
+    Comet 的核心底线是“方案未敲定前绝不盲目写代码”（hotfix 和 tweak 轻量预设除外）。完整流程的守卫在放行进入 build 之前，会强制校验 `design_doc` 是否存在。跳过方案推敲往往会导致后续开发频繁返工，因此守卫会明确拦截。
   </Accordion>
 
-<Accordion title="大需求要怎么处理">
-  `/comet-open` 会在创建产物文件前触发 PRD 拆分预检查，把大需求拆成多个可独立设计、交付、归档的
-  change。详见[大型 PRD 拆分](/zh/guides/prd-splitting)。
-</Accordion>
+  <Accordion title="verify 阶段验收报错未通过该怎么处理？">
+    切勿强行归档。对于常规的技术报错或测试失败，系统会在重试预算内自动退回 build 阶段修复，无需人工介入；只有当连续尝试 4 次依然未通过、或者报错涉及功能范围取舍时，系统才会主动暂停等待你做决策。在验收结果为 fail 的情况下，归档守卫会彻底锁死，杜绝半成品交付。
+  </Accordion>
 
-  <Accordion title="review_mode 有什么用">
-    `review_mode`（off/standard/thorough）控制 build 和 verify 阶段的自动代码审查强度。full workflow 必须在离开 build 前选择；hotfix 默认 off。可在 `.comet/config.yaml` 的 `classic.review_mode` 设置项目默认值。
+  <Accordion title="阶段是如何向前推进的，需要我手动输入下一阶段命令吗？">
+    阶段的推进由守卫命令 `comet-guard.mjs --apply` 自动完成。在默认配置（`auto_transition: true`）下，当前阶段检查通过后会自动唤起下一个阶段的 Skill；若配置为 `false`，则会在达标后暂停并输出提示，等待你手动触发下一步。
+  </Accordion>
+
+  <Accordion title="修改了方案后，需要手动重新生成交接材料吗？">
+    当前 Classic 采用直接读取正式文档的机制，无需手动重新计算 Handoff Hash。Agent 会先行评估方案调整带来的代码影响，并按需修正后续计划；若架构方案产生重大转向，只需重新确认即可。日常开发无需手动运行打包脚本。
   </Accordion>
 </AccordionGroup>
 
-## 常见问题
+## 预设模式与复杂需求
 
 <AccordionGroup>
-  <Accordion title="代码老是自动提交怎么办">
-    自动提交是 Superpowers 自身的行为。你可以让 AI 生成拦截 `git commit` 的 hook 或 rule，阻止自动提交。
+  <Accordion title="hotfix 与 tweak 预设有什么区别？">
+    两套预设均跳过了繁重的独立设计文档流程，但依然完整保留了状态跟踪、自动化验证与规范归档。hotfix 专用于复现路径明确的 Bug 修复；tweak 适用于目标明确的配置微调、文案更新或小范围能力改动。一旦在开发中发现改动涉及核心架构或公开 API 变更，系统会自动提示你升级为完整流程。详见 [hotfix 预设](/zh/presets/hotfix)。
   </Accordion>
-  <Accordion title="代码写到一半，我不满意方案怎么办">
-    先让 Agent 停下，不要继续写代码。然后按你实际做过什么处理：
 
-    - **你改了 spec、design 或 tasks**：直接再次调用 `/comet`。配置进入 Classic 后，Comet 会重新读取 `.comet.yaml` 和 OpenSpec artifacts，按当前 phase 恢复到正确阶段。
-    - **你自己改了代码**：也再次调用 `/comet`，并告诉 Agent：“我改过代码，请按当前工作区恢复。” Comet 会检查工作区的未提交改动并判断它们属于哪个阶段。
-
-    如果 spec 和代码都改了，也先用 `/comet` 恢复。你需要说明这些改动是否代表新方案；不要手工改 `.comet.yaml` 的 `phase` 或 `.comet/run-state.json`。Comet 会从当前文件状态和持久化 artifacts 恢复。
-
+  <Accordion title="遇到复杂庞大的业务需求时该如何拆解？">
+    在 open 阶段初期，`/comet-open` 会自动触发 PRD 拆分预检查。如果需求体量过大，系统会建议将其拆解为多个彼此独立、可单独测试与交付的子任务，并为你规划清晰的批次关系。详见 [大型 PRD 拆分](/zh/guides/prd-splitting)。
   </Accordion>
-  <Accordion title="使用 Comet 之后 Token 消耗变大、时间变长">
-    Comet 的 Full 流程面向复杂需求和功能：多轮澄清、可选的 TDD 执行和 Review，过程严格，因此 Token 消耗较高。需要轻量快速交付时，使用 comet-tweak 和 comet-hotfix 预设；小需求也可以直接用 Plan 或 /loop 替代。
+
+  <Accordion title="review_mode 参数有什么作用？">
+    `review_mode`（可选 `off`、`standard`、`thorough`）用于控制 build 与 verify 阶段自动化代码审查的严格程度。完整工作流在开始编写代码前会提示你选定；hotfix 模式下默认关闭。你可以在 `.comet/config.yaml` 中设置全局默认值。
+  </Accordion>
+</AccordionGroup>
+
+## 常见困惑与日常贴士
+
+<AccordionGroup>
+  <Accordion title="Agent 老是自动生成 Git Commit 怎么办？">
+    自动提交属于部分底层工具（如 Superpowers 原生脚本）的固有行为。如果你不希望频繁自动提交，可以在配置中引入拦截 Git Commit 的针对性规则。
+  </Accordion>
+
+  <Accordion title="代码写到一半，我对实现方案不满意想重来怎么办？">
+    首先明确让 Agent 暂停编写代码。随后根据实际情况处理：
+    - **如果你手动修改了规格文档或计划**：直接在对话中再次输入 `/comet`，系统会自动重新加载变更文档，恢复到对应阶段；
+    - **如果你手动修改了源码**：同样输入 `/comet` 并说明“我已手动调整了代码，请基于当前工作区评估进度”，系统会核对未提交的代码变动并重新校准状态。
+  </Accordion>
+
+  <Accordion title="使用 Comet 之后，Token 消耗增加、响应变慢了？">
+    Comet 的完整流程面向的是复杂、高可靠性要求的业务需求：前期的多轮澄清、方案设计、测试驱动与代码审查，每一步都设立了严格的质量门槛，因此在复杂任务中的 Token 消耗会相对较高。对于日常的小修小补或改动极小的需求，强烈建议优先使用 `comet-hotfix` 或 `comet-tweak` 轻量预设，或者采用 Native 工作流快速推进。
   </Accordion>
 </AccordionGroup>

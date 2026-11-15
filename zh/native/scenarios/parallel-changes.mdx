@@ -1,172 +1,172 @@
 ---
 title: '并行推进多个独立 Native Change'
-description: '在隔离 worktree 中推进多个独立目标，管理写入归属、跨会话恢复和 capability 归档冲突。'
+description: '在物理隔离的 Git worktree 中并发推进多个独立目标，掌握写入归属绑定、跨会话恢复及 Capability 归档次序仲裁。'
 ---
 
 <Note>
-  新建 change 使用 SDK Run，本机执行数据位于用户 Comet 数据目录；文中的
-  `.comet/runtime/native/`、独立 YAML 恢复和 `--finish` 示例仅适用于 Compat。默认 SDK 操作见
-  [Runtime](/zh/native/runtime) 与 [归档交付](/zh/native/archive-and-delivery)。
+  新建 change 统一采用 SDK Run，本机底层执行数据存储于用户主目录下的 Comet 全局数据目录；文中所涉及的
+  `.comet/runtime/native/`、独立 YAML 恢复以及 `--finish` 示例仅用于兼容模式（Compat）。默认的 SDK 操作指引详见
+  [Runtime 机制](/zh/native/runtime) 与 [归档与交付](/zh/native/archive-and-delivery)。
 </Note>
 
-一个项目可以同时存在多个 active Native Change。每个 change 保留自己的目标、验收范围、分支和工作目录绑定。目标相互独立时，可以在多个会话和 worktree 中并行推进；出现共享规格时，Runtime 会在 Archive 前要求确定顺序。
+同一个项目完全支持并发运行多个活跃中的 Native Change。每个 change 均独立拥有业务目标、验收契约、代码分支与物理工作目录绑定。当业务目标相互解耦时，你可以在多个客户端会话与物理 worktree 中无干扰并行推进；当遇到共享的系统底层能力规格时，Runtime 会在 Archive 归档门禁前主动仲裁先后次序。
 
-本页以两个目标为例：
+本文以两个平行的业务目标为例进行实战推演：
 
-- `session-retry-policy`：调整登录会话的重试和锁定策略；
-- `dashboard-export`：为运营看板增加 CSV 导出。
+- `session-retry-policy`：调优用户登录会话的重试退避与账户锁定策略；
+- `dashboard-export`：为数据运营看板增加大文件 CSV 异步导出功能。
 
-两个目标没有共同的最终验收结果，适合使用独立 change。
+上述两个目标在业务闭环上互不依赖，亦无共同的全链路验收诉求，属于极其典型的独立并发 Change 场景。
 
 ![小鱼把两个独立 Change 放在各自工作区中推进，并分别完成交付](/assets/parallel-changes-illustrations/01-isolated-worktrees.png)
 
-## 独立 Change 与 Supervisor Change 的选择
+## 独立 Change 与 Supervisor Change 的架构取舍
 
-| 判断条件    | 独立 Change                  | Supervisor Change                         |
-| ----------- | ---------------------------- | ----------------------------------------- |
-| 产品目标    | 可以分别发布和验收           | 必须作为一个整体交付                      |
-| 验收范围    | 各自拥有完整验收项           | 父目标拥有完整验收，child 覆盖其中一部分  |
-| 依赖关系    | 没有依赖，或只依赖已发布行为 | Runtime 需要管理 child 的依赖与集成顺序   |
-| 最终 Verify | 每个 change 分别执行         | 所有 child 集成后，父 change 再做整体验收 |
-| 归档        | 各自归档                     | child 不单独归档，由 Supervisor 最终归档  |
+| 核心考量维度 | 独立 Change 并发模式 | Supervisor 复合变更架构 |
+| --- | --- | --- |
+| 业务交付目标 | 各模块业务解耦，支持分别独立上线验收 | 必须作为一个原子化整体统一上线交付 |
+| 验收契约归属 | 各自拥有全套闭环的验收用例与测试标准 | 根目标统领全局验收，各子任务覆盖特定切片 |
+| 上下游依赖 | 彼此互无依赖，或仅依赖已发布的既有特性 | Runtime 在底层统筹子任务的依赖流向与集成拓扑 |
+| 全局 Verify 终审 | 每个 change 独立走完验证闭环即可交付 | 所有子任务并入集成分支后，触发主任务全链路终审 |
+| 最终流转归档 | 各自独立流转至 Archive 并单独交付 | 子任务绝不单独归档，最终由 Supervisor 统一归档收尾 |
 
-需求来自同一个会议或 PRD，不代表必须放进一个 change。决定因素是结果能否独立交付，以及是否存在共同的最终验收。
+多个需求即便是来自于同一场产品评审会或源于同一份需求大纲，亦不代表必须强行打包进同一个 change。核心评判标准在于：各模块是否能够独立交付上线，以及是否存在共同的全局终审验收要求。
 
-## 为并行任务选择 worktree 隔离
+## 采用 Git worktree 达成物理工作区硬隔离
 
-Native 创建 change 时支持三种工作区：
+在 Native 中新建 change 时，系统提供三种工作区隔离策略：
 
-| 隔离方式   | 适用场景                                  | 并行影响                           |
-| ---------- | ----------------------------------------- | ---------------------------------- |
-| `current`  | 串行完成一个 change，当前目录可以直接使用 | 多个会话会共享目录，不适合并行写入 |
-| `branch`   | 需要独立分支，但同一时间只在一个目录工作  | 切换分支会影响当前目录中的其他任务 |
-| `worktree` | 多会话、并行开发或当前目录已有未提交修改  | 每个 change 拥有独立目录和分支     |
+| 隔离策略 | 最佳实践场景 | 对多任务并发的实际影响 |
+| --- | --- | --- |
+| `current` 本地工作区 | 串行推进单个 change，直接在当前目录开工 | 多个会话将共享同一目录，绝对禁止并发修改，易引发踩踏 |
+| `branch` 独立分支 | 需要专有分支，但在同一时间段内仅操作单工作区 | 本地切换分支会直接影响当前目录中正在运行的其他任务 |
+| `worktree` 物理隔离 | 多会话并发、并行开发或当前目录已有未提交代码 | 为每个 change 分配完全独立的物理工作目录与专属 Git 分支 |
 
-本案例为两个 change 分别选择 `worktree`。Runtime 会记录 change branch、目标 branch 和 worktree 类型，并在每次写入和恢复时检查绑定。
+在本文场景中，两个并行任务均果断选择 `worktree` 隔离模式。Runtime 会在底层持久化记录各自的 change 分支、目标集成主干及工作区类型，在每一次触发文件写入与状态恢复时进行双向严密鉴权。
 
 ```text
-项目主目录
+项目主工程目录
 ├── .worktrees/session-retry-policy
 └── .worktrees/dashboard-export
 ```
 
-一个会话只在一个 change 的 worktree 中修改文件。不要把同一 change 复制到第二个 worktree，也不要让两个 change 共享同一个未提交工作目录。
+一个会话终端严格仅在对应的专属 worktree 目录内编码。严禁跨目录拷贝同一个 change 的工作区，亦不可让两个并发任务混用同一个尚未提交代码的脏工作区。
 
-## 每个 Change 独立完成 Shape
+## 各自独立完成 Shape 阶段契约锁定
 
-两个 change 分别确认自己的目标和验收范围。
+两个 change 分别在各自的上下文空间中完成目标定义与验收项对齐。
 
-`session-retry-policy` 可以包含：
+`session-retry-policy` 聚焦于：
 
-- 连续失败 5 次后锁定账号 15 分钟；
-- 成功登录后清零失败次数；
-- 锁定状态在 API 和登录页面中保持一致。
+- 登录凭据连续输错 5 次后，强制锁定账号 15 分钟；
+- 凭据核验成功登录后，立即清空历史失败计数器；
+- 锁定状态在底层 API 响应与前端登录页之间严格保持一致。
 
-`dashboard-export` 可以包含：
+`dashboard-export` 则聚焦于：
 
-- 导出结果遵循当前筛选条件；
-- 大数据量导出以后台任务执行；
-- 导出失败时显示可重试状态。
+- 导出的 CSV 数据严格继承前端当前的复合筛选条件；
+- 超大规模数据导出自动转为后台异步任务并支持轮询进度；
+- 导出失败时友好展示错误提示并提供重试入口。
 
-每个 change 都单独经历 Shape → Build → Verify → Archive。一个 change 的确认、失败或暂停不会自动推进另一个 change。
+两个 change 各自独立经历 Shape → Build → Verify → Archive 的标准状态机循环。任何一个任务的方案确认、测试挂起或阶段推进绝不会对另一个任务产生任何越权干扰。
 
-## 当前选择确定写入归属
+## 明确写入归属，杜绝跨任务污染
 
-`.comet/current-change.json` 记录下一次可观察写入属于哪个 workflow 和 change。项目中只有一个 active change 时，Hook Router 可以推断归属；存在多个 active change 时，需要明确选择。
+`.comet/current-change.json` 忠实记录了当前终端下一次免参数写入到底归属于哪套 workflow 及 change。当整个工程内仅存在唯一一个活跃任务时，Hook Router 能够智能推导归属；而在多任务并发场景下，必须显式明确当前聚焦的目标。
 
-查看所有 change：
+在终端中全局查看当前活跃的全部变更：
 
 ```bash
 comet native status
 ```
 
-在目标 worktree 中选择当前 change：
+切入对应的物理工作区后，显式锁定目标任务：
 
 ```bash
 comet native select session-retry-policy
 ```
 
-选择只确定当前写入归属，不会关闭其他 active change，也不会切换 Git 分支。选择的 change 已归档、状态不可读或工作区绑定不匹配时，Runtime 会拒绝写入。
+该选择仅用于锚定当前终端的写入归属，绝不会强行挂起其他 active change，更不会私自切换 Git 分支。若试图绑定的任务早已归档、元数据损坏或物理工作区不匹配，Runtime 会坚决拦截并拒绝写入。
 
-## 多个会话分别推进
+## 多窗口多会话并行攻坚
 
-可以为两个 worktree 各使用一个会话：
+你完全可以为两个隔离的物理 worktree 分别开启独立的客户端会话：
 
 ```text
-会话 A
-  worktree: .worktrees/session-retry-policy
-  change: session-retry-policy
+会话 A 窗口
+  物理路径: .worktrees/session-retry-policy
+  聚焦变更: session-retry-policy
 
-会话 B
-  worktree: .worktrees/dashboard-export
-  change: dashboard-export
+会话 B 窗口
+  物理路径: .worktrees/dashboard-export
+  聚焦变更: dashboard-export
 ```
 
-每个会话只读取自己的最新 `continuation`，并分别提交 Builder handoff、运行 Runtime 检查和启动 Verifier。状态版本、候选 ID 和执行引用会阻止一个 change 的迟到结果写入另一个 change。
+每个会话仅精准消费自身专属的最新 `continuation` 指令，分别向 Runtime 提交 Builder handoff、触发自动化沙盒测试并拉起只读 Verifier 审查。底层的状态版本号、代码快照哈希与会话身份鉴权体系，从物理上杜绝了某个任务迟到的异步结果错写进另一个任务的恶性事故。
 
-主目录中的未提交文件属于用户或其他任务时，应保持原样。worktree 隔离可以减少目录冲突，但不会自动清理与当前任务无关的修改。
+主工程目录中因个人日常调试留存的未提交改动，会被系统安全保留。worktree 隔离能够有效消除目录级的文件冲突，但不会越权清理与当前任务无关的外在脏代码。
 
-## 工作区不匹配时返回正确目录
+## 工作区脱节时的自愈与路径提示
 
-如果在 `dashboard-export` 的 worktree 中尝试推进 `session-retry-policy`，Runtime 会比较：
+若在 `dashboard-export` 的物理工作区中误敲命令尝试推进 `session-retry-policy`，Runtime 会前置核验：
 
-- 当前项目根目录；
-- change branch；
-- worktree 类型；
-- `comet-state.yaml` 保存的工作区绑定。
+- 当前所在工程物理根目录绝对路径；
+- 当前关联的 Git change 分支名；
+- 既定的 worktree 隔离模式；
+- `comet-state.yaml` 中持久化绑定的工作区契约。
 
-绑定不一致时，恢复结果为 `await-user`，并返回预期分支或 worktree。进入正确目录后重新读取状态即可。不要在错误目录中重建同名 change，也不要通过手工修改 YAML 绕过绑定。
+一旦发现绑定发生脱节，操作立即被拦截，状态机返回 `await-user` 并明确打印预期的目标分支与路径。开发者只需在终端中重新切入正确的物理目录即可顺畅接续。切忌在错误的路径下新建同名任务，更不可通过手动修改 YAML 绕过系统的前置防护。
 
-## 独立目标仍可能出现 capability 冲突
+## 独立任务面临的 Capability 语义级归档冲突
 
-两个 change 的产品目标可以独立，但实现期间可能修改同一个主 Spec 覆盖的能力。例如：
+两个变更虽然在业务功能上完全解耦，但在底层技术实现上完全有可能需要并发修改同一份系统主 Spec。例如：
 
-- `session-retry-policy` 修改 `authentication` Spec；
-- 另一个并行 change `session-device-limit` 也修改 `authentication` Spec。
+- `session-retry-policy` 涉及对 `specs/authentication/spec.md` 主规范的更新；
+- 另一个并行的 `session-device-limit`（设备并发限制）同样声明要修改 `authentication` 规范。
 
-Archive 会检查当前项目和已登记 Git worktree 中的其他 active change。发现相同 capability owner 时，当前 change 不能直接归档，Runtime 会返回 `capabilityPeers` 和串行处理要求。
+在流转至 Archive 归档门禁时，Runtime 会全域扫描所有已登记 Git worktree 中的 active change。一旦检测到存在多个活跃任务竞争同一个 Capability 的修改所有权，当前变更绝不可直接轻率归档，Runtime 会主动输出 `capabilityPeers` 冲突列表，并提示开发者明确归档次序。
 
-## 先归档一个 Change
+## 仲裁先后次序：率先归档首发任务
 
-假设用户决定先归档 `session-retry-policy`：
+假设经过开发者评估，决定优先归档 `session-retry-policy`：
 
-1. 按最新 `continuation` 确认归档顺序；
-2. Runtime 再次检查冲突列表和状态版本；
-3. `session-retry-policy` 更新 `authentication` 主 Spec；
-4. change 完成 Archive 和你已确认的工作区收尾。
+1. 依循最新的 `continuation` 指令确认优先归档该任务；
+2. Runtime 二次核验冲突队列一致性与当前状态版本号；
+3. `session-retry-policy` 率先将本次修改合流至 `authentication` 主 Spec；
+4. 该 change 正式完成 Archive 归档，并依照已获授权的策略完成 Git 工作区收尾。
 
-串行决定必须指向当前正在归档的 change。冲突列表或状态已经变化时，旧决定会被拒绝。
+仲裁指令在参数中强制绑定当前正在归档的特定 change 标识。若冲突队列发生动态变化或底层状态跃迁，旧的仲裁指令会被自动阻断。
 
-## 后续 Change 重新对齐并验收
+## 后续任务基于新基线重新对齐并验证
 
-`session-device-limit` 随后读取最新主 Spec。它需要把自己的完整目标规格与新基线重新对齐，再检查实现是否仍然满足合并后的行为。
+随后推进的 `session-device-limit` 会读取被前一个任务更新后的最新主 Spec。它必须将自身的目标规格与全新的系统基线重新对齐校准，确保自身代码在合并后的全新世界观下依然健壮可行。
 
-重新对齐后：
+对齐校准的标准工序如下：
 
-- 更新当前 change 的完整目标 Spec；
-- 根据最新行为修订实现；
-- 重新运行必要检查；
-- 由新的 Verifier 完成验收；
-- 使用新的结果进入 Archive。
+- 刷新当前 change 内部的目标 Spec 定义；
+- 依据合并后的最新系统行为，针对性微调业务代码实现；
+- 重新触发相关的自动化健康检查；
+- 由全新的只读 Verifier 对全量验收用例重新跑通严审；
+- 携带最新的测试证据链流转进入 Archive 归档。
 
-冲突前的通过结果不能直接复用，因为它验证的是旧的主 Spec。
+冲突发生前取得的历史测试通过结论绝不可直接盲目套用，因为先前的测试代码跑在旧版的主 Spec 契约之上。
 
-## 跨会话和跨设备恢复
+## 跨会话与跨设备断点无损接续
 
-恢复单个 change 时，先明确名称：
+在恢复单个具体 change 时，推荐在命令行显式声明名称：
 
 ```bash
 comet native status dashboard-export --details --json
 ```
 
-跨设备需要同步项目代码、`.comet/config.yaml` 和 change 的用户可携带产物。`.comet/runtime/native/` 属于本机执行状态，由目标设备重建。
+更换物理开发机时，只需确保通过 Git 提交并推送了业务源码、`.comet/config.yaml` 全局配置以及 change 目录内面向人类的技术产物。单机私有的 `.comet/runtime/native/` 执行缓存由目标设备全自动无损重建。
 
-多个 active change 同时存在且没有明确名称或有效选择时，自动恢复探测会返回 `ask_user`。它不会根据聊天内容猜测目标，也不会扫描或修改其他 change 的 Runtime 状态。
+当仓库内同时存在多个 active change 且在对话中未明确指代具体任务名时，系统的只读恢复探测会返回 `ask_user`。它绝不会凭空臆测开发者模糊的聊天意图，更不可能擅自跨目录篡改其他任务的底层运行态。
 
-## 分别完成交付与清理
+## 独立完成分支交付与工作区优雅收尾
 
-每个独立 change 的 Archive 都有自己的交付选择（保留工作区、本地合并、推送分支或创建 PR，选项见[归档与交付](/zh/native/archive-and-delivery)）。一个 change 的交付选择不适用于另一个 change。
+每个独立的 change 在流转至 Archive 阶段时，均享有完全自治的交付策略选择（保留本地分支与目录、本地合并入主干、推送到远端 Git 仓库或拉起 PR，详细参数请参阅[归档与交付](/zh/native/archive-and-delivery)）。某个任务选定的交付偏好绝不会机械污染另一个平行任务。
 
-Runtime 只清理已经归档、没有未提交修改且不再使用的 worktree。仍在执行、存在用户修改或 Git 收尾被阻塞的目录会保留，并通过 `workspaceFinishResult` 和 `recoveryArgs` 返回下一步。
+Runtime 仅安全清理已顺利完成归档、工作区无任何未提交残留、且已明确废弃不再使用的临时 worktree。若任务仍在途运行、工作区存有人类手动编写的代码、或底层 Git 交付被外部 Hook 拦截，相关目录会被完好保留，系统会通过 `workspaceFinishResult` 与 `recoveryArgs` 参数给出清晰的应急指引。
 
-继续阅读：[多 Change 与规格冲突](/zh/native/multi-change-and-conflicts)、[运行时保护与故障恢复](/zh/native/safety-and-recovery) 和 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
+延伸阅读：[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts)、[运行时安全防护与容灾自愈](/zh/native/safety-and-recovery) 以及 [任务推进与中断恢复机制](/zh/native/continuation-and-checkpoints)。

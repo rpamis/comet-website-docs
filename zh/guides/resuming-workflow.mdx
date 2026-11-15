@@ -1,115 +1,108 @@
 ---
 title: '恢复中断的工作'
-description: '会话中断、上下文压缩或换设备后，用 /comet 恢复中断的 Classic 工作。'
+description: '遭遇会话中断、上下文压缩或切换工作设备后，如何通过 /comet 快速恢复未竟的工作流。'
 ---
 
-会话中断、上下文压缩或换设备后，输入 `/comet 继续`。Comet 先读取项目配置，进入 `/comet-native` 或 `/comet-classic`，再由对应工作流读取磁盘状态。两套工作流分别管理自己的 change。
+发生会话中断、上下文压缩或切换工作设备后，只需输入 `/comet 继续`。Comet 会优先读取项目配置，自动路由到 `/comet-native` 或 `/comet-classic`，并由相应工作流解析磁盘上的最新状态。两套工作流各自独立管理所属的 change。
 
-## 最短路径
+## 最短恢复路径
 
-在 Agent 平台里输入：
+在你的 Agent 界面中直接发送：
 
 ```text
 /comet 继续
 ```
 
-Comet 不依赖对话历史：Classic 重读项目配置、OpenSpec、`.comet.yaml` 与运行证据。
+Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会重新读取项目配置、OpenSpec 规格、`.comet.yaml` 状态以及磁盘上的运行证据。
 
 <Tip>
-  <strong>
-    恢复不需要先跑 <code>comet status</code> 或 <code>comet doctor</code>。
-  </strong>
-  那两个是诊断命令，只在<strong>看起来有问题</strong>时才用（CLI/Skill 装坏了、change
-  不路由、证据对不上）。正常恢复就是 <code>/comet</code> 一步到位。
+  <strong>日常恢复无需先执行 <code>comet status</code> 或 <code>comet doctor</code>。</strong>
+  这两个命令是排查工具，仅在<strong>怀疑环境或配置异常</strong>时使用（如 CLI/Skill 未就绪、状态路由异常、产物证据缺失等）。正常接续工作直接输入 <code>/comet</code> 即可一步到位。
 </Tip>
 
-## 也可以直接说“继续”
+## 也可以直接用自然语言说“继续”
 
-0.4.0-beta.4 起，`comet init` 和 `comet update` 会把一段 Comet 恢复说明合并进项目的 `AGENTS.md` 和 `CLAUDE.md`。长程任务经过上下文压缩、跨会话或跨设备继续时，Agent 可能已经忘记当前请求原本属于 Comet，而用户也未再次输入 `/comet`。此时 Agent 可以先运行只读的 `comet resume-probe`，判断“继续刚才的登录重构”是否对应现有 change，再决定是否重新进入工作流。
+自 0.4.0-beta.4 起，`comet init` 和 `comet update` 会自动将一段 Comet 恢复指引注入到项目的 `AGENTS.md` 与 `CLAUDE.md` 中。长程开发在遭遇上下文被压缩、新建会话或换端操作时，Agent 可能忘记当前会话正由 Comet 管理，而你也可能未输入斜杠命令。此时 Agent 会率先运行只读的 `comet resume-probe` 探测命令，判断诸如“继续刚才的用户系统重构”是否能匹配到现有的 change，再决定是否重新唤起工作流。
 
-| 场景                                                | 探测结果                                 |
-| --------------------------------------------------- | ---------------------------------------- |
-| 明确要求继续、验证、归档或提交指定 change，状态允许 | 返回 `auto_resume`，进入对应永久入口     |
-| 新会话仅语义匹配到 change，或只有项目 selection     | 返回 `ask_user`，确认后再进入            |
-| 有多个候选、状态损坏或需要用户选择                  | 返回 `ask_user`，只问一个问题            |
-| 只是问问题、明确不走 Comet，或当前已在 Comet 流程内 | 返回 `out_of_scope`，不重复进入 workflow |
-| 没有 active Comet change                            | 返回 `none`，不执行恢复                  |
+| 交互场景 | 探测结果 | 行为表现 |
+| --- | --- | --- |
+| 明确要求继续、验证、归档或提交指定 change，且状态允许 | 返回 `auto_resume` | 自动进入对应阶段的正式入口 |
+| 新会话仅语义模糊匹配到某个 change，或只有项目级选择意图 | 返回 `ask_user` | 必须先向你确认意向，确认后再进入 |
+| 存在多个候选 change、状态冲突或需要用户裁决 | 返回 `ask_user` | 暂停并只抛出一个精准问题等待确认 |
+| 仅咨询问题、明确表示不走流程，或当前已在 Comet 流程中 | 返回 `out_of_scope` | 绝不重复唤起 workflow |
+| 没有任何活跃中的 active Comet change | 返回 `none` | 不触发恢复动作 |
 
-这段说明只约束 Comet 的恢复探测，并会保留文件中已有的用户规则。探测命令先解析配置，再只检查一套工作流；配置损坏时不会回退。`.comet/config.yaml` 中的 `ambient_resume: false` 可以关闭普通请求触发的自动检查。它不会影响显式 `/comet`，也不会绕过已有决策点。
+该机制仅约束 Comet 的无感恢复探测，且完整保留项目原有自定义规则。探测命令会严格按配置顺序校验单套工作流，配置损坏时不会随意兜底回退。若希望彻底关闭自然语言触发的被动探测，可在 `.comet/config.yaml` 中设置 `ambient_resume: false`。该配置不影响显式 `/comet` 调用，也不会跳过既有的关键停顿点。
 
 详见[恢复探测命令](/zh/cli/resume-probe)。
 
-## Classic 如何恢复
+## Classic 恢复机制深度解析
 
 <Note>
-  这一节同样是 <strong>后台原理</strong>：解释 <code>/comet-classic</code>{' '}
-  内部重读哪些文件、按什么规则路由到下一个阶段。你只需要输入 <code>/comet 继续</code>，下面的路由由
-  Comet 自动完成。
+  本节属于<strong>底层实现原理</strong>：旨在说明 <code>/comet-classic</code> 在内部重读了哪些文件、遵循怎样的状态路由表。日常使用中你只需发送 <code>/comet 继续</code>，后续的状态判定与路由跳转均由 Comet 自动完成。
 </Note>
 
-`/comet-classic` 的恢复能力依赖几点机制：
+`/comet-classic` 的韧性恢复依托于以下三条核心设计：
 
-| 机制                             | 说明                                                                                                                                      |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **重读文件状态，不依赖对话**     | 每次恢复都重新执行发现活跃 change + 读 `.comet.yaml`，不靠聊天历史猜阶段                                                                  |
-| **文件状态优先，自动修正元数据** | 如果 `.comet.yaml` 和实际文件冲突，以文件为准，Comet 自动修正 `.comet.yaml` 后继续                                                        |
-| **按阶段固定规则路由**           | 根据 `phase`/`workflow`/`verify_result` 等字段，路由到对应的阶段 Skill（含预设：build 阶段 hotfix→`/comet-hotfix`、tweak→`/comet-tweak`） |
+| 机制 | 说明 |
+| --- | --- |
+| **重读物理文件，解耦会话历史** | 每次恢复均在磁盘上即时扫描 active change 并读取 `.comet.yaml`，绝不凭聊天记忆臆测当前阶段 |
+| **文件状态优先，自动纠偏元数据** | 若 `.comet.yaml` 记录与磁盘实际代码或文件冲突，以物理文件为准，Comet 自动纠偏状态元数据后继续推进 |
+| **阶段规则路由确定** | 依据 `phase`、`workflow`、`verify_result` 等关键字段，精准分发至对应阶段 Skill（含轻量预设：build 阶段 hotfix → `/comet-hotfix`、tweak → `/comet-tweak`） |
 
-恢复时的路由（命中即停，以文件状态为准）：
+恢复时的状态路由矩阵（从上到下按命中优先级分发）：
 
-| 当前状态                                  | `/comet-classic` 路由到                                        |
-| ----------------------------------------- | -------------------------------------------------------------- |
-| `archived: true`                          | 流程已完成                                                     |
-| `verify_result: pass`                     | `/comet-archive`（先做归档前确认）                             |
-| `verify_result: fail`                     | 验证失败暂停点（需要你选修复或接受偏差）                       |
-| `phase: verify` 或 tasks 全勾             | `/comet-verify`                                                |
-| `phase: build`                            | 按 workflow：`/comet-hotfix` / `/comet-tweak` / `/comet-build` |
-| `phase: design` 或有 change 无 Design Doc | `/comet-design`                                                |
-| `phase: open` 或 `.comet.yaml` 缺失       | `/comet-open`                                                  |
-| 无活跃 change                             | `/comet-open`                                                  |
+| 当前状态 | `/comet-classic` 路由目标 |
+| --- | --- |
+| `archived: true` | 变更已归档，提示流程已全部完成 |
+| `verify_result: pass` | 路由至 `/comet-archive`（执行归档前审计与确认） |
+| `verify_result: fail` | 停留在验证失败停顿点（等待你选择针对性修复或接受偏差） |
+| `phase: verify` 或任务全部勾选完成 | 路由至 `/comet-verify` |
+| `phase: build` | 按 workflow 分发至 `/comet-hotfix`、`/comet-tweak` 或 `/comet-build` |
+| `phase: design` 或已有 change 但缺少 Design Doc | 路由至 `/comet-design` |
+| `phase: open` 或 `.comet.yaml` 缺失 | 路由至 `/comet-open` |
+| 磁盘上无任何活跃 change | 路由至 `/comet-open` 创建新变更 |
 
-只要有**一个**活跃 Classic change，`/comet-classic` 会自动选中它；有**多个**时列出清单让你选一个。
+当工作区只存在**一个**活跃 Classic change 时，`/comet-classic` 会自动选中并进入；若存在**多个**活跃 change，则会打印候选列表供你手动挑选。
 
-如果通过自然语言恢复，有多个 active change 时 Comet 不会替你自动选定；恢复探测会返回 `ask_user`，等待你指定具体的目标 change。
+若采用自然语言接续，当命中多个 active change 时，Comet 绝不会替你私自决定，恢复探测会固定返回 `ask_user` 等待你选定目标。
 
 ### Classic Change 的工作区复用
 
-创建或恢复 Classic change 时，Comet 会先读取 change 记录的分支和 worktree 绑定。匹配的已登记 worktree 会直接复用；找不到匹配 worktree 但分支仍存在时，恢复流程会重建它。当前目录、分支和 worktree 不匹配时，Comet 会暂停等待选择，不会静默改用另一个工作区。
+在创建或恢复 Classic change 时，Comet 会首先核验该 change 绑定的分支及 Git worktree。若存在已登记的匹配 worktree，Comet 将直接复用；若本地分支存在但 worktree 已丢失，恢复流程会自动重建。当工作目录、分支与 worktree 状态冲突时，Comet 会停顿等待你明确抉择，绝不会静默切换到无关工作区。
 
-从目标项目目录输入 `/comet` 或 `/comet 继续`。如果有多个 active change，先选择目标，再继续 Classic；不要手工复制 change 目录来恢复工作。
+请确保在目标项目根目录下执行 `/comet` 或 `/comet 继续`。若有多个活跃 change，先选定目标再接续；切勿直接手动跨目录拷贝 change 文件夹来进行所谓的“手动恢复”。
 
-## 换设备/换平台也能恢复
+## 跨设备与跨平台无缝恢复
 
-可跨设备恢复的 Classic 状态保存在仓库文件里：`.comet/config.yaml`、OpenSpec 产物根（新项目为 `docs/openspec/`）、change 的 `.comet.yaml` 和运行证据、`docs/superpowers/`。所以在另一台设备或另一个 Agent 平台打开同一个仓库，`/comet` 能从对应文件恢复。Native change 的跨设备恢复见[恢复手册](/zh/native/recovery-playbook)。
+所有支持跨设备接续的 Classic 状态均保存在 Git 追踪的仓库文件中：`.comet/config.yaml`、OpenSpec 规格根目录（新项目为 `docs/openspec/`）、各 change 的 `.comet.yaml` 与运行证据文件，以及 `docs/superpowers/`。因此，只要将代码推送到远端并在另一台机器或另一个 Agent 平台拉取，输入 `/comet` 即可一键拉起工作流。Native change 的跨设备恢复请参考[恢复手册](/zh/native/recovery-playbook)。
 
 <Note>
-  需要注意：未提交的工作区改动不会随 <code>git push</code>{' '}
-  同步到远端。更换设备前请先提交（commit）并推送代码，否则在新设备上恢复时将缺少这些未提交的代码（
-  <code>tasks.md</code> 中的勾选记录仍会保留）。
+  请特别留意：工作区中尚未提交（uncommitted）的代码改动不会随 <code>git push</code> 同步到远端。更换机器前请务必先将代码 <code>commit</code> 并 <code>push</code>，否则新设备上虽然保留了 <code>tasks.md</code> 的勾选记录，但会缺失未提交的业务代码实现。
 </Note>
 
-### 跨设备断点恢复
+### 跨设备断点恢复全景
 
-下图展示跨设备的断点恢复：只要仓库一致，不管在哪台设备、哪个平台，`/comet` 都能从文件状态重建断点继续，无需额外操作或上下文传递。
+只要 Git 仓库状态同步，无论你在哪台物理机器、使用哪款 IDE 或 Agent 客户端，`/comet` 都能从文件状态重建断点继续推进，无须手动传达背景信息。
 
 <img src="/img/comet-zero-resume.png" alt="跨设备断点恢复" />
 
-## 上下文压缩后怎么办
+## 上下文被压缩后的应对策略
 
-如果 Classic change 所在的 Agent 平台自动压缩了上下文，重新输入 `/comet`。项目配置会再次进入 Classic，内部 `/comet-classic` 按恢复协议重载状态；必要时读取 `brainstorm-summary.md`、handoff 交接包和 `.comet/subagent-progress.md`。你不需要手动操作这些文件。
+如果当前变更所在的会话被平台强制压缩，重新发送 `/comet` 即可。Comet 会重新读取配置进入对应流，Classic 内部按恢复协议重新加载状态；并在必要时读取 `brainstorm-summary.md`、handoff 交接包和 `.comet/subagent-progress.md`。开发者无需手动翻阅或拼接这些底层文件。
 
-## 从任意阶段入口恢复
+## 从任意阶段入口定向恢复
 
-Classic 正常恢复使用 `/comet`。阶段和预设入口只用于手动控制或调试：`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
+日常恢复推荐统一使用 `/comet`。各个独立的阶段入口主要用于高级手动调试或断点介入：`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
 
-这里有一条确定性保证：每个阶段 Skill 进入时都会先定位自己的脚本，再执行该阶段的**入口检查或恢复检查**；阶段始终以当前文件状态为准。
+Comet 具备严格的确定性保证：每个阶段 Skill 被调用时，均会首先定位配套脚本，并执行该阶段的前置**入口校验与恢复检查**；流转永远以磁盘实际文件事实为准。
 
 ```bash
 comet state check <change-name> <phase> --recover
 ```
 
-- 如果检查发现实际的 phase、workflow 或证据属于**另一个** Skill，按脚本输出和 `/comet-classic` 路由规则切换，**不要在错误的阶段里继续写状态**。
-- 如果工作树有未提交改动，先用 `comet/reference/dirty-worktree.md` 的规则归因。
+- 若检查发现当前的 phase、workflow 或代码证据属于**另一个**阶段，Comet 会依循脚本输出和路由规则主动切换，**绝不在错误的阶段状态下写入新数据**。
+- 若工作区存在未提交代码改动，会依照规范自动执行变更归因。
 
 ```mermaid
 flowchart TD
@@ -122,72 +115,69 @@ flowchart TD
 ```
 
 <Tip>
-  已知当前阶段时，可以跳过统一入口和 Classic
-  内部路由，直接进入对应阶段。入口检查会拦截与文件状态不匹配的调用。
+  如果你明确知晓当前所处的阶段，完全可以跳过总入口路由，直接执行对应阶段 Skill。前置入口守卫会自动拦截任何与文件状态不符的调用。
 </Tip>
 
-## build 阶段恢复的特殊情况
+## build 阶段恢复的特殊场景
 
-build 阶段的恢复最复杂，但大多数情况 `/comet-classic` 也能自动处理：
+build 阶段涉及代码生成与任务调度，相对最为复杂，但常见场景下 `/comet-classic` 均已实现全自动接续：
 
-| 情况                                                   | 行为                                                                              |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `build_pause: plan-ready` 且配置齐全                   | 重新发起同一次联合决策确认，你确认后清除暂停标记并继续                            |
-| `build_pause: plan-ready` 且 plan 存在，但执行配置未设 | 回到 plan-ready 联合决策，**让你补选**执行方式、TDD 和审查模式（不重新生成 plan） |
-| `build_pause: plan-ready` 但 plan 文件缺失             | 状态损坏，回 `/comet-build` 修复或重新生成 plan                                   |
-| `isolation`/`build_mode`/`tdd_mode` 未设               | 回 `/comet-build` 对应步骤**让你补选**                                            |
-| 都已设，有未完成任务                                   | 读 tasks.md 下一个未勾选任务继续执行                                              |
+| 现场状态 | 恢复行为 |
+| --- | --- |
+| `build_pause: plan-ready` 且执行配置齐全 | 重新发起同一次联合决策确认，你确认后自动清除挂起标记并推进 |
+| `build_pause: plan-ready` 且 plan 存在，但执行配置缺失 | 重新拉起 plan-ready 联合决策，**提示你补齐**执行模式、TDD 及审查配置（不会无故重新生成 plan） |
+| `build_pause: plan-ready` 但 plan 文件丢失 | 判定为状态损坏，回退至 `/comet-build` 修复或重新生成 plan |
+| `isolation`、`build_mode` 或 `tdd_mode` 未设置 | 返回对应配置节点，**引导你补充完成设置** |
+| 配置均已就绪，尚有未完成任务 | 读取 `tasks.md` 中下一个未打勾的任务继续执行 |
 
-subagent 模式（`build_mode: subagent-driven-development`）恢复时，主会话**不会**直接执行任务，而是重新按后台子代理调度规则推进，只负责协调。
+在 subagent 模式（`build_mode: subagent-driven-development`）下恢复时，主会话**不会**直接下场写业务代码，而是作为调度中心继续协调后台子代理分工执行。
 
-## 有未提交改动时
+## 存在未提交改动时的处理
 
-如果工作区有未提交改动，Comet 会自动做**归因**，不需要你先解释改了什么：
+如果工作区存在未提交的代码改动，Comet 会自动进行**变更归因**，无需你在提示词中手动说明修改了什么：
 
-- 改动属于当前 change → 折叠进去继续
-- 和当前 change 无关 → 暂停问你怎么处理（并入 / 拆新 change / 保留 / 丢弃）
-- 来源不确定 → 暂停汇报文件列表和判断依据
+- **归属于当前 change**：自动吸收合并入当前实现并继续推进。
+- **与当前 change 无关**：自动停顿并询问你的处理意向（并入当前变更 / 拆分为新 change / 本地保留 / 放弃更改）。
+- **来源无法判定**：暂停并输出差异文件列表与判定依据，等待你确认。
 
-构建产物（`node_modules/`、`dist/` 等 `.gitignore` 的）会自动排除，不视为用户改动。
+已被 `.gitignore` 忽略的构建产物（如 `node_modules/`、`dist/` 等）会被自动剔除，不计入用户变更。
 
 <Warning>
-  未提交改动（dirty worktree）只代表代码事实，<strong>不会自动推进</strong> <code>.comet.yaml</code>{' '}
-  的 <code>phase</code> 或勾选 <code>tasks.md</code>
-  ，只有完成归因、验证、过阶段 guard 后才推进状态。
+  工作区未提交改动（dirty worktree）仅代表代码物理事实，<strong>绝不会自动修改</strong> <code>.comet.yaml</code> 的 <code>phase</code> 或私自勾选 <code>tasks.md</code>。只有在通过变更归因、通过验证并满足阶段 Guard 条件后，工作流状态才会正式演进。
 </Warning>
 
-## 需要你介入的情况
+## 常见的人工介入场景
 
-`/comet-classic` 能自动推进无歧义的衔接，但**决策点**必须等你明确选择。恢复时常见的需要你介入的情况：
+`/comet-classic` 能够无缝自动串联所有无歧义的执行步骤，但遇到**核心决策点**时必须等待你亲自裁决。恢复过程中常见的人工交互节点包括：
 
-- **验证失败**（`verify_result: fail`）：需要你决定修复还是接受偏差
-- **plan-ready 暂停**：需要你选择隔离和执行方式
-- **build 决策缺失**：需要你补选 `isolation`/`build_mode`/`tdd_mode`
-- **无法归因的未提交改动**：需要你说明改动归属
-- **多个活跃 change**：需要你选择恢复哪个
+- **验证未通过**（`verify_result: fail`）：需要你决策针对性修复还是接受已知偏差
+- **plan-ready 挂起**：需要你确认实现方案并选择隔离等级与执行模式
+- **build 策略缺失**：需要你补全 `isolation`、`build_mode` 或 `tdd_mode`
+- **无法判定的未提交代码**：需要你明确该批代码的归属意图
+- **多个活跃中的 change**：需要你指定当前要接续的具体任务
 
-其余是各阶段固有的停顿点（见[五阶段停顿点](/zh/concepts/decision-points)）。这些之外，`/comet-classic` 都会自动推进。
+除上述情况及各阶段固有的审查停顿点（详见[五阶段决策与停顿点](/zh/concepts/decision-points)）之外，其余中间过程 `/comet-classic` 均会自动闭环推进。
 
-## 什么时候才用 comet status / comet doctor
+## 何时调用 comet status 与 comet doctor
 
-这两个是**诊断工具**，不是恢复的必经步骤：
+这两条命令定位为**离线诊断工具**，并不是每次恢复都要跑的前置条件：
 
-| 命令           | 什么时候用                                                                              |
-| -------------- | --------------------------------------------------------------------------------------- |
-| `comet status` | 想看“当前处于哪个阶段、声明的产物是否都还在”：`/comet-classic` 路由不对、或证据对不上时 |
-| `comet doctor` | 环境或安装出问题：CLI/Skill 缺失、`.comet.yaml` 格式坏掉、`/comet-classic` 起不来时     |
+| 命令 | 推荐使用时机 |
+| --- | --- |
+| `comet status` | 想要直观查阅“当前变更处于何种阶段、声明的产物是否齐备”，或怀疑路由异常、证据脱节时 |
+| `comet doctor` | 怀疑底层开发环境或依赖损坏时：例如全局 CLI 或 Skill 丢失、`.comet.yaml` 格式损坏、入口唤起失败等 |
 
 ```bash
-comet status        # 看活跃 change 的 phase/任务/runtime_eval
-comet doctor        # 诊断安装、环境、Skill 完整性
+comet status        # 查看当前 active change 的阶段、任务进展及 runtime_eval 状态
+comet doctor        # 深度诊断环境依赖、配置合法性及 Skill 安装完整性
 ```
 
-`runtime_eval` 会告诉你声明的步骤证据是否真在磁盘上，失败时会提示 `run <命令> or restore missing evidence`。
+其中 `runtime_eval` 会在磁盘上真实校验步骤产物是否完好，若发生丢失会明确打印修复建议（如 `run <命令> or restore missing evidence`）。
 
-## 下一步
+## 相关文档
 
-- [恢复探测命令](/zh/cli/resume-probe) — 了解自然语言恢复前的只读探测
-- [状态损坏与恢复](/zh/guides/state-recovery) — `/comet-classic` 路由不对或状态坏了怎么办
-- [项目文件结构](/zh/guides/project-structure) — 状态都存在哪些文件里
-- [自动推进机制](/zh/concepts/auto-transition) — 恢复后的自动衔接
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — 哪些地方需要你介入
+- [恢复探测命令](/zh/cli/resume-probe) — 了解自然语言被动恢复的只读探测原理
+- [状态异常排查与修复](/zh/guides/state-recovery) — 状态文件损坏或路由偏差时的急救方案
+- [项目文件结构](/zh/guides/project-structure) — 了解状态与产物在项目中的实际落盘位置
+- [自动流转机制](/zh/concepts/auto-transition) — 深入了解恢复后的自动化状态机推演
+- [五阶段决策与停顿点](/zh/concepts/decision-points) — 梳理流程中所有需要人工裁决的交互锚点

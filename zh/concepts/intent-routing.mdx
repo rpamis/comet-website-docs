@@ -1,9 +1,9 @@
 ---
 title: '意图识别与路由'
-description: '输入一句话后，Comet 会在 full、hotfix、tweak、resume、ask_user、out_of_scope 六种结果中选择其一。证据不足或有冲突时，它会暂停并向你确认。'
+description: '输入自然语言需求后，Comet 会在 full、hotfix、tweak、resume、ask_user、out_of_scope 六种路由中精准分发。若证据不足或存在潜在风险，系统会主动暂停等待你确认。'
 ---
 
-在 Classic 模式下，输入 `/comet` 并说明目标即可。内部 `/comet-classic` 会判断这次该走哪个 Classic profile。判断依据包括**意图识别**、**槽位提取**和实际文件状态。
+在 Classic 模式下，日常开发只需在 Agent 中输入 `/comet` 并附带任务描述。系统内部的 `/comet-classic` 路由引擎会综合**意图分类**、**关键槽位提取**与代码仓库的实际物理状态，精准裁决本次任务该走向哪个工作流。
 
 <p align="center">
   <img
@@ -14,222 +14,193 @@ description: '输入一句话后，Comet 会在 full、hotfix、tweak、resume�
 </p>
 
 <p align="center">
-  路由上下文记录用户请求、仓库状态和风险信号，运行时据此计算 route
+  路由引擎综合分析用户输入、仓库状态与潜在风险信号，由运行时计算最优路由
 </p>
 
-## 路由的六种结果
+## 六种路由走向
 
-输入一句话后，Comet 会把这次调用路由到下面六种结果之一：
+输入需求后，Comet 会自动将本次调用匹配至以下六种走向之一：
 
-| 路由（route）  | 含义                                             | 下一步 Skill           | 需要确认 |
-| -------------- | ------------------------------------------------ | ---------------------- | -------- |
-| `full`         | 走完整五阶段（open→design→build→verify→archive） | `comet-open`           | 否       |
-| `hotfix`       | 快速修复已有行为，跳过头脑风暴                   | `comet-hotfix`         | 否       |
-| `tweak`        | 使用 OpenSpec 的中等改动，delta spec 是正式产物  | `comet-tweak`          | 否       |
-| `resume`       | 恢复一个进行中的变更                             | 由该变更的当前阶段决定 | 否       |
-| `ask_user`     | 证据不足或有冲突，停下来问你                     | 无                     | **是**   |
-| `out_of_scope` | 你只是在提问，没要求执行工作流                   | 无                     | **是**   |
+| 路由走向（route） | 核心含义                                         | 唤起的下一步 Skill     | 是否需要人工确认 |
+| ----------------- | ------------------------------------------------ | ---------------------- | ---------------- |
+| `full`            | 走完整的五阶段（open → design → build → verify → archive） | `comet-open`           | 否               |
+| `hotfix`          | 快速修复已有已知异常，跳过独立设计文档           | `comet-hotfix`         | 否               |
+| `tweak`           | 目标清晰的中轻量调整，增量 Spec 即为正式规格产物 | `comet-tweak`          | 否               |
+| `resume`          | 继续推进某个处于进行中的活跃变更                 | 由该变更当前所处阶段决定 | 否               |
+| `ask_user`        | 上下文证据不足或存在规则冲突，暂停等待确认       | 无（等待用户选择）     | **是**           |
+| `out_of_scope`    | 仅为咨询提问，非实际代码研发任务                 | 无（直接回复答疑）     | **是**           |
 
-其中：
+其中需要特别注意：
 
-- 只有 `ask_user` 和 `out_of_scope` 需要**显式确认**。证据不足时，Comet 会暂停并等待你选择。
-- `full`/`hotfix`/`tweak` 各自映射到一个确定的入口 Skill，而 `resume` 的下一步取决于你要恢复的那个变更当前停在哪一阶段。
+- 只有 `ask_user` 与 `out_of_scope` 需要**显式人工确认**。在判断依据不足时，Comet 宁可主动暂停求证，也绝不盲目猜测。
+- `full`、`hotfix` 与 `tweak` 会直接对应到确定的入口 Skill；而 `resume` 则根据你要恢复的那个变更当前停在哪一阶段顺畅接续。
 
 <Warning>
-  这是 Comet 的安全设计：<strong>风险信号优先于口头说的流程</strong>。如果你明确要求走{' '}
-  <code>hotfix</code> 但同时命中了风险信号，运行时会停下来问你（<code>ask_user</code>
-  ），并在高风险的轻量流程入口暂停确认。
+  这是 Comet 极为重要的安全机制：<strong>物理风险信号的优先级始终高于口头表述</strong>。如果你口头上说要走 <code>hotfix</code>，但改动内容实际上触碰了核心公开 API 或底层数据结构，运行时会果断判定为 <code>ask_user</code> 并暂停，严禁在高风险场景下违规冒进。
 </Warning>
 
-## 几个典型场景
+## 典型场景剖析
 
-下面用具体例子说明同一条用户输入，不同上下文会路由到不同结果。
+通过以下真实开发示例，了解系统如何根据不同上下文给出合理的路由决策：
 
-### 场景一：修一个已知 bug
-
-```text
-/comet 登录接口偶发 500，帮我看一下
-```
-
-- `intent.name`: `fix_bug`，置信度高
-- `existing_behavior: true`（修已有行为）
-- 风险信号全为 `false`
-- 有 `workflow_candidate: hotfix` 的证据
-
-→ 路由 **`hotfix`**，下一步 `comet-hotfix`。这是 hotfix 的典型场景：修已有异常，不碰新能力、API、schema。
-
-### 场景二：嘴上说小改，实则动了对外接口
+### 场景一：修复已知 Bug
 
 ```text
-/comet 小改一下，把 CLI 的 --force 参数去掉
+/comet 登录接口偶发 500，帮我排查修复一下
 ```
 
-- `intent.name`: `make_tweak`
-- `user_explicit_workflow: tweak`（你明确说了"小改"）
-- 但 `public_api_change: true`（去掉 CLI 参数是改对外接口）
+- `intent.name`: `fix_bug`，高置信度；
+- `existing_behavior: true`（针对现有缺陷修复）；
+- 核心风险信号全为 `false`；
+- 具备强有力的 `workflow_candidate: hotfix` 事实依据。
 
-→ 路由 **`ask_user`**。显式的 `tweak` 和风险信号冲突，运行时会暂停并请你确认是否继续这条会影响外部契约的轻量流程。
+→ 路由至 **`hotfix`**，直接唤起 `comet-hotfix`。这是典型的修复场景：快速修复现有行为异常，不增加新业务能力，也不破坏接口与 Schema。
 
-### 场景三：恢复一个进行中的变更
+### 场景二：口头说“微调”，实则破坏了对外接口
+
+```text
+/comet 稍微小改一下，把 CLI 的 --force 参数直接去掉
+```
+
+- `intent.name`: `make_tweak`；
+- `user_explicit_workflow: tweak`（用户口头表达为微调）；
+- 但同时检测到 `public_api_change: true`（删除公开命令行参数属于破坏性接口变更）。
+
+→ 路由至 **`ask_user`**。口头指定的轻量模式与底层的重大风险信号发生冲突，系统主动暂停，提示你确认是否真的要跳过设计阶段直接修改外部公开契约。
+
+### 场景三：恢复未完结的任务
 
 ```text
 /comet 继续上次的 note-board
 ```
 
-- `requested_action: continue`
-- `change_id: note-board`，且在 `active_change_names` 里
+- `requested_action: continue`；
+- `change_id: note-board` 且在当前活跃任务列表中。
 
-→ 路由 **`resume`**，下一步由 `note-board` 这个变更当前停在哪一阶段决定。
+→ 路由至 **`resume`**，系统根据 `note-board` 当前停顿的具体阶段精准唤醒。
 
-### 场景四：只是问个问题
+### 场景四：纯粹咨询答疑
 
 ```text
-/comet Comet 的 verify 阶段大概做什么？
+/comet Comet 的 verify 阶段主要做哪些检查？
 ```
 
-- `intent.name: ask_question`
-- `requested_action: question`
+- `intent.name: ask_question`；
+- `requested_action: question`。
 
-→ 路由 **`out_of_scope`**。你在提问，没要求执行工作流，Comet 只回答问题，不启动流程。
+→ 路由至 **`out_of_scope`**。检测到你只是在咨询技术细节，并未发起真实的代码变更，Comet 会直接回答问题，绝不节外生枝创建空任务。
 
-## 使用时需要知道什么
+## 日常使用建议
 
-对普通用户，你**不需要手写路由上下文**。调用 `/comet` 后，配置进入 Classic，`/comet-classic` 会在内部完成上下文整理和评分。你只需要知道：
+在日常编码中，你**完全无需手动构造复杂的路由参数**。在 Agent 中正常输入 `/comet` 后，系统会自动在后台完成意图解析与评分。只需留意以下几点：
 
-1. **说清楚你要干什么。** 越具体，路由越准。"修这个 bug"比"帮我看看"更容易命中 `hotfix`。
-2. **Comet 在证据不足时请你确认。** 证据不足或存在冲突时，它会暂停在路由入口，等待明确决定。
-3. **路由可追溯。** 如果你觉得路由错了，可以回看路由上下文和诊断信息。
+1. **清晰准确地描述诉求**：描述越具象，路由就越精准。例如“修复订单重复提交的 Bug”比模糊的“看看这个接口”更容易直接命中 `hotfix`。
+2. **遇到暂停无需惊慌**：当证据不充分或可能存在重大影响时，系统主动暂停确认是为了保护你的代码安全。
+3. **全程可追溯**：若对路由结果有疑问，可以随时调阅路由上下文与诊断日志。
 
-如果你是高级用户或贡献者，想看后端实际的路由输出，可以手工跑：
+高级开发者或开源贡献者若想直接观察底层的评分输出，可以在终端中运行：
 
 ```bash
-# 把一个路由上下文 JSON 交给运行时评分
+# 将一个路由上下文 JSON 传入运行时进行评分
 node "$COMET_INTENT" route '{"schema_version":"comet.intent.v1", ...}'
-# 或从 stdin 读
+
+# 或者从标准输入读取
 node "$COMET_INTENT" route --stdin < frame.json
 ```
 
-它会返回最终的 `route`、`diagnostics`（分歧诊断）和完整的 `normalizedFrame`。字段含义见随 Skill 分发的 `reference/intent-frame.md`。
+系统会输出最终裁决的 `route`、分歧诊断报告 `diagnostics` 以及规范化后的 `normalizedFrame`。
 
-## 和 `/comet-tweak` 的关系
+## 与独立命令 `/comet-tweak` 的分工
 
-路由上下文让 `/comet-classic` 能自动路由到 `tweak`，那 `/comet-tweak` 这个独立命令还有用吗？
+既然路由引擎能够自动分发至 `tweak`，那么单独的 `/comet-tweak` 入口还有必要保留吗？
 
-有用，但定位不同：
+两者定位互补，各有用途：
 
-- **`/comet`**：正常用户入口，按项目配置选择 Native 或 Classic。
-- **`/comet-classic`**：Classic 内部永久入口，由路由上下文决定走 `full`/`hotfix`/`tweak`/`resume`；通常由 `/comet` 转发进入。
-- **`/comet-tweak`**：**tweak 专用**的 OpenSpec action 路径。适用于已经确认范围的中等改动。
+- **`/comet`**：日常标准统一入口，根据项目配置自动分流；
+- **`/comet-classic`**：Classic 内部路由引擎，负责基于上下文判定具体流程；
+- **`/comet-tweak`**：面向 tweak 预设的显式入口，适用于开发者已经非常明确要走微调流程的场景。
 
-两者的差别是：`/comet-classic` 用于“在 Classic 内判断该走哪条流程”，`/comet-tweak` 用于“我已经确定要走 tweak”。完整五阶段 `full` 仍走 Superpowers 的 design/plan/build 路径。
+## 意图判定的底层架构（排障与进阶参考）
 
-## 路由怎么判定（想复现或排查时再读）
+以下内容深入剖析路由引擎的底层判定逻辑，日常使用了解即可。
 
-下面这些结构用于解释和排查路由结果，日常使用不必了解。
+### 为什么需要结构化的意图帧？
 
-### 路由上下文解决的问题
+在早期版本中，路由分发很大程度上依赖 Prompt 中的自然语言约定（例如“若是 Bug 就走 hotfix……”）。这种朴素做法在实际工程中存在三大痛点：
 
-在路由上下文机制出现之前，`/comet-classic` 入口主要依赖 Skill 正文里的自然语言规则，比如“如果是 bug 就走 hotfix，如果是文案改动就走 tweak……”。这种做法有三个问题：
+| 痛点问题     | 具体表现                                                           |
+| ------------ | ------------------------------------------------------------------ |
+| **不可解释** | 为什么选了这条路径？模型无法给出结构化论据，全凭提示词模糊推测    |
+| **不可复核** | 缺乏结构化的中间参数，一旦路线选错，难以快速定位是哪条信号产生误导 |
+| **不可恢复** | 对话一旦中断，模型只能重新再盲猜一次                               |
 
-| 问题         | 表现                                                           |
-| ------------ | -------------------------------------------------------------- |
-| **不可解释** | 路由结果是怎么得出来的？用户和 Agent 都说不清，只能信任提示词  |
-| **不可复核** | 没有结构化的判断依据，无法在路由错的时候定位是哪个信号出了问题 |
-| **不可恢复** | 中断后重新进来，Agent 只能重新读一遍提示词，重新"猜"一次       |
+Comet 引入了结构化的意图帧（`CometIntentFrame`），将用户意图抽象为**带明确字段、证据来源与置信度**的标准数据。运行时并不轻信 Agent 初步推荐的候选路径，而是基于确定性规则重新评分，并将任何判断分歧记入诊断日志。
 
-路由上下文会把“用户想干什么”整理成一份**带字段、证据和置信度**的结构化数据。运行时不会直接采纳 Agent 的候选路由，而是会重新评分，再给出最终结果，并把分歧写入诊断日志。
+通过这一机制，路由决策实现了**完全的可解释、可复核与断点可复原**。
 
-从 0.4.0 开始，这套机制（实现为 `CometIntentFrame`）取代了 Skill 正文里的自然语言经验规则。路由结果因此变得**可解释、可复核、可恢复**。中断后可以从结构化的路由上下文直接恢复，不需要重新推断。
+### 意图分类与槽位提取流程
 
-### 意图识别与槽位提取
-
-**意图识别**回答“你想干什么”，例如启动新变更、修已有 bug、做轻量调整、恢复进行中的变更，或只是提问。
-**槽位提取**会把你的原话和仓库状态拆成结构化路由信号，如动作、候选流程和风险标记。每条信号都带来源标注，供运行时按固定优先级评分。
-
-路由决策的核心输入是 `intent`（意图识别）和 `slots`（槽位提取），两者连同其余字段构成 `CometIntentFrame`。运行时用这份结构评分并给出最终路由：
+**意图识别**负责定义“用户要干什么”（如开启新任务、修 Bug、微调、继续任务或咨询）。
+**槽位提取**则将自然语言与当前 Git 状态解构为结构化的技术信号，每项信号均严格标注来源（`user` / `repo` / `state`）。
 
 ```mermaid
 flowchart LR
-    U["你的原话<br/>utterance"] --> F["路由上下文<br/>CometIntentFrame"]
-    R["仓库状态<br/>active changes 等"] --> F
-    F --> I["intent<br/>高层意图 + 置信度"]
-    F --> S["slots<br/>路由槽位"]
+    U["用户自然语言输入<br/>utterance"] --> F["路由上下文<br/>CometIntentFrame"]
+    R["仓库物理状态<br/>active changes 等"] --> F
+    F --> I["intent<br/>核心意图 + 置信度"]
+    F --> S["slots<br/>路由关键槽位"]
     F --> C["context<br/>仓库上下文"]
-    F --> E["evidence<br/>证据片段"]
-    F --> P["proposed_route<br/>Agent 候选路由"]
-    I --> RT{"运行时评分"}
+    F --> E["evidence<br/>技术证据片段"]
+    F --> P["proposed_route<br/>Agent 建议路由"]
+    I --> RT{"运行时确定性评分"}
     S --> RT
     C --> RT
     E --> RT
-    RT --> O["最终 route<br/>full/hotfix/tweak/resume/ask_user/out_of_scope"]
+    RT --> O["最终确定 route<br/>full/hotfix/tweak/resume/ask_user/out_of_scope"]
 ```
 
-| 部分             | 作用                                                          |
-| ---------------- | ------------------------------------------------------------- |
-| `utterance`      | 触发 `/comet-classic` 的用户原话，便于事后追溯                |
-| `intent`         | 高层意图（启动/恢复/修 bug/小改/提问/未知）+ 置信度           |
-| `slots`          | 从原话归一化出来的路由槽位：动作、候选流程、风险信号等        |
-| `context`        | 从**仓库状态**读取的上下文，不是从你的话里抽的                |
-| `evidence`       | 支撑关键判断的证据片段，每条标注来源（`user`/`repo`/`state`） |
-| `proposed_route` | Agent 提交的候选路由，**只是建议，运行时会复核**              |
+#### 核心风险槽位（slots）
 
-#### 意图识别（`intent`）
+在所有槽位中，对最终流向起决定性作用的是以下几个布尔型的**重大风险信号**：
 
-`intent` 包含两个子字段：
-
-- **`name`**：意图类型，取值 `start_change` / `fix_bug` / `make_tweak` / `resume_change` / `ask_question` / `unknown`
-- **`confidence`**：0–1 的置信度评分。置信度低于 0.7 时，运行时直接路由到 `ask_user`。宁可停下来问，也不依赖模糊意图冒险选路。
-
-#### 槽位提取（`slots`）
-
-槽位里最影响路由的是几个**风险信号**布尔值。它们决定了"这事是不是该走完整流程"：
-
-| 槽位                        | 命中时倾向                                           |
+| 槽位标识                    | 命中后的倾向                                         |
 | --------------------------- | ---------------------------------------------------- |
-| `existing_behavior: true`   | 修复已有行为 → 倾向 `hotfix`                         |
-| `new_capability: true`      | 新增能力 → 倾向 `full`                               |
-| `public_api_change: true`   | 改了对外接口/契约 → 倾向 `full`                      |
-| `schema_change: true`       | 改了结构化数据格式（如 `.comet.yaml`） → 倾向 `full` |
-| `cross_module_change: true` | 跨模块/跨工作流边界 → 倾向 `full`                    |
+| `existing_behavior: true`   | 属于修复既有功能缺陷 → 倾向于 `hotfix`               |
+| `new_capability: true`      | 涉及新增完整业务能力 → 必须进入 `full`               |
+| `public_api_change: true`   | 改变对外公开 API 或命令契约 → 必须进入 `full`        |
+| `schema_change: true`       | 变更核心数据格式（如配置文件规范） → 必须进入 `full` |
+| `cross_module_change: true` | 涉及跨模块边界的深度联动 → 必须进入 `full`           |
 
-只要命中**任何一个**风险信号（`new_capability`/`public_api_change`/`schema_change`/`cross_module_change`），运行时就倾向于走 `full`，哪怕用户说的是"小改一下"。
+一旦命中上述后四项中任意一个重大风险信号，即便口头上说得再轻描淡写，运行时都会强制将其推向安全稳妥的 `full` 流程。
 
-### 运行时怎么评分
+### 运行时评分优先级
 
-Agent 整理好路由上下文后，运行时（`comet-intent.mjs`）会按一套**固定优先级**重新评分，给出最终 `route`。
-
-<Note>
-  可解释路由的核心就是这套固定优先级顺序。
-  每一步都有明确的判断条件，分歧写入诊断日志，方便事后追溯。
-</Note>
+在 Agent 整理好意图帧后，运行时通过固定的优先级算法给出最终 `route`：
 
 ```mermaid
 flowchart TD
-    A(["运行时评分开始"]) --> B{"① 置信度 ≥ 0.7<br/>且无歧义？"}
+    A(["开始运行时评分"]) --> B{"① 置信度 ≥ 0.7<br/>且语义清晰？"}
     B -->|否| AU1["ask_user"]
-    B -->|是| C{"② 明确意图<br/>resume / out_of_scope？"}
+    B -->|是| C{"② 明确属于<br/>resume 或 out_of_scope？"}
     C -->|是| CLEAR["resume / out_of_scope"]
-    C -->|否| D{"③ 显式流程<br/>与风险信号冲突？"}
+    C -->|否| D{"③ 显式指定流程<br/>与底层风险信号冲突？"}
     D -->|是| AU2["ask_user"]
-    D -->|否| E{"④ 用户显式指定<br/>了流程？"}
+    D -->|否| E{"④ 用户是否明确<br/>指定了具体模式？"}
     E -->|是| WF["full / hotfix / tweak"]
-    E -->|否| F{"⑤ 命中风险信号<br/>或有 workflow 证据？"}
-    F -->|"风险信号"| FULL["full"]
-    F -->|"bug 证据"| HF["hotfix"]
-    F -->|"tweak 证据"| TW["tweak"]
-    F -->|"证据不足"| AU3["ask_user"]
+    E -->|否| F{"⑤ 是否命中风险信号<br/>或具备特定依据？"}
+    F -->|"命中风险信号"| FULL["full"]
+    F -->|"具备 Bug 证据"| HF["hotfix"]
+    F -->|"具备微调证据"| TW["tweak"]
+    F -->|"上下文依据不足"| AU3["ask_user"]
 ```
 
-这套顺序回答了几个常见的"为什么路由成这样"的疑问：
-
-1. **置信度低于 0.7 → `ask_user`。** Agent 无法确定你的意图时，运行时会暂停并请你确认。
-2. **多个进行中的变更 + 没指定恢复哪个 → `ask_user`。** Comet 会列出候选 change，等待你点名目标。
-3. **风险信号优先于口头流程。** 你说"走 hotfix"，但命中 `public_api_change`时，运行时会暂停并请你确认。
-4. **没风险信号 + 修已有 bug + 有证据 → `hotfix`。** 这是 hotfix 的典型场景。
-5. **证据不足 → `ask_user`。** 比起猜一条路，Comet 宁可问你。
+这一套严谨的判定链路杜绝了盲目猜测：
+1. **置信度不足（< 0.7）直接进入 `ask_user`**：宁可多问一句，绝不冒险走错流程；
+2. **存在多个未结任务且未指明时进入 `ask_user`**：由你明确指定要继续哪一个；
+3. **物理风险信号永远具有一票否决权**：即便要求走轻量修复，只要改动越界，立刻暂停请示。
 
 ## 下一步
 
-- [Comet 工作流总览](/zh/concepts/workflow) — 五阶段、阶段交接和 verify 漂移决策
-- [决策点](/zh/concepts/decision-points) — Comet 在关键节点如何停下来问你
-- [核心脚本概览](/zh/scripts/overview) — `comet-intent.mjs` 等脚本如何协作
+- [工作流核心概念](/zh/concepts/workflow) — 深入了解 Classic 五阶段流转细节
+- [决策停顿点全景速查](/zh/concepts/decision-points) — 掌握所有需要人工把关的关键时刻
+- [核心脚本概览](/zh/scripts/overview) — 了解底层脚本如何高效协同

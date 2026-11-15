@@ -1,162 +1,156 @@
 ﻿---
 title: 'comet skill'
-description: '管理本地 Comet Skill 包，并调试高级 Skill 运行。'
+description: '管理本地 Comet Skill 技能包，调试与观测 Engine Run 运行时高级生命周期。'
 ---
 
 <Note>
-  以 `application.json` 为入口的完整 SDK 应用使用 [comet runtime](/zh/cli/runtime) 执行，并使用
-  [comet application](/zh/cli/application) 安装与分发。本页提供单独 Skill 与高级 Engine 运行命令。
+  以 `application.json` 为主入口的完整 SDK 应用，请通过 [comet runtime](/zh/cli/runtime) 调度执行，并通过
+  [comet application](/zh/cli/application) 实施安装与分发。本文主要面向单个底层 Skill 包与高级 Engine 运行命令。
 </Note>
 
-`comet skill` 是低层 Skill 包和 Skill 运行（Engine Run）工具。它发现显式 Skill 目录、`.comet/skills/` 下的项目覆盖和内置 Skill，也可以管理本地 Skill 包、调试高级 Skill 运行。
+`comet skill` 是面向底层 Skill 包与引擎执行（Engine Run）的管理与调试工具。它支持探测外部显式目录、`.comet/skills/` 下的项目级覆盖配置及内置 Skill，支持对本地 Skill 包进行生命周期管理并深度排查高级运行态。
 
-创建可复用 Skill 时优先用 [`/comet-any`](/zh/skill-creator/overview)。`comet skill run` / `comet skill continue` 更适合调试高级 Skill 运行。
+若需从零创作并沉淀可复用的标准化 Skill，推荐首选交互式命令 [`/comet-any`](/zh/skill-creator/overview)。而 `comet skill run` 与 `comet skill continue` 则更为契合底层引擎高级运行态的单步断点调试。
 
 <Note>
-  如果你只想把本地 Skill 放进项目，先用 <code>comet skill add</code> 和{' '}
-  <code>comet skill show</code>。运行、恢复和 runtime check 是高级调试能力，主要面向 Engine-enabled
-  Skill。
+  若你仅希望将本地开发的 Skill 引入当前工程，推荐直接使用 <code>comet skill add</code> 与 <code>comet skill show</code>。至于运行推演、断点接续与运行时自检，则属于面向 Engine-enabled Skill 的进阶调试能力。
 </Note>
 
-## 先区分平台 Skill 与项目 Skill
+## 核心概念：平台 Skill 与项目 Skill 的本质区别
 
-- **平台 Skill**：由 `comet init` 或 `comet update` 安装到 `.claude/skills/`、`.agents/skills/` 等平台目录，由 Agent 平台直接发现。
-- **项目 Skill**：由 `comet skill add` 安装到 `.comet/skills/<name>/`，由 Comet Engine 按名称解析，不会自动变成平台命令。
+- **平台 Skill**：由 `comet init` 或 `comet update` 标准化安装至 `.claude/skills/`、`.agents/skills/` 等各大 Agent 平台目录中，能够被 Agent 客户端直接作为原生斜杠命令识别消费。
+- **项目 Skill**：由 `comet skill add` 安装至当前工程的 `.comet/skills/<name>/` 目录，专供 Comet Engine 在底层按名称进行依赖解析，不会直接暴露为客户端界面的顶层命令。
 
-两者解决的问题不同。日常使用 `/comet` 时大多不需要管理项目 Skill。只有安装自定义 Engine Skill、覆盖内置 Skill 或调试 Engine Run 时，才需要本页命令。
+两者的工程定位完全不同。日常调用 `/comet` 推进业务变更时，绝大多数场景无需直接维护项目 Skill。仅当你需要引入自定义引擎 Skill、同名覆盖官方内置 Skill 或深度单步调试 Engine Run 实例时，方需查阅本文命令。
 
-## 常用路径
+## 常用操作指引
 
-| 目标                  | 命令                                               | 说明                        |
-| --------------------- | -------------------------------------------------- | --------------------------- |
-| 安装本地 Skill        | `comet skill add ./my-skill --project .`           | 复制到项目 Skill 池         |
-| 查看 Skill 来源和内容 | `comet skill show my-skill --project .`            | 确认加载的是哪个 Skill      |
-| 调试一次 Engine Run   | `comet skill run my-skill --change ./changes/demo` | 高级调试，不是普通创建入口  |
-| 继续 pending action   | `comet skill continue ...`                         | 提交结果或恢复 Run          |
-| 检查 runtime checks   | `comet skill check ...`                            | 只检查某次 Run 的运行期检查 |
+| 诉求目标 | 对应指令 | 说明 |
+| --- | --- | --- |
+| 安装本地自定义 Skill | `comet skill add ./my-skill --project .` | 物理复制并纳管进当前项目的 Skill 池中 |
+| 查验 Skill 来源与元数据 | `comet skill show my-skill --project .` | 确证当前加载生效的到底是哪个物理文件 |
+| 单步调试一次 Engine Run | `comet skill run my-skill --change ./changes/demo` | 高级研发调试通道，非普通业务创建入口 |
+| 接续推进挂起的 Action | `comet skill continue ...` | 回传外部执行结果或恢复中断的 Run 实例 |
+| 针对性触发运行时检查 | `comet skill check ...` | 仅核验特定 Run 实例声明的运行时检查点 |
 
-## 子命令
+## 子命令清单
 
-| 命令                       | 用途                                 |
-| -------------------------- | ------------------------------------ |
-| `comet skill add <path>`   | 安装本地 Skill 到项目 Skill 池       |
-| `comet skill show <skill>` | 查看 Skill 内容、来源和元数据        |
-| `comet skill run <skill>`  | 启动高级 Skill 运行                  |
-| `comet skill continue`     | 提交 pending action 的结果或恢复 Run |
-| `comet skill check`        | 检查当前 Run 的 runtime checks       |
+| 命令 | 核心用途与能力 |
+| --- | --- |
+| `comet skill add <path>` | 将本地目录中的 Skill 纳管至当前工程的专属池中 |
+| `comet skill show <skill>` | 全景查阅 Skill 的正文配置、加载来源与元数据规范 |
+| `comet skill run <skill>` | 显式启动一次高级 Skill 引擎执行实例 |
+| `comet skill continue` | 提交挂起动作（pending action）的输出，或接续运行 Run |
+| `comet skill check` | 核验当前 Run 实例绑定的运行时健康检查项 |
 
-所有子命令都支持 `--json`。
+全量子命令均原生支持追加 `--json` 输出结构化数据。
 
-## 通用选项
+## 通用选项参数
 
-| 选项                                   | 说明                                                                                                                | 适用命令                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `--project <dir>`                      | 项目根目录（默认 `.`）                                                                                              | 所有                       |
-| `--json`                               | 输出结构化 JSON                                                                                                     | 所有                       |
-| `--overwrite`                          | 覆盖已存在的项目 Skill                                                                                              | `add`                      |
-| `--change <dir>`                       | 绑定 OpenSpec change 目录（与 `--run-id` 互斥）                                                                     | `run`、`continue`、`check` |
-| `--run-id <id>`                        | 用 `.comet/runs/<run-id>` 存放 Run state（与 `--change` 互斥）                                                      | `run`、`continue`、`check` |
-| `--confirm <ref>`                      | 确认受 guardrail 保护的动作，可多次传入；`run` 输出 `User confirmation required for: <ref>` 时带上对应 ref 重新运行 | `run`、`continue`          |
-| `--status <succeeded\|failed>`         | 提交 action 结果状态                                                                                                | `continue`                 |
-| `--summary <text>`                     | 结果摘要（`--status` 时必需）                                                                                       | `continue`                 |
-| `--artifact <key=value>`               | 提交 artifact（`--status` 时使用）                                                                                  | `continue`                 |
-| `--state <key=value>`                  | 提交 state（`--status` 时使用）                                                                                     | `continue`                 |
-| `--upgrade <skill>`                    | 用新 Skill 版本升级当前 Run                                                                                         | `continue`                 |
-| `--scope <progress\|step\|completion>` | runtime check 范围（默认 `progress`）                                                                               | `check`                    |
+| 选项参数 | 详细语义与影响 | 适用子命令 |
+| --- | --- | --- |
+| `--project <dir>` | 指定目标项目物理根目录（默认值为 `.` 当前目录） | 全量命令 |
+| `--json` | 输出标准机器可读的结构化 JSON 报文 | 全量命令 |
+| `--overwrite` | 强制覆写工程内已存在的同名项目 Skill | `add` |
+| `--change <dir>` | 显式绑定关联的 OpenSpec change 目录（与 `--run-id` 互斥） | `run`、`continue`、`check` |
+| `--run-id <id>` | 指定在 `.comet/runs/<run-id>` 存放执行态（与 `--change` 互斥） | `run`、`continue`、`check` |
+| `--confirm <ref>` | 显式放行受安全守卫（Guardrail）保护的敏感动作，支持多次传入；在输出提示需要确认时带上对应引用重跑 | `run`、`continue` |
+| `--status <succeeded\|failed>` | 正式回传提交 Action 动作的执行状态终态 | `continue` |
+| `--summary <text>` | 提交执行结果的文本摘要（指定 `--status` 时为必填项） | `continue` |
+| `--artifact <key=value>` | 提交产物键值对映射（配合 `--status` 使用） | `continue` |
+| `--state <key=value>` | 提交内部状态机键值对（配合 `--status` 使用） | `continue` |
+| `--upgrade <skill>` | 采用新版本的 Skill 规范原地升级当前 Run 实例 | `continue` |
+| `--scope <progress\|step\|completion>` | 约束运行时检查的覆盖范畴（默认值为 `progress`） | `check` |
 
 <Info>
-  <code>--change</code> 和 <code>--run-id</code> 互斥：一次 Run 只能绑定其中一个。
-  <code>--change</code> 绑定 OpenSpec change 目录，<code>--run-id</code> 用{' '}
-  <code>.comet/runs/&lt;run-id&gt;</code> 存放独立 Run state。
+  <code>--change</code> 与 <code>--run-id</code> 存在严格的互斥约束：单次 Run 实例仅能绑定其中一种模式。
+  <code>--change</code> 强绑定特定 OpenSpec change 的物理目录，而 <code>--run-id</code> 则使用统一的 <code>.comet/runs/&lt;run-id&gt;</code> 独立维护隔离的状态机。
 </Info>
 
-## 包管理
+## Skill 包管理操作
 
-### add
+### add：纳管安装
 
 ```bash
 comet skill add ./my-skill --project .
 comet skill add ./my-skill --project . --overwrite
 ```
 
-把 Skill 复制到 `.comet/skills/<name>`（拒绝符号链接，用原子 rename 加备份）。项目 Skill 会**按名称覆盖**内置 Skill。无效覆盖会 **fail closed**，直接报错并禁止静默回退到内置版本。
+该命令会将本地 Skill 规范完整拷贝至 `.comet/skills/<name>`（底层坚决拒绝不安全的软链接，统一采取原子重命名配合备份机制）。项目私有 Skill 会**按同名绝对优先覆盖**内置官方 Skill。一旦检测到覆盖包存在非法格式，系统会执行**失败关闭（Fail Closed）**，直接报错阻断并严禁隐蔽回退至内置版本。
 
-### show
+### show：透视元数据
 
 ```bash
 comet skill show my-skill --project .
 ```
 
-解析 Skill 并返回名称、版本、来源、根目录、内容 hash、steps、guardrails 和 runtime checks。
+深度解析并回显 Skill 的名称、契约版本、物理来源、根路径绝对地址、内容散列哈希值（Hash）、步骤定义（steps）、守卫门禁（guardrails）及配套的运行时自检项。
 
-## Skill 发现顺序
+## Skill 探测优先级规则
 
-Skill 解析按以下顺序查找，找到即停止：
+引擎在解析特定 Skill 时严格依循以下优先梯队查找，一旦命中即刻停止向下寻址：
 
-1. **explicit** — selector 指向一个已存在的目录，直接加载。路径不存在会报错，不会继续找。
-2. **project** — `<projectRoot>/.comet/skills/<selector>`，**优先于内置**，所以项目可以按名称覆盖内置 Skill。
-3. **builtin** — `assets/skills/<selector>`。
-4. 都没找到 → **fail closed**，不静默回退。
+1. **explicit（显式指定）**：当选择器直接传入一个已存在的物理目录绝对路径时，直接加载。若路径不存在立即报错抛出异常，绝不继续兜底查找。
+2. **project（项目私有）**：探测 `<projectRoot>/.comet/skills/<selector>`，**优先级严格高于内置**，支持团队按需完全接管官方同名逻辑。
+3. **builtin（官方内置）**：探测系统内置的 `assets/skills/<selector>`。
+4. **全链路未命中**：立即触发**失败关闭（Fail Closed）**，绝不静默兜底回退。
 
 <Warning>
-  bare 名字必须匹配 <code>^[A-Za-z0-9][A-Za-z0-9._-]*$</code>。项目 Skill 按名称覆盖内置 Skill
-  时，无效的项目 Skill 会直接失败并禁止回退。这可以防止自定义版本无效时静默降级。
+  裸包名称必须严格契合正则表达式 <code>^[A-Za-z0-9][A-Za-z0-9._-]*$</code>。在利用项目私有 Skill 同名覆盖内置逻辑时，若项目级 Skill 自身存在格式残缺，系统会断然报错并阻断降级，杜绝由于版本缺陷导致业务逻辑在暗中发生静默漂移。
 </Warning>
 
-## Run 生命周期
+## Run 运行态全生命周期
 
-### run：启动
+### run：实例化启动
 
 ```bash
-# 绑定 OpenSpec change 目录
+# 绑定特定 OpenSpec change 物理目录
 comet skill run my-skill --change ./changes/demo
 
-# 或用独立 run-id
+# 或显式指定全局唯一的 run-id
 comet skill run my-skill --run-id demo-run --project .
 ```
 
-启动时做这些事：
+启动阶段引擎会按序执行以下准入工序：
 
-1. 拒绝 adaptive 包（目前）。
-2. 拒绝已存在的 Run（change 模式一个目录只能有一个 Run）。
-3. **创建不可变快照**。把整个 Skill 包冻结到 `.comet/skill-snapshots/<hash>/`，hash 锁定到 Run 的 `skillHash`。
-4. 初始化 Run state：`currentStep = entry`，`status = running`。
-5. 记录 `run_started` trajectory 事件。
-6. 引擎决策：解析 entry step、构造第一个动作、过 guardrails、写入 pending action、`status = waiting`。
+1. 校验并拒绝自适应变体包（当前阶段）；
+2. 防重校验，拒绝重复拉起已存在的活动 Run（单目录下仅允许并存单一活动 Run）；
+3. **拍摄不可变静态快照**：将该 Skill 全量包物理冻结存入 `.comet/skill-snapshots/<hash>/`，哈希强绑定至 Run 实例的 `skillHash` 属性；
+4. 初始化运行时状态：设定 `currentStep = entry`，置标志位 `status = running`；
+5. 在追加式审计日志中记录 `run_started` 轨迹事件；
+6. 引擎推演首步决策：解析入口步骤、组装首个原子动作、经过安全守卫鉴权、落盘挂起动作（pending action），置状态 `status = waiting`。
 
-### continue：提交结果或恢复
+### continue：提交执行输出或断点接续
 
-带 outcome（实际推进）：
+携带真实执行结论推进流程（带 outcome）：
 
 ```bash
 comet skill continue --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
 ```
 
 ```bash
-comet skill continue --run-id demo-run --project . --status succeeded --summary "完成"
+comet skill continue --run-id demo-run --project . --status succeeded --summary "已全部完成代码落地"
 ```
 
-不带 outcome（查看/重新决定）：
+仅查验现场或触发引擎重新决策（不带 outcome）：
 
 ```bash
 comet skill continue --change ./changes/demo
 ```
 
-升级当前 Run 到新 Skill 版本：
+将当前已暂停的 Run 实例平滑升级至最新 Skill 规范版本：
 
 ```bash
 comet skill continue --change ./changes/demo --upgrade my-skill --project .
 ```
 
-升级有严格守卫：不能有 pending action、Skill 名称必须匹配、编排模式必须匹配、当前 step 必须在新版本里仍存在。升级后记录 `state_migrated` 事件。
+版本热升级具备严格的前置守卫条件：当前绝不允许存在未决的挂起动作、Skill 包名称必须严格相符、编排拓扑模式必须兼容、且当前所处的执行步骤在新版本中必须依然合法存在。热升级成功后，系统会在审计账本中追加记录 `state_migrated` 事件。
 
 <Warning>
-  <code>--upgrade</code> 不能和 <code>--status</code>、<code>--summary</code>、
-  <code>--artifact</code>、<code>--state</code> 组合使用。<code>--summary</code>、
-  <code>--artifact</code>、<code>--state</code> 必须配合 <code>--status</code> 使用。
+  参数 <code>--upgrade</code> 严禁与 <code>--status</code>、<code>--summary</code>、<code>--artifact</code> 或 <code>--state</code> 混用。而 <code>--summary</code>、<code>--artifact</code> 及 <code>--state</code> 则必须严格伴随 <code>--status</code> 协同传入。
 </Warning>
 
-### check：按需检查
+### check：按需针对性自检
 
 ```bash
 comet skill check --change ./changes/demo --scope completion
@@ -166,40 +160,38 @@ comet skill check --change ./changes/demo --scope completion
 comet skill check --run-id demo-run --project . --scope completion
 ```
 
-`--scope` 可选 `progress`、`step` 或 `completion`（默认 `progress`）。读 `comet/checks.yaml` 的 runtime checks。
+`--scope` 支持配置为 `progress`、`step` 或 `completion`（出厂默认为 `progress`）。该命令会严格核对 `comet/checks.yaml` 中声明的各项运行时规则。
 
 <Warning>
-  <code>comet skill check</code> 只检查某次 Skill 运行的完成度，不是通用 Skill 评估。评估一个 Skill
-  产品能力，请用 <a href="/zh/cli/eval">comet eval</a>。详见{' '}
-  <a href="/zh/eval/runtime">Runtime check</a>。
+  <code>comet skill check</code> 严格仅度量单次 Skill 运行实例的步骤完备度，并不等同于通用的 Skill 能力综合评测。若需对 Skill 的智能化表现开展严格打分，请使用专门的 <a href="/zh/cli/eval">comet eval</a> 命令。详见 <a href="/zh/eval/runtime">Runtime check 规范</a>。
 </Warning>
 
-## Run state 存储
+## Run 状态机的物理存储分层
 
-Run state 由 Engine 自动维护（machine-owned），**不要手工编辑**。只有 `run_id` 会镜像到 `.comet.yaml`。
+Run 的底层机器状态完全由 Engine 统一维护，**严禁开发者手动编辑**。仅有关键的 `run_id` 凭据会被镜像同步至外层人类可读的 `.comet.yaml` 中。
 
-| runnerMode   | 存储位置                             | 特点                                        |
-| ------------ | ------------------------------------ | ------------------------------------------- |
-| `change`     | `<changeDir>/.comet/`                | 绑定 OpenSpec change 目录，一个目录一个 Run |
-| `standalone` | `<projectRoot>/.comet/runs/<runId>/` | 独立 Run，用 runId 寻址，多个 Run 并存      |
+| 运行架构模式 | 状态物理落盘位置 | 核心拓扑特征 |
+| --- | --- | --- |
+| `change` 模式 | `<changeDir>/.comet/` | 强绑定 OpenSpec change 物理目录，单目录严格独占单一 Run |
+| `standalone` 模式 | `<projectRoot>/.comet/runs/<runId>/` | 独立解耦的 Run 实例，通过 runId 全局寻址，支持海量多任务并发并存 |
 
-附属文件（都在 change/run 目录内）：
+在具体的 change/run 内部沉淀的核心附属文件清单：
 
-| 文件                         | 内容                                         |
-| ---------------------------- | -------------------------------------------- |
-| `.comet/run-state.json`      | Run state（currentStep、pending、status 等） |
-| `.comet/pending-action.json` | 当前等待的 pending action                    |
-| `.comet/trajectory.jsonl`    | append-only 轨迹审计记录                     |
-| `.comet/context.md`          | 当前 Agent 上下文                            |
-| `.comet/artifacts.json`      | 产出的产物映射                               |
+| 内部私有文件 | 承载的关键现场数据 |
+| --- | --- |
+| `.comet/run-state.json` | 引擎执行态全貌（涵盖当前步骤、挂起动作及生命周期状态） |
+| `.comet/pending-action.json` | 当前正在等待外部 Agent 或系统消费的挂起动作详情 |
+| `.comet/trajectory.jsonl` | 严禁篡改的追加式操作审计全景轨迹日志 |
+| `.comet/context.md` | 即时生成并注入的当前 Agent 专属上下文快照 |
+| `.comet/artifacts.json` | 步骤产出的所有中间产物与最终制品的索引映射表 |
 
-所有文件 IO 都限制在 change/run 目录内，拒绝绝对路径、`~`、盘符和 `..` 路径穿越。写入是原子的（写 tmp 再 rename）。
+系统所有的内部文件读写均强制限制在合法的 change/run 物理目录沙盒内，底层坚决拦截绝对路径、用户主目录缩写 `~`、Windows 物理盘符以及 `..` 路径穿越攻击。写入流程统一采取“先写临时暂存文件、再触发原子重命名替换”的防断电设计。
 
-## 文本模式的恢复提示
+## 终端文本模式下的自愈提示
 
-`comet skill` 在文本模式下会打印 `Pending action` 和 `Next:`，说明 Run 暂停或 eval 失败后的下一步。
+在以文本模式调用 `comet skill` 时，终端会在末尾清晰打印当前挂起的 `Pending action` 以及下一步指引 `Next:`。
 
-例如 `run` 输出：
+以 `run` 启动后的回显为例：
 
 ```text
 Run: demo-run
@@ -210,14 +202,14 @@ Runtime checks: 1
 Next: complete the pending action, then run comet skill continue
 ```
 
-`check` 失败时会提示：
+当 `check` 检查未通过时，会明确提示自愈动作：
 
 ```text
 Next: record the missing artifact/state and rerun comet skill check
 ```
 
-## 下一步
+## 相关文档
 
-- [Skill 与 Engine（进阶）](/zh/skill-creator/engine) — 理解 Skill 包和 Skill 运行（Engine Run）的语义、pending action、不可变快照
-- [Runtime check](/zh/eval/runtime) — 区分 `comet skill check` 和 `comet eval`
-- [Skill Creator 概览](/zh/skill-creator/overview) — 创建可复用 Skill 的主入口
+- [Skill 与底层 Engine 架构（进阶）](/zh/skill-creator/engine) — 深度掌握 Skill 包与引擎运行态（Engine Run）的语义设计、挂起动作及不可变快照机制
+- [Runtime check 规范](/zh/eval/runtime) — 科学区分单步自检 `comet skill check` 与全链路评测 `comet eval` 的职责边界
+- [Skill Creator 创作中心概览](/zh/skill-creator/overview) — 快速上手可复用 Skill 创作的标准流程

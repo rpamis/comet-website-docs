@@ -1,35 +1,35 @@
 ﻿---
 title: 'comet bundle'
-description: '了解高级 Bundle 后端命令，以及它和 /comet-any、comet publish 的边界。'
+description: '深入了解底层 Bundle 编译与后端指令集，明晰其与 /comet-any、comet creator 及 comet publish 的职责分工与边界。'
 ---
 
-`comet bundle` 管理平台无关的 Skill Bundle、编译计划、Eval 证据与人工批准。日常 Bundle 评审与分发可使用 [comet publish](/zh/cli/publish)。
+`comet bundle` 负责底层跨平台的 Skill Bundle 打包、跨端编译编排、Eval 评测证据沉淀以及人工终审凭据。日常的 Bundle 评审与分发建议直接使用 [comet publish](/zh/cli/publish)。
 
-Comet Any 创作的是完整 SDK 应用，使用 [comet creator](/zh/cli/creator) 读取创作状态，使用 [comet application](/zh/cli/application) 安装与分发。
+Comet Any 创作体系面向完整的 SDK 工作流应用，状态探查推荐使用 [comet creator](/zh/cli/creator)，最终的本地安装与分发推荐使用 [comet application](/zh/cli/application)。
 
-## 什么时候需要直接用
+## 什么时候需要直接调用本命令
 
-- 审计 Bundle draft 和编译输出。
-- 调试平台 compile、capability gap 或 executable disclosure。
-- 手工记录结构化 eval evidence。
-- 自动化集成需要 JSON 后端命令。
+- 深入审计 Bundle 草稿（draft）与跨平台编译输出日志；
+- 调试特定平台的编译器行为、能力代沟（capability gap）或可执行权限披露；
+- 手动录入并固化结构化的 Eval 自动化评测证据；
+- 编写平台级持续集成（CI/CD）脚本时调用纯 JSON 后端接口。
 
-## 常见后端阶段
+## 典型后端流转拓扑
 
 ```mermaid
 flowchart LR
-  A["draft create / optimize"] --> B["compile"]
-  B --> C["eval-plan"]
-  C --> D["eval-record"]
-  D --> E["review-summary"]
-  E --> F["review"]
-  F --> G["publish"]
-  G --> H["distribute"]
+  A["draft create / optimize<br/>草稿创建与优化"] --> B["compile<br/>目标平台编译"]
+  B --> C["eval-plan<br/>评测工作量预估"]
+  C --> D["eval-record<br/>评测证据沉淀"]
+  D --> E["review-summary<br/>就绪态审计摘要"]
+  E --> F["review<br/>人工终审批准"]
+  F --> G["publish<br/>正式发布为 Bundle"]
+  G --> H["distribute<br/>分发至各 Agent 平台"]
 ```
 
-## Skill Creator 命令已移到 comet creator
+## Skill Creator 相关指令已收敛至 comet creator
 
-0.4.0-beta.1 起，`comet creator` 是 Skill Creator 对应的命令行入口。下面这些旧的预发布 Bundle 别名不再是当前命令：
+自 0.4.0-beta.1 版本起，`comet creator` 已成为承接 Skill 创作全生命周期的标准命令行入口。下列历史预览阶段的 Bundle 命令别名已全量废弃：
 
 ```text
 comet bundle factory-*
@@ -38,162 +38,161 @@ comet bundle list
 comet bundle status
 ```
 
-对应关系：
+现代指令映射关系对照表：
 
-| 旧预发布命令                    | 当前命令                         |
-| ------------------------------- | -------------------------------- |
-| `comet bundle factory-guide`    | `comet creator guide`            |
-| `comet bundle candidates`       | `comet creator candidates`       |
-| `comet bundle factory-propose`  | `comet creator propose`          |
-| `comet bundle factory-init`     | `comet creator init`             |
-| `comet bundle factory-resolve`  | `comet creator resolve`          |
-| `comet bundle factory-generate` | `comet creator generate`         |
-| `comet bundle authoring-plan`   | `comet creator authoring-plan`   |
+| 历史预发布别名 | 当前标准指令 |
+| --- | --- |
+| `comet bundle factory-guide` | `comet creator guide` |
+| `comet bundle candidates` | `comet creator candidates` |
+| `comet bundle factory-propose` | `comet creator propose` |
+| `comet bundle factory-init` | `comet creator init` |
+| `comet bundle factory-resolve` | `comet creator resolve` |
+| `comet bundle factory-generate` | `comet creator generate` |
+| `comet bundle authoring-plan` | `comet creator authoring-plan` |
 | `comet bundle authoring-record` | `comet creator authoring-record` |
-| `comet bundle list/status`      | `comet creator list/status`      |
+| `comet bundle list/status` | `comet creator list/status` |
 
-## 创作协议（authoring）
+## 创作协议（Authoring Protocol）体系
 
-0.4.0-beta.1 起，`/comet-any` 生成的 Skill 不再只有一个固定流程骨架，而是携带真实人工创作内容。这通过**创作协议**（authoring protocol）实现：一个由创作通道（lane）组成的有向无环流程，每条通道的输出都经过 schema 校验，最后做一次多轮投票的 Skill 评审。
+自 0.4.0-beta.1 起，`/comet-any` 创作生成的 Skill 绝不仅是一个死板空洞的流程骨架，而是内嵌了深度的定制化业务智慧。这一飞跃依托于底层的**创作协议（Authoring Protocol）**：一个由多个正交创作通道（Lane）构成的有向无环图，每条通道产出的技术内容均经受 Schema 强校验，最终汇流至多维度代码评审门禁。
 
-### 创作流水线
+### 创作流水线与多通道并行
 
-创作按**波次（wave）**推进，每个 lane 是一个可并行的子任务：
+创作推进按**波次（Wave）**有序推演，每个通道均为支持并发的独立作业单元：
 
 ```mermaid
 flowchart LR
-    W1["wave 1<br/>script / reference / pause-points"] --> W2["wave 2<br/>workflow-entry / skill-core"]
-    W2 --> B["barrier<br/>skill-review"]
-    B --> R["记录到 Bundle<br/>authoring-record"]
+    W1["Wave 1（并行第一波）<br/>script / reference / pause-points"] --> W2["Wave 2（依赖第二波）<br/>workflow-entry / skill-core"]
+    W2 --> B["Barrier（质量栅栏）<br/>skill-review 多轮投票评审"]
+    B --> R["沉淀固化到 Bundle<br/>authoring-record"]
 ```
 
-| Lane             | 产出                                                                                                      | 说明                |
-| ---------------- | --------------------------------------------------------------------------------------------------------- | ------------------- |
-| `script`         | 运行时脚本（workflow-state、workflow-guard、workflow-handoff、comet-plan、comet-check、comet-hook-guard） | 6 个核心脚本        |
-| `reference`      | workflow-protocol、resolved-skills、composition-report、authoring-lanes                                   | 协议和组合证据      |
-| `pause-points`   | decision-points、recovery                                                                                 | 决策点和恢复        |
-| `workflow-entry` | 入口 Skill 正文                                                                                           | 入口创作            |
-| `skill-core`     | 节点 Skill 正文                                                                                           | 节点创作            |
-| `skill-review`   | skill-review                                                                                              | 投票评审（barrier） |
+| 创作通道（Lane） | 核心交付物 | 架构定位与职责说明 |
+| --- | --- | --- |
+| `script` | 运行时脚本群（涵盖 workflow-state、workflow-guard、workflow-handoff、comet-plan、comet-check、comet-hook-guard） | 生成支撑状态机流转的 6 个核心执行脚本 |
+| `reference` | workflow-protocol、resolved-skills、composition-report、authoring-lanes | 产出底层通信协议与组件依赖组合证据 |
+| `pause-points` | decision-points、recovery | 固化流程决策锚点与故障断点自愈规约 |
+| `workflow-entry` | 入口 Skill 正文（Decision Core） | 负责统一调度分发的主入口逻辑创作 |
+| `skill-core` | 节点 Skill 正文（Guidance） | 各具体业务执行节点的实战指引创作 |
+| `skill-review` | skill-review 评审结论报告 | 充当最终的质量门禁栅栏（Barrier） |
 
-运行创作协议时请用 `comet creator authoring-plan` 和 `comet creator authoring-record`。这些命令会：
+在驱动创作协议推演时，请优先调用 `comet creator authoring-plan` 与 `comet creator authoring-record`：
 
-- 返回创作计划：要跑哪些 lane、每个 lane 的预期产出、深度（`quick` 只覆盖必要 lane，`full` 覆盖全部）。
-- 校验并记录某个 lane 的产出。
-- **schema 校验**：lane 输出 JSON 必须符合该 lane 的 schema（status ∈ `DONE`/`DONE_WITH_CONCERNS`/`NEEDS_CONTEXT`/`BLOCKED`，artifacts、findings、evidence 等字段齐全）。
-- **claim 校验**：lane 声称产出哪些内容（claims），实际产物文件必须存在且匹配。
-- **写入状态**：校验通过后把 lane 产出固化到 Bundle 的创作状态（`BundleAuthoringState`），记录 lane status、findings（severity ∈ `critical`/`important`/`minor`）和 review evidence。
-- **review evidence**：`skill-review` lane 的 evidence source ∈ `deterministic-check-only`/`llm-single`/`llm-multivote`，记录真实评审结论（voters、lenses、findings），不再硬编码 `approved`。
+- **解析生成创作规划**：输出当前拟执行的 Lane 清单、各 Lane 预期交付物以及创作深度（`quick` 仅覆盖骨干通道，`full` 全量覆盖所有通道）；
+- **全方位 Schema 契约校验**：各 Lane 提交的 JSON 数据包必须严格契合该通道的元数据模型（状态码受限于 `DONE`/`DONE_WITH_CONCERNS`/`NEEDS_CONTEXT`/`BLOCKED`，且产物清单、分析洞察 findings 与证据链字段齐全）；
+- **声明真实性防伪校验（Claims Validation）**：Lane 声明产出的所有文件（Claims），物理磁盘上必须真实存在且内容哈希强匹配；
+- **固化落盘至 Bundle 状态机**：校验通过后，将成果固化进 Bundle 创作状态机（`BundleAuthoringState`），记录通道状态、问题严重度分级（`critical`/`important`/`minor`）与评审证据；
+- **多维度真实评审证据**：`skill-review` 通道记录审查来源（`deterministic-check-only`/`llm-single`/`llm-multivote`），客观忠实沉淀评审员投票结果、审视维度与缺陷清单，杜绝暗中硬编码“全量通过”。
 
-### Authored 内容分区
+### 生成文档的双区隔离架构（Authored Zones）
 
-生成的 SKILL.md 由两部分组成：
+最终编译生成的 `SKILL.md` 实行严格的双区物理隔离：
 
-- **Auto zone（自动区）**：frontmatter、路由表、Entry/Exit 检查、证据格式、恢复。不变的控制面，由模板生成。
-- **Authored zone（创作区）**：入口的 `## Decision Core`、节点的 `## Guidance`。由 skill-core / workflow-entry 子 Agent 动态创作。
+- **Auto zone（自动生成控制区）**：Frontmatter 元数据、路由分发表、Entry/Exit 阶段门禁检查、证据格式声明及断点恢复指南。此为不变的底层控制面，完全由框架模版自动编译生成。
+- **Authored zone（智慧创作区）**：入口文档的 `## Decision Core`、各节点的 `## Guidance`。由各专门的子 Agent 结合具体项目工程深度提炼创作。
 
-节点分为 `delegates`（覆盖层 → 安装富 Skill，薄指导正确）和 `substance`（工作流内核，必须有富创作指导）。一个 `substance` 节点如果缺少创作内容会渲染显式的 `AUTHORING PENDING` stub，并出现在 `unauthoredSubstanceNodes` 里。**这会阻止 Bundle 进入发布就绪状态**，生成器不能再以看似完整的薄 Skill 冒充已完成。
+工作流节点划分为 `delegates`（覆盖代理层：用于安装并暴露成熟的外部富能力，本身仅需轻量路由指引）与 `substance`（业务核心层：工作流的灵魂，必须具备详实、深度的实战指导）。若一个 `substance` 核心节点缺失创作指导，系统会显式渲染出带有警示的 `AUTHORING PENDING` 占位符，并在未完工节点清单中暴露。**该隐患会直接阻断 Bundle 晋升至发布就绪态**，彻底杜绝生成器拿空洞无物的虚假代码浑水摸鱼。
 
-## draft 和 compile 命令
+## draft 与 compile 调试指令
 
 ```bash
-# 手动创建或优化 draft（排障或显式优化时）
+# 手动创建或针对性优化草稿（排障或显式调优时使用）
 comet bundle draft create <name> --default-locale en --json
 comet bundle draft optimize <bundle> --name <name> --json
 
-# 编译到参考平台
+# 编译生成特定 Agent 平台的适配代码包
 comet bundle compile <name> --platform <id> --json
 ```
 
-## eval 命令
+## eval 评测体系指令
 
 ```bash
-# 规划 eval 工作量
+# 规划预估评测工作量与预算
 comet bundle eval-plan <name> --level quick --json
 comet bundle eval-plan <name> --level full --json
 
-# 记录 eval 证据
+# 录入并固化评测客观证据链
 comet bundle eval-record <name> --result <file> --json
 ```
 
-### eval-plan
+### eval-plan 规划报文解读
 
-返回 `BundleEvalPlan { level, components[], estimatedRuns, tokenWorkload, explanation }`，是**描述性估算**，不是 token 承诺：
+返回结构化的 `BundleEvalPlan { level, components[], estimatedRuns, tokenWorkload, explanation }` 描述性预算预估报文：
 
-| 级别    | components                                                          | estimatedRuns           |
-| ------- | ------------------------------------------------------------------- | ----------------------- |
-| `quick` | static、entry-smoke、baseline、assertion-grading、platform-compile  | `4 + entries*2`         |
-| `full`  | quick 全部 + trigger-accuracy、routing-overlap、failure-analysis 等 | `quick + 6 + entries*3` |
+| 评测等级 | 覆盖的核心评测组件（components） | 预估调用轮次（estimatedRuns） |
+| --- | --- | --- |
+| `quick` 轻量级 | static 静态扫描、entry-smoke 冒烟测试、baseline 基准对比、assertion-grading 断言打分、platform-compile 平台编译 | `4 + entries * 2` |
+| `full` 全量级 | 涵盖 quick 全量项 + trigger-accuracy 意图识别率、routing-overlap 路由重叠检测、failure-analysis 容灾排错分析等 | `quick + 6 + entries * 3` |
 
-### eval-record
+### eval-record 证据准入鉴权门禁
 
-结果必须绑定当前 draft hash 和当前 eval manifest hash。校验规则：
+评测结论必须在底层与当前 draft 哈希及评测清单哈希强绑定，Runtime 依循以下准则严格鉴权：
 
-- `result.schemaVersion !== 2` 或 `result.provider !== "comet-eval"` → 拒绝。
-- `result.draftHash !== state.currentHash` → 只写文件，不推进状态。
-- `result.evalManifestHash` 不等于当前生成的 `comet/eval.yaml` hash → 只写文件，不推进状态。
-- 全部通过（`result.passed` 且 `failures` 为空）→ status 推进到 `eval-passed`。
-- 否则回退到 `draft`，清除 review/ready/conflict。
+- 若 `result.schemaVersion !== 2` 或提供方不符合 `result.provider === "comet-eval"`，立即拒绝落盘；
+- 若测试报告绑定的 `result.draftHash` 与当前真实状态不符，仅写入日志文件，状态机绝不向前推演；
+- 若报告中的 `result.evalManifestHash` 与当前重新计算的 `comet/eval.yaml` 哈希不一致，同样仅落盘日志，不推进状态；
+- 唯有在评测结论全绿通过（`result.passed === true` 且 `failures` 为空）时，状态机才顺畅晋升至 `eval-passed`；
+- 一旦测试未通过，状态机立即回退至 `draft` 草稿态，清空原有的 review 审批与就绪状态。
 
-eval-result JSON 的 schema 见[发布和分发 Skill · eval-record 证据契约](/zh/skill-creator/publishing#eval-record-证据契约)。
+详细的 JSON Schema 契约请参阅 [发布与分发 Skill · eval-record 证据契约](/zh/skill-creator/publishing#eval-record-证据契约)。
 
-## review 和 publish 命令
+## review 与 publish 核心指令
 
 ```bash
-# 生成评审摘要
+# 生成多维度综合评审摘要大盘
 comet bundle review-summary <name> --platform <id> --json
 
-# 批准或拒绝
+# 人工正式授权审批或否决驳回
 comet bundle review <name> --approve --reviewer <reviewer> --json
 comet bundle review <name> --reject --reviewer <reviewer> --json
 
-# 发布
+# 正式发布为不可变标准化 Bundle
 comet bundle publish <name> --platform <id> --json
 
-# 分发
+# 安全分发至指定的 Agent 平台
 comet bundle distribute <name> --platform <id> --scope project --preview --json
 comet bundle distribute <name> --platform <id> --scope project --json
 ```
 
-发布前必须读取 review summary 的 readiness，未满足发布门禁时不得把 Bundle 标记为 ready 并发布。根据本次 JSON 评审返回的阻塞信息修正，再重新评审。面向用户的发布命令参考见[comet publish](/zh/cli/publish)。
+在执行发布前，必须仔细审阅 review summary 中的就绪状态（readiness）。只要有一项发布门禁亮红灯，严禁将 Bundle 标记为 ready 并强行发布。请结合 JSON 报文中明确返回的阻塞根因完成修正，随后重新提交评审。面向普通开发者的标准发布指引请参阅 [comet publish 命令行参考](/zh/cli/publish)。
 
-## 通用选项
+## 通用选项参数
 
-| 选项                        | 说明                          |
-| --------------------------- | ----------------------------- |
-| `--project <dir>`           | 项目根目录（默认 `.`）        |
-| `--json`                    | 输出结构化 JSON               |
-| `--platform <id>`           | 目标平台（可多次传）          |
-| `--scope <project\|global>` | 分发范围                      |
-| `--level <quick\|full>`     | eval 工作量级别               |
-| `--result <path>`           | eval 结果文件路径             |
-| `--approve` / `--reject`    | 批准或拒绝                    |
-| `--reviewer <name>`         | 评审人                        |
-| `--preview`                 | 分发预览                      |
-| `--confirm-executables`     | 确认可执行披露                |
-| `--skip-capability <cap>`   | 跳过 optional 能力            |
-| `--default-locale <locale>` | 默认语言（`draft create`）    |
-| `--locale-option <locale>`  | 语言选项（可多次传）          |
-| `--engine`                  | 启用 Engine（`draft create`） |
+| 选项参数 | 详细语义说明 |
+| --- | --- |
+| `--project <dir>` | 目标项目根目录（默认值为 `.` 当前工作区） |
+| `--json` | 输出机器可读的标准结构化 JSON 报文 |
+| `--platform <id>` | 目标平台标识符（支持多次传入绑定多个平台） |
+| `--scope <project\|global>` | 分发生效范围（项目局部或全局用户目录） |
+| `--level <quick\|full>` | 设定 Eval 评测的工作量与覆盖深度 |
+| `--result <path>` | 评测客观测试报告的文件物理绝对路径 |
+| `--approve` / `--reject` | 明确的人工审查裁决：批准放行或驳回拦截 |
+| `--reviewer <name>` | 署名本次人工审核的责任人标识 |
+| `--preview` | 纯只读拉取分发预览报告，绝不执行物理写操作 |
+| `--confirm-executables` | 显式放行对包内可执行脚本的安全权限披露与确认 |
+| `--skip-capability <cap>` | 显式跳过可选的附加扩展能力 |
+| `--default-locale <locale>` | 声明默认语言区域（用于 `draft create`） |
+| `--locale-option <locale>` | 追加支持的多语言选项（支持多次传入） |
+| `--engine` | 声明开启高级 Engine 运行时（用于 `draft create`） |
 
-## Bundle 和 publish 的关系
+## Bundle 与周边命令集的架构定位划分
 
-`comet creator` 是创建和恢复入口，`comet publish` 是发布入口。`comet bundle` 是高级后端，直接操作内部状态。
+`comet creator` 是日常创作与断点恢复的主入口，`comet publish` 是面向开发者的友好发布通道，而 `comet bundle` 则充当底层核心引擎的纯后端控制台。
 
-| 命令            | 定位               | 适合谁                 |
-| --------------- | ------------------ | ---------------------- |
-| `comet creator` | 创建状态和恢复入口 | 日常使用、自动化       |
-| `comet publish` | 用户发布入口       | 日常使用               |
-| `comet bundle`  | 高级 Bundle 后端   | 审计、调试、自动化集成 |
+| 核心命令集 | 架构系统定位 | 最适合的目标受众 |
+| --- | --- | --- |
+| `comet creator` | 统领全流程创作状态机与断点自愈 | 日常开发者、高阶创作 Agent |
+| `comet publish` | 人类友好的一站式审查与分发入口 | 日常开发者、团队发布责任人 |
+| `comet bundle` | 裸机级 Bundle 底层编译与后备指令集 | 平台审计员、底层排障、高级 CI/CD 集成流水线 |
 
 <Info>
-  面向用户的发布路径请优先使用 <a href="/zh/cli/publish">comet publish</a>。
-  <code>comet bundle</code> 只在排障或审计时直接使用。
+  日常面向业务交付的发布，强烈推荐优先使用 <a href="/zh/cli/publish">comet publish</a>。
+  <code>comet bundle</code> 仅在遭遇深层编译异常排障或进行严格的安全合规审计时使用。
 </Info>
 
-## 下一步
+## 相关文档
 
-- [comet publish](/zh/cli/publish) — 用户发布入口
-- [comet creator](/zh/cli/creator) — `/comet-any` 创建状态和恢复入口
-- [SDK 应用](/zh/sdk/applications) — 完整工作流应用的包与固定依赖
-- [SDK 应用分发](/zh/cli/application) — 完整应用的安装和平台分发
+- [comet publish 交互发布指南](/zh/cli/publish) — 开发者一站式发布标准通道
+- [comet creator 创作指令参考](/zh/cli/creator) — `/comet-any` 状态机流转与自愈
+- [SDK 工作流应用架构](/zh/sdk/applications) — 完整 SDK 应用制品包与依赖规范
+- [SDK 应用安装与分发](/zh/cli/application) — 面向生产环境的应用多平台分发

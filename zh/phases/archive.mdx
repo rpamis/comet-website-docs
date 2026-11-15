@@ -1,161 +1,134 @@
 ---
 title: 'archive 阶段'
-description: 'archive 阶段在最终确认后合并 delta spec、持久化完整归档状态，并按已确认方式推送或创建 PR。'
+description: 'archive 阶段在获得最终确认后合并增量 Spec、固化完整归档元数据，并按约定方式推送远端或自动创建 PR。'
 ---
 
-archive 阶段把通过验证的 change 合并到 OpenSpec 主 spec，标注产物，并移动到 archive 目录。它是不可逆的收尾动作，因此 Comet 会在执行前确认归档与交付方式。
+archive 阶段负责将已通过全量验证的变更平滑合并到 OpenSpec 主 Spec 中，为设计与计划文档打上归档印记，并将变更目录规范归拢到 archive 仓库。由于归档属于不可逆的收尾操作，Comet 会在执行前主动暂停，由你最终敲定归档与交付方式。
 
 <Tip>
-  正常情况下只需调用 <code>/comet</code>。配置选择 Classic 后，内部 <code>/comet-classic</code> 会在
-  verify 通过后路由到 <code>/comet-archive</code>。
+  日常开发只需调用 <code>/comet</code> 即可。当项目选用 Classic 时，系统底层会在 verify 验收全量通过后自动路由至 <code>/comet-archive</code>。
 </Tip>
 
-## 前置条件
+## 准入前置条件
 
-- `phase: archive`
-- `verify_result: pass`
-- `branch_status: pending`
-- 协调根属于 Git 工作树时，当前分支与 change 的 `bound_branch` 一致
+进入归档前，系统严格核验以下前提：
+- `phase: archive`；
+- `verify_result: pass`；
+- `branch_status: pending`；
+- 若工作区基于 Git 管理，当前所在分支必须与变更绑定的 `bound_branch` 保持一致。
 
-Verify 只负责记录验证证据。`branch_status` 会一直保持 `pending`，直到本阶段按已确认的方式处理归档交付。
+Verify 阶段仅负责出具测试通过凭证，分支交付状态 `branch_status` 会始终保持 `pending`，直至在归档阶段根据你的明确授权完成收尾。
 
-## 流程
+## 阶段执行全流程
 
 ```mermaid
 flowchart TD
-    Entry["入口状态验证"] --> Confirm["归档与交付最终确认"]
-    Confirm -->|仅本地归档| Archive["comet archive"]
+    Entry["入口状态验证"] --> Confirm["停顿点 9：归档与交付最终确认"]
+    Confirm -->|仅本地归档| Archive["运行 comet archive"]
     Confirm -->|归档并推送| Archive
-    Confirm -->|归档、推送并创建 PR| Archive
-    Confirm -->|仅归档协调文档| Documents["归档文档并核对回执"]
-    Confirm -->|调整或重新验证| Reopen["archive-reopen 回 verify"]
-    Confirm -->|暂不归档| Keep["保持 active + pending"]
-    Archive --> State["写 branch_status: handled"]
-    State --> Guard["comet guard archive"]
-    Guard --> Commit["唯一归档提交"]
-    Commit -->|仅本地| Clear["clear-selection"]
-    Commit -->|需要远端交付| Push["推送一次"]
-    Push -->|已选择 PR| PR["创建 PR"]
-    Push -->|只推送| Clear
+    Confirm -->|归档推送并创建 PR| Archive
+    Confirm -->|仅归档文档| Documents["归档文档并核对物理回执"]
+    Confirm -->|需要调整或复验| Reopen["archive-reopen 回退至 verify"]
+    Confirm -->|暂不归档| Keep["保持活跃与 pending 状态"]
+    Archive --> State["标记 branch_status: handled"]
+    State --> Guard["运行 comet guard archive 校验"]
+    Guard --> Commit["生成唯一规范的归档 Git 提交"]
+    Commit -->|仅本地| Clear["清理当前选择 clear-selection"]
+    Commit -->|需远端交付| Push["推送到远端关联分支"]
+    Push -->|已选创建 PR| PR["调用接口创建 PR"]
+    Push -->|仅推送| Clear
     PR --> Clear
     Documents --> Clear
 ```
 
-## 调用的 skill
+## 调用的核心能力
 
-archive 阶段不加载任何 Skill。状态检查、归档和远端交付全部由 `comet state`、`comet guard`、`comet archive` 命令和 git 操作完成；`comet archive` 内部调用 OpenSpec archive 完成 delta 到主 spec 的合并。
+archive 阶段不额外加载冗余的大模型 Skill，所有的状态校验、目录归拢与远端操作均由 `comet state`、`comet guard`、`comet archive` 底层脚本及标准 Git 工具链扎实完成。`comet archive` 内部会自动调度 OpenSpec 工具链将增量 Spec 合并进主 Spec。
 
-## 归档与交付最终确认
+## 停顿点 9：归档与交付最终确认
 
-确认前，Comet 会展示 change、验证报告、当前绑定分支、已有未提交改动的归属，以及即将执行的不可逆归档动作。
+在正式落盘前，Comet 会清晰展示当前变更名称、验证报告结论、绑定的分支与工作区，以及即将执行的物理动作，供你定夺：
 
-| 选项                            | 结果                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------- |
-| **仅本地归档（不推送）**        | 归档、创建唯一归档提交并保留在当前绑定分支，不推送、不创建 PR                                     |
-| **确认归档并立即推送**          | 归档、创建唯一完整提交并推送当前绑定分支                                                          |
-| **确认归档、立即推送并创建 PR** | 归档、推送唯一完整提交，然后创建 PR                                                               |
-| **需要调整或重新验证**          | `archive-reopen` 回到 verify，再调用 `/comet-verify`                                              |
-| **暂不归档**                    | 不执行 `archive-confirm` 或归档；保持 active change、`phase: archive` 和 `branch_status: pending` |
+| 交付选项                        | 实际执行效果                                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| **仅本地归档（不推送）**        | 完成 Spec 合并与目录归档，创建唯一的归档 Git 提交并停留在当前分支，不推送远端、不创建 PR       |
+| **确认归档并立即推送**          | 完成归档、生成唯一归档提交，并一次性推送到远端关联分支                                         |
+| **确认归档、推送并自动创建 PR** | 完成归档、推送到远端分支，并自动调用 API 发起针对目标主干的 Pull Request                       |
+| **需要调整或重新验证**          | 触发 `archive-reopen` 回退到 verify 阶段重新核验                                               |
+| **暂不归档**                    | 暂不执行归档动作，保持当前变更的活跃状态（`phase: archive` 与 `branch_status: pending`）       |
 
-选择归档后，Comet 先保存交付选择，再确认归档：
+选定交付方式后，系统会先保存交付记录，再确认进入执行：
 
 ```bash
 comet state delivery <change-name> --file <交付选择.json>
 comet state transition <change-name> archive-confirm
 ```
 
-`archive_confirmation` 由 Comet 自动维护（machine-owned），不能手工编辑。
+`archive_confirmation` 属于系统自动维护的核心状态，严禁手动篡改。
 
-## 执行归档
+## 执行物理归档
 
 ```bash
 comet archive "<change-name>"
 ```
 
-命令会写入可恢复 checkpoint，调用 OpenSpec 合并 delta、移动 change、校验主 spec、标注 Design Doc 和 Plan，并在实际归档目录中写入 `archived: true`。
+该命令具备完善的断点检查点机制，会自动完成增量 Spec 合并、搬迁 change 目录、复核主 Spec 一致性、为 Design Doc 和 Plan 打上归档标记，并在归档目录的 `.comet.yaml` 中固化 `archived: true`。
 
-归档前可以只读预览：
+若在正式执行前希望先排查潜在冲突，可以随时运行只读预览：
 
 ```bash
 comet archive "<change-name>" --dry-run
 ```
 
-## 非 Git 协调目录的文档归档
+## 将最终状态打包为唯一的归档提交
 
-协调根目录本身不属于 Git 工作树、业务代码分别放在独立子仓库时，选择“仅归档协调文档”。Comet 会合并主 Spec、移动 change，并保存归档时的主 Spec 快照和文件摘要回执。这项选择不创建 Git 提交；子仓库的提交和推送分别按各仓库的交付流程处理。
-
-该方式的交付选择只包含以下内容，输入文件放在 change 目录之外：
-
-```json
-{ "action": "archive-only" }
-```
-
-归档后运行 `comet guard <change-name> archive` 和 `comet state delivery <change-name> --verify`。只有核对结果为 `verification.status: complete` 才清除当前选择。保留归档目录、主 Spec 快照和 `.comet/classic-deliveries/` 中的回执；归档文件缺失或发生改动时，先处理核对失败，再继续完成流程。
-
-Git 项目仍使用本地归档、推送或创建 PR 的交付选项，并执行下面的提交步骤。
-
-## 把最终状态放入唯一归档提交
-
-归档完成后，Comet 在提交前运行：
+归档完成后，系统在生成 Git Commit 前会先运行安全检查：
 
 ```bash
 comet state set <change-name> branch_status handled
 comet guard <change-name> archive
 ```
 
-`handled` 不表示提交、push 或 PR 已经成功，也不能代替交付选择记录。guard 必须在提交前通过，确保 `.comet.yaml` 中的 `archived: true` 和 `branch_status: handled` 一起进入唯一归档提交。
+阶段守卫放行后，系统仅精准暂存归属于当前变更的文件路径：
+- 原活跃变更路径与实际归档搬迁路径；
+- 本次增量 Spec 合并后的主 Spec 文档；
+- 带有归档标记的 Design Doc 与实施计划；
+- 最终归档目录下的 `.comet.yaml`。
 
-Comet 只暂存能归因于当前 change 的路径：
-
-- 原 active change 路径和实际 archive 路径
-- 本次 delta 更新的 main specs
-- Design Doc / Plan 的归档元数据
-- 归档目录中最终的 `.comet.yaml`
-
-检查 staged diff 后提交：
+随后生成排版规范的独立归档提交：
 
 ```bash
-git add -- <逐项核对后的归档路径...>
+git add -- <逐项核验后的归档路径...>
 git diff --cached --stat
 git commit -m "chore: archive <change-name>"
 ```
 
-不得使用 `git add -A`，也不得混入用户已有改动。
+严禁使用盲目的 `git add -A`，杜绝混入你在工作区中尚未提交的其他无关文件。
 
-## 远端交付与完成
+## 远端交付与圆满收官
 
-归档提交成功后，Comet 只执行确认时选择的方式：
+归档提交生成后，Comet 严格遵照你预先敲定的交付方式执行：
+- 仅保留在本地分支；或
+- 推送当前分支一次；或
+- 推送分支并自动创建 PR。
 
-- 仅保留本地提交；或
-- 推送当前绑定分支一次；或
-- 推送一次，然后创建 PR。
+完成交付后，系统运行校验命令核对远端状态：
 
-归档阶段不再加载 Superpowers `finishing-a-development-branch`，也不会在归档后再询问本地合并、保留分支或暂不推送。需要推迟交付时，应在不可逆归档前选择“暂不归档”。
+```bash
+comet state delivery <change-name> --verify
+```
 
-完成所选操作后，运行 `comet state delivery <change-name> --verify` 核对实际结果。只有返回 `verification.status: complete`，Comet 才运行：
+核验确认为 `verification.status: complete` 后，运行收尾清理：
 
 ```bash
 comet state clear-selection
 ```
 
-此时 Runtime 已核对所选交付完成，本地工作区没有 Comet 遗留的未提交 `.comet.yaml`。
-
-## 失败处理
-
-- archive、状态写入、guard 或 commit 失败：停止，不执行远端操作。
-- push 失败：完整归档提交已在本地，当前任务只重试同一个 push。
-- PR 创建失败：分支已推送，当前任务只重试创建 PR。
-- 失败时不清除 current selection，也不宣告 workflow 完成。
+至此，该变更圆满完结交付，本地工作区干净整洁，不留任何临时未提交文件。
 
 ## 下一步
 
-- [open 阶段](/zh/phases/open)
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points)
-- [comet archive 脚本](/zh/scripts/comet-archive)
-- [状态管理](/zh/concepts/state-management)
-
-## SDK 实现与归档提交
-
-新建 Classic 任务的交付提交需要包含本次 Verify 已检查、尚未提交的实现和相关测试，并包含当前归档产物。漏交实现、提交旧内容或混入检查后新增的无关文件都会被拒绝。已通过检查的删除与重命名同样需要进入提交。
-
-让 Agent 显式暂存本 change 的文件，保留其他改动。完成实际提交及已批准的远端交付后，再按当前下一步运行 `comet state complete-delivery <change-name> --commit <sha> --json`。命令核对真实 Git 结果后才标记交付完成，不用归档目录代替实现提交。
+- [open 阶段](/zh/phases/open) — 开启下一个全新变更
+- [决策停顿点速查](/zh/concepts/decision-points) — 回顾五阶段所有关键人工确认节点
+- [comet archive 脚本](/zh/scripts/comet-archive) — 深入探究归档命令的参数与机制
+- [状态管理](/zh/concepts/state-management) — 掌握归档元数据的持久化规范

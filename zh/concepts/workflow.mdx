@@ -1,171 +1,157 @@
 ---
 title: 'Classic 工作流'
-description: 'Classic 是什么、适合谁；一次 change 从入口到归档会经历什么；五阶段与各机制的细节分别在哪些页面展开。'
+description: 'Classic 是什么、适合谁；一次变更从需求到归档的完整流程；五阶段核心机制与各参考页面的对应关系。'
 ---
 
-在 Classic 模式下，你只需要调用 `/comet`。
-系统会读取项目配置 `.comet/config.yaml`。当 `default_workflow` 为 `classic` 时，请求会转发到内部入口 `/comet-classic`，再按 open、design、build、verify、archive 五个阶段执行。
-Classic 与 [Native 工作流](/zh/concepts/native-workflow) 是两套独立工作流，各自维护自己的 change、状态与产物。
+在 Classic 模式下，你在日常开发中依然只需调用 `/comet`。
+系统会自动读取项目配置文件 `.comet/config.yaml`。当 `default_workflow` 配置为 `classic` 时，你的请求会被分发到内部入口 `/comet-classic`，并严格按照 open、design、build、verify、archive 五个阶段稳步推进。
+Classic 与 [Native 工作流](/zh/concepts/native-workflow) 是两套完全独立的体系，各自维护专属的变更目录、状态机与产物文件。
 
-Classic 把 OpenSpec 和 Superpowers 接在同一条可恢复流程里。
-OpenSpec 负责 WHAT（需求、提案、spec 生命周期、归档），Superpowers 负责 HOW（brainstorming、技术设计、计划、执行、验证），Comet 负责记录阶段和交接状态。
-阶段 Skill 每次都会重读活跃 change、`.comet.yaml` 与实际文件状态，所以即使对话中断，也能判断当前处于 open、design、build、verify 还是 archive。
+Classic 将 OpenSpec 与 Superpowers 串联在同一条支持中断恢复的工程流水线中：
+OpenSpec 聚焦 **WHAT**（明确需求范围、技术提案、Spec 生命周期与版本归档），Superpowers 聚焦 **HOW**（脑暴探索、架构设计、计划拆解、落地实现与功能验收），而 Comet 则负责严格把控各阶段准入准出标准，并保存交接上下文。
+每个阶段的专用 Skill 在运行时都会重新扫描当前活跃的 change、`.comet.yaml` 状态机以及磁盘文件，因此即便对话因网络或 Token 上限中断，Agent 也能精准判断任务停留在哪一步并无缝恢复。
 
-**Classic 主要适配 Fable 5、GPT-5.6 以下的模型能力档**。
-这类模型通常更依赖明确的 Spec、设计、计划、TDD、调试和审查步骤。Comet 的基线评估显示，这些约束能更稳定地覆盖任务并完成交付。
-如果模型能力达到 Fable 5、GPT-5.6 或更高，一般更适合执行方式更轻的 Native 工作流。
+**Classic 主要针对 Fable 5、GPT-5.6 以下梯队的模型量身定制**。
+这类模型通常更依赖清晰的 Spec 规格、架构方案、执行步骤、TDD 测试驱动与代码审查机制。Comet 的基线评测表明，这些明确的阶段约束能显著降低模型跑偏或遗漏的概率，确保高质量交付。
+如果使用的模型已经达到 Fable 5、GPT-5.6 或更高水平，通常更建议选用流程更轻盈、约束更灵活的 Native 工作流。
 
-下文用 `<classic-root>` 表示当前 Classic OpenSpec 根目录：新项目默认是 `docs/openspec/`，保留旧布局的项目是 `openspec/`。
-实际位置由 `classic.artifact_layout` 决定，见[项目文件结构](/zh/guides/project-structure)。
+下文中使用 `<classic-root>` 指代当前 Classic OpenSpec 的存放根目录：新项目默认保存在 `docs/openspec/`，沿用旧版布局的项目为 `openspec/`。实际位置由配置项 `classic.artifact_layout` 决定，详见 [项目文件结构](/zh/guides/project-structure)。
 
-## 谁该用 Classic
+## 谁该使用 Classic
 
-| 需要关心的 | 结论                                                                       |
+| 关注维度   | 核心结论                                                                   |
 | ---------- | -------------------------------------------------------------------------- |
-| 用户入口   | 统一调用 `/comet`；Classic 内部由 `/comet-classic` 做意图识别与阶段路由    |
-| 适用模型   | Fable 5、GPT-5.6 以下，需要更细步骤与过程约束的模型                        |
-| 流程       | open → design → build → verify → archive                                   |
-| 你何时参与 | 只在停顿点决策：需求、设计方案、执行模式、验证失败、归档前确认             |
-| 恢复靠什么 | 再调用 `/comet`；OpenSpec 产物、`.comet.yaml` 与运行证据                   |
-| 轻量预设   | `/comet-hotfix` 修 bug、`/comet-tweak` 做中等改动，都跳过 design           |
-| 高级细节   | handoff hash、路由判定、归档流程等，排障时再读，见文末“机制细节与对应页面” |
+| 统一入口   | 日常开发只需输入 `/comet`；内部由 `/comet-classic` 完成意图识别与阶段分发  |
+| 推荐模型   | Fable 5、GPT-5.6 以下，需要更明确步骤指导与流程约束的模型                  |
+| 推进链路   | open → design → build → verify → archive                                   |
+| 人工参与点 | 仅在关键决策点需要你确认：需求确认、方案选择、执行模式、验收未通过、最终归档确认 |
+| 恢复机制   | 重新输入 `/comet` 即可；系统基于 OpenSpec 产物、`.comet.yaml` 与运行记录自动恢复 |
+| 轻量预设   | `/comet-hotfix` 用于快速修 Bug，`/comet-tweak` 用于轻量调整，两者均跳过 design |
+| 进阶机制   | 产物交接指纹、路由算法、归档机制等，排查问题时再查阅文末“机制细节与对应页面” |
 
-当变更会引入新能力、修改 public API 或 schema、或涉及跨模块协作时，优先使用完整五阶段。
-改动小且目标明确时，可优先使用轻量预设：修 bug 走 `/comet-hotfix`，配置、文档或 prompt 类轻中量修改走 `/comet-tweak`，两者都跳过 design。
-预设执行中命中升级信号时，Comet 会暂停，让你选择继续预设还是升级 full，见下文“轻量预设与升级”。
+如果变更涉及新增完整业务功能、修改公开 API 或数据库 Schema、或需要跨多个模块联动，建议走完整的五阶段流程。
+如果改动较小且目标非常清晰，可以优先使用轻量预设：修 Bug 走 `/comet-hotfix`，改配置、微调 Prompt 或修改文档走 `/comet-tweak`，这两套预设都会省去繁琐的技术设计阶段。
+如果在预设执行过程中检测到了架构级改动的信号，Comet 会主动暂停并提示你确认：是继续使用轻量预设，还是平滑升级为完整流程。
 
-如果你需要保留可回顾的需求、设计与验证记录，Classic 的五个阶段和归档产物更合适。
-如果模型已到 Fable 5、GPT-5.6 档位，并且你希望它自主决定实现与测试方法，[Native 工作流](/zh/concepts/native-workflow) 会更轻。
+如果团队非常看重留存可追溯的需求提案、架构设计与验收记录，Classic 的五阶段规范和归档归集是极其稳妥的选择。
+如果模型推理能力充沛，并且你希望它完全自主探索实现与测试路径，[Native 工作流](/zh/concepts/native-workflow) 的体验会更加轻快流畅。
 
-## 一次 change 你会经历什么
+## 一次完整的变更会经历什么
 
-下面以一条完整 full 流程为例，从入口走到归档。
-需要你停下做选择的地方都有编号：路由阶段是 1，open 是 2/3/4，design 是 5，build 是 6/7，verify 是 8，archive 是 9，hotfix/tweak 的升级评估是 10。完整清单见[五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
-各阶段之间由 `/comet-classic` 自动衔接（`auto_transition: false` 时改为逐阶段手动推进，见[自动推进机制](/zh/concepts/auto-transition)）。
+下面以最典型的完整流程（full）为例，带你了解从输入目标到最终归档的全过程。
+在整个流程中，只有遇到带有明确编号的“决策停顿点”时才会等待人工确认：路由阶段对应停顿点 1，open 阶段对应 2/3/4，design 阶段对应 5，build 阶段对应 6/7，verify 阶段对应 8，archive 阶段对应 9，遇到架构超出时的升级评估对应 10。完整清单请参考 [五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
+在各阶段之间，系统默认会自动流转衔接（若设置 `auto_transition: false`，则会在每步完成后等待手动输入下一步命令，详见 [自动推进机制](/zh/concepts/auto-transition)）。
 
-### 入口：说出目标，路由决定走哪条流程
+### 1. 入口路由：根据意图智能分发
 
-运行 `/comet` 并附带任务描述。
-内部根据你的原话、活跃 change 列表和风险信号，把这次调用路由到六种结果之一：`full`（完整五阶段）、`hotfix`、`tweak`、`resume`（继续已有 change）、`ask_user`、`out_of_scope`（只是在提问）。
-几个常见走向：
+在 Agent 中输入 `/comet` 并附带任务描述。
+系统会根据你的原始需求、当前活跃的 change 状态以及潜在风险，自动路由到以下六种结果之一：`full`（完整五阶段）、`hotfix`（紧急修复）、`tweak`（轻微调整）、`resume`（继续未完变更）、`ask_user`（等待用户选择）、`out_of_scope`（非代码变更类咨询）：
 
-- 新能力、public API、schema 或跨模块变更，通常会被路由至 `full` 流程并进入 `/comet-open`；
-- 修已有 bug 且没有新增能力或接口变化，路由 `hotfix`，进入 `/comet-hotfix`；
-- 可收敛的轻中量修改，路由 `tweak`，进入 `/comet-tweak`；
-- 明确要继续某个 active change，路由 `resume`，下一步由该 change 当前停在哪一阶段决定。
+- 新增业务能力、修改公开 API/Schema 或跨模块协作，通常路由到 `full` 并唤起 `/comet-open`；
+- 修复已知 Bug 且不破坏现有接口，通常路由到 `hotfix` 并唤起 `/comet-hotfix`；
+- 可快速收敛的配置或文案修改，路由到 `tweak` 并唤起 `/comet-tweak`；
+- 明确要求继续之前的任务时，路由到 `resume` 并根据该 change 的当前阶段继续推进。
 
-`full`、`hotfix`、`tweak`、`resume` 会直接开始。
-只有在证据不足、存在多个活跃 change，或你口头指定的流程与风险信号冲突时，才会路由到 `ask_user` 并在入口等待你选择。
-路由的判定依据、风险信号与典型场景见 [意图识别与路由](/zh/concepts/intent-routing)。
+`full`、`hotfix`、`tweak` 和 `resume` 均会自动启动。
+只有在上下文证据不足、存在多个待恢复的任务、或者用户口头指定的模式与底层安全检查发生冲突时，系统才会进入 `ask_user` 并等待你明确选择。
+关于意图判定的详细规则与风险信号，请参考 [意图识别与路由](/zh/concepts/intent-routing)。
 
-### open：把想法变成 OpenSpec change
+### 2. open 阶段：梳理需求并生成 OpenSpec 规格
 
-路由到 `full` 且没有需要恢复的活跃 change 时，`/comet-classic` 调用 `/comet-open`。
-Comet 加载 `openspec-explore` 反复澄清需求，再逐个生成 proposal → design → tasks，遵循项目的 `template`、`instruction` 与 `dependencies`。
-过程中你会依次遇到停顿点：
+当路由至 `full` 且当前没有未完结的活跃任务时，系统会调用 `/comet-open`。
+Comet 会引导 Agent 与你展开针对性沟通，在彻底理清需求后，依次生成 proposal → design → tasks 系列文档，严格遵从项目中的模板、指令与依赖要求。
+在此阶段你可能会遇到以下几个关键决策点：
 
-- 输入是大型 PRD 或包含多个独立能力时，停顿点 2 让你选择拆成多个 change、保持一个 change 还是调整拆分方案；
-- 停顿点 3 选择工作区隔离方式：`current`（当前分支）、`branch`（新建分支）还是 `worktree`（独立工作区，明确要并行时直接用）；
-- 停顿点 4 审视产物：确认 change 名称、范围和 proposal/design/tasks 是否符合预期。
+- 当输入属于大型复杂需求或包含多个独立模块时，停顿点 2 会提示你选择：是将其拆分成多个子 change，还是合并为一个 change 继续推进；
+- 停顿点 3 供你选择工作区隔离方式：`current`（当前分支）、`branch`（新建 Git 分支）或 `worktree`（独立的 Git worktree，适合并行任务）；
+- 停顿点 4 供你审核产物：确认 change 的命名、影响范围以及 proposal/design/tasks 文档是否符合预期。
 
-产物落在 `<classic-root>/changes/<name>/`，包括 `.comet.yaml`、`proposal.md`、`design.md`、`tasks.md`，以及涉及能力变更时的 delta spec（`specs/<capability>/spec.md`）。
-完整流程禁止一次性 one-shot 生成提案，也禁止跳过 brainstorming。
-范围与命名都明确时，需求澄清和命名默认不阻塞，停顿点只出现在真正需要你选择的地方。
-open 的逐步操作与产物结构见 [open 阶段](/zh/phases/open)。
+所有产物均规范保存在 `<classic-root>/changes/<name>/` 目录下，包含 `.comet.yaml`、`proposal.md`、`design.md`、`tasks.md`，若涉及业务能力变更还会包含增量 Spec（`specs/<capability>/spec.md`）。
+为保证交付质量，系统严禁未经推敲的一键式生成，也严禁跳过必要的脑暴对齐。
+关于 open 阶段的详细规范，请参考 [open 阶段](/zh/phases/open)。
 
 <Warning>
-  创建 change 只使用 `/comet-open`。直接调 `/opsx:new` 只生成 OpenSpec artifacts，不会创建
-  `.comet.yaml`，change 会落在 Comet 状态机之外。
+  创建变更请务必使用 `/comet-open` 或统一的 `/comet` 入口。若直接调用外部原生命令（如 `/opsx:new`），只会生成孤立的 OpenSpec 模板文件而不会创建 `.comet.yaml` 状态机，导致任务脱离 Comet 的管理边界。
 </Warning>
 
-### design：确认技术方案（仅 full）
+### 3. design 阶段：深入推敲技术方案（仅限 full 流程）
 
-open 完成后，full 流程自动衔接 `/comet-design`。
-Comet 先用脚本把 open 阶段的产物整理成 handoff 交接包（不允许 agent 手写摘要代替），再加载 `brainstorming`，以真实上下文和你探讨实现方案、风险与测试策略。
-停顿点 5 请你确认采用的技术方案；确认后生成 Design Doc（`docs/superpowers/specs/...-design.md`），guard 才推进到 build。
+open 阶段达标后，流程会自动衔接至 `/comet-design`。
+Comet 会自动将上一阶段沉淀的结论打包成结构化的交接材料（严禁 Agent 随意手写模糊摘要），并调起头脑风暴模式，结合实际代码上下文与你深入探讨技术选型、架构风险与验证测试策略。
+在停顿点 5 中，你需要对敲定的技术方案进行最终确认；确认后系统会生成正式的 Design Doc（`docs/superpowers/specs/...-design.md`），守卫检查通过后方可解锁进入 build 阶段。
+设计阶段的详细指引请参考 [design 阶段](/zh/phases/design)。
 
-design 阶段不允许 Agent 写第二份需求 spec。
-delta spec 缺少验收场景时，只能写 Spec Patch 回写 OpenSpec；改动超出 Spec Patch 边界（接口变化、新组件、数据流变化等）时，回到 brainstorming 重新对齐或另开新 change。
-设计细节见 [design 阶段](/zh/phases/design)。
+### 4. build 阶段：拆解实施计划并逐步实现
 
-### build：写计划、逐任务实现
+`/comet-build` 会调用专门的子 Agent 梳理落地实施计划。此时停顿点 6（build 联合决策）会提示你进行一次关键确认：是立刻由当前模型执行、还是暂停会话切换到能力更强的高阶模型继续，并同时选定执行模式、TDD 测试策略与审查严格度。
 
-`/comet-build` 先派子代理加载 `writing-plans` 生成实施计划，然后停顿点 6（build 联合决策）让你一次性决定：立即继续执行还是暂停、换成更强的模型再继续，同时选定执行方式、TDD 模式和审查模式。
+随后，系统会按照你选定的模式逐项编写代码：
 
-之后按你选的方式逐任务实现：
+- `subagent-driven-development`：主会话专注全局调度，后台启动独立的只读子 Agent 逐项编写代码；根据预设的 `review_mode` 派发审查与修复，各项测试通过后，主会话在 `tasks.md` 中勾选并提交代码；
+- `executing-plans`：由主会话直接按顺序编写代码的轻量化路径；
+- 若在执行过程中遭遇测试挂掉或构建报错，系统会强制启动规范排错机制，先定位问题根因再行修改。
 
-- `subagent-driven-development`：主会话只协调，后台子代理逐任务实现；按 `review_mode` 派任务级审查与修复，通过后主会话勾选 tasks.md 并提交；
-- `executing-plans`：主会话直接执行的轻量路径；
-- 执行中出现崩溃、测试失败或构建失败时，强制走 `systematic-debugging`，先定位根因再修复。
+如果在编写代码的过程中发现需要新增的任务项已经超过了初始 `tasks.md` 的一半（停顿点 7），系统会主动暂停，询问你是将新需求拆分成全新的 change，还是扩充进当前变更中。
+各种执行模式的详细对比与调试规范，请参考 [build 阶段](/zh/phases/build)。
 
-执行中发现新增任务超过初始 tasks.md 的一半（停顿点 7）时，会停下问你是拆成新的 change 还是留在当前 change。
-三种执行选择的对比、审查模式与调试协议见 [build 阶段](/zh/phases/build)。
+### 5. verify 阶段：全面核验实现质量与 Spec 吻合度
 
-### verify：验证实现与 spec
+`/comet-verify` 会根据变更体量执行轻量或完整的质量检查，并将所有测试结果沉淀为结构化验证报告。
+对于可以客观自动化定位并修复的常规报错，系统会自动退回 build 阶段修复，前 3 次尝试均不会打扰你；只有当遇到需要人工裁决的情况时才会触发停顿点 8：例如连续修复 4 次仍未通过、或者代码实现与最初的 Design Doc 存在偏差。
+如果产生偏差，你可以选择：在 Design Doc 中追加实现偏差说明、打回重修、或直接接受该偏差继续流程。
+验证通过后，守卫会放行进入 archive 阶段。关于验证强度与修复策略，请参考 [verify 阶段](/zh/phases/verify)。
 
-`/comet-verify` 按任务规模跑 light 或 full 检查，通过后把结论保存为验证报告。
-可客观修复的失败会自动回 build 修复，前 3 次不打断你；需要你介入的情形都收敛到停顿点 8：第 4 次失败、接受带权衡的 WARNING/SUGGESTION 偏差、或 full 检查发现 delta spec 与 Design Doc 漂移。
-漂移时三选一：在 Design Doc 追加 Implementation Divergence 记录偏差、`verify-fail` 回 build 重新对齐、或接受偏差并继续验证。
-验证通过后 guard 推进到 archive，此时 `branch_status` 保持 `pending`，是否推送或建 PR 留到归档前再确认。
-验证强度与失败处理见 [verify 阶段](/zh/phases/verify)。
+### 6. archive 阶段：确认交付形式并规范归档
 
-### archive：确认交付方式并归档
+进入 archive 阶段后，流程会暂停在停顿点 9 等待你做最后确认。系统提供五种交付方式：仅在本地归档、归档并推送到远程分支、归档推送并自动创建 PR、返回上一步重新调整、或者暂不归档。
+如果选择“暂不归档”，当前变更将继续保持活跃状态并停留在 archive 阶段，不会写入任何终结标记。
+若对合并影响拿不准，可以先使用 `comet archive --dry-run` 预览归档动作，它只输出检查报告，不进行实际的文件搬迁或合并。
 
-进入 archive 后先做停顿点 9 的最终确认，选项有五个：仅本地归档、归档并推送、归档并推送且创建 PR、回去调整（回 verify 重新验证）、暂不归档。
-选“暂不归档”时 change 保持活跃并留在 archive 阶段，不会写任何归档状态。
-不放心时可以先用 `comet archive --dry-run` 预览，只报告结果、不执行合并。
-
-确认后 `comet archive` 委托 OpenSpec CLI 把 delta spec 合并进主 spec，把 change 目录移到 `<classic-root>/changes/archive/YYYY-MM-DD-<name>/`，为 Design Doc 和计划加归档标注，再创建唯一的归档提交并按所选方式推送或创建 PR。
-归档完成后该 change 不再是活跃 change，`comet status` 不再列出它。
-归档步骤见 [archive 阶段](/zh/phases/archive)，命令细节见 [comet archive](/zh/scripts/comet-archive)。
+确认执行后，`comet archive` 会协同 OpenSpec 工具将增量 Spec 合并进主 Spec，将整个变更目录规范归档至 `<classic-root>/changes/archive/YYYY-MM-DD-<name>/`，在对应的设计文档与计划中打上归档印记，最后生成一条干净的 Git 归档提交并按要求推送或创建 PR。
+归档完成后，该变更即正式完结，不再占用活跃任务列表。
+关于归档的详细规范与命令行参数，请参考 [archive 阶段](/zh/phases/archive) 与 [comet archive 脚本](/zh/scripts/comet-archive)。
 
 ## 五阶段速查表
 
-| 阶段    | 负责方      | 目标                       | 主要产物                                                             |
-| ------- | ----------- | -------------------------- | -------------------------------------------------------------------- |
-| open    | OpenSpec    | 把想法变成 OpenSpec change | `proposal.md`、`design.md`、`tasks.md`、delta spec                   |
-| design  | Superpowers | 做深度技术设计并定稿       | Design Doc（`docs/superpowers/specs/...-design.md`）、handoff 交接包 |
-| build   | Superpowers | 写计划并逐任务执行         | 实施计划、代码改动、tasks.md 勾选                                    |
-| verify  | 双方        | 验证实现符合设计与 spec    | 验证报告；`branch_status` 保持 `pending`                             |
-| archive | OpenSpec    | 合并 delta spec 并归档     | `changes/archive/YYYY-MM-DD-<name>/`、Design Doc 与计划的归档标注    |
+| 阶段    | 核心负责方   | 主要目标                   | 产出物                                                               |
+| ------- | ------------ | -------------------------- | -------------------------------------------------------------------- |
+| open    | OpenSpec     | 将原始想法沉淀为标准需求文档 | `proposal.md`、`design.md`、`tasks.md`、增量 spec                     |
+| design  | Superpowers  | 深入推敲技术方案并敲定细节 | Design Doc（`docs/superpowers/specs/...-design.md`）、标准交接包      |
+| build   | Superpowers  | 制定执行计划并逐项编码落地 | 实施计划、业务代码修改、`tasks.md` 逐项勾选                          |
+| verify  | 双方协同     | 严密验证代码是否契合需求   | 结构化验证报告；`branch_status` 保持 `pending`                       |
+| archive | OpenSpec     | 合并增量 Spec 并正式归档   | 规范归档目录 `changes/archive/YYYY-MM-DD-<name>/`、设计文档与计划的归档标记 |
 
 <Note>
-  **写入放行**：默认情况下，项目内（产物区之外）的写入受 Classic
-  阶段守卫约束。想让实现代码目录在任意阶段都可修改，在 `.comet/config.yaml` 配置共享的
-  `hook.allow_paths`。详见 [Classic 配置 — Hook 写入放行](/zh/classic/configuration#hook-写入放行)。
+  **Hook 写入放行机制**：在默认情况下，项目源码目录的写入受 Classic 阶段守卫的严格管控。如果你希望业务代码目录在任意阶段都能随时编辑，可以在 `.comet/config.yaml` 中配置 `hook.allow_paths`。详细说明请参考 [Classic 配置 — Hook 写入放行](/zh/classic/configuration#hook-写入放行)。
 </Note>
 
 ## 机制细节与对应页面
 
-Classic 的交接、spec 处理、路由、归档与恢复都有对应页面。
-日常使用先看上面两节即可。需要追查具体机制时，再从这里进入对应页面：
+Classic 流程中涉及的上下文交接、Spec 管理、路由决策、代码归档与状态恢复均有独立的专门文档展开。
+日常使用只需掌握本文前述核心脉络即可；若需深入探究底层机制或排查疑难问题，可以查阅以下权威页面：
 
-- **产物交接**：Classic 默认读取正式材料，按需生成集中阅读视图，见 [comet handoff](/zh/scripts/comet-handoff)和[上下文交接与原文复用](/zh/concepts/context-compression)。其他中间产物的作用见[工作流中间产物](/zh/concepts/intermediate-artifacts)。
-- **spec 范围与漂移**：delta spec 的 `ADDED`/`MODIFIED`/`REMOVED`/`RENAMED` 是 OpenSpec 原生概念，Comet 会使用这些类型，但不做去重。build 中按规模处理 delta spec（小改直接编辑、中改重新对齐、大改开新 change），见 [build 阶段](/zh/phases/build) 和 [中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。verify 发现 spec 漂移时，对应停顿点 8，见 [五阶段停顿点和用户选择点](/zh/concepts/decision-points) 与 [verify 阶段](/zh/phases/verify)。
-- **归档流程**：如果你要看 delta 合并、目录移动和产物标注，见 [archive 阶段](/zh/phases/archive)。如果你要看 `comet archive` 命令和 `--dry-run` 预览，见 [comet archive](/zh/scripts/comet-archive)。
-- **路由与阶段判定**：六种路由结果如何判定、风险信号如何影响结果，见 [意图识别与路由](/zh/concepts/intent-routing)。阶段推进、自动衔接和 `auto_transition`，见 [自动推进机制](/zh/concepts/auto-transition)。
-- **你在哪些地方参与**：停顿点 1-10 的完整清单、选项和规则，见 [五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
-- **阶段 Skill**：五阶段由 `/comet-classic` 路由到 `/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`。轻量预设走 `/comet-hotfix`、`/comet-tweak`。正常使用只调用 `/comet`。手动调用这些入口的条件和恢复方式，见各 phases 页面与 [恢复中断的工作](/zh/guides/resuming-workflow)。
+- **产物交接与压缩**：了解交接材料的生成机制与纯文本复用，请参考 [comet handoff](/zh/scripts/comet-handoff) 以及 [上下文交接与原文复用](/zh/concepts/context-compression)。各阶段中间文件的用途请参考 [工作流中间产物](/zh/concepts/intermediate-artifacts)。
+- **Spec 规范与实现偏差**：关于增量 Spec 的变更类型以及如何在 build 中平稳应对需求调整，请参考 [build 阶段](/zh/phases/build) 与 [中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。
+- **归档与版本终结**：关于 Spec 自动合并与目录搬迁细节，请参考 [archive 阶段](/zh/phases/archive) 与 [comet archive 脚本](/zh/scripts/comet-archive)。
+- **意图路由与状态机运转**：关于意图识别的判定细节、风险信号如何影响走向，请参考 [意图识别与路由](/zh/concepts/intent-routing)。关于阶段守卫与自动推进，请参考 [自动推进机制](/zh/concepts/auto-transition)。
+- **人工决策清单**：停顿点 1 到 10 的完整选项矩阵与判定标准，请查阅 [五阶段停顿点和用户选择点](/zh/concepts/decision-points)。
+- **中断恢复与排障**：会话中断或换电脑后如何继续工作，请查阅 [恢复中断的工作](/zh/guides/resuming-workflow)。
 
-## 轻量预设与升级
+## 轻量预设与平滑升级
 
-hotfix 与 tweak 都走 open → build → verify → archive（跳过 design），仍保留 OpenSpec 状态、验证与归档。
-共同前提是变更能装进单个 OpenSpec change，且不需要 Superpowers 深度设计。
-`/comet-hotfix` 适合快速修 bug，无需 Design Doc。
-`/comet-tweak` 适合配置调整、文档或提示词优化，以及 delta spec 驱动的中等变更。在 tweak 里，delta spec 是正式产物，单凭需要 delta spec 不构成升级理由。
-两者各自的前提、流程与限制见 [hotfix 预设](/zh/presets/hotfix) 与 [tweak 预设](/zh/presets/tweak)。
+对于改动较小的场景，hotfix 与 tweak 预设走的是精简的 open → build → verify → archive 链路（跳过了耗时的 design 阶段），同时依然保留了完整的状态跟踪、自动化验证与规范归档。
+两者的共同前提是：变更能被单一 change 完整承载，且不需要 Superpowers 展开多模块架构推敲。
+`/comet-hotfix` 专用于快速修 Bug，不生成额外的 Design Doc。
+`/comet-tweak` 适用于修改配置、优化文档或 Prompt，以及由小规模增量 Spec 驱动的中轻量调整。
+关于两者的详细适用条件，请参考 [hotfix 预设](/zh/presets/hotfix) 与 [tweak 预设](/zh/presets/tweak)。
 
-预设版的走查是同一流程去掉 design：open 的 guard 完成后直接进入 build 阶段，verify 的失败处理和归档前确认仍然保留。
-差异只在两者各自的 build 方式：hotfix 手动逐任务修复（build_mode 默认 `direct`），tweak 用 OpenSpec 原生的 apply 路径执行。
-
-当变更无法收敛到单个 change，或执行中出现跨模块协调、新 public API、schema 变更、深层架构问题等升级信号时，Comet 会在停顿点 10 暂停，让你选择继续预设还是升级 full。
-升级只能走 `preset-escalate` 这一条合法通道。
-升级与中途回退的操作见[中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。
+如果在执行轻量预设时发现改动超出预期，例如涉及新业务接口、数据库架构调整或深层重构，系统会在停顿点 10 主动暂停，询问你是否继续预设，或者通过合法通道 `preset-escalate` 平滑升级到完整的五阶段流程中。
+关于中途升级与回退的具体操作，请参考 [中途修改 Spec 或回退工作流](/zh/guides/mid-workflow-changes)。
 
 ## 下一步
 
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — 你在哪里需要停下决策
-- [恢复中断的工作](/zh/guides/resuming-workflow) — 中断、上下文压缩或换设备后继续
-- [大型 PRD 拆分](/zh/guides/prd-splitting) — 把大需求拆成多个可独立交付的 change
-- [状态管理](/zh/concepts/state-management) — `.comet.yaml` 字段与状态守卫
-- [comet skill](/zh/cli/skill) — 安装、查看和调试项目 Skill
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — 掌握所有需要人工确认的决策时刻
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 遭遇中断、长上下文压缩或更换开发机时的恢复指南
+- [大型 PRD 拆分](/zh/guides/prd-splitting) — 将庞大复杂的业务需求科学拆解为可独立交付的子任务
+- [状态管理](/zh/concepts/state-management) — 深入理解 `.comet.yaml` 状态机字段与核心守卫逻辑
+- [comet skill](/zh/cli/skill) — 了解如何安装、查看与调试项目本地的各类工作流 Skill

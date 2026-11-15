@@ -1,116 +1,113 @@
 ---
 title: 'comet resume-probe（恢复探测）'
-description: '在长程任务、跨会话或跨设备恢复时，只读判断当前自然语言请求是否对应现有 Comet change，并帮助 Agent 重新进入正确工作流。'
+description: '在长程任务演进、跨会话或换机协作中，通过只读探测智能识别当前自然语言指令是否关联存量 Comet change，引导 Agent 精准唤醒正确的工作流。'
 ---
 
-`comet resume-probe` 用来处理长任务里的“恢复识别”问题。
-典型场景是：你想继续已有 Comet change，但会话、上下文窗口或设备已经变化，Agent 看不到连续对话，也没有新的 `/comet` 显式触发。
+`comet resume-probe` 专职攻克长程任务中的“自然语言无感恢复”痛点。
 
-恢复探测会只读比对当前请求与 active changes，判断是否应回到 Native 或 Classic 流程，避免把“继续刚才的登录重构”误当成一个全新的普通任务。
+典型的交互困境在于：你希望接续推进手头现有的某个 Comet change，但由于会话被平台压缩、新建了对话窗口或更换了开发机，新接手的 Agent 丢失了历史聊天上下文，而你此时可能并未键入显式的 `/comet` 斜杠命令。
 
-它会先读取项目 `.comet/config.yaml`，确认当前采用 Native 还是 Classic；再只读取该工作流下的 active changes、当前阶段与用户请求。旧 Classic 项目在没有有效 workflow 配置时走 legacy fallback；如果配置损坏，则直接停止并要求修复，不会跨工作流盲扫目录。
+恢复探测会在底层以纯只读模式精准比对当前意图与活跃的 active changes，智能裁决是否应当平滑切回 Native 或 Classic 工作流，彻底避免大模型把一句“继续刚才的用户系统重构”错误当成一个从零开始的全新任务。
 
-恢复探测只返回识别和路由结论，不修改 change 或推进阶段。新会话仅发现相关 change 时，即使目标唯一或项目已有 selection，也先询问本次是否继续。确认后，Agent 加载返回的 `skill`；用户明确要求继续指定 change 且状态允许时，则按 `nextCommand` 进入永久入口。
+它会率先解析项目根目录的 `.comet/config.yaml`，锁定当前激活的是 Native 还是 Classic；随后仅精准扫描该流派下的活跃变更、当前阶段以及用户意图。若配置文件损坏，系统会立即安全停机并提示排查，绝不在各工作流目录间盲目乱扫。
 
-## 为什么需要恢复探测
+恢复探测仅输出意图判定与路由决策，绝不私自篡改任何 change 数据或强行推进阶段。在新会话仅通过语义模糊匹配到相关 change 时，即便目标唯一或本地存在 selection 索引，系统依然会礼貌向你确认是否要继续该任务。确认后，Agent 自动加载返回的 `skill`；若你已在指令中明确指定了 change 名称且状态允许，则依照 `nextCommand` 直通对应正式入口。
 
-长程任务不一定始终处于同一个完整上下文中。以下情况都可能让 Agent 忘记当前工作原本由 Comet 管理：
+## 为什么需要无感恢复探测机制
 
-- 对话经过上下文压缩、切换窗口或开启新会话；
-- 用户换设备继续同一个仓库和 change；
-- 新 Agent 只能看到磁盘状态和一句“继续之前的工作”；
-- 用户自然地要求继续任务，但没有再次输入 `/comet`。
+超长周期的架构演进很难始终局限在单一会话窗口中。以下场景往往会导致 Agent 遗忘当前工程正由 Comet 纳管：
 
-项目初始化写入的 Comet 恢复说明可以让 Agent 在处理此类请求前调用恢复探测。恢复探测根据配置、active change、阶段、selection 和请求文本给出候选目标及理由。请求仅与任务语义相关时只说明存在候选，新会话仍须先与用户确认；明确指定 change 的续行请求除外。
+- 对话遭遇平台强制上下文压缩、切换了 IDE 窗口或新建了会话；
+- 换了一台物理开发机克隆同一仓库接续推进；
+- 全新拉起的 Agent 眼前仅有磁盘代码与一句轻描淡写的“继续之前的工作”；
+- 开发者习惯性用自然语言下达指令，未重复键入 `/comet`。
 
-<Note>
-  恢复探测不是要求用户记住一个额外命令。它主要供 Agent
-  和项目恢复说明调用，用来补上"用自然语言继续任务"和显式 <code>/comet</code> 入口之间的缺口。
-</Note>
-
-## 自动探测如何发生
-
-用户不需要输入 `comet resume-probe`。正常交互仍然是直接告诉 Agent：
-
-> 继续刚才的登录重构。
-
-`comet init` 和 `comet update` 会把恢复说明写入项目的 Agent 指令文件。当 `ambient_resume` 开启时，Agent 在处理可能属于长程任务的自然语言请求前，会自动运行只读恢复探测：
-
-1. 读取项目配置，确定应检查 Native 还是 Classic；
-2. 比较用户请求、active changes、当前阶段和 selection；
-3. 仅语义相关或只有磁盘上的 selection 时，展示目标名称和阶段，询问本次是否继续；
-4. 用户确认后进入对应入口，无需再次扫描。请求无关或用户拒绝时按普通任务处理，保留原 change、批准和阶段写入约束。
-
-已在 Comet 流程中的同一会话沿用已有确认，常规继续、回答流程内提问或发生上下文恢复时不会重复询问。新会话若仅输入“继续”、仅提及 change 名称，或只提出宽泛的验证要求时，仍会先向用户确认；明确说明“继续 cache-controls”或“提交当前 change”等指令时，则可直接定位恢复目标。
-
-显式调用 `/comet` 时会直接按项目配置进入工作流，不依赖自动探测。通过平台显式调用的**非 Comet** Skill 或斜杠命令同样不触发恢复探测——任务意图已经由该调用明确，直接执行该 Skill 即可。项目若设置 `ambient_resume: false`，普通自然语言请求不会触发自动恢复探测，但 `/comet` 仍然可用。
+项目在初始化时写入的恢复说明会引导 Agent 在处理此类指令前，率先唤起只读恢复探测。探测器统筹项目配置、活跃变更、当前阶段、磁盘索引与自然语言语义，给出最可信的候选建议及归因依据。若指令仅在语义上弱相关，系统仅告知存在候选，新会话仍须获得你的核准；而在指令中明确指名道姓的变更，则可一键直通恢复。
 
 <Note>
-  对用户而言，恢复探测是自动的。下面的 CLI 参数用于
-  Agent、Hook、项目指令和自动化集成，不是恢复任务前必须手工执行的步骤。
+  恢复探测并不要求人类开发者死记硬背一条新命令。它主要由 Agent 依循项目恢复指南在底层被动触发，旨在严密缝合“纯自然语言交互”与“显式 <code>/comet</code> 入口”之间的体验断层。
 </Note>
 
-## Agent 与自动化集成参考
+## 自动化被动探测的运行机制
 
-Agent 或集成可以直接传入请求：
+日常使用中你完全无需手动敲击 `comet resume-probe`。只需像往常一样对 Agent 表达：
+
+> 继续刚才的用户系统重构。
+
+`comet init` 与 `comet update` 会自动将恢复引导规约写入项目的 Agent 规则文件中。只要全局开关 `ambient_resume` 处于开启状态，Agent 在接纳疑似长程任务的自然语言输入前，会在后台自动执行只读探测：
+
+1. 率先解析项目配置，明确应当校验 Native 还是 Classic 体系；
+2. 严密比对输入意图、在途 active changes、当前阶段与本地 selection 索引；
+3. 若仅属于语义弱相关或仅磁盘存有索引记录，向你呈现匹配的目标名称与阶段，询问本次是否确定接续；
+4. 获得确认后平滑直通对应工作流入口，无需二次全盘重扫。若属于无关日常问答或你明确拒绝接续，则按常规通用会话处理，既有 change、审批记录与阶段只读保护完好保持。
+
+已身处 Comet 流程内部的同一会话将无缝继承既有确认，常规指令推进、答复流程内提问或发生会话恢复时绝不反复弹窗打扰。若在新会话中仅模糊输入“继续”、或仅提及某个宽泛的测试要求，系统依然会先向你求证；唯有当指令明确包含“继续 cache-controls”或“提交当前 change”等具象指令时，方可直接锚定目标。
+
+显式键入 `/comet` 时会直接依照项目配置进入对应工作流，不依赖被动探测。通过 Agent 平台显式调用的**非 Comet 原生**斜杠命令同样不会触发探测——因为任务意图已由该调用明确锁定，直接执行该 Skill 即可。若在项目配置中声明 `ambient_resume: false`，普通自然语言将彻底停用被动探测，而显式 `/comet` 入口依然完好可用。
+
+<Note>
+  对开发者而言，整个探测过程在幕后全自动无感运行。下述的命令行参数主要面向 Agent 框架、系统 Hook 插件与自动化脚本集成，并非人类日常恢复时必须手动执行的工序。
+</Note>
+
+## Agent 与自动化集成调用指南
+
+脚本或上层 Agent 可直接传入待判定的意图文本：
 
 ```bash
-comet resume-probe . --utterance "继续刚才的登录重构" --json
+comet resume-probe . --utterance "继续刚才的用户系统重构" --json
 ```
 
-也可以从标准输入读取：
+亦支持自标准输入（stdin）管道流式喂入：
 
 ```bash
-echo "继续刚才的登录重构" | comet resume-probe . --stdin --json
+echo "继续刚才的用户系统重构" | comet resume-probe . --stdin --json
 ```
 
-| 选项                      | 作用                                                       |
-| ------------------------- | ---------------------------------------------------------- |
-| `--utterance <text>`      | 直接传入需要分类的用户请求                                 |
-| `--stdin`                 | 从标准输入读取用户请求                                     |
-| `--json`                  | 输出稳定的结构化结果，适合 Agent、Hook 和自动化            |
-| `--no-workflow-work`      | 把当前请求标记为信息查询，跳过 workflow 推进               |
-| `--already-in-comet-flow` | 当前已经在 Comet 流程内时返回 `out_of_scope`，避免重复路由 |
+| 参数选项 | 功能与职责 |
+| --- | --- |
+| `--utterance <text>` | 直接传入需要进行语义分类的用户输入文本 |
+| `--stdin` | 自标准输入流安全读取自然语言指令 |
+| `--json` | 输出机器可读的标准结构化报文，供 Agent、Hook 或流水线消费 |
+| `--no-workflow-work` | 将当前请求强行标记为只读信息查询，杜绝触发工作流推进 |
+| `--already-in-comet-flow` | 声明当前已身处 Comet 流程中，返回 `out_of_scope` 避免重复路由 |
 
-## 如何理解结果
+## 探测返回值的语义与后续调度
 
-| `action`       | 含义                                                                      | 下一步                                                                                      |
-| -------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `auto_resume`  | 用户明确要求继续指定 change，且状态允许恢复                               | Agent 按 `nextCommand` 进入永久入口：Native 为 `/comet-native`，Classic 为 `/comet-classic` |
-| `ask_user`     | 需要确认本次是否继续，或目标有歧义、状态异常、等待用户决定                | 展示目标和理由，等待明确回复；恢复确认后加载 `skill`，不重新扫描                            |
-| `out_of_scope` | 用户明确不想恢复、当前已在 Comet 内，或请求只是与 workflow 无关的信息查询 | 正常回答当前请求，不进入 Comet                                                              |
-| `none`         | 没有 active Comet change                                                  | 不执行恢复；如需开始新工作，可显式运行 `/comet`                                             |
+| `action` 终态 | 核心业务语义 | 推荐的下一步调度举措 |
+| --- | --- | --- |
+| `auto_resume` | 用户意图明确要求接续指定 change，且当前状态机完全允许恢复 | Agent 依循 `nextCommand` 进入永久入口：Native 为 `/comet-native`，Classic 为 `/comet-classic` |
+| `ask_user` | 需向用户求证意向，或存在多个候选歧义、状态异常、等待人工决策 | 向用户展示候选目标与判定依据，等待其答复；确认后直接加载 `skill`，无需重复扫描 |
+| `out_of_scope` | 用户明确表示不接续、当前已在流程中、或属于纯信息咨询 | 作为常规普通会话予以解答，绝不唤起 Comet 工作流 |
+| `none` | 项目中没有任何活跃在途的 active Comet change | 不触发任何恢复动作；若用户想提新需求，引导其运行 `/comet` |
 
-JSON 使用 `comet.resume_probe.v2`，包含 `workflow`、`skill`、`entrySource`、`reasonCode`、`candidates`、`changeName`、`phase`、`nextCommand` 和判断证据。Native 任一阶段都通过 `/comet-native` 恢复；`comet native next` 是状态推进命令，不是恢复入口。Classic 自带 runtime 的内部 v1 检查保持兼容，但顶层 CLI 返回 v2。
+JSON 输出严格采用 `comet.resume_probe.v2` 规范契约，完整内嵌 `workflow`、`skill`、`entrySource`、`reasonCode`、`candidates`、`changeName`、`phase`、`nextCommand` 以及判定证据链。Native 无论处于哪个阶段，统一通过 `/comet-native` 接续；`comet native next` 纯属内部推进指令，绝不可当作恢复入口。Classic 模式下顶层 CLI 统一返回标准的 v2 格式。
 
-## 哪些情况一定会暂停
+## 哪些异常现场必然会触发主动挂起（ask_user）
 
-- 新会话仅发现相关 change，尚未明确要求继续指定目标，即使目标唯一或 selection 有效。
+- 在新开的会话中仅发现弱相关变更，用户尚未明确指名道姓要求接续，即便目标唯一或 selection 索引有效；
+- 存在多个 active change，但用户的自然语言并未点明具体是哪一个；
+- 存在多个 active change，且本地缺失有效 selection 或指名指令；
+- active change 核心状态文件缺失，或项目级配置文件格式损坏；
+- 当前任务恰好正停留在 plan-ready 确认、验证未通过、归档审批等核心人工决策点；
+- 请求意图与现有 change 完全无关或纯属日常信息咨询（此时返回 `out_of_scope`）。
 
-- 多个 active change，但用户请求没有点名目标。
-- 多个 active change 且没有有效 selection 或用户点名。
-- active change 缺少有效状态或项目配置损坏。
-- 当前处于 plan-ready、验证失败、归档确认等用户决策点。
-- 请求与已有 change 无关或只是信息查询时不会恢复，而是返回 `out_of_scope`。
-
-Native 的未提交改动只作为恢复证据与提醒，不会因此阻止强模型进入 `/comet-native` 核实项目现状；Classic 继续保留工作树归属确认规则。
+在 Native 模式下，工作区存在未提交改动仅作为恢复证据与现状提醒，绝不因此阻止强模型进入 `/comet-native` 实地复核现场；Classic 模式则继续保留严格的工作树归属校验准则。
 
 <Warning>
-  <code>ask_user</code>{' '}
-  该结果表示证据不足或流程正在等待用户选择，属于正常暂停状态。调用方应展示原因并询问用户；反复运行恢复探测无法补齐所需证据。
+  <code>ask_user</code> 表明当前证据尚不充沛或状态机正在等待开发者做出抉择，属于完全正常的停顿保护机制。调用方应当向人类用户清晰复述原因并等待答复；单纯死循环重复调用恢复探测命令绝不可能凭空消除盲区。
 </Warning>
 
-## 与其他命令的区别
+## 核心命令职责边界对照
 
-| 命令                 | 用途                                                 |
-| -------------------- | ---------------------------------------------------- |
-| `/comet`             | 按项目配置转发到 `/comet-native` 或 `/comet-classic` |
-| `comet resume-probe` | 在进入 workflow 前做一次只读恢复探测                 |
-| `comet status`       | 查看 active change、阶段、证据和推荐下一步           |
-| `comet doctor`       | 诊断安装、环境或状态损坏                             |
+| 命令与入口 | 核心定位与职责分工 |
+| --- | --- |
+| `/comet` | 统一总入口，依据项目配置智能分发至 `/comet-native` 或 `/comet-classic` |
+| `comet resume-probe` | 在正式迈入 workflow 前执行的被动、轻量、纯只读恢复探测 |
+| `comet status` | 离线查看 active change、阶段进度、客观证据链与建议的下一步 |
+| `comet doctor` | 深度诊断 CLI 安装依赖、底层平台或环境合法性或损坏状态自愈 |
 
-## 下一步
+## 相关文档
 
-- [恢复中断的工作](/zh/guides/resuming-workflow) — 自然语言恢复与显式 `/comet` 的使用方式
-- [状态损坏与恢复](/zh/guides/state-recovery) — 恢复探测提示状态异常时如何排查
-- [comet status](/zh/cli/status) — 查看全部 active change 的详细状态
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 了解自然语言恢复与显式 `/comet` 的标准使用范式
+- [状态异常排查与恢复](/zh/guides/state-recovery) — 恢复探测提示状态异常时的急救方案
+- [comet status 详尽参考](/zh/cli/status) — 全览所有活跃变更的实时状态

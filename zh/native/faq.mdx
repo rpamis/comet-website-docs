@@ -4,103 +4,90 @@ description: '解答 Native 模式选择、需求澄清、状态恢复、验证 
 ---
 
 <Note>
-  新建 change 使用 SDK Run，本机执行数据位于用户 Comet 数据目录；文中的
-  `.comet/runtime/native/`、独立 YAML 恢复和 `--finish` 示例仅适用于 Compat。默认 SDK 操作见
-  [Runtime](/zh/native/runtime) 与 [归档交付](/zh/native/archive-and-delivery)。
+  新建 change 统一采用 SDK Run，本机底层执行数据存储于用户 Comet 数据目录；文中所涉及的
+  `.comet/runtime/native/`、独立 YAML 恢复以及 `--finish` 示例仅用于兼容模式（Compat）。默认的 SDK 操作指引详见
+  [Runtime 机制](/zh/native/runtime) 与 [归档与交付](/zh/native/archive-and-delivery)。
 </Note>
 
-关于 Native 的适用场景、四阶段工作流、可跨设备同步的状态、验证、恢复和冲突处理的常见问题。
+本文整理了关于 Native 工作流的选型定位、四阶段流转、跨端状态同步、验证闭环、断点恢复以及并发冲突排查的高频问题。
 
-## 基础概念
+## 基础与选型
 
 <AccordionGroup>
-  <Accordion title="Native 和 Classic 应该怎么选">
-    主力模型是 Fable 5、GPT-5.6 及同档强模型时优先 Native：这类模型能自主规划和实现，强加方法论约束反而浪费它的能力，Native 把方法选择权交给它，只锁住结果与证据。模型能力档更低、需要更明确过程约束时用 Classic，它通过 OpenSpec 与 Superpowers 提供 open、design、build、verify、archive 五阶段治理。两套工作流由 `.comet/config.yaml` 选择。
+  <Accordion title="Native 与 Classic 应该如何抉择">
+    当使用具备深度推理能力的主力大模型时，优先推荐 Native：这类模型具备出色的自主拆解与代码实现能力，过多死板的过程方法论约束反而束缚其手脚。Native 将工程实现自由度交还给模型，专注把控最终结果契约与客观验证证据。当模型能力较弱、需要通过规范文档严格约束中间过程时，可选用 Classic 工作流，它通过 OpenSpec 与 Superpowers 提供标准的五阶段工程治理。两套工作流均可在 `.comet/config.yaml` 中随时按需配置切换。
   </Accordion>
 
-<Accordion title="Native 是否依赖 OpenSpec、Superpowers 或其他外部 Skill">
-  不依赖。Native 自带 Shape、Build、Verify、Archive 和 Runtime。只有 Classic 才安装并使用 OpenSpec
-  和 Superpowers。
-</Accordion>
+  <Accordion title="Native 是否强依赖 OpenSpec、Superpowers 或其他外部 Skill">
+    完全不依赖。Native 出厂内置了完整的 Shape、Build、Verify、Archive 阶段编排与统一 Runtime。只有在选择 Classic 工作流时，系统才会自动安装并调用 OpenSpec 和 Superpowers。
+  </Accordion>
 
-<Accordion title="为什么 Builder 说完成还不能归档">
-  Builder 提交的是候选实现，还需要 Runtime 检查和覆盖全部验收项的
-  Verify。新建任务允许同会话验收，独立审查按任务需要和你的要求选择；全部通过后仍需接受当前结果，事前明确委托通过后接受并归档的除外。已有任务保留原验收约定，见[验证与修复](/zh/native/verification-and-repair)。
-</Accordion>
+  <Accordion title="为什么 Builder 提示编码完成后还不能立即归档">
+    Builder 提交的代码仅属于“候选实现”，后续必须无缝触发 Runtime 自动化检查，并由 Verifier 对全部验收项开展逐条严格核验。新创建的任务支持在同会话内闭环验收，亦可按需发起物理隔离的独立审查；验收全量通过后，通常仍需你确认接受交付成果（事前明确授权自动归档的除外）。存量任务严格维持原有约定，详见[验证与修复](/zh/native/verification-and-repair)。
+  </Accordion>
 
-<Accordion title="Verify 为什么会回到 Build">
-  验收失败、检查失败、Verifier 漏项或结果无效都会写入下一步 continuation，并把 change 返回
-  Build。下一轮按失败原因修复后，重新核对全部验收项，并保留仍有效的检查。
-</Accordion>
+  <Accordion title="为什么 Verify 验收未通过会回退到 Build">
+    只要存在验收用例未通过、代码基线检查报错、Verifier 审查遗漏或裁决凭据不合法，系统均会将现场与未通过项记入 `continuation`，并驱动状态机安全回退至 Build。下一轮 Builder 会根据精准的失败原因进行针对性修复，并在后续轮次重新复核全量验收项（有效的基线检查结论会被智能复用）。
+  </Accordion>
 
-<Accordion title="没有 verification.md 可以恢复吗">
-  可以。Shape 和 Build 需要同步的 brief、Specs 和 `comet-state.yaml`；`verification.md`
-  是可重建报告。Verify 或 archive-ready
-  在另一台设备上会重建本机执行状态并重新确认，不会直接复用旧的本机结果。
-</Accordion>
+  <Accordion title="缺失 verification.md 会影响跨端断点恢复吗">
+    完全不影响。Shape 与 Build 阶段仅依赖仓库中已同步的 `brief.md`、各能力 Specs 规范以及权威的 `comet-state.yaml`；`verification.md` 纯属人类可读的渲染快照。若在处于 Verify 或准备归档状态下换机，目标设备会依据底层 YAML 数据即时重建本机执行态并重新核验，绝不会盲目信任陈旧的异地快照。
+  </Accordion>
 
-<Accordion title="Native 的可跨设备同步状态和本机 Runtime 有什么区别">
-  `comet-state.yaml` 保存阶段、Loop、验收、handoff、检查摘要、Verifier
-  结论、阻塞原因和下一步；换设备时靠这份文件恢复进度。`.comet/runtime/native/` 只保存本机
-  `state.json`、日志、锁和事务，缺失或版本不匹配时可以重建。
-</Accordion>
+  <Accordion title="Native 跨设备同步状态与本机 Runtime 缓存有何本质区别">
+    `comet-state.yaml` 持久化记录了当前阶段、Loop 迭代轮次、逐条验收结论、handoff 交付摘要、健康检查报告、Verifier 裁决结论、阻塞诱因及下一步指引；跨端同步正是基于该文件恢复真实进度。而 `.comet/runtime/native/` 仅承载本机的临时执行态 `state.json`、运行日志、并发锁与短期事务，一旦缺失或版本脱节，系统随时可基于权威 YAML 文件一键安全重建。
+  </Accordion>
 
-<Accordion title="为什么新项目默认 Batch">
-  Batch 会先整理问题依赖，再一次询问当前前提已具备的问题，减少重复往返。Sequential
-  仍可配置，按轮次询问一个最上游问题；两种模式都要在进入 Build 前确认双方对需求的理解一致。
-</Accordion>
+  <Accordion title="为什么新项目默认采用 Batch 澄清模式">
+    Batch 模式会率先在内存中梳理问题依赖拓扑，将当前批次所有前置明确、彼此解耦的决策点集中抛出，大幅降低无谓的对话往返轮次。`sequential` 单题递进模式依然随时可配，支持按依赖图逐题发问；两种模式在迈入 Build 阶段前均需完成最终需求确认门禁。
+  </Accordion>
 
-<Accordion title="需要额外检查怎么办">
-  当前 Verifier 通过 `request-checks` 请求 Runtime 执行。Runtime
-  会合并等价的检查请求、限制请求轮数并返回结果；不要自行创建“检查回执”或在状态文件里填通过。
-</Accordion>
+  <Accordion title="Verifier 执行期间需要运行额外的检查命令怎么办">
+    当前 Verifier 会通过结构化的 `request-checks` 动作向 Runtime 发起执行申请。Runtime 会智能合并语义等价的重复检查、限制单轮调用频次并返回真实执行日志；严禁在提示词中伪造“通过回执”或手动篡改状态文件。
+  </Accordion>
 
-  <Accordion title="多个 Native change 可以并行吗">
-    可以。创建 change 时会在适用时展示 `current`、`branch`、`worktree` 选择；`.comet/current-change.json` 只选择下一次写入归属，不限制 active change 数量。两个 change 要修改同一 capability 时，Archive 会要求明确顺序。
+  <Accordion title="支持多个 Native change 同时并行开发吗">
+    原生支持。在创建 change 时，系统会引导你按需选择 `current`（当前目录）、`branch`（独立分支）或 `worktree`（物理工作区隔离）；`.comet/current-change.json` 仅作为免参数调用的快速索引，并不限制工程内 active change 的总数。当两个并发 change 尝试修改同一份 capability 时，Archive 阶段会主动停顿要求明确归档先后次序。
   </Accordion>
 </AccordionGroup>
 
-## Supervisor Change
+## Supervisor 复合变更
 
 <AccordionGroup>
-  <Accordion title="什么时候使用 Supervisor Change">
-    一个整体目标包含至少两个能够独立实现和验证的结果，并且仍需要统一集成和最终验收时，适合使用 Supervisor Change。Runtime 会按验收项分配 child、管理依赖和独立 worktree，并在所有 child 集成后验证完整目标。
+  <Accordion title="什么场景下适合选用 Supervisor 复合变更">
+    当一个整体架构目标可以自然解耦为至少两个能够独立实现与验收的子模块，且最终需要统筹集成与全链路最终验收时，非常适合采用 Supervisor Change。Runtime 会自动按验收项拆解派发子变更（child）、调度依赖关系并创建隔离的 Git worktree，待所有子模块陆续集成回主干后，再统一完成全链路验收。
 
-    没有共同最终验收的目标应创建多个独立 Change。多个部分需要频繁修改同一核心区域，或者拆分成本高于并行收益时，继续使用单个 Native Change。
-
+    若各模块之间没有共同的最终闭环验收目标，应直接创建互不相干的独立 Change。若各模块频繁改动同一核心底层热点文件，或拆分维护成本高于并行收益，保持单个 Native Change 顺序交付更为稳妥。
   </Accordion>
 
-  <Accordion title="为什么要选择多会话协作或单会话推进">
-    推进方式只决定 child 在哪里执行；拆分结果、依赖、验收和集成规则在两种方式下保持一致。多会话协作由当前会话统筹，优先使用 Codex 独立会话或 Claude Code Agent Teams；单会话推进由当前会话按顺序完成 child。
+  <Accordion title="Supervisor 的多会话协同与单会话推进有何区别">
+    两者的差异仅在于子任务（child）的并发调度载体不同；其底层的任务切分、拓扑依赖、验收门禁与集成逻辑完全一致。多会话协作模式由主会话作为统筹中枢，优先调度独立的 Agent 进程或会话开展并发攻坚；单会话推进模式则由当前主会话严格按拓扑序依次推进各子任务。
 
-    Runtime 在确认 Supervisor Shape 时把选择保存为 `coordination_mode`。恢复任务或因需求变化重新进入 Shape 时会沿用这个选择，不重复询问。
-
+    Runtime 会在确认 Supervisor Shape 方案时将你的选择固化为 `coordination_mode`。无论后续恢复任务还是因需求变更重算 Shape，均会自动沿用该选择，不反复重复打扰。
   </Accordion>
 
-  <Accordion title="多会话任务消失后怎么恢复">
-    Comet 会先重新读取 Runtime，不会根据旧会话的残留信息判断 child 已经完成。持久化为 `multi-session` 时，独立会话或 Agent Team 不可用会自动改用 subagent，不会切换为单会话。
+  <Accordion title="多会话派发的子任务若意外中断或句柄丢失如何恢复">
+    Comet 会率先向 Runtime 核验真实状态，绝不凭旧会话的残留日志轻率判定子任务已完工。当持久化模式为 `multi-session` 时，若 Agent 平台的独立会话能力不可用，系统会自动退火使用 subagent 模式，绝不随意篡改为单会话。
 
-    已经派发但丢失的任务会先通过 `supervisor-cancel` 使旧 `runId` 失效，再使用新的任务包和 `runId` 重新派发。旧执行的迟到结果会被拒绝；subagent 也不可用时，Comet 会如实报告阻塞原因。
-
+    对于已派发但通信失联的子任务，系统会通过 `supervisor-cancel` 废弃其旧版 `runId` 凭证，随后封装最新的任务上下文包并分配全新 `runId` 重新派发。旧执行实例迟到的异步回调会被自动拦截并拒绝；若 subagent 环境同样受阻，Comet 会如实打印阻塞诱因等待排查。
   </Accordion>
 </AccordionGroup>
 
-## 恢复和排障
+## 恢复与故障排查
 
 <AccordionGroup>
-  <Accordion title="Verify 已通过后需求发生变化怎么办">
-    如果变化只是补齐已确认目标的实现，继续 Build 和 Verify Loop。变化修改了用户可见目标、范围或验收标准时，Native 会让 change 返回 Shape，记录新的决定并使旧验证失效。即使 change 已经 archive-ready，也要先重新确认需求，再针对当前目标取得新的验证结果。
+  <Accordion title="在 Verify 验收通过后需求又发生变动该如何处理">
+    若需求变动纯属补齐原定既定目标的内部实现细节，继续沿用当前的 Build 与 Verify Loop 推进即可。若变动直接修改了系统的外在交付目标、业务范围或验收基准，Native 会主动驱动状态机退回 Shape 阶段，即时沉淀新决议并废弃陈旧的验证结论。即便变更此前已处于 `archive-ready` 就绪状态，也必须针对最新目标重新核准需求并跑通全新验证。
   </Accordion>
 
-  <Accordion title="升级到 RC1 后，旧 Native Change 还能继续吗">
-    可以先通过 `comet status` 和 `comet native doctor <change-name>` 判断状态。能够迁移的 active change 会按 Runtime 返回的动作保守迁移；旧版归档保持只读。不要手工移动旧 Runtime、修改状态文件或复制验证记录。
+  <Accordion title="版本升级后，存量的旧 Native Change 还能平滑接续吗">
+    可以先运行 `comet status` 与 `comet native doctor <change-name>` 评估现状。具备迁移条件的 active change 会依据 Runtime 返回的保守动作自动完成升级迁移；已归档的历史数据完整维持只读状态。切忌手动剪切旧版 Runtime 缓存、直接修改内部状态文件或跨目录拷贝测试记录。
 
-    升级后先运行 `comet update` 刷新 Skill 和 Runtime。只有 Doctor 明确提供修复动作时，才运行 `comet native doctor <change-name> --repair`。
-
+    升级 CLI 后建议先运行 `comet update` 刷新全局 Skill 与 Runtime 组件。唯有在 Doctor 明确定性并提供自愈脚本时，方可执行 `comet native doctor <change-name> --repair`。
   </Accordion>
 
-  <Accordion title="恢复 Native 任务时先做什么">
-    先运行：
+  <Accordion title="排查与恢复 Native 任务的标准诊断动作是什么">
+    标准诊断三步法：
 
     ```bash
     comet status
@@ -108,11 +95,10 @@ description: '解答 Native 模式选择、需求澄清、状态恢复、验证 
     comet native doctor <change-name>
     ```
 
-    不要手工修改 `comet-state.yaml`、`.comet/current-change.json` 或 `.comet/runtime/native/`。如果代码、artifact root、branch/worktree 未同步，或 active/archive 目录混合，Runtime 会返回具体的 `await-user`/`blocked` 动作。
+    严禁手动修改 `comet-state.yaml`、`.comet/current-change.json` 或 `.comet/runtime/native/` 内部文件。若由于代码未提交、产物目录迁移、分支/worktree 未对齐或 active 与 archive 目录重名引发异常，Runtime 会精准返回对应的 `await-user` 或 `blocked` 动作指引。
 
-    旧版本留下的 change-local Runtime、旧 receipt/evidence 或 `native.snapshot` 配置只用于迁移和只读兼容。RC1 新建的 Portable State change 不会继续创建这套旧版状态记录。
-
+    历史旧版本遗留的本地 Runtime、过期的证据收据或 `native.snapshot` 配置仅保留用于平滑只读兼容，新建的规范变更均已彻底摆脱对旧式机器产物的依赖。
   </Accordion>
 </AccordionGroup>
 
-继续阅读：[Native 配置](/zh/native/configuration)、[产物与状态](/zh/native/artifacts-and-state)、[验证与修复](/zh/native/verification-and-repair) 和 [恢复手册](/zh/native/recovery-playbook)。
+延伸阅读：[Native 全局配置详解](/zh/native/configuration)、[产物与状态机制](/zh/native/artifacts-and-state)、[自动化验证与修复](/zh/native/verification-and-repair) 以及 [断点恢复实操手册](/zh/native/recovery-playbook)。

@@ -1,23 +1,21 @@
 ---
 title: '自动推进机制'
-description: '理解 /comet 进入 Classic 后，内部路由如何自动检测阶段、推进状态、衔接下一阶段，以及如何恢复。'
+description: '解析 Classic 流程中的阶段自动检测、状态机流转、下一阶段自动衔接以及断点恢复机制。'
 ---
 
-调用 `/comet` 且项目配置为 Classic 时，`/comet-classic` 会检测当前阶段、推进状态并选择下一阶段 Skill。本页说明其判断顺序和恢复行为。
+在项目配置为 Classic 的情况下，在 Agent 中调用 `/comet` 时，系统底层会交由 `/comet-classic` 自动检测当前变更处于哪个阶段、推进内部状态机，并判断是否无缝唤起下一阶段的 Skill。本文详细说明其背后的状态检测逻辑与恢复机制。
 
 ## 阶段推进 vs 自动衔接
 
-自动推进包含两个不同动作：
+在自动流转体系中，包含两个职责清晰的底层动作：
 
-| 概念         | 谁做               | 做什么                             | 受 auto_transition 影响            |
+| 动作类型     | 负责组件           | 具体执行内容                       | 是否受 auto_transition 影响        |
 | ------------ | ------------------ | ---------------------------------- | ---------------------------------- |
-| **阶段推进** | guard `--apply`    | 更新 `.comet.yaml` 的 `phase` 字段 | 否，始终发生                       |
-| **自动衔接** | `comet-state next` | 决定是否自动调用下一个阶段 Skill   | 是，读取 `classic.auto_transition` |
+| **阶段推进** | guard `--apply`    | 校验通过后，更新 `.comet.yaml` 中的 `phase` 字段 | 否，只要阶段任务合格，始终会执行更新 |
+| **自动衔接** | `comet-state next` | 阶段更新后，决定是否自动调用下一个阶段的 Skill   | 是，受 `classic.auto_transition` 控制 |
 
 <Warning>
-  <strong>阶段推进一定发生</strong>。guard 的 <code>--apply</code> 总是更新 <code>phase</code>。
-  <code>auto_transition</code> 只控制是否自动调用下一个 Skill，不影响 phase 推进。用户决策点无论{' '}
-  <code>auto_transition</code> 取何值都必须阻塞。
+  <strong>阶段推进本身必定会执行</strong>：只要当前阶段的任务达标，guard 的 <code>--apply</code> 就会把 <code>phase</code> 推进到下一状态。<code>auto_transition</code> 仅仅决定是否在当前会话中“一口气自动触发下一个 Skill”。而在所有预设的人工决策点上，无论 <code>auto_transition</code> 设为什么，流程都必须停下来等待你确认。
 </Warning>
 
 <p align="center">
@@ -28,56 +26,56 @@ description: '理解 /comet 进入 Classic 后，内部路由如何自动检测�
   />
 </p>
 
-<p align="center">阶段推进负责更新状态，自动衔接则控制是否自动加载并触发下一阶段的 Skill</p>
+<p align="center">阶段推进负责记录状态，自动衔接则控制是否自动加载并触发下一阶段的 Skill</p>
 
-## 自动检测怎么工作
+## 自动检测如何运转
 
-每次调用 `/comet` 并进入 Classic 后，内部 `/comet-classic` 都会重新读取文件状态来判断当前阶段，而不是依赖对话历史。
+每次你在对话中输入 `/comet` 时，系统都会直接重新扫描项目中的磁盘文件和状态机，完全不依赖易丢失的会话聊天记录。
 
-### Step 0：发现活跃 change
+### 第 0 步：扫描当前活跃变更（Active Change）
 
-1. **预设检测（优先级最高）**：命中 hotfix/tweak 时直接调用对应预设 Skill
-2. 未命中预设时运行 `openspec list --json` 获取所有活跃 change
-3. 按 change 数量和用户输入决定行为：
+1. **预设检测（最高优先级）**：若命中 hotfix 或 tweak 场景，直接调用对应的轻量预设 Skill。
+2. 若未命中预设，系统运行 `openspec list --json` 检索项目中所有尚未归档的 change。
+3. 根据变更数量与输入内容采取对应动作：
 
-| 活跃 change | 用户输入           | 行为                                                      |
-| ----------- | ------------------ | --------------------------------------------------------- |
-| 无          | 非预设             | 调用 `/comet-open`                                        |
-| 1 个        | `/comet <描述>`    | 配置进入 Classic 后询问：继续该 change 还是创建新的 |
-| 多个        | `/comet <描述>`    | 配置进入 Classic 后询问是否继续已有 change 或创建新的。若选继续，会列出清单 |
-| 1 个        | `/comet`（无描述） | 配置进入 Classic 后自动选中                               |
-| 多个        | `/comet`（无描述） | 配置进入 Classic 后列出清单让用户选择                     |
+| 活跃变更数   | 你的输入           | 系统的实际响应                                            |
+| ------------ | ------------------ | --------------------------------------------------------- |
+| 0 个         | 普通需求描述       | 自动调用 `/comet-open` 开启全新变更                        |
+| 1 个         | `/comet <新描述>`  | 提示确认：是继续该活跃 change，还是为新需求创建独立变更   |
+| 多个         | `/comet <新描述>`  | 提示确认：是继续已有任务还是新建任务；若选继续，会列出清单供挑选 |
+| 1 个         | 仅输入 `/comet`    | 自动选中唯一的活跃 change 并继续推进                      |
+| 多个         | 仅输入 `/comet`    | 打印活跃任务列表，等待你指定目标 change                    |
 
-### Step 1：读取状态
+### 第 1 步：读取物理状态
 
-优先读取当前 Classic OpenSpec 根目录下的 `changes/<name>/.comet.yaml`。
-新项目默认路径是 `docs/openspec/changes/<name>/.comet.yaml`，保留旧布局的项目是 `openspec/changes/<name>/.comet.yaml`。
-如果文件不存在，会回退到 `openspec status`、`tasks.md` 和 `docs/superpowers/` 做文件检查。根目录由 `classic.artifact_layout` 决定，详见[项目文件结构](/zh/guides/project-structure)。
+优先读取当前 Classic 产物根目录下的 `changes/<name>/.comet.yaml`。
+新项目默认存储在 `docs/openspec/changes/<name>/.comet.yaml`，保留旧版布局的项目为 `openspec/changes/<name>/.comet.yaml`。
+若该状态机文件缺失，系统会退一步检查 `tasks.md`、`docs/superpowers/` 以及运行 `openspec status` 进行文件级推断。
 
-### Step 2：阶段判定
+### 第 2 步：阶段精准判定
 
-按以下顺序判断，命中即停（以文件状态为准，冲突时修正 `.comet.yaml`）：
+系统按以下顺序从上往下依次匹配，命中即止（以磁盘真实文件为基准；若发现状态机与文件不符，会以文件为准修复 `.comet.yaml`）：
 
-| 判定条件                                       | 路由到                                                            |
+| 匹配条件                                       | 最终路由走向                                                      |
 | ---------------------------------------------- | ----------------------------------------------------------------- |
-| `archived: true` 或已移入 archive              | 流程已完成                                                        |
-| `verify_result: pass`                          | `/comet-archive`（先做归档前确认）                                |
-| `verify_result: fail`                          | ≤3 次失败自动回 build 修复，第 4 次暂停等你决策                    |
-| `phase: verify` 或 tasks 全部勾选              | `/comet-verify`                                                   |
-| `phase: build` 或有 Design Doc 但执行未完成    | hotfix→`/comet-hotfix`、tweak→`/comet-tweak`、full→`/comet-build` |
-| `phase: design` 或有 change 无 Design Doc      | `/comet-design`                                                   |
-| `phase: open` 或有活跃 change 无 `.comet.yaml` | `/comet-open`                                                     |
-| 无活跃 change                                  | `/comet-open`                                                     |
+| `archived: true` 或已进入归档目录              | 提示该变更已全部完结                                              |
+| `verify_result: pass`                          | 进入 `/comet-archive`（先进行归档前确认）                         |
+| `verify_result: fail`                          | 失败 ≤3 次时自动打回 build 修复；第 4 次失败时暂停等待你决策       |
+| `phase: verify` 或任务列表全部完成勾选         | 唤起 `/comet-verify` 执行验收                                     |
+| `phase: build` 或已有 Design Doc 但执行未完毕  | full 流程进入 `/comet-build`，预设分别进入 hotfix 或 tweak        |
+| `phase: design` 或已有变更但尚未产出 Design Doc| 唤起 `/comet-design` 进行技术方案推敲                             |
+| `phase: open` 或仅有目录未生成 `.comet.yaml`   | 唤起 `/comet-open` 补全需求规格                                   |
+| 无任何活跃变更                                 | 唤起 `/comet-open` 创建新变更                                     |
 
-## 状态转换
+## 状态转换链路
 
-阶段推进通过 guard `--apply` 或 `comet-state transition` 完成：
+阶段推进通常通过守卫命令的 `--apply` 或直接调用 `comet-state transition` 完成：
 
 ```bash
-# guard 推进（退出阶段 Skill 时调用）
+# 阶段守卫检查通过后更新状态（在阶段 Skill 退出前调用）
 node "$COMET_GUARD" <change-name> <phase> --apply
 
-# 直接表达状态事件
+# 触发明确的状态转换事件
 node "$COMET_STATE" transition <change-name> open-complete
 node "$COMET_STATE" transition <change-name> design-complete
 node "$COMET_STATE" transition <change-name> build-complete
@@ -85,133 +83,132 @@ node "$COMET_STATE" transition <change-name> verify-pass
 node "$COMET_STATE" transition <change-name> verify-fail
 ```
 
-转换链：
+核心流转链如下：
 
 ```text
 open-complete → design-complete → build-complete → verify-pass → archived
                                                       ↑
-                                              verify-fail（回到 build）
+                                               verify-fail（打回 build 修复）
 ```
 
-## 自动衔接：next 命令
+## 自动衔接：解析下一步指令
 
-阶段推进后，运行 `next` 解析下一步：
+每当一个阶段顺利完工并更新状态后，系统会运行 `next` 解析下一步行动：
 
 ```bash
 node "$COMET_STATE" next <change-name>
 ```
 
-输出格式：
+标准输出结构如下：
 
 ```text
 NEXT: auto|manual|done
-SKILL: <skill-name>     # done 时省略
-HINT: <message>         # 仅 manual 时
+SKILL: <skill-name>     # 流程完成（done）时省略
+HINT: <message>         # 仅在 manual 时输出提示信息
 ```
 
-| 输出           | 含义                                      | 触发条件                       |
+| 输出标识       | 核心含义                                  | 对应触发条件                   |
 | -------------- | ----------------------------------------- | ------------------------------ |
-| `NEXT: auto`   | 自动调用下一阶段 Skill                    | `auto_transition` 不是 `false` |
-| `NEXT: manual` | 不调用下一 Skill，打印 HINT 让用户手动运行 | `auto_transition: false`       |
-| `NEXT: done`   | 流程已完成                                | `archived: true`               |
+| `NEXT: auto`   | 自动无缝唤起下一个阶段的 Skill            | `auto_transition` 未设为 `false` |
+| `NEXT: manual` | 停止自动流转，输出友好提示并等待你手动执行 | `auto_transition: false`       |
+| `NEXT: done`   | 该变更已全面完成并归档                    | `archived: true`               |
 
-### Skill 路由
+### 各阶段路由分发表
 
-`next` 根据 `phase` 和 `workflow` 决定下一个 Skill：
+`next` 命令会根据当前的 `phase` 与工作流类型（full / hotfix / tweak）精准分发后续 Skill：
 
-| phase  | full             | hotfix                           | tweak                           |
-| ------ | ---------------- | -------------------------------- | ------------------------------- |
-| open   | `/comet-design`  | `/comet-build`(→`/comet-hotfix`) | `/comet-build`(→`/comet-tweak`) |
-| design | `/comet-build`   | —                                | —                               |
-| build  | `/comet-verify`  | `/comet-verify`                  | `/comet-verify`                 |
-| verify | `/comet-archive` | `/comet-archive`                 | `/comet-archive`                |
+| 当前 phase | full 流程        | hotfix 预设                      | tweak 预设                      |
+| ---------- | ---------------- | -------------------------------- | ------------------------------- |
+| open       | `/comet-design`  | `/comet-build`（分流至 hotfix）  | `/comet-build`（分流至 tweak）  |
+| design     | `/comet-build`   | —                                | —                               |
+| build      | `/comet-verify`  | `/comet-verify`                  | `/comet-verify`                 |
+| verify     | `/comet-archive` | `/comet-archive`                 | `/comet-archive`                |
 
-verify 和 archive 阶段不受 workflow 类型影响，始终返回标准 Skill。
+无论前期走的是完整流程还是轻量预设，verify 与 archive 阶段的处理逻辑完全一致，均使用标准化的验收与归档 Skill。
 
-## 连续执行
+## 连续执行与决策打断
 
-单次 `/comet` 调用进入 Classic 后，会从检测到的阶段开始。退出条件满足后，自动推进到后续阶段。
+输入一次 `/comet` 并进入 Classic 模式后，系统会自动从当前检测到的阶段顺畅启动。当一个阶段的退出门槛达成后，自动平滑流转到后续步骤：
 
 ```text
 /comet
-  ↓ 自动检测
+  ↓ 自动检测阶段
 /comet-open ──→ /comet-design ──→ /comet-build ──→ /comet-verify ──→ /comet-archive
 ```
 
-**自动推进只适用于没有用户决策的衔接点。**
-遇到[停顿点](/zh/concepts/decision-points)时必须暂停并等待用户确认，不能用推荐规则、默认值或历史偏好代替。
-支持结构化提问的平台会优先展示可点击的单选或多选。如果平台没有这类工具，或第一次调用失败，本会话后续停顿点会直接退回编号文本选项。
+**自动推进仅在纯自动化步骤之间生效。**
+一旦流程遇到预设的 [决策停顿点](/zh/concepts/decision-points)，系统必须毫无例外地暂停并等待人工拍板，严禁 Agent 擅自以“默认设置”或“根据历史习惯”代替你做决定。
+在支持交互式卡片的平台上，系统会优先展示结构化的单选或多选控件；如果当前平台不支持，则平滑降级为标准的编号文本选项。
 
-## auto_transition 配置
+## auto_transition 的配置方法
 
-`auto_transition` 控制是否自动调用下一个 Skill。配置优先级：
+`auto_transition` 用于控制是否在阶段完成后自动唤起下一步。其生效优先级为：
 
 ```text
-change 级 .comet.yaml > 环境变量 > 项目级 .comet/config.yaml > 默认值(true)
+change 级 .comet.yaml > 环境变量 > 项目级 .comet/config.yaml > 内置默认值（true）
 ```
 
-| 值             | 行为                                  |
+| 选项值         | 实际效果                              |
 | -------------- | ------------------------------------- |
-| `true`（默认） | `NEXT: auto`，自动调用下一 Skill       |
-| `false`        | `NEXT: manual`，打印 HINT，由你手动运行 |
+| `true`（默认） | 输出 `NEXT: auto`，由 Agent 自动进入下一阶段 |
+| `false`        | 输出 `NEXT: manual` 并打印提示，等待你手动触发下一步 |
 
-### 什么时候用 false
+### 什么时候适合设为 false？
 
-- 想在阶段之间插入人工审核
-- 每个阶段完成后需要换模型或换人
-- CI/CD 场景需要逐步控制
+- 团队希望在每个阶段切换时由人工进行代码或方案检视；
+- 不同的阶段由不同的人员或不同的模型接力处理；
+- 在自动化测试或 CI/CD 流水线中需要更精细的分步控制。
 
 ```bash
-# 环境变量临时覆盖
+# 通过环境变量临时关闭自动推进
 export COMET_AUTO_TRANSITION=false
 ```
 
-## 预设升级
+## 轻量预设平滑升级
 
-hotfix 或 tweak 执行过程中命中升级信号时，会暂停，并提供两个选项：
+如果使用 hotfix 或 tweak 过程中发现改动规模超出预期，系统会主动暂停，并给出两个明确选项：
 
-| 信号类型        | 触发                                                                  | 决策           |
+| 触发场景        | 具体表现                                                              | 处理策略       |
 | --------------- | --------------------------------------------------------------------- | -------------- |
-| 质变信号        | 跨模块协调、新增 capability、schema 变更、新 public API、深层架构问题 | 命中任一即暂停 |
-| 文件数阈值（tripwire） | 改动文件数超阈值                                          | 暂停交用户决定 |
+| 架构变动信号    | 出现跨模块协作、引入新 capability、Schema 变动、公开 API 变化等重大影响 | 命中任意一项即暂停 |
+| 改动文件数超阈值 | 修改文件数量超过设定的阈值                                            | 暂停等待人工评估 |
 
-| 选项                        | 结果                                                                        |
+| 选项名称                    | 执行效果                                                                    |
 | --------------------------- | --------------------------------------------------------------------------- |
-| 继续预设轻量流程            | 继续当前预设                                                                |
-| 升级为完整 `/comet-classic` | `transition preset-escalate` → 回退到 design → 补 Design Doc → 回到完整流程 |
+| 继续按轻量预设推进          | 保持当前预设，继续执行                                                      |
+| 升级为完整 `/comet-classic` | 触发 `transition preset-escalate`，退回 design 阶段补齐设计文档并按全流程推进 |
 
-`preset-escalate` 是预设到 full 升级的唯一合法通道。
-它会一次性设置 `workflow`/`classic_profile` 为 `full`、把 `phase` 回退到 `design` 并清除 `design_doc`。这三个动作要么全部生效，要么都不执行。
+升级通道 `preset-escalate` 具有严格的事务保证：它会一次性将流程类型切换为 `full`、将阶段回退到 `design` 并清理临时的设计记录，这三个动作要么全部成功，要么完全不执行。
 
-## 断点恢复
+## 断点智能恢复
 
-上下文压缩或会话中断后，重新调用 `/comet`。配置进入 Classic 后，内部路由会重新读取文件状态并恢复：
+在遭遇对话中断或长上下文被压缩后，只需重新输入 `/comet`。系统会自动重走状态探测逻辑，精准回到断点位置：
 
-| 场景                                                                   | 恢复行为                          |
-| ---------------------------------------------------------------------- | --------------------------------- |
-| `phase: build` + `build_pause: plan-ready`（配置已齐全） | 重新发起同一次联合决策，你补全配置后才清除暂停标记并继续 |
-| `phase: build` + `build_pause: plan-ready`（配置未齐全） | 回到 plan-ready 联合决策，等你补选执行方式、TDD 和审查模式 |
-| `phase: build` + `build_pause: plan-ready` + plan 缺失                 | 状态损坏，重新生成 plan            |
-| `phase: verify` + `verify_result: fail`                                | ≤3 次失败自动回 build 修复。第 4 次暂停并等待你决策 |
-| `phase: open` + 产物已完整                                       | 先 guard `--apply` 修正状态再判定 |
-| `phase: archive`                                                       | 只允许调用 `/comet-archive`       |
+| 异常断点场景                                                           | 系统的恢复策略                                                  |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `phase: build` 且标记为 `plan-ready`（所有配置已选定）                  | 重新呈现联合决策面板，确认无误后清除暂停标记继续执行            |
+| `phase: build` 且标记为 `plan-ready`（尚缺配置）                        | 重新唤起联合决策，等待你补选执行方式、TDD 模式与审查严格度      |
+| `phase: build` 且标记为 `plan-ready` 但计划文件丢失                    | 判定为中间文件损坏，由 Agent 重新生成落地计划                   |
+| `phase: verify` 且上轮验收结果为 `fail`                                | 失败 ≤3 次时自动打回 build 修复；第 4 次失败时暂停等待人工决策  |
+| `phase: open` 但实际规格文档已全部齐全                                 | 先自动运行 guard `--apply` 修正状态机，再继续推进               |
+| `phase: archive`                                                       | 严密限制仅能调用 `/comet-archive` 终结任务                      |
 
-断点恢复不依赖对话历史。每次都重新执行 Step 0 和 Step 1。
+恢复过程完全基于物理文件，即使会话历史被清空也丝毫不会受到影响。
 
-## 红旗清单
+## 行为边界与风险防范清单
 
-Comet 的自动推进有明确的边界。以下想法出现时必须停下检查：
+Comet 的自动推进具有极为清晰的边界防护，以下是 Agent 严禁出现的越界行为：
 
-| Agent 心理                  | 实际风险                                |
+| 危险想法 / 违规倾向         | 潜在风险与底线规则                      |
 | --------------------------- | --------------------------------------- |
-| "用户应该会同意这个方案"    | 不能替用户决策，必须等待明确选择         |
-| "这只是个小改动，不需要确认" | 决策点无大小之分                        |
-| "用户之前选过 A，这次也选 A" | 历史偏好不能替代当前确认                |
-| "流程走到这里应该没问题了"  | 流程走完不等于验证通过，检查 verify_result |
+| “我觉得用户大概率会选这个方案” | 严禁代用户做主，遇到停顿点必须等待明确答复 |
+| “这改动挺小的，就不打扰用户了” | 决策点无轻重之分，规定需要确认的必须停下 |
+| “用户上次选了 A，这次肯定也选 A” | 历史偏好仅供参考，不能取代当前的直接确认 |
+| “前面步骤都跑通了，应该稳了” | 流程跑完不代表验收合格，必须严格检查真实测试证据 |
 
 ## 下一步
 
-- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — 自动推进在哪里暂停
-- [Classic 配置](/zh/classic/configuration) — `auto_transition` 字段和配置优先级
-- [工作流概念](/zh/concepts/workflow) — 五阶段如何串联
-- [恢复中断的工作](/zh/guides/resuming-workflow) — 断点恢复的实践
+- [五阶段停顿点和用户选择点](/zh/concepts/decision-points) — 掌握所有自动推进会暂停的人工决策点
+- [Classic 配置](/zh/classic/configuration) — `auto_transition` 与更多高级配置项
+- [工作流概念](/zh/concepts/workflow) — 五阶段如何协同运转
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 遭遇中断后的实操指南

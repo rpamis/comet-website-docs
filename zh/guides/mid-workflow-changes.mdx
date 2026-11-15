@@ -1,47 +1,43 @@
 ---
 title: '中途修改 Spec 或回退工作流'
-description: '写了代码不满意、中途要改 spec、验证不通过要回 build、归档前想重新验证——这些场景怎么操作，哪些状态会被保留或重置。'
+description: '代码编写不满意、中途调整需求规格、验收未通过退回重修、归档前重新复验——详细操作指引与状态机保留规则。'
 ---
 
-实际开发中，需求变化、代码不满意、验证失败都是常态。除了向前推进，Comet 还提供了多条合法的修改和回退路径。本页讲清楚每个场景该怎么操作。
+在真实的软件工程研发中，需求变更、代码重构与测试修复都是不可避免的常态。除了按部就班向前流转，Comet 还提供了一套完备且受状态机严格保护的合法修改与回退通道。本文详细梳理各个场景下的正确处理方式。
 
-## 编辑后继续当前任务
+## 本地编辑后平滑继续任务
 
-Native 和 Classic 在 Build、Verify 或归档前保留你的实际编辑，由当前 Agent 核对内容与影响，继续原 Run。无需为普通编辑单独启动审查会话，也不需要重建 change。
+无论是 Native 还是 Classic 工作流，在 Build、Verify 或归档前，系统均会完整保留你在工作区中的实际改动，由当前 Agent 核实改动范围与影响后继续推进。无需为了常规的代码微调而重新创建变更：
 
-- 代码或检查输入变化：保留仍有效的工作，只补受影响或缺失的检查。
-- brief、Spec、Design Doc 或计划仅调整措辞、契约未变：对照已批准原文核对后，保留原批准和阶段。
-- 目标、验收标准、方案或批准范围发生实质变化：说明变化与影响，再处理对应的用户决定。
-- 结果已接受、尚未交付时修改普通文档：核对影响并刷新受影响检查后，继续原归档；不重复已完成的一次性操作。
+- **源码或测试用例调整**：完整保留仍然有效的工作成果，仅重新补跑受影响或缺失的检查；
+- **brief、Spec、Design Doc 仅微调文案但接口契约未变**：核对确认后，保留原有的人工批准与阶段状态；
+- **核心目标、验收标准或技术选型发生实质改变**：说明变化影响，重新唤起对应的人工确认流程；
+- **在验收通过、尚未交付时微调文档**：核对影响并刷新相关检查后继续归档流程，绝不重复执行已完成的操作。
 
-Agent 按 Runtime 返回的 `comet edit-review observe` 等指引处理。未获批准的操作不会因编辑而自动获准；仍在执行或结果未知的任务也不能直接重启。
+## 核心前提：阶段 phase 严禁手动修改
 
-下面的 transition 示例用于 Classic 的显式回退；日常编辑优先按 Runtime 当前返回的续行操作处理。Native 验收见[验证与修复](/zh/native/verification-and-repair)。
+`.comet.yaml` 中的 `phase` 由状态机内核严格维护。直接运行 `set phase build` 会被系统底层强行拒绝。任何阶段回退都必须通过**合法的状态流转事件（transition event）**触发，且每项事件均受守卫核验保护。
 
-## 先理解：phase 不能手动改
-
-`.comet.yaml` 的 `phase` 由 Comet 自动维护（machine-owned）。你不能直接 `set phase build` 回退，状态机会拒绝。回退只能通过**合法的 transition 事件**，每个事件都有守卫检查。
-
-紧急修复状态时可以使用 `COMET_FORCE_PHASE=1`，命令会输出 `WARNING`：
+仅在极端异常的手动抢救场景下，方可使用 `COMET_FORCE_PHASE=1` 进行强制覆盖（命令会输出明确的安全告警）：
 
 ```bash
 COMET_FORCE_PHASE=1 node "$COMET_STATE" set <name> phase verify
 ```
 
-正常工作流应使用下列 transition 事件。
+日常正常开发请始终使用下述标准流转通道。
 
-## 可用的 transition 事件
+## 合法的状态流转事件全览
 
-| 事件                  | 方向                    | 触发场景               |
-| --------------------- | ----------------------- | ---------------------- |
-| `open-complete`       | 向前 open→design        | open 产物完成          |
-| `design-complete`     | 向前 design→build       | Design Doc 完成        |
-| `build-complete`      | 向前 build→verify       | 代码完成               |
-| `verify-pass`         | 向前 verify→archive     | 验证通过               |
-| **`verify-fail`**     | **回退 verify→build**   | 验证不通过，用户选修复 |
-| **`preset-escalate`** | **回退 build→design**   | hotfix/tweak 范围扩大  |
-| **`archive-reopen`**  | **回退 archive→verify** | 归档前想重新验证       |
-| `archived`            | 终态                    | 归档完成               |
+| 转换事件名称          | 流转方向                | 触发场景                                           |
+| --------------------- | ----------------------- | -------------------------------------------------- |
+| `open-complete`       | 前进：open → design     | 需求探索完毕，规格文档全部就绪                     |
+| `design-complete`     | 前进：design → build    | 架构方案获得确认，Design Doc 已落盘                |
+| `build-complete`      | 前进：build → verify    | 编码实现完毕，自动化构建测试全绿                   |
+| `verify-pass`         | 前进：verify → archive  | 质量验收全量通过，出具验证报告                     |
+| **`verify-fail`**     | **回退：verify → build** | 验收未通过，或你需要打回重写代码                   |
+| **`preset-escalate`** | **回退：build → design** | hotfix / tweak 预设发现改动超标，平滑升级到全流程   |
+| **`archive-reopen`**  | **回退：archive → verify** | 归档前想重新验证或做最后微调                       |
+| `archived`            | 终态归档                | 物理归档全部完成                                   |
 
 <p align="center">
   <img
@@ -51,190 +47,77 @@ COMET_FORCE_PHASE=1 node "$COMET_STATE" set <name> phase verify
   />
 </p>
 
-<p align="center">phase 不能手动改；回退必须走状态机允许的 transition 事件</p>
+<p align="center">阶段状态不可强行篡改；任何回退动作均需通过合法的状态机流转事件触发</p>
 
-## 场景一：build 阶段中途修改 spec
+## 常见场景一：在 build 阶段中途微调 Spec
 
-delta spec 在 build 阶段可以修改。根据修改范围采用以下处理方式：
+在编码过程中，增量 Spec（delta spec）完全允许适度修正。依据改动规模分别处理：
 
-| 规模 | 触发                         | 怎么做                                                       | 改 phase 吗            |
-| ---- | ---------------------------- | ------------------------------------------------------------ | ---------------------- |
-| 小   | 缺验收场景、边界情况         | 直接编辑 delta spec 并追加 tasks.md，提交时记录原因          | 否                     |
-| 中   | 接口变化、新组件、数据流变化 | 暂停确认 → 加载 `brainstorming` 更新 Design Doc + delta spec | 否                     |
-| 大   | 全新 capability              | 暂停确认 → `/comet-open` 开新 change                         | 新 change 从 open 开始 |
+| 改动规模 | 触发原因                       | 规范处理路径                                                 | 是否改变阶段 phase |
+| -------- | ------------------------------ | ------------------------------------------------------------ | ------------------ |
+| **轻度** | 补充边界用例、修正模糊用词     | 直接编辑增量 Spec 并追加至 `tasks.md`，提交 Git 时如实记录理由 | 否，在 build 原地处理 |
+| **中度** | 涉及接口变动、组件调整或数据流 | 主动暂停确认 → 调起头脑风暴更新 Design Doc 与增量 Spec       | 否，在 build 原地处理 |
+| **重度** | 引入全新的业务 capability      | 主动暂停确认 → 通过 `/comet-open` 为新模块另起独立变更        | 另起新任务从 open 开始 |
 
 <Note>
-  轻度和中度修改<strong>不回退 phase</strong>——它们在 build
-  阶段原地处理。只有涉及重大范围变更时（开新 change），才会另起一个完整的 open→design→build
-  流程。full workflow <strong>没有</strong> build→design 的直接回退，设计问题在 build 阶段通过
-  brainstorming 原地更新 Design Doc 解决。
+  轻度和中度微调<strong>无需回退 phase</strong>——它们直接在 build 阶段原地自愈。只有出现超出当前变更边界的全新能力时，才建议拆分出新的独立任务。
 </Note>
 
-### 50% 阈值
+## 常见场景二：代码编写不满意，想从验证阶段退回重修
 
-新增任务超过初始 tasks.md 的 50% 时，视为超出原始计划范围，必须暂停让你选择：拆分新 change 或继续在当前 change。
-
-### delta spec 什么时候同步到 main spec
-
-delta spec 只在 archive 阶段合并到 main spec。build 阶段不修改 main spec。
-
-## 场景二：写了代码不满意，想回 build 重来
-
-如果已经在 verify 阶段但想改代码：
-
-```mermaid
-flowchart LR
-  A["verify 阶段"] --> B{"验证不通过?"}
-  B -->|是| C["transition verify-fail"]
-  C --> D["回到 build"]
-  D --> E["修改代码"]
-  E --> F["build-complete"]
-  F --> G["重新 verify"]
-  B -->|通过但想改| H["archive-reopen 回 verify"]
-  H --> C
-```
-
-### verify-fail 回退
-
-验证未通过或需要返回 build 修复时：
+如果流程已经进入 verify 阶段，但在测试中发现重大逻辑缺陷希望重新编写：
 
 ```bash
 node "$COMET_STATE" transition <change-name> verify-fail
 ```
 
-保留和更新的字段如下：
+触发回退后的状态机表现：
+- `phase`：回退为 `build`；
+- `verify_result`：更新为 `fail`；
+- `verification_report` 与 `branch_status` 完好保留，分支状态继续保持 `pending`。
 
-| 字段                  | verify-fail 后     |
-| --------------------- | ------------------ |
-| `branch_status`       | **保留**（不重置） |
-| `verification_report` | **保留**           |
-| `verify_result`       | 改为 `fail`        |
-| `phase`               | 改为 `build`       |
+修改完代码并通过本地测试后，再次推进至 `build-complete` 重新发起验收。
 
-正常流程不会在 verify 处理分支，因此这里保留的应是 `branch_status: pending`。不要在重新验证时手工写 `handled`；交付方式统一由 Archive 在最终确认后记录。
+## 常见场景三：验证已通过，但在归档前还想最后调整
 
-## 场景三：验证通过但归档前想重新检查
-
-verify 通过后进入 archive，但你在归档前确认时发现还想改：
+在进入 archive 阶段后，若在最终确认时发现遗漏了某些测试或想微调细节：
 
 ```bash
 node "$COMET_STATE" transition <change-name> archive-reopen
 ```
 
-执行后的字段状态如下：
+触发重新打开后的状态机表现：
+- `phase`：退回至 `verify`；
+- `verify_result`：重置为 `pending`；
+- `branch_status`：保持 `pending`；
+- `verified_at`：清空为 `null`。
 
-| 字段            | archive-reopen 后 |
-| --------------- | ----------------- |
-| `branch_status` | 重置为 `pending`  |
-| `verify_result` | 改为 `pending`    |
-| `phase`         | 改为 `verify`     |
-| `verified_at`   | 改为 `null`       |
+随后再次运行 `/comet-verify` 重新核验，确认无误后再进入归档。
 
-然后进入 `/comet-verify` 重新验证。发现问题时，再用 `verify-fail` 返回 build。
+## 常见场景四：将轻量预设（hotfix / tweak）平滑升级为全流程
 
-## 场景四：将 hotfix 或 tweak 升级为 full
-
-hotfix 或 tweak 执行过程中命中升级信号，并确认升级到 full 时：
+在运行 hotfix 或 tweak 过程中，若发现改动超出预期需要补充正规的架构设计文档：
 
 ```bash
 node "$COMET_STATE" transition <change-name> preset-escalate
 ```
 
-该事件会将 `workflow` 和 `classic_profile` 设为 `full`，将 `phase` 回退到 `design`，并清空 `design_doc`。随后加载 `comet-design` 创建 Design Doc。
+该原子命令会一次性将工作流类型切换为 `full`、将 `phase` 退回至 `design`，并清理临时标记。随后系统会自动唤起 `/comet-design` 补齐 Design Doc。已写好的代码和测试完全保留，无需推倒重来。
+
+## 常见场景五：恢复时发现本地有未提交的代码改动
+
+在重新唤起 `/comet` 恢复任务时，若检测到本地工作区存在未提交的改动：
+- **明确归属于当前变更**：自动吸纳进当前任务中，不重复编写；
+- **属于你的其他临时改动**：系统主动暂停并询问：是合并进当前变更、另起新任务、暂存保留、还是舍弃；
+- **改动归属不确定**：系统主动暂停，列出文件清单等待你确认，绝不擅自越界推进。
 
 <Warning>
-  <code>preset-escalate</code> 只对 hotfix/tweak 有效，full workflow 不能用。这是预设→full 升级的
-  <strong>唯一合法通道</strong>。
+  未提交改动仅属于客观代码事实，<strong>绝不会自动触发打勾或推进阶段</strong>。必须完成归因、测试通过并通过守卫核验后方可放行。
 </Warning>
-
-## 场景五：design 阶段修改了 delta spec
-
-design 阶段可能需要补充验收场景、修正描述或增加边界用例。修改后由 Agent 对照原始请求判断影响，更新相应设计与计划；目标或批准范围发生实质变化时，先重新确认。
-
-Classic 默认直接交接原始材料，不再要求重建内容 hash。只有你需要一份集中阅读的 Markdown 视图时，才按当前 Runtime 的指引生成 handoff。
-
-## 场景六：恢复时发现工作区有未提交改动
-
-恢复 `/comet` 时，如果工作区存在未提交改动，先按未提交改动的归因规则处理：
-
-| 归因                          | 处理                                                                    |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| 属于当前 change               | 折叠进当前任务，不重复编辑                                              |
-| 不属于当前 change（用户改动） | 暂停询问：折叠进当前 change / 拆新 change / 保留不动 / 丢弃（需你确认） |
-| 来源不确定                    | 暂停，列出文件并说明判断依据，不推进 phase                              |
-
-<Warning>
-  未提交改动只代表代码事实，<strong>不会自动推进 phase 或勾选 tasks.md</strong>
-  。必须完成归因、验证、同步文档、过 guard 后才推进。
-</Warning>
-
-## 场景七：build_pause 卡住了
-
-`build_pause: plan-ready` 是计划生成后的暂停点。恢复规则如下：
-
-| 状态                                         | 恢复行为                                          |
-| -------------------------------------------- | ------------------------------------------------- |
-| isolation/build_mode 已设但 build_pause 还在 | 残留的暂停标记（stale pause），自动清除后继续执行 |
-| isolation/build_mode 未设                    | 回到 plan-ready 恢复点让你选择（不重新生成计划）  |
-| plan 文件缺失                                | 回到 `/comet-build` 处理损坏或重新生成            |
-| 所有任务已完成                               | 清除 build_pause，走 guard 到 verify              |
-
-## 回退路径速查
-
-| 你想做的               | 操作                            | 到哪个阶段    | 保留                                            |
-| ---------------------- | ------------------------------- | ------------- | ----------------------------------------------- |
-| 改 delta spec（小改）  | 直接编辑，不回退                | build（不变） | 全部                                            |
-| 改 Design Doc（中改）  | 暂停 + brainstorming 原地更新   | build（不变） | 全部                                            |
-| 改代码                 | `verify-fail` → build           | build         | verification_report；branch_status 保持 pending |
-| 归档前重新验证         | `archive-reopen`                | verify        | branch_status 重置为 pending                    |
-| hotfix/tweak 升级 full | `preset-escalate`               | design        | 无（清空 design_doc）                           |
-| 修复紧急状态           | `COMET_FORCE_PHASE=1 set phase` | 任意          | 无（WARNING）                                   |
-
-## 回退关系图
-
-```mermaid
-flowchart LR
-  open["open"] -->|open-complete| design["design"]
-  design -->|design-complete| build["build"]
-  build -->|build-complete| verify["verify"]
-  verify -->|verify-pass| archive["archive"]
-  archive -->|archived| done["完成"]
-
-  verify -->|verify-fail| build
-  archive -->|archive-reopen| verify
-  build -->|preset-escalate<br/>仅 hotfix/tweak| design
-
-  style verify fill:#fdd
-  style build fill:#dfd
-  style archive fill:#fdd
-```
-
-红色（verify/archive）是有回退出口的阶段。绿色（build）是可以原地改 spec 的阶段。
-
-## 常见问题
-
-<AccordionGroup>
-  <Accordion title="我能直接编辑 .comet.yaml 改 phase 吗">
-    不能。phase 是 machine-owned，直接改会被拒绝。用 `transition` 事件回退，或用
-    `COMET_FORCE_PHASE=1`（仅修复，会 WARNING）。
-  </Accordion>
-  <Accordion title="full workflow 能从 build 回到 design 吗">
-    不能直接回。full workflow 的设计问题在 build 阶段通过 brainstorming 原地更新 Design Doc
-    解决，不回退 phase。只有 hotfix/tweak 能用 `preset-escalate` 回 design。
-  </Accordion>
-  <Accordion title="verify-fail 后 branch_status 是什么">
-    正常流程中它仍是 pending。Verify 不处理分支，也不写 handled；只有 Archive
-    在用户确认立即远端交付后才写 handled，并把它包含在唯一归档提交中。
-  </Accordion>
-  <Accordion title="build 阶段改了 delta spec，要同步 main spec 吗">
-    不要。delta→main spec 合并统一在 archive 阶段完成。build 阶段只编辑 delta spec。
-  </Accordion>
-</AccordionGroup>
 
 ## 下一步
 
-- [自动推进机制](/zh/concepts/auto-transition) — transition 事件和 next 命令
-- [状态管理](/zh/concepts/state-management) — 状态机硬约束
-- [恢复中断的工作](/zh/guides/resuming-workflow) — 残留暂停标记和未提交改动的恢复
-- [build 阶段](/zh/phases/build) — spec 增量更新三档
-- [verify 阶段](/zh/phases/verify) — verify-fail 决策
+- [自动推进机制](/zh/concepts/auto-transition) — 掌握状态流转事件与 next 指令
+- [状态管理](/zh/concepts/state-management) — 深入理解状态机底层字段
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 遭遇中断后的物理恢复实操
+- [决策停顿点速查](/zh/concepts/decision-points) — 掌握各个关键节点的裁决标准
