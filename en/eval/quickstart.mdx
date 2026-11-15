@@ -1,229 +1,110 @@
 ---
-title: 'Quick Start: Evaluating a Skill'
-description: 'From the first run, evaluation configuration to report interpretation, take you to evaluate local skills with comet eval. '
+title: 'Quickstart: Evaluating a Skill'
+description: 'From your first run and evaluation configuration to report interpretation, evaluate local skills with comet eval.'
 ---
 
-You only need a local directory containing `SKILL.md` to evaluate a Skill using `comet eval`. Even if you haven't pre-written the evaluation use cases, Eval will automatically generate 2 to 4 evaluation use cases based on the content of the Skill and run them. This article introduces in the order of actual usage: First, run it through once, then select the Agent and evaluate the backend, and then configure the task, generate the report and locate the cause of failure.
+As long as you have a local directory containing `SKILL.md`, you can immediately evaluate its quality using `comet eval`.
+
+Even if you have not written any test cases yet, **Eval automatically generates 2 to 4 matching evaluation test cases based on your Skill's content and executes them**. This guide follows the actual developer workflow: start with a zero-config static pre-check, run a low-cost smoke test, interpret report findings, and configure advanced settings as needed.
 
 <Tip>
-  To use existing benchmark tasks, select **Built-in datasets** when creating a Dashboard
-  evaluation, explicitly download WorkBuddy Code or SkillsBench, then run. See [built-in benchmark
-  datasets](/en/cli/eval#built-in-benchmark-datasets) for CLI usage, licensing, and Goal comparison
-  conditions.
+  Want to run standardized public benchmark tasks? In Dashboard, select **Built-in datasets** under New Evaluation to download WorkBuddy Code or SkillsBench. See [Built-in benchmark datasets](/en/cli/eval#built-in-benchmark-datasets).
 </Tip>
 
-## What you need before running
+## Quickstart Workflow
 
-### Required content
+```mermaid
+flowchart LR
+  A["1. Static Pre-check<br/>--collect"] --> B["2. Low-cost Smoke Run<br/>--quick --html"]
+  B --> C["3. Read Eval Report<br/>HTML & Root-Cause Attribution"]
+  C --> D["4. Full & Advanced Eval<br/>Auto Cases / eval.yaml"]
+```
 
-- `@rpamis/comet` has been installed. The npm package comes with an eval harness, so there is no need to clone the Comet repository.
-- A local Skill directory containing `SKILL.md`.
-- When running the real evaluation, `uv`, Python 3.11+, Docker, the selected Agent CLI and the corresponding model credentials are required.
+## Step 1: Zero-Config Static Pre-check (No API Keys Required)
 
-`--collect` only performs static discovery and configuration checks, and does not start agents, Docker, plugins, credentials, or network requests. Therefore, it can be used to check the Skill first, without having to prepare a complete model environment from the very beginning.
-
-If you want to select an Agent other than Claude Code, first read the [Eval Agent startup configuration ](/en/eval/agent-setup) to confirm the corresponding CLI, authentication method and model protocol.
-
-### User-level `.env` configuration
-
-Ordinary users do not need to clone the Comet source code, nor do they need to enter `eval/` in the source code directory. Run arbitrary for the first time
-When the `comet eval` command is used, the CLI will automatically create a complete user-level configuration file:
-
-- Windows：`%USERPROFILE%\.comet\eval\.env`
-- macOS/Linux：`~/.comet/eval/.env`
-
-The CLI only creates missing files and does not overwrite existing ones. The first run will display the actual path in the output. Open this file
-Just fill in the parameters as needed and run it again. The environment variables already set in the current shell take precedence over `.env`.
-
-The automatically generated template contains all user-configurable parameters and is organized in the following groups:
-
-| Parameter group                  | Main variable                                                                                                                                                                                |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Main task (Bench                 | `BENCH_EVAL_AGENT`、`BENCH_API_KEY`、`BENCH_BASE_URL`、`BENCH_MODEL`                                                                                                                         |
-| Independent Judge                | `BENCH_LLM_JUDGE`、`BENCH_JUDGE_AGENT`、`BENCH_JUDGE_API_KEY`、`BENCH_JUDGE_AUTH_TOKEN`、`BENCH_JUDGE_BASE_URL`、`BENCH_JUDGE_MODEL`                                                         |
-| Claude Code                      | `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_*`、`CLAUDE_CODE_SUBAGENT_MODEL`、`BENCH_CC_MODEL`、`BENCH_CC_VERSION`              |
-| Codex                            | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`CODEX_API_KEY`、`CODEX_BASE_URL`、`CODEX_MODEL`、`BENCH_CODEX_*`                                                                       |
-| Qoder                            | `QODER_PERSONAL_ACCESS_TOKEN`、`QODER_BASE_URL`、`QODER_MODEL`、`BENCH_QODER_*`                                                                                                              |
-| CodeBuddy                        | `CODEBUDDY_API_KEY`、`CODEBUDDY_AUTH_TOKEN`、`CODEBUDDY_BASE_URL`、`CODEBUDDY_MODEL`、`CODEBUDDY_*_MODEL`、`CODEBUDDY_CUSTOM_HEADERS`、`CODEBUDDY_INTERNET_ENVIRONMENT`、`BENCH_CODEBUDDY_*` |
-| Custom Agent                     | `COMET_EVAL_ADAPTERS_DIR`;" And the credentials, model and address variables declared by the adapter `adapter.yaml`                                                                          |
-| Other evaluations and follow-ups | `BENCH_SIMULATOR_PROMPT_FILE`、`LANGSMITH_*`、`TRACE_TO_LANGSMITH`、`LANGFUSE_*`                                                                                                             |
-
-The parameters in the template are all comments by default. Items that are not filled in will not change their default behavior. The real API key should only be placed at the user level
-`.env` or the current shell cannot write skills, manifest, reports, or public repositories.
-
-### Which evaluation agents are supported
-
-By default, `comet eval` uses `claude-code`. The main Agent, user simulator and optional Judge can all use the following agents:
-
-| Agent         | Suitable scenarios                                  | Common vouchers                               |
-| ------------- | --------------------------------------------------- | --------------------------------------------- |
-| `claude-code` | Default selection: Use Claude Code to execute Skill | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
-| `codex`       | Use Codex CLI or OpenAI compatible models           | `OPENAI_API_KEY` or `CODEX_API_KEY`           |
-| `qoder`       | Use the Qoder CLI                                   | `QODER_PERSONAL_ACCESS_TOKEN`                 |
-| `codebuddy`   | Use the CodeBuddy CLI or its API                    | `CODEBUDDY_API_KEY` or `CODEBUDDY_AUTH_TOKEN` |
-
-<Info>
-  The custom Agent adapter is a user-level advanced capability and does not require cloning the
-  Comet source code. Only the built-in Eval harness needs to be modified. When it comes to tasks or
-  Docker environments, it is only necessary to refer to [Advanced Configuration
-  ](/en/eval/configuration)].
-</Info>
-
-For registration, credentials, and CLI conventions for custom Agents, see [Eval Agent setup · Extend Eval with a custom Agent](/en/eval/agent-setup#extend-eval-with-a-custom-agent).
-Placing the executable file on PATH alone does not automatically enable it.
-
-If evaluation ends instantly and does not actually run, Docker, Agent CLI, or model credentials are often not ready. In these cases, harness marks the sample as skipped to avoid false-positive success.
-
-## The first run
-
-First, perform a pre-check without calling the model, then run the low-cost smoke once, and finally run the complete task set as needed
+Before making any real model calls, run `--collect` to verify Skill directory structures, manifests, and task discovery:
 
 ```bash
-# 1. Check Skill, manifest and task discovery
 comet eval ./my-skill --collect
+```
 
-# 2. Run fixed low-cost smoking tasks
+- **Requires no Docker, no API keys, and incurs zero token cost**;
+- Completes static syntax parsing and task discovery in seconds;
+- Once the command recognizes your Skill name and planned tasks, proceed to the next step.
+
+## Step 2: Run a Low-Cost Smoke Evaluation
+
+Before running a real evaluation, make sure your machine has:
+- Python 3.11+ and `uv`
+- Docker installed and running
+- Your chosen Agent CLI (defaults to `claude-code` or `codex`) and corresponding model API keys
+
+Run the fixed, low-cost smoke test to validate the full execution pipeline:
+
+```bash
 comet eval ./my-skill --quick --html
+```
 
-# 3. Run evaluations using configured or automatically generated tasks
+- `--quick` runs the built-in `generic-skill-smoke` task, verifying that the Skill can be properly loaded into the agent, invoked by the model, and produce expected output files;
+- `--html` tells the runner to generate an interactive HTML report upon completion and print the report path to your terminal.
+
+```text
+✔ Loaded Skill: my-skill
+✔ Launching isolated container environment...
+✔ Executing smoke task: generic-skill-smoke
+✔ Scoring complete: pass@1 = 100%
+📄 Evaluation report generated: .comet/eval/runs/exp-2026-11-15/summary.html
+```
+
+## Step 3: Interpret Evaluation Reports and Root-Cause Failures
+
+Open the generated `summary.html` in your browser (or view `summary.md` in the same directory):
+
+1. **Pass Rates**: Check `pass@1`, `pass@k`, or `pass^k` metrics to measure Skill capability and consistency across repeated runs;
+2. **Multi-Dimensional Rubric Scores**: Inspect task completion, formatting compliance, and absence of unwanted side effects;
+3. **Precise Failure Attribution**: When a task fails, Comet automatically categorizes the root cause:
+   - `harness`: Container, dependency, or runtime environment errors (e.g. Docker port conflicts or missing Python packages);
+   - `workflow`: Workflow guidance flaws, such as the agent getting stuck or timing out;
+   - `task`: The evaluation task definition or assertion criteria are incorrect or overly strict;
+   - `model`: Model output instability or formatting anomalies.
+
+## Step 4: Full Evaluation and Customizing Tasks
+
+Once the smoke test succeeds, run a full evaluation:
+
+```bash
 comet eval ./my-skill --html
 ```
 
-When there is no `comet/eval.yaml`, or when there are no `evaluation.tasks` and `recommendedTasks` in the manifest, the normal run will automatically generate 2 to 4 evaluation use cases based on the Skill content, freeze and cache them before execution. You don't need to write down the task first to start the assessment. `--quick` does not use these automatically generated use cases but runs `generic-skill-smoke` consistently to verify that the Skill can be injected, invoked, and produce `result.md`.
+If no task is manually configured, the runner **automatically generates 2 to 4 test cases** tailored to your Skill, freezes and caches them, and executes the suite.
 
-### How to pass "target"
+### Target Passing Options
 
-Directories, direct `SKILL.md` and manifest can all be used as targets:
+You can pass a directory, a `SKILL.md` file directly, or an `eval.yaml` manifest:
 
 ```bash
-# Skill directory: Automatically discover comet/eval.yaml within it (if it exists)
-comet eval ./my-skill --collect
+# Pass the Skill directory: automatically discovers comet/eval.yaml if present
+comet eval ./my-skill --html
 
-# Just pass SKILL.md directly
+# Pass SKILL.md directly
 comet eval ./my-skill/SKILL.md --html
 
 # Pass the manifest directly
 comet eval ./my-skill/comet/eval.yaml --html
 ```
 
-When there is no manifest, Comet will synthesize the basic configuration in memory and will not rewrite the Skill source file. When the Skill is outside the repository, use `--project` to specify the project directory for saving the running status and reports:
+If your Skill lives outside the current project, pass `--project ./my-project` to designate where run logs and reports should be saved.
 
-```bash
-comet eval ./my-skill --project ./my-project --html
-```
+### Customizing Evaluation Tasks
 
-## Configure the evaluation Agent and Judge
-
-The simplest way is to select the main Agent in the command line:
-
-```bash
-comet eval ./my-skill --agent codex --model subject-model --html
-```
-
-It is also possible to create `comet/eval.yaml` in the root directory of the evaluated Skill and configure the default Agent in this file. For example, the directory structure is as follows:
-
-```text
-my-skill/
-├── SKILL.md
-└── comet/
-    └── eval.yaml
-```
-
-When you run `comet eval ./my-skill`, Comet will automatically detect `./my-skill/comet/eval.yaml`. You can also directly pass this file as the target
-
-```bash
-comet eval ./my-skill/comet/eval.yaml --collect
-```
-
-Configure the default Agent in `eval.yaml`. CLI options take precedence over manifest:
+To write domain-specific evaluation tasks, create a `comet/eval.yaml` file inside your Skill root:
 
 ```yaml
-execution:
-  agent: codex
-  model: subject-model
-  baseUrl: https://subject.example/v1
-
-judge:
-  agent: claude-code
-  model: judge-model
-  baseUrl: https://judge.example/v1
-```
-
-The main Agent and LLM-as-Judge can use different agents, models, API addresses and credentials. Judge does not silently inherit the model or credentials of the main Agent. When enabling Judge, a separate Judge configuration needs to be provided.
-
-## Select the evaluation backend
-
-`--suite` selects the evaluation backend. The three backends use the same set of target, task and Agent configurations. The difference lies in whether the results are synchronized to the external evaluation service:
-
-| "Back end   | Command                                          | Result location and usage                                                                                          |
-| ----------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `local`     | `comet eval ./my-skill --html`                   | The default backend only generates local reports and is suitable for daily development                             |
-| `langsmith` | `comet eval ./my-skill --suite langsmith --html` | Generate local reports and synchronize running trajectories, scores and experimental data to LangSmith             |
-| `langfuse`  | `comet eval ./my-skill --suite langfuse --html`  | Generate local reports and synchronize task trace, rubric score, pass metrics and experiment summaries to Langfuse |
-
-Langfuse example
-
-```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... \
-  comet eval ./my-skill --suite langfuse --html
-```
-
-If it is only for checking tasks and configurations, any backend can be used together with `--collect`:
-
-```bash
-comet eval ./my-skill --suite langfuse --collect
-```
-
-`--collect --suite langfuse` does not initialize the SDK, does not connect to the Internet, nor does it download plugins.
-
-## What types of reports are there
-
-The assessment status and reports are written by default to the following directory in the project the target belongs to:
-
-```text
-.comet/eval/runs/<experiment-id>/
-├─ Summary.md # Markdown summary reports are always generated
-├── Summary.html # HTML summary report generated when using -- HTML
-├── Metadata.json # The metadata of this experiment
-├── events/ # Agent runs events
-├── raw/ # Original output
-├── reports/ # report.json for each run
-└── artifacts/ # Task products and validation evidence
-```
-
-When `--html` is not included, the assessment will still generate `summary.md`. Run when HTML is needed:
-
-```bash
-comet eval ./my-skill --html
-```
-
-You can also customize the report output using `--report-config <path>` or `COMET_EVAL_REPORT_CONFIG`. The CLI will print `Experiment` and `Report path`. When searching for reports, the output of this time shall prevail.
-
-When reading the report, pay attention to three things first:
-
-1. Evaluate whether it is passed.
-2. Is the failure attribution `harness`, `workflow`, `task` or `model`?
-3. Whether the expected artifact is missing, and whether the token, cost, and duration are abnormal.
-
-Failure attribution means: `harness` points to environment or dependency issues, `workflow` means the Skill process did not meet expectations, `task` indicates task-definition or validation-condition problems, and `model` indicates unstable model behavior or calls.
-
-## How to customize tasks
-
-Tasks are selected according to the following priorities:
-
-1. The CLI specifies `--task`.
-2. `--quick` uses `generic-skill-smoke`.
-3. The `evaluation.tasks` in the manifest.
-4. The `recommendedTasks` in the manifest or the task package `source`.
-5. When there are no available tasks, automatically generate and cache 2 to 4 evaluation use cases based on the content of the Skill.
-
-If the automatically generated tasks do not fit your Skill, please create or edit `comet/eval.yaml` in the root directory of the evaluated Skill and declare inline task under `evaluation.tasks` within it. For example:
-
-```yaml
+# my-skill/comet/eval.yaml
 evaluation:
   tasks:
     - name: writes-summary
-      prompt: Create summary.md with the requested result.
+      prompt: Create summary.md in the current workspace with key findings.
       expect:
         files:
           - summary.md
@@ -232,135 +113,68 @@ evaluation:
             - '# Summary'
 ```
 
-### Reference the task package within the Skill package
+For advanced task bundles containing custom Dockerfiles and test scripts (`task.toml`), see [Configuring Evaluations and Custom Tasks](/en/eval/configuration).
 
-If the task requires an independent `task.toml`, `instruction.md`, Docker environment or validation script, the task package can be placed in the Skill directory and then referenced through `source`. The recommended directory structure is as follows:
+## Step 5: Switch Evaluation Agents and Backends
 
-```text
-my-skill/
-├── SKILL.md
-├── comet/
-│   └── eval.yaml
-└── eval-tasks/
-    └── writes-summary/
-        ├── task.toml
-        ├── instruction.md
-        ├── environment/
-        │   └── Dockerfile
-        └── validation/
-            └── test_summary.py
-```
+### Changing the Evaluated Agent
 
-In the `comet/eval.yaml` of the Skill root directory, point to the task package with `evaluation.tasks[].source`. Here, `source` is relative to the root directory of the Skill package (the directory containing `SKILL.md`), not to the `comet/` directory:
-
-```yaml
-# my-skill/comet/eval.yaml
-skill:
-  name: my-skill
-  source: ..
-
-evaluation:
-  tasks:
-    - name: writes-summary
-      source: eval-tasks/writes-summary
-```
-
-The following are the minimum sample contents of several files in this task package. For the complete `task.toml` field, validation script, profile, and Docker configuration instructions, please refer to [Configuration Evaluation and Customizing Task](/en/eval/configuration)
-
-`task.toml` declares task metadata, Docker environment, products to be checked, and verification scripts:
-
-```toml
-[metadata]
-name = "writes-summary"
-description = "Create summary.md"
-
-[environment]
-dockerfile = "environment/Dockerfile"
-
-[validation]
-test_scripts = ["test_summary.py"]
-target_artifacts = ["summary.md"]
-```
-
-`instruction.md` is the task instruction sent to the Agent:
-
-```markdown
-Create `summary.md` in the current workspace.
-
-Requirements:
-
-- Include the heading `# Summary`
-- Summarize the result in at least three bullet points
-```
-
-`environment/Dockerfile` provides the basic environment required for task operation and verification:
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /workspace
-```
-
-`validation/test_summary.py` checks within the task container whether the Agent has produced files that meet the requirements
-
-```python
-from pathlib import Path
-
-from scaffold.python.validation.core import write_test_results
-
-
-passed = []
-failed = []
-summary = Path("summary.md")
-
-if not summary.exists():
-    failed.append("summary.md is missing")
-else:
-    text = summary.read_text(encoding="utf-8")
-    if "# Summary" in text:
-        passed.append("summary heading is present")
-    else:
-        failed.append("summary heading is missing")
-
-write_test_results({"passed": passed, "failed": failed})
-```
-
-`eval-tasks/writes-summary/task.toml` describes the environment and verification method of the task, and `instruction.md` is the task instruction sent to the Agent. If Docker or deterministic verification scripts are needed, place them respectively under `environment/` and `validation/` in the same task package. The `source` task cannot simultaneously write the `prompt` or `expect` fields of the inline task, and Comet will check that `task.toml` and `instruction.md` do indeed exist in the task package.
-
-After configuration, you can directly transfer the Skill directory, and Comet will automatically discover `comet/eval.yaml`. You can also directly pass manifest:
+The default agent is `claude-code`. You can specify a different primary Agent and an independent LLM-as-Judge model via CLI flags or `eval.yaml`:
 
 ```bash
-# Automatically discover my-skill/comet/eval.yaml
-comet eval ./my-skill --collect
-comet eval ./my-skill --task writes-summary --html
-
-# Pass the manifest directly
-comet eval ./my-skill/comet/eval.yaml --collect
-comet eval ./my-skill/comet/eval.yaml --task writes-summary --html
+# Specify codex via CLI
+comet eval ./my-skill --agent codex --model gpt-4o --html
 ```
 
-The task can check files, text, JSON or command results; The task workspace and the expected product must remain within the permitted Skill package or evaluation workspace.
+Or configure defaults in `eval.yaml` (CLI flags take precedence):
 
-Only when it is necessary to customize the Docker environment, validation script, profile or treatment is it necessary to continue reading [Configuration Evaluation and Customizing Task](/en/eval/configuration)
-
-## Common evaluation process
-
-```text
-1. Prepare a directory containing SKILL.md
-2. comet eval ./my-skill --collect
-3. Fix issues with path, manifest or task discovery
-4. comet eval ./my-skill --quick --html
-5. Configure Agents, judges, Suites or custom tasks as needed
-6. comet eval ./my-skill --html
-7. Reading. Comet/eval/runs/<experiment-id>/summary. The md or summary. HTML
+```yaml
+execution:
+  agent: codex
+  model: gpt-4o
+judge:
+  agent: claude-code
+  model: claude-3-7-sonnet
 ```
 
-## Read further
+### Choosing an Evaluation Backend (Local / LangSmith / Langfuse)
 
-| Topic                                                         | Recommended For                                                          |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [Evaluation System Overview](/en/eval/overview)               | Understand tasks, profiles, scoring, and run mechanisms                  |
-| [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) | Understand rubrics, pass@k/pass^k, and multi-turn Agent interaction      |
-| [Eval Harness](/en/eval/harness)                              | Deep-dive into harness mechanics, environment variables, and test suites |
-| [Reading Evaluation Reports](/en/eval/reports)                | Detailed analysis of reports and failure attribution                     |
-| [comet eval Command](/en/cli/eval)                            | View complete CLI options and troubleshooting                            |
+Use `--suite` to specify where telemetry and test scores should sync:
+
+| Backend | Command | Description |
+| --- | --- | --- |
+| `local` | `comet eval ./my-skill --html` | Default backend, generates local reports for fast iterations |
+| `langsmith` | `comet eval ./my-skill --suite langsmith --html` | Generates local reports and syncs traces and Rubric scores to LangSmith |
+| `langfuse` | `comet eval ./my-skill --suite langfuse --html` | Generates local reports and syncs task traces and metrics to Langfuse |
+
+## Advanced Reference: User-Level `.env` Configuration
+
+The first time you run any `comet eval` command, the CLI automatically generates a global configuration template in your user home directory (creating only missing files without overwriting existing ones):
+
+- **Windows**: `%USERPROFILE%\.comet\eval\.env`
+- **macOS / Linux**: `~/.comet/eval/.env`
+
+You can maintain API keys and base URLs for frequently used models in this file without re-entering them in your terminal.
+
+<Accordion title="View Complete Environment Variable Reference">
+The auto-generated `.env` template includes configuration options for the following parameter groups:
+
+| Parameter Group | Key Variables |
+| --- | --- |
+| Main Evaluation (Bench) | `BENCH_EVAL_AGENT`, `BENCH_API_KEY`, `BENCH_BASE_URL`, `BENCH_MODEL` |
+| Independent Judge | `BENCH_LLM_JUDGE`, `BENCH_JUDGE_AGENT`, `BENCH_JUDGE_API_KEY`, `BENCH_JUDGE_BASE_URL`, `BENCH_JUDGE_MODEL` |
+| Claude Code | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` |
+| Codex | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` |
+| Qoder | `QODER_PERSONAL_ACCESS_TOKEN`, `QODER_BASE_URL`, `QODER_MODEL` |
+| CodeBuddy | `CODEBUDDY_API_KEY`, `CODEBUDDY_BASE_URL`, `CODEBUDDY_MODEL` |
+| External Observability | `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+
+All template parameters are commented out by default. Unconfigured items retain default behaviors. Store real API keys only in your local `.env` or current shell session, and never commit secrets to public repositories.
+</Accordion>
+
+## Further Reading
+
+- [Evaluation System Overview](/en/eval/overview): In-depth look at evaluation tasks, profiles, scoring, and runners;
+- [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring): Understand Rubrics, `pass@k` / `pass^k`, and multi-turn interaction loops;
+- [Evaluating SDK Applications](/en/eval/applications): How to automate evaluations for composite workflow applications built with Comet Any;
+- [comet eval Command Reference](/en/cli/eval): View all CLI options, parameters, and troubleshooting guides.
