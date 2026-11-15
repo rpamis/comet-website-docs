@@ -4,7 +4,10 @@ const { chromium } = require(process.env.COMET_PLAYWRIGHT_MODULE || 'playwright'
 const base = process.env.COMET_DOCS_URL || 'http://localhost:3000';
 
 test('both homepages share section order, type scale, artwork size and feature columns', async (t) => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    ...(process.env.COMET_CHROMIUM_EXECUTABLE ? { executablePath: process.env.COMET_CHROMIUM_EXECUTABLE } : {}),
+  });
   try {
     for (const width of [1600, 1280, 390]) {
       await t.test(`${width}px`, async () => {

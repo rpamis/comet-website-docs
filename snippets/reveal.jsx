@@ -43,5 +43,32 @@ export const RevealController = () => {
     return () => observers.forEach((observer) => observer.disconnect());
   }, []);
 
+  useEffect(() => {
+    const sections = Array.from(document.querySelectorAll('.comet-home__feature--ruled'));
+    if (!sections.length || !window.IntersectionObserver) return;
+    const visible = new Set();
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => sections.forEach(section => {
+      section.dataset.ruleFlow = !document.hidden && !motion.matches && visible.has(section) ? 'active' : 'idle';
+    });
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) visible.add(entry.target);
+        else visible.delete(entry.target);
+      });
+      update();
+    }, { rootMargin: '120px 0px' });
+    sections.forEach(section => observer.observe(section));
+    document.addEventListener('visibilitychange', update);
+    motion.addEventListener('change', update);
+    update();
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', update);
+      motion.removeEventListener('change', update);
+      sections.forEach(section => section.removeAttribute('data-rule-flow'));
+    };
+  }, []);
+
   return null;
 };
