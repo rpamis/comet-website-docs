@@ -3,95 +3,40 @@ title: '项目知识：在任务中提炼与复用项目规则'
 description: '了解 Comet 如何从基础项目结构和实际任务结果中提取并复用项目知识，同时保留 Rule、源码和工程检查的原有职责。'
 ---
 
-Project Knowledge（项目知识）是 Comet 的第一方项目级插件。它在 Agent 执行任务的过程中发现具有复用价值的项目信息，并将这些信息整理为带来源、适用范围和验证记录的项目知识。
+在大型代码库中开发时，Agent 往往需要耗费大量 Token 盲目摸索目录层级、模块依赖与隐藏的编码约定；不仅初次定位缓慢，还容易忽略配套改动，甚至重复踩进团队曾经踩过的坑。
 
-首次使用时，Comet 会从 manifest、配置、目录结构、Comet 产物和你明确加入的 Markdown 中建立有限的基础项目模型。后续任务中的 Review、验证、故障复验、Change Archive 和实际应用结果会继续补充项目策略。Agent 还可以在任务结束时把验证过的可复用经验直接写入项目记忆。Agent 因此能够复用已经确认的项目理解，同时仍以当前源码、配置和测试为直接依据。
+**Project Knowledge（项目知识）让 Comet 沉淀有据可查的项目架构事实与工程约束**。在日常执行需求、代码审查与归档时，Comet 会自动提炼可复用的项目规律，并在后续任务中精准召回，帮助 Agent 快速锁定入口、补全影响范围并沿用正确的验证方式。
+
+<Tip>
+  **开箱即用，与仓库 Rule 优势互补**
+  Comet 初始化后项目知识**默认原生启用**，无需额外配置或安装插件。仓库中的 `AGENTS.md`、`CLAUDE.md` 等 Rule 依然是你的顶层明确指令，项目知识则为 Agent 提供有证据支撑的架构理解与避坑经验。
+</Tip>
 
 ## 与 Rule 和项目 Wiki 的边界
 
-### Rule 仍是显式约束入口
+### 1. 仓库 Rule 仍是顶层显式指令
 
-项目知识不替代 Rule。你可以继续通过目标平台支持的 Rule 文件或规则目录编写团队指令和行为约束，例如 Codex 的 `AGENTS.md`、Claude Code 的 `CLAUDE.md`、Cursor 的 `.cursor/rules`，以及其他平台提供的 Rule 载体。平台仍按自己的作用域规则加载这些内容。
+项目知识不替代既有的 Rule 文件。你可以继续使用平台支持的规则载体编写团队硬性约束，例如 Codex 的 `AGENTS.md`、Claude Code 的 `CLAUDE.md` 或 Cursor 的 `.cursor/rules`。
 
-Comet 不接管 Rule 的编写和加载，也不会静默改写 Rule。Rule 配置为知识来源时，项目知识可以引用其中的依据和适用范围；原始 Rule 仍是更高优先级的项目证据。
+Comet 绝不会私自篡改你的 Rule 文件。当 Rule 被引入作为知识依据时，原始 Rule 始终具备最高的仲裁优先级。
 
-### 项目知识按任务积累，不生成全量 Wiki
+### 2. 按任务渐进沉淀，不生成冗余 Wiki
 
-项目知识不提供“一键生成项目全部 Wiki”的能力。Comet 不要求扫描并解释仓库中的每个目录、文件和实现细节，也不承诺生成覆盖完整项目的面向人的文档。
+项目知识不盲目追求“一键扫描全库生成百科全书”。代码库中随处可见的通用实现细节，Agent 直接读源码即可获得，无须存入知识库增加检索噪声。
 
-项目知识以 Agent 的后续任务为使用场景，只保存能够帮助定位入口、补全改动范围、理解决策或选择验证方式的记录。缺少可靠来源、只对当前任务有效或可以直接从源码读取的普通细节，不会为了填充知识库而长期保存。
+项目知识只保存**对后续任务有真实决策帮助**的高价值信息：模块职责边界、跨包依赖关系、已批准的技术选型、已被测试验证的特定排错方案。
 
-## 核心能力
+## 核心能力一览
 
-| 能力         | Comet 提供的上下文                   | 对任务的帮助                       |
-| ------------ | ------------------------------------ | ---------------------------------- |
-| 项目定位     | 目录、模块、工作区和组件职责         | 缩小源码搜索范围                   |
-| 影响范围分析 | 模块依赖、注册关系、配置与生成物关系 | 提前补全实现、测试、配置和文档范围 |
-| 设计理解     | 已接受的技术决策、产品决策和实现模式 | 理解当前实现的约束与依据           |
-| 流程复用     | 稳定操作步骤和实际验证命令           | 沿用项目已经验证的工作方式         |
-| 故障处理     | 根因、修复方案和成功复验记录         | 减少同类问题的重复排查             |
-
-项目知识的核心目标是提高首次定位质量和改动范围完整度。检索速度是实现手段，实际效果取决于 Agent 能否更早找到正确入口、关联文件和验证路径。
-
-## 业界实践与 Comet 的定位
-
-业界通常通过三类能力向 Agent 提供项目上下文：
-
-1. **项目指令**：[Codex](https://openai.com/index/unrolling-the-codex-agent-loop/) 使用 `AGENTS.md`，[Claude Code](https://code.claude.com/docs/en/memory) 使用 `CLAUDE.md` 和 path-scoped rules，[Cursor](https://cursor.com/docs/rules) 使用 Project Rules。它们适合保存团队明确写下的行为要求。
-2. **代码索引**：[Sourcegraph Cody](https://sourcegraph.com/docs/cody/core-concepts/local-indexing) 等工具建立代码索引，帮助 Agent 查找符号和相关片段。
-3. **Agent 知识层**：[Qoder Knowledge Engine](https://qoder.com/en/blog/qoder-knowledge-engine) 将架构、工程约定和跨文件关系组织为可复用的项目理解。
-
-[OpenAI 的 Harness Engineering 实践](https://openai.com/index/harness-engineering/)建议使用简短的 `AGENTS.md` 指向结构化仓库知识。简短指令便于保持重点，详细知识则可以按任务加载和单独维护。
-
-Comet 将这三类能力进一步分工：
-
-- 仓库 Rule 保存团队明确的 Agent 指令；
-- 项目知识保存带来源、适用范围和生命周期的工程理解；
-- 全文检索与精确搜索负责召回相关候选；
-- Hook、linter、test、build 和 CI 负责实际的规则检查与强制执行。
-
-在这套分层中，Comet 增加了来源有效性检查、渐进式上下文和应用反馈。项目知识可以随仓库变化更新，并根据实际任务效果持续校准。
-
-## 项目知识的记录范围
-
-进入规范化 Project Knowledge Record 的内容需要有来源、可以限定适用范围，并且能够帮助后续任务：
-
-- 目录、模块和工作区拓扑；
-- 可以从当前仓库核对的事实；
-- 模块、包和组件之间的依赖；
-- 已接受的设计与产品决策；
-- 稳定实现模式和操作流程；
-- 项目约束与故障解决经验。
-
-用户入口统一使用**项目知识**。Project Policy（项目策略）是项目知识内部的一类记录，用于描述项目中的决策、流程和约束。它不是新的 Rule 文件格式。
+| 核心能力 | 提供的上下文支撑 | 对开发的实际价值 |
+| --- | --- | --- |
+| 项目定位 | 目录职责、模块边界与工作区结构 | 缩小源码搜索半径，更快锁定修改入口 |
+| 影响范围分析 | 模块依赖、注册点关系与配置生成关联 | 提前补齐配套的测试用例、配置文件与文档改动 |
+| 设计决策理解 | 团队已采纳的技术决策与设计模式 | 避免 Agent 提出与现有架构相悖的方案 |
+| 流程复用 | 经过验证的构建、测试与部署命令 | 沿用团队既有的工作方式，减少探索试错 |
+| 故障排查经验 | 历史缺陷的根因、修复方案与复验命令 | 杜绝同类 Bug 重复出现与重复排查 |
 
 ## 两类项目知识
-
-### Project Model：项目模型
-
-Project Model（项目模型）保存可以从当前项目证据中核对的结构与事实：
-
-| 类型         | 产品含义               | 示例                                         |
-| ------------ | ---------------------- | -------------------------------------------- |
-| `topology`   | 目录、模块和工作区结构 | CLI 入口位于 `app/`，领域逻辑位于 `domains/` |
-| `fact`       | 当前项目事实           | Runtime 生成物由指定构建命令同步             |
-| `dependency` | 模块、包和组件关系     | Dashboard 通过 Plugin Host 读取插件状态      |
-
-模块记录包含入口、依赖、调用方、注册点和对应测试，供 Agent 按任务展开查看。Local Provider 会补充缺失或过期的模型记录，并整理重复的自动生成历史。
-
-### Project Policy：项目策略
-
-Project Policy（项目策略）保存任务中提炼出的工程做法：
-
-| 类型                 | 产品含义                 | 示例                                 |
-| -------------------- | ------------------------ | ------------------------------------ |
-| `decision`           | 已接受的技术或产品决定   | Native 与 Classic 保持独立状态机     |
-| `pattern`            | 稳定实现模式             | 新平台能力从统一 registry 派生       |
-| `procedure`          | 可重复执行的操作流程     | 修改 Runtime 后重新生成并核对资产    |
-| `constraint`         | 需要遵守的项目约束       | domain 不直接散落平台路径逻辑        |
-| `failure-resolution` | 已完成复验的故障解决方案 | 构建资产过期时先重建再运行浏览器测试 |
-
-Project Policy 只有在关联的验证命令当前存在且已成功执行后，才能进入 `enforced`（已验证约束）状态。在 Native 工作流中，这些验证命令会并入 Verify 阶段的必要检查一起执行（见[验证与修复](/zh/native/verification-and-repair)），通过后策略才升级。该状态表示项目已有工具能够检查这条策略，自然语言正文仍作为上下文提供给 Agent。
 
 <p align="center">
   <img
@@ -100,162 +45,105 @@ Project Policy 只有在关联的验证命令当前存在且已成功执行后�
   />
 </p>
 
-## 项目记忆：Agent 直接写入的经验
+### 1. Project Model：项目模型（静态架构事实）
 
-项目记忆是项目知识中的文件层经验。与 Project Model 和 Project Policy 不同，它不经过提取和评审队列：Agent 在任务结束时通过 `comet knowledge remember` 把验证过、可复用的经验直接写入，写入后立即对后续任务生效。
+Project Model 描述能从代码库客观证据中核对的拓扑与事实：
 
-```bash
-comet knowledge remember . --title "<简明标题>" --text "<现象、做法、验证结果>" --type <类型> --paths <相关路径>
-```
+| 类型 | 含义 | 真实示例 |
+| --- | --- | --- |
+| `topology` | 目录结构、工作区划分与模块职责 | CLI 入口位于 `app/`，领域核心逻辑位于 `domains/` |
+| `fact` | 当前项目的客观技术事实 | Runtime 生成物必须通过 `npm run build:assets` 统一同步 |
+| `dependency` | 模块、子包与组件之间的调用关系 | Dashboard 通过 Plugin Host 读取插件状态 |
 
-`--type` 可选 `fact`、`decision`、`pattern`、`procedure`、`constraint`、`failure-resolution`，默认 `pattern`。同一标题默认更新同一条记忆，不会重复堆叠。
+### 2. Project Policy：项目策略（工程做法与决策）
 
-项目记忆保存在项目仓库之外的本机知识缓存目录中：一份 `MEMORY.md` 索引，加上每条经验一个 Markdown 文件。Dashboard 的项目记忆页会显示具体存储位置。
+Project Policy 记录在日常开发和任务验收中提炼出的工程规范与经验：
 
-### 注入与展开
+| 类型 | 含义 | 真实示例 |
+| --- | --- | --- |
+| `decision` | 已确认的技术或产品决策 | Native 与 Classic 保持独立状态机，互不干扰 |
+| `pattern` | 团队推崇的稳定设计模式 | 新增平台能力必须从统一 registry 派生 |
+| `procedure` | 可重复执行的固定操作步骤 | 修改 Runtime 核心协议后，必须重新生成并核对测试资产 |
+| `constraint` | 必须严格遵守的代码红线 | domain 领域层严禁直接硬编码平台特定路径 |
+| `failure-resolution` | 经过测试复验的缺陷解决方案 | 遇到前端资源过期报错时，先重新构建再运行端到端测试 |
 
-- 任务上下文提供有限的 `MEMORY.md` 索引；索引按最新在前排序，超出预算时可以按需展开完整索引。检索还会匹配经验标题、摘要和正文，较早的相关经验也能被找到。
-- 需要单条经验的完整内容时，用同一任务参数追加 `--expand-context "project-memory:<slug>"` 展开，并核对当前来源；绑定来源已经变化的经验不会继续作为有效依据。
-- 索引先于 Local/Remote Provider 检索读取，Provider 不可用时项目记忆仍然生效。
-- 任务完成前，Agent 检查是否有已验证、可复用且尚未记录的项目经验；有则用 `comet knowledge remember` 保存，没有则明确跳过。项目经验与个人偏好分开处理，完成后再调用 `comet task --complete`。
+<Info>
+  **带自动验证的策略（enforced）**：当一条策略关联了具体的测试或校验命令且已成功执行时，会进入 `enforced` 状态。在 Native 流程中，这些命令会自动纳入 Verify 验收环节，用自动化检查守护规范。
+</Info>
 
-### 管理入口
+## 项目记忆：Agent 直接沉淀的高置信度经验
 
-`comet knowledge forget . --memory <slug>` 删除过期的项目记忆。Dashboard 项目知识页的**项目记忆**标签页是只读视图，可以浏览、搜索、查看和删除项目记忆；最近使用列表会显示记忆索引何时提供给了 Agent。
-
-## 与 Rule、Hook 和工程检查的关系
-
-| 层                | 核心职责                             | 典型载体                                | 执行方                   |
-| ----------------- | ------------------------------------ | --------------------------------------- | ------------------------ |
-| 项目知识          | 提供结构、依据、关系、流程和工程经验 | Project Model、Project Policy、来源记录 | Comet 检索并提供给 Agent |
-| Rule / Agent 指令 | 规定 Agent 在当前作用域内的行为      | 目标平台支持的 Rule 文件或规则目录      | 平台加载并提供给 Agent   |
-| Hook / Guard      | 在动作发生时观察、阻断或调整流程     | Hook、权限规则、Comet Guard             | 平台或 Runtime           |
-| 确定性检查        | 判断当前实现是否满足项目要求         | compiler、linter、test、build、CI       | 项目现有工具             |
-
-> 项目知识提供理解，Rule 提供指令，Hook 和工程检查负责强制执行。
-
-仓库 Rule、源码、配置、测试和检查始终是更高优先级证据。Comet 读取并关联这些来源，不静默改写它们。
-
-## 项目知识的形成方式
-
-### 建立基础项目模型
-
-Local Provider 使用三类来源建立有限的 Project Model：
-
-- Comet 管理的 Native、Classic 和 Archive 产物；
-- 可确定识别的项目结构、manifest 和配置；
-- 通过 `knowledge.local.include` 指定的 Markdown 文档。
-
-```yaml
-knowledge:
-  provider: local
-  local:
-    include:
-      - docs/**/*.md
-      - packages/*/README.md
-      - architecture/**/decisions-*.md
-    max_file_mb: 1
-    max_total_mb: 32
-```
-
-额外路径均相对于项目根目录解析。只有 Markdown 进入全文检索语料；源码、配置和测试可以作为模型记录的证据，但不会因此成为检索语料。默认语料范围不会自动包含目标平台的所有 Rule 文件或规则目录，需要时可通过 `include` 加入其中的 Markdown。单个文件和语料总量分别受 `knowledge.local.max_file_mb` 和 `max_total_mb` 限制（默认 1 MB 和 32 MB），超限的文件不进入检索语料并产生诊断；两个上限也可以在 Dashboard 的项目知识设置中调整。
-
-### 从执行结果中提取项目策略
-
-Agent 执行任务时，Project Policy Learner 会处理以下已完成事件：
-
-- 已接受并完成处理的 Review 结论；
-- 已确认根因、完成修复并成功复验的故障；
-- 已成功执行的验证及其实际命令；
-- Change Archive 中的最终决策、稳定模式、操作流程和废弃项；
-- 项目知识在后续任务中的成功、忽略、纠正或失败结果。
-
-Comet 从这些事件中提取候选记录，并在写入前重新核对来源。需要归纳总结的经验可交给当前 Agent 评审，无需另配模型或 API Key。Agent 通过以下命令查看待评审证据并提交评审结果：
+项目记忆（Project Memory）是项目知识体系中的文件层轻量经验记录。在一次任务圆满完成并经过验收后，Agent 可直接通过命令将验证过的排错或开发技巧记入本机缓存：
 
 ```bash
-comet knowledge review . --json
-comet knowledge review . --id <评审标识> --file <评审结果.json>
+comet knowledge remember . --title "构建前需先清理缓存" --text "修改协议字段后，需先执行 pnpm clean 再编译，否则产物哈希不一致" --type procedure --paths "packages/core"
 ```
 
-首条命令会返回待评审证据和提交格式。新提炼的知识先进入 `trial`，成功用于后续任务后再晋升；来源刷新只核对有效性，不会将未经试用的经验直接提升为已确认知识。
+- `--type` 支持 `fact`、`decision`、`pattern`、`procedure`、`constraint`、`failure-resolution`，默认为 `pattern`；
+- 同名标题自动更新原记录，不堆叠重复垃圾；
+- 经验保存在本地缓存的 `MEMORY.md` 索引与独立 Markdown 文件中，不污染 Git 工作区；
+- 任务执行时，上下文清单会优先提供相关的经验摘要，Agent 按需展开阅读完整正文。
 
-## 来源有效性检查
-
-每条记录保留项目身份、来源路径、适用范围、来源版本和验证信息。内容进入任务前，Comet 会执行以下检查：
-
-- 来源内容一致时，记录继续参与检索；
-- 来源变化时，旧结论停止作为当前内容使用；
-- 来源删除或 selector（适用条件）失效时，记录进入 `superseded`；
-- 验证命令消失时，原有 `enforced` 状态失效；
-- 新证据形成新版本，并保留与旧版本的替代关系。
-
-刷新时，Comet 会重新核对来源内容，即使文件大小和修改时间没有变化，也能识别内容变化。Dashboard 的状态统计覆盖项目中的全部记录，当前列表的显示数量不代表记录总量。
-
-项目知识为 Agent 提供有依据的任务线索。Agent 仍会读取当前代码、配置和测试，确认本次修改的实际情况。
-
-## 任务召回与提供
-
-Context Director（上下文调度器）会按当前 project、path、task、operation、phase、类型和状态过滤候选，再结合 Markdown 全文检索、有限精确搜索、项目关系、来源状态和应用结果进行排序。尚未指定文件路径时，Agent 也可以先发现相关知识，再展开适用范围、来源和验证方式；已明确的范围不匹配仍会被排除。
+## 上下文匹配与提供流程
 
 ```mermaid
 flowchart TD
-  S["1. 读取项目来源"] --> F["2. 检查范围与来源状态"]
+  S["1. 读取项目来源（源码、配置、文档）"] --> F["2. 检查有效性与版本状态"]
   F --> R["3. 执行混合检索与排序"]
   R --> C["4. 匹配当前任务<br/>Context Director"]
-  C --> K["5. 提供相关上下文<br/>关键策略或 Context Manifest"]
-  K --> E["6. 按稳定 ID 展开详情"]
-  E --> A["7. 服务 Agent 当前任务"]
+  C --> K["5. 提供关键策略与 Context Manifest"]
+  K --> E["6. Agent 按需展开详情与证据"]
+  E --> A["7. 指导当前编码与验证"]
 ```
 
-少量关键的 `proven`（已确认）或 `enforced` Project Policy 可以完整提供。Project Model、`trial` Policy、较长 Procedure 和 evidence 通常先进入 Context Manifest（上下文清单）。清单只携带摘要、应用原因和稳定 ID，Agent 按需展开完整正文、来源和验证方式。
+1. **精准召回**：根据当前项目、编辑文件路径、当前阶段（如 Build 或 Verify）与操作动作进行智能过滤；
+2. **轻量清单注入**：默认以 Context Manifest 摘要注入，避免海量文本挤占上下文；
+3. **来源时效性检查**：当底层关联的源码、配置发生变动或被删除时，旧结论立即标记为失效或 `superseded`（已替代），绝不向 Agent 提供过时的陈旧假知识。
 
-Agent 使用后的成功、忽略、覆盖、纠正或失败结果会反过来影响后续排序和生命周期。
+## 管理与排查入口
 
-## 管理入口
+### 推荐：在 Dashboard 中直观管理
 
-大多数情况下，推荐通过 **Comet Dashboard** 视觉化管理项目知识。启动本地面板后，进入 **项目知识** 页面即可进行全量操作：
+启动本地 Web 控制台：
 
 ```bash
 comet dashboard
 ```
 
-- **分类浏览与检查**：区分「项目模型」（架构拓扑、模块依赖与事实）和「项目策略」（技术决策、稳定模式、工程流程），清晰查看每条记录的适用路径与依据来源。
-- **检索模拟与调试**：可以在面板中输入任务描述和文件路径，实时测试检索命中结果，查看 `whyApplied` 命中原因与排序分值。
-- **直观编辑与维护**：支持在界面中直接添加、修改正文、废弃旧记录、管理项目记忆或一键重建本地索引。
+进入 **项目知识** 模块：
 
-<Accordion title="通过 CLI 命令行管理（高级用法）">
-如果你需要在自动化脚本中查询或维护项目知识，可以使用 CLI 命令（Dashboard 与 CLI 底层读写同一份状态）：
+- **卡片式分类浏览**：分门别类查看项目模型（架构拓扑）与项目策略（决策规范），清晰核对适用路径与来源证据；
+- **交互式检索模拟**：在输入框中填入一段任务目标（如“修改用户登录认证”），面板即刻回显匹配命中的知识条目、打分排序与具体的 `whyApplied` 触发理由，方便调试规则；
+- **在线编辑与索引重建**：直接在线编辑内容、废弃过期记录或一键重建本地全文索引。
+
+<Accordion title="通过 CLI 命令行管理（进阶与 CI/CD 用法）">
+你可以在终端或 CI 脚本中通过 `comet knowledge` 命令进行排查与维护：
 
 ```bash
+# 查看项目知识状态
 comet knowledge status .
+
+# 模拟检索：查看修改指定模块时会命中哪些知识
 comet knowledge query . --task "修改身份验证模块" --path src/auth --phase build --operation edit
+
+# 列出所有已确认的稳定策略
 comet knowledge list . --state proven
-comet knowledge get . --id <记录标识>
-comet knowledge remember . --title "<简明标题>" --text "<现象、做法、验证结果>" --type <类型>
-comet knowledge correct . --id <记录标识> --text <新说明>
+
+# 手动新增一条经验
+comet knowledge remember . --title "统一使用 pnpm 运行单测" --text "由于 monorepo 软链接机制，必须通过 pnpm test 执行" --type constraint
+
+# 纠正、遗忘与一键重建索引
+comet knowledge correct . --id <记录标识> --text "更新后的说明"
 comet knowledge forget . --id <记录标识>
-comet knowledge forget . --memory <记忆标识>
-comet knowledge feedback . --id <记录标识> --outcome used-successfully
 comet knowledge rebuild .
 ```
-
-你可以手动新增或纠正知识、废弃旧记录、展开来源并刷新索引。后台学习与索引刷新不会阻塞 Dashboard 首屏。
-
 </Accordion>
 
-遇到知识未按预期召回时，建议按 Provider → Record → Query → Context 的顺序排查：来源是否已进入默认 Corpus 或 `knowledge.local.include`；Record 的 project、path、operation、phase 和 lifecycle 是否与任务匹配；来源版本是否仍然有效；Query 是否返回相关候选；Context Manifest 中的 `whyApplied` 和 application history 是否符合预期。
+## 产品与权限安全边界
 
-## 产品边界
+- **源码与测试优先**：当前代码库中的实际源码、配置和自动化测试结果始终拥有最高裁决权；
+- **平台规则兼容**：继续支持各 Agent 平台原生的 Rule 文件与加载行为；
+- **绝不越权**：项目知识仅为 Agent 提供理解参考，绝不自动替开发者执行 Commit、Push 或发布；
+- **隔离与停用**：可在 Dashboard 插件中心一键停用项目知识；停用后停止检索注入，不影响 Native 或 Classic 的基础开发工作流。
 
-项目知识服务于 Agent 的项目理解，并遵守以下边界：
-
-- 当前源码、配置、测试和 Runtime 状态始终优先；
-- 平台继续使用原有 Rule 文件和加载机制；
-- 个人记忆只有经过用户明确共享、个人信息移除和来源复核后才能形成团队知识；
-- linter、compiler、test、build 和 CI 继续由项目现有工具维护；
-- 项目知识不授予提交、推送、删除或发布权限；
-- 停用后停止学习、查询、策略验证和 Remote 请求；可在 Dashboard 插件中心停用，初始化后默认启用。
-
-继续阅读[项目知识原理：从项目证据到任务上下文](/zh/plugins/project-knowledge-principles)，了解语料、记录、混合检索和 Provider 的内部协作。
-
-相关内容：[Agent Learning Loop](/zh/plugins/agent-learning-loop)、[个人记忆](/zh/plugins/personal-memory) 和 [Dashboard 概览](/zh/dashboard/overview)。
+延伸阅读：[项目知识原理：从项目证据到任务上下文](/zh/plugins/project-knowledge-principles)、[个人记忆](/zh/plugins/personal-memory) 以及 [Dashboard 概览](/zh/dashboard/overview)。

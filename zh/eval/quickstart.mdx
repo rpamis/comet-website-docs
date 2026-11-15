@@ -3,233 +3,108 @@ title: '快速上手：评估一个 Skill'
 description: '从第一次运行、评估配置到报告解读，带你用 comet eval 评估本地 Skill。'
 ---
 
-只要你有一个包含 `SKILL.md` 的本地目录，就可以开始评估。
-即使还没写评估用例，**Eval 也会基于 Skill 内容自动生成 2–4 个用例并执行**。
-本文按实际操作顺序展开：先跑通一次，再选择 Agent 和后端，最后看任务配置、报告解读与失败定位。
+只要你有一个包含 `SKILL.md` 的本地目录，就可以立刻使用 `comet eval` 进行质量评估。
+
+即使你还没来得及编写任何评测用例，**Eval 也会根据 Skill 的正文内容，自动生成 2–4 个匹配的评估用例并执行**。本文带你按实际操作顺序展开：先进行 0 配置的静态预检，再跑通低成本冒烟评估，最后解读报告并按需进阶配置。
 
 <Tip>
-  想使用现成基准任务时，可在 Dashboard 的新建评估中选择 **内置数据集**，显式下载 WorkBuddy Code 或
-  SkillsBench 后再运行。CLI、许可与 Goal 对比条件见[内置基准数据集](/zh/cli/eval#内置基准数据集)。
+  想要使用现成的公开基准任务？可在 Dashboard 的新建评估中选择 **内置数据集**，下载 WorkBuddy Code 或 SkillsBench 进行标准基准评测。详见[内置基准数据集](/zh/cli/eval#内置基准数据集)。
 </Tip>
 
-## 你要准备什么
+## 快速上手流程
 
-### 必需内容
+```mermaid
+flowchart LR
+  A["1. 静态预检<br/>--collect"] --> B["2. 低成本冒烟<br/>--quick --html"]
+  B --> C["3. 解读评估报告<br/>查看 HTML 与失败归因"]
+  C --> D["4. 全量与进阶评估<br/>自动用例 / eval.yaml"]
+```
 
-- 已安装 `@rpamis/comet`。npm 包自带评测框架（eval harness，负责启动隔离环境、执行任务并生成报告），不需要 clone Comet 仓库。
-- 一个本地 Skill 目录，里面包含 `SKILL.md`。
-- 运行真实评估时，需要 `uv`、Python 3.11+、Docker、选定的 Agent CLI 和对应模型凭证。
+## 第 1 步：0 配置静态预检（无需模型 Key）
 
-`--collect` 只做静态发现和配置检查，不会启动 Agent、Docker、插件，也不会使用凭据或发起网络调用。
-所以你可以先用它验证 Skill 入口与任务发现，再准备完整模型环境。
-
-如果要选择 Claude Code 以外的 Agent，先阅读 [Eval Agent 启动配置](/zh/eval/agent-setup)，确认对应的 CLI、认证方式和模型协议。
-
-### 用户级 `.env` 配置
-
-普通用户不需要 clone Comet 源码，也不需要进入源码目录下的 `eval/`。
-第一次运行任意 `comet eval` 命令时，CLI 会自动创建完整的用户级配置文件：
-
-- Windows：`%USERPROFILE%\.comet\eval\\.env`
-- macOS/Linux：`~/.comet/eval/.env`
-
-CLI 只会创建缺失文件，不会覆盖已有文件。
-首次运行会打印实际路径。
-你按需填写参数后再次运行即可。
-如果当前 shell 已设置同名变量，则优先使用 shell 值。
-
-自动生成的模板包含全部用户可配置参数，按以下几组组织：
-
-| 参数组                                 | 主要变量                                                                                                                                                                                     |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 主任务（Bench）                        | `BENCH_EVAL_AGENT`、`BENCH_API_KEY`、`BENCH_BASE_URL`、`BENCH_MODEL`                                                                                                                         |
-| 独立裁判模型（Judge，可选的 LLM 打分） | `BENCH_LLM_JUDGE`、`BENCH_JUDGE_AGENT`、`BENCH_JUDGE_API_KEY`、`BENCH_JUDGE_AUTH_TOKEN`、`BENCH_JUDGE_BASE_URL`、`BENCH_JUDGE_MODEL`                                                         |
-| Claude Code                            | `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_*`、`CLAUDE_CODE_SUBAGENT_MODEL`、`BENCH_CC_MODEL`、`BENCH_CC_VERSION`              |
-| Codex                                  | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`CODEX_API_KEY`、`CODEX_BASE_URL`、`CODEX_MODEL`、`BENCH_CODEX_*`                                                                       |
-| Qoder                                  | `QODER_PERSONAL_ACCESS_TOKEN`、`QODER_BASE_URL`、`QODER_MODEL`、`BENCH_QODER_*`                                                                                                              |
-| CodeBuddy                              | `CODEBUDDY_API_KEY`、`CODEBUDDY_AUTH_TOKEN`、`CODEBUDDY_BASE_URL`、`CODEBUDDY_MODEL`、`CODEBUDDY_*_MODEL`、`CODEBUDDY_CUSTOM_HEADERS`、`CODEBUDDY_INTERNET_ENVIRONMENT`、`BENCH_CODEBUDDY_*` |
-| 自定义 Agent                           | `COMET_EVAL_ADAPTERS_DIR`；以及适配器 `adapter.yaml` 声明的凭据、模型和地址变量                                                                                                              |
-| 其他评估与追踪                         | `BENCH_SIMULATOR_PROMPT_FILE`、`LANGSMITH_*`、`TRACE_TO_LANGSMITH`、`LANGFUSE_*`                                                                                                             |
-
-模板中的参数默认都是注释，不填写的项目不会改变默认行为。真实 API key 只应放在用户级
-`.env` 或当前 shell，不能写入 Skill、manifest、报告或公开仓库。
-
-### 支持哪些评估 Agent
-
-`comet eval` 默认使用 `claude-code`。主 Agent、用户模拟器和可选的 Judge 都可以使用以下 Agent：
-
-| Agent         | 适合场景                              | 常见凭证                                      |
-| ------------- | ------------------------------------- | --------------------------------------------- |
-| `claude-code` | 默认选择，使用 Claude Code 执行 Skill | `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN` |
-| `codex`       | 使用 Codex CLI 或 OpenAI 兼容模型     | `OPENAI_API_KEY` 或 `CODEX_API_KEY`           |
-| `qoder`       | 使用 Qoder CLI                        | `QODER_PERSONAL_ACCESS_TOKEN`                 |
-| `codebuddy`   | 使用 CodeBuddy CLI 或其 API           | `CODEBUDDY_API_KEY` 或 `CODEBUDDY_AUTH_TOKEN` |
-
-<Info>
-  自定义 Agent 适配器是用户级进阶能力，不需要 clone Comet 源码。只有需要修改内置 Eval harness、
-  任务或 Docker 环境时，才需要参考[进阶配置](/zh/eval/configuration)。
-</Info>
-
-非预定义 Agent 的注册、凭据和 CLI 约定见[Eval Agent 启动配置](/zh/eval/agent-setup#扩展自定义-agent)。
-仅仅把可执行文件放到 PATH 上不会自动启用它。
-
-如果评估几乎瞬间结束且没有真实执行，多数是 Docker、Agent CLI 或模型凭证未就绪。
-harness 会把这类样本标为跳过，避免产生“假成功”。
-
-## 第一次运行
-
-先执行不调用模型的预检查，再运行低成本冒烟，最后按需运行全部任务：
+在运行任何真实模型之前，先运行 `--collect` 检查 Skill 目录结构、配置与任务发现是否正常：
 
 ```bash
-# 1. 检查 Skill、manifest 和任务发现
 comet eval ./my-skill --collect
+```
 
-# 2. 运行固定的低成本冒烟任务
+- **不需要 Docker，不需要配置 API Key，不产生任何费用**；
+- 瞬间完成静态语法检查与任务扫描；
+- 确认命令回显识别到 Skill 名称与预定任务后，即可进入下一步。
+
+## 第 2 步：运行低成本冒烟评估
+
+真实运行评估前，确保本机已具备：
+- Python 3.11+ 与 `uv`
+- Docker 运行环境
+- 选定 Agent 的 CLI（默认为 `claude-code` 或 `codex`）及对应模型 API Key
+
+运行固定、低成本的冒烟任务验证整套执行链路：
+
+```bash
 comet eval ./my-skill --quick --html
+```
 
-# 3. 使用已配置或自动生成的任务运行评估
+- `--quick` 固定执行通用的 `generic-skill-smoke` 任务，重点核查 Skill 能否被正常注入、模型能否调用并产出结果文件；
+- `--html` 指示评估完成后自动生成可交互的 HTML 报告，并在终端打印报告路径。
+
+```text
+✔ 成功加载 Skill: my-skill
+✔ 正在启动隔离容器环境...
+✔ 执行冒烟用例: generic-skill-smoke
+✔ 评分计算完成: pass@1 = 100%
+📄 评估报告已生成: .comet/eval/runs/exp-2026-11-15/summary.html
+```
+
+## 第 3 步：解读评估报告与失败定位
+
+在浏览器中打开生成的 `summary.html`（或查看同目录下的 `summary.md` 摘要）：
+
+1. **核心通过率**：查看 `pass@1`、`pass@k` 或 `pass^k` 指标，确认 Skill 在多次尝试下的稳定性；
+2. **多维 Rubric 评分**：核对任务完成度、输出规范、是否有违规副作用等维度打分；
+3. **失败原因精准归因**：若用例未通过，Comet 会在报告中自动标注问题所属类别：
+   - `harness`：容器、依赖或环境报错（如 Docker 端口冲突或缺少 Python 包）；
+   - `workflow`：Skill 流程引导有缺陷，Agent 在执行中迷失或超时；
+   - `task`：评测任务自身的验证条件过于苛刻或有误；
+   - `model`：底层大模型推理波动或偶发格式异常。
+
+## 第 4 步：全量评估与任务自定义
+
+跑通冒烟测试后，可以运行全量评估：
+
+```bash
 comet eval ./my-skill --html
 ```
 
-如果没有 `comet/eval.yaml`，或 manifest 中缺少 `evaluation.tasks` 与 `recommendedTasks`，普通运行会根据 Skill 内容**自动生成 2–4 个评估用例**，冻结并缓存后执行。
-你不需要先手写任务就能开始。
-`--quick` 不会使用自动生成用例，而是固定跑 `generic-skill-smoke`，重点验证 Skill 能被注入、调用并产出 `result.md`。
+如果没有手写任务，系统会根据 Skill 内容**自动生成 2–4 个评估用例**，冻结并缓存后执行。
 
-### target 怎么传
+### target 传参方式
 
-目录、直接的 `SKILL.md` 和 manifest 都可以作为 target：
+目录、直接的 `SKILL.md` 文件或 manifest 均可作为评测 target：
 
 ```bash
-# Skill 目录：自动发现其中的 comet/eval.yaml（如果存在）
-comet eval ./my-skill --collect
+# 传入 Skill 目录：自动发现其中的 comet/eval.yaml（若存在）
+comet eval ./my-skill --html
 
-# 直接传 SKILL.md
+# 直接传入 SKILL.md
 comet eval ./my-skill/SKILL.md --html
 
-# 直接传 manifest
+# 直接传入 manifest
 comet eval ./my-skill/comet/eval.yaml --html
 ```
 
-没有 manifest 时，Comet 会在内存中合成基础配置，不会改写 Skill 源文件。Skill 在仓库外时，用 `--project` 指定保存运行状态和报告的项目目录：
+若 Skill 位于项目外部，可用 `--project ./my-project` 指定保存运行记录和报告的项目目录。
 
-```bash
-comet eval ./my-skill --project ./my-project --html
-```
+### 自定义评估用例
 
-## 配置评估 Agent 和 Judge
-
-最简单的方式是在命令行选择主 Agent：
-
-```bash
-comet eval ./my-skill --agent codex --model subject-model --html
-```
-
-也可以在**被评估 Skill 的根目录**下创建 `comet/eval.yaml`，在这个文件中配置默认 Agent。例如目录结构如下：
-
-```text
-my-skill/
-├── SKILL.md
-└── comet/
-    └── eval.yaml
-```
-
-当你运行 `comet eval ./my-skill` 时，Comet 会自动发现 `./my-skill/comet/eval.yaml`。你也可以直接把这个文件作为 target 传入：
-
-```bash
-comet eval ./my-skill/comet/eval.yaml --collect
-```
-
-在 `eval.yaml` 中配置默认 Agent。CLI 选项优先于 manifest：
+想要针对自身业务手写特定的评估用例？只需在 Skill 根目录下创建 `comet/eval.yaml`：
 
 ```yaml
-execution:
-  agent: codex
-  model: subject-model
-  baseUrl: https://subject.example/v1
-
-judge:
-  agent: claude-code
-  model: judge-model
-  baseUrl: https://judge.example/v1
-```
-
-主 Agent 与 LLM-as-Judge 可以使用不同的 Agent、模型、API 地址和凭据。
-Judge 不会自动继承主 Agent 的模型或凭据。
-启用 Judge 时，必须单独提供 Judge 配置。
-
-## 选择评估后端
-
-`--suite` 选择评估后端。三种后端使用同一套 target、任务和 Agent 配置，区别在于结果是否同步到外部评估服务：
-
-| 后端        | 命令                                             | 结果位置和用途                                                                |
-| ----------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `local`     | `comet eval ./my-skill --html`                   | 默认后端，只生成本地报告，适合日常开发                                        |
-| `langsmith` | `comet eval ./my-skill --suite langsmith --html` | 生成本地报告，并同步运行轨迹、评分和实验数据到 LangSmith                      |
-| `langfuse`  | `comet eval ./my-skill --suite langfuse --html`  | 生成本地报告，并同步 task trace、rubric score、pass 指标和实验摘要到 Langfuse |
-
-Langfuse 示例：
-
-```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... \
-  comet eval ./my-skill --suite langfuse --html
-```
-
-如果只是检查任务和配置，任何后端都可以和 `--collect` 一起使用：
-
-```bash
-comet eval ./my-skill --suite langfuse --collect
-```
-
-`--collect --suite langfuse` 不初始化 SDK、不联网，也不会下载插件。
-
-## 报告有哪些类型
-
-评估状态和报告默认写入 target 所属项目的以下目录：
-
-```text
-.comet/eval/runs/<experiment-id>/
-├── summary.md       # Markdown 总结报告，总是生成
-├── summary.html     # HTML 总结报告，使用 --html 时生成
-├── metadata.json    # 本次 experiment 的元数据
-├── events/          # Agent 运行事件
-├── raw/             # 原始输出
-├── reports/         # 每次运行的 report.json
-└── artifacts/       # 任务产物和校验证据
-```
-
-不带 `--html` 时，评估仍然会生成 `summary.md`。需要 HTML 时运行：
-
-```bash
-comet eval ./my-skill --html
-```
-
-也可以用 `--report-config <path>` 或 `COMET_EVAL_REPORT_CONFIG` 自定义报告输出。CLI 会打印 `Experiment` 和 `Report path`，查找报告时以本次输出为准。
-
-看报告时先关注三件事：
-
-1. 评估是否通过。
-2. 失败归因是 `harness`、`workflow`、`task` 还是 `model`。
-3. 是否缺少预期 artifact，以及 token、cost、duration 是否异常。
-
-失败归因可这样理解：`harness` 多数表示环境或依赖问题，`workflow` 表示 Skill 流程未达预期，`task` 表示任务定义或校验条件有问题，`model` 表示模型行为或调用不稳定。
-
-## 怎么自定义任务
-
-任务按以下优先级选择：
-
-1. CLI 指定的 `--task`。
-2. `--quick` 使用的 `generic-skill-smoke`。
-3. manifest 中的 `evaluation.tasks`。
-4. manifest 中的 `recommendedTasks` 或任务包 `source`。
-5. 没有可用任务时，根据 Skill 内容**自动生成并缓存 2–4 个评估用例**。
-
-如果自动生成的任务不够贴合你的 Skill，请在**被评估 Skill 的根目录**下创建或编辑 `comet/eval.yaml`，并在其中的 `evaluation.tasks` 下声明 inline task。例如：
-
-```yaml
+# my-skill/comet/eval.yaml
 evaluation:
   tasks:
     - name: writes-summary
-      prompt: Create summary.md with the requested result.
+      prompt: 在当前工作区创建 summary.md 并整理核心结论。
       expect:
         files:
           - summary.md
@@ -238,135 +113,68 @@ evaluation:
             - '# Summary'
 ```
 
-### 引用 Skill 包内的任务包
+更多包含 Dockerfile、确定性测试脚本（`task.toml`）的高级任务包配置，请参考[配置评估与自定义 Task](/zh/eval/configuration)。
 
-如果任务需要独立的 `task.toml`、`instruction.md`、Docker 环境或验证脚本，可以把任务包放在 Skill 目录内，再通过 `source` 引用。推荐的目录结构如下：
+## 第 5 步：切换评估 Agent 与外部后端
 
-```text
-my-skill/
-├── SKILL.md
-├── comet/
-│   └── eval.yaml
-└── eval-tasks/
-    └── writes-summary/
-        ├── task.toml
-        ├── instruction.md
-        ├── environment/
-        │   └── Dockerfile
-        └── validation/
-            └── test_summary.py
-```
+### 切换被评测的 Agent
 
-在 Skill 根目录的 `comet/eval.yaml` 中，用 `evaluation.tasks[].source` 指向任务包。这里的 `source` 相对于 Skill 包根目录（包含 `SKILL.md` 的目录），不是相对于 `comet/` 目录：
-
-```yaml
-# my-skill/comet/eval.yaml
-skill:
-  name: my-skill
-  source: ..
-
-evaluation:
-  tasks:
-    - name: writes-summary
-      source: eval-tasks/writes-summary
-```
-
-下面是这个任务包中几个文件的最小示例内容。完整的 `task.toml` 字段、验证脚本、profile 和 Docker 配置说明，见[配置评估与自定义 Task](/zh/eval/configuration)。
-
-`task.toml` 声明任务元数据、Docker 环境、需要检查的产物和验证脚本：
-
-```toml
-[metadata]
-name = "writes-summary"
-description = "Create summary.md"
-
-[environment]
-dockerfile = "environment/Dockerfile"
-
-[validation]
-test_scripts = ["test_summary.py"]
-target_artifacts = ["summary.md"]
-```
-
-`instruction.md` 是发给 Agent 的任务指令：
-
-```markdown
-Create `summary.md` in the current workspace.
-
-Requirements:
-
-- Include the heading `# Summary`
-- Summarize the result in at least three bullet points
-```
-
-`environment/Dockerfile` 提供任务运行和校验所需的基础环境：
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /workspace
-```
-
-`validation/test_summary.py` 在任务容器内检查 Agent 是否产出了符合要求的文件：
-
-```python
-from pathlib import Path
-
-from scaffold.python.validation.core import write_test_results
-
-
-passed = []
-failed = []
-summary = Path("summary.md")
-
-if not summary.exists():
-    failed.append("summary.md is missing")
-else:
-    text = summary.read_text(encoding="utf-8")
-    if "# Summary" in text:
-        passed.append("summary heading is present")
-    else:
-        failed.append("summary heading is missing")
-
-write_test_results({"passed": passed, "failed": failed})
-```
-
-`eval-tasks/writes-summary/task.toml` 描述任务的环境和校验方式，`instruction.md` 是发给 Agent 的任务指令。如果需要 Docker 或确定性校验脚本，就分别放在同一个任务包的 `environment/` 和 `validation/` 下。`source` 任务不能同时写 inline task 的 `prompt` 或 `expect` 字段，且 Comet 会检查任务包中确实存在 `task.toml` 和 `instruction.md`。
-
-配置后可以直接传 Skill 目录，Comet 会自动发现 `comet/eval.yaml`。也可以直接传 manifest：
+默认使用 `claude-code`。可以通过命令行参数或 `eval.yaml` 指定主 Agent 与独立的 LLM-as-Judge 裁判模型：
 
 ```bash
-# 自动发现 my-skill/comet/eval.yaml
-comet eval ./my-skill --collect
-comet eval ./my-skill --task writes-summary --html
-
-# 直接传 manifest
-comet eval ./my-skill/comet/eval.yaml --collect
-comet eval ./my-skill/comet/eval.yaml --task writes-summary --html
+# 命令行指定使用 codex
+comet eval ./my-skill --agent codex --model gpt-4o --html
 ```
 
-任务可以检查文件、文本、JSON 或命令结果。任务工作区和期望产物必须留在允许的 Skill 包或评估工作区内。
+在 `eval.yaml` 中统一配置（CLI 命令行参数优先级高于此配置）：
 
-只有需要自定义 Docker 环境、验证脚本、profile 或 treatment 时，才需要继续阅读[配置评估与自定义 Task](/zh/eval/configuration)。
-
-## 常用评估流程
-
-```text
-1. 准备一个包含 SKILL.md 的目录
-2. comet eval ./my-skill --collect
-3. 修复路径、manifest 或任务发现问题
-4. comet eval ./my-skill --quick --html
-5. 根据需要配置 Agent、Judge、suite 或自定义 task
-6. comet eval ./my-skill --html
-7. 阅读 .comet/eval/runs/<experiment-id>/summary.md 或 summary.html
+```yaml
+execution:
+  agent: codex
+  model: gpt-4o
+judge:
+  agent: claude-code
+  model: claude-3-7-sonnet
 ```
+
+### 选择评估后端（本地 / LangSmith / Langfuse）
+
+通过 `--suite` 指定评测数据同步目的地：
+
+| 后端 | 执行命令 | 用途说明 |
+| --- | --- | --- |
+| `local` | `comet eval ./my-skill --html` | 默认选项，仅生成本地报告，适合日常快速迭代 |
+| `langsmith` | `comet eval ./my-skill --suite langsmith --html` | 生成本地报告，并将运行轨迹、Rubric 评分同步至 LangSmith |
+| `langfuse` | `comet eval ./my-skill --suite langfuse --html` | 生成本地报告，并将任务 Trace 与指标同步至 Langfuse |
+
+## 进阶参考：用户级 `.env` 配置
+
+第一次运行任意 `comet eval` 命令时，CLI 会自动在用户主目录下创建全局配置文件模板（仅补全缺失文件，不覆盖已有内容）：
+
+- **Windows**：`%USERPROFILE%\.comet\eval\.env`
+- **macOS / Linux**：`~/.comet/eval/.env`
+
+你可以在该文件中集中维护常用 Agent 的 API Key 与 Base URL，避免每次在终端中重复输入。
+
+<Accordion title="查看完整环境变量参考表">
+自动生成的 `.env` 模板包含以下主要变量配置：
+
+| 参数组 | 核心变量 |
+| --- | --- |
+| 主任务（Bench） | `BENCH_EVAL_AGENT`、`BENCH_API_KEY`、`BENCH_BASE_URL`、`BENCH_MODEL` |
+| 独立裁判模型（Judge） | `BENCH_LLM_JUDGE`、`BENCH_JUDGE_AGENT`、`BENCH_JUDGE_API_KEY`、`BENCH_JUDGE_BASE_URL`、`BENCH_JUDGE_MODEL` |
+| Claude Code | `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`CLAUDE_CODE_SUBAGENT_MODEL` |
+| Codex | `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` |
+| Qoder | `QODER_PERSONAL_ACCESS_TOKEN`、`QODER_BASE_URL`、`QODER_MODEL` |
+| CodeBuddy | `CODEBUDDY_API_KEY`、`CODEBUDDY_BASE_URL`、`CODEBUDDY_MODEL` |
+| 外部追踪服务 | `LANGSMITH_API_KEY`、`LANGSMITH_PROJECT`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` |
+
+模板中的参数默认均已加注释，未填写的项目保持默认行为。真实 API Key 请只保存在本地 `.env` 或当前 Shell 环境变量中，切勿提交至公开代码仓库。
+</Accordion>
 
 ## 进一步阅读
 
-| 内容                                        | 适合场景                                     |
-| ------------------------------------------- | -------------------------------------------- |
-| [评估系统概览](/zh/eval/overview)           | 了解任务、profile、评分和运行机制            |
-| [评分指标与双 Agent 评测](/zh/eval/scoring) | 了解 rubric、pass@k/pass^k 和多轮 Agent 交互 |
-| [Eval harness](/zh/eval/harness)            | 排查 harness、环境变量和套件内部机制         |
-| [读取评估报告](/zh/eval/reports)            | 深入分析报告和失败归因                       |
-| [comet eval 命令](/zh/cli/eval)             | 查看完整 CLI 选项和故障排查                  |
+- [评估系统概览](/zh/eval/overview)：深入了解评估任务、Profile、评分和运行机制；
+- [评分指标与双 Agent 评测](/zh/eval/scoring)：了解 Rubric 体系、`pass@k` / `pass^k` 及多轮交互机制；
+- [评估 SDK 应用](/zh/eval/applications)：如何对由 Comet Any 创作的完整应用进行自动化评测；
+- [comet eval 命令行参考](/zh/cli/eval)：查看完整的 CLI 参数与选项手册。
