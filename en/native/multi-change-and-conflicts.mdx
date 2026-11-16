@@ -1,9 +1,9 @@
 ---
-title: "Multi-Change Parallelism and Conflict Control"
-description: "Learn how Native enables multiple changes to run stably in parallel through independent Worktrees, workspace bindings, and Spec archive sequences."
+title: 'Multi-Change Parallelism and Conflict Control'
+description: 'Learn how Native enables multiple changes to run stably in parallel through independent Worktrees, workspace bindings, and Spec archive sequences.'
 ---
 
-Native can promote multiple changes simultaneously. Each Change has its own requirements, acceptance status, branches, and working directories, and the Runtime is responsible for maintaining these boundaries. Agents can thus be implemented in parallel, and users can restore any one of the changes at any time, while avoiding writing code, status, or verification results to incorrect tasks.
+Native supports multiple independent changes, each with its own requirements, acceptance criteria, and approvals. Built-in Native v4 Runs can share a branch and planning workspace during Shape. Execution workspaces are prepared when implementation starts. Use independent worktrees when multiple Agents write code in parallel.
 
 Parallel protection is divided into two layers: worktree isolates uncommitted code, and Spec conflict checking protects formal requirements. The former addresses "where the code is written", while the latter addresses "in what order should multiple changes update the same Spec simultaneously".
 
@@ -11,24 +11,42 @@ Parallel protection is divided into two layers: worktree isolates uncommitted co
 
 The relationship between the goals determines how the Change is organized:
 
-|Target relationship|Organizational mode|
-| --- | --- |
-|A product goal encompasses multiple outcomes that need to be delivered collaboratively|Use [Supervisor Change](/en/native/supervisor-change) to uniformly split, integrate and verify|
-|Multiple product goals can be achieved and delivered separately|Create independent changes for each target|
+| Target relationship                                                                    | Organizational mode                                                                            |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| A product goal encompasses multiple outcomes that need to be delivered collaboratively | Use [Supervisor Change](/en/native/supervisor-change) to uniformly split, integrate and verify |
+| Multiple product goals can be achieved and delivered separately                        | Create independent changes for each target                                                     |
 
 Supervisor Change is responsible for child splitting and integration within a large target. This page focuses on how multiple independent changes can advance in parallel within the same repository.
 
-## Automatic workspace isolation
+## Plan multiple Shapes in one workspace
 
-When you say "parallel processing", "simultaneous advancement" or "completed with multiple sessions", Native will directly select `worktree` for the new Change. Each Change acquires an independent branch and working directory. Once created, the Agent will enter the `preparation.projectRoot` returned by the Runtime to continue working.
+For independently deliverable goals, create Native v4 Shapes on one branch. One Agent can switch between their materials while reviewers review and approve each separately:
 
-This process will reuse existing resources in combination with the current status of the warehouse:
+```bash
+comet native new session-retry-policy --isolation current --json
+comet native new dashboard-export --isolation current --json
+comet native select session-retry-policy
+```
 
-- When the registered worktree matches the Change branch, continue to use the original directory.
-- When the branch still exists and the original worktree has been removed, the Runtime rebuilds the working directory.
-- When a branch is renamed, taken over by another task, or its affiliation cannot be confirmed, the Runtime pauses and requests rebinding.
+Each change keeps its own brief, Specs, acceptance criteria, and approval. Keep one Agent writing in the shared planning directory. Use independent worktrees when multiple Agents write materials or code concurrently.
 
-When the user has not specified the parallel mode, Native will decide to directly use the current directory based on whether there are uncommitted jobs and active changes in the current directory, or ask you to choose among `current`, `branch` and `worktree`.
+To approve without starting implementation, append `--defer-build` to the current Shape confirmation command returned by Runtime. Preserve `--confirmed`, the state version, and the expected action; do not reconstruct an old confirmation command. Approval is saved and the task waits for a later `next`. `--defer-build` alone does not approve Shape.
+
+## Start Build in its execution workspace
+
+When ready to implement, the actual receiving session runs:
+
+```bash
+comet native next session-retry-policy --session <actual-session> --json
+```
+
+If other active requirements remain in the planning workspace, Runtime prepares an independent branch and worktree and transfers the original Run, materials, and valid approval. Otherwise, the change can stay in the current workspace. Run subsequent commands and development in the returned `executionCwd`. The planning directory still shows the task and lets you select another Shape.
+
+The new worktree uses committed code from the current branch. Prepare the implementation baseline first: commit tracked code changes outside the planning directory before retrying; untracked code is not automatically copied. Handoff does not commit or push changes.
+
+If handoff is interrupted, preserve the target directory and retry the original `next` command. Runtime resumes the original Run and current target progress without creating another Builder or overwriting a completed transfer. The planning directory cannot implement a transferred task. Reconcile unknown execution using the current recovery instructions. If requirements or acceptance scope change, revise the original Run and reconfirm Shape.
+
+Compat changes and pinned SDK applications retain their own isolation rules.
 
 ## Change Workspace binding
 

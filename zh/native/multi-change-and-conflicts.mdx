@@ -1,9 +1,9 @@
 ---
-title: "多 Change 并行与冲突控制"
-description: "了解 Native 如何借助独立 Git worktree、工作区硬绑定及 Spec 归档仲裁机制，实现多变更安全高效并行。"
+title: '多 Change 并行与冲突控制'
+description: '了解 Native 如何借助独立 Git worktree、工作区硬绑定及 Spec 归档仲裁机制，实现多变更安全高效并行。'
 ---
 
-Native 原生支持在同一工程内并发推进多个 Change。每个 Change 均拥有独立的业务需求、验收状态机、Git 分支与物理工作目录，Runtime 在底层严密守护边界。这使得多个 Agent 会话能够并行独立编码，开发者亦可随时无缝接续其中任意一个，彻底杜绝代码落错目录、状态交叉污染或测试证据串号。
+Native 支持同时维护多个独立 Change。每个 Change 保存自己的需求、验收项和批准。Native v4 内置流程允许多个 Shape 共享同一分支和规划工作区；开始实施时，再按当前活跃任务准备执行工作区。多个 Agent 并行编码时使用独立 worktree。
 
 多任务并行防护分为两层：Git worktree 负责隔离未提交的代码变更，Spec 冲突检查负责保护系统的正式需求规格。前者解决“代码安全写在哪个物理目录”，后者解决“多个 Change 并发修改同一能力规格时，该依循何种次序收敛更新”。
 
@@ -11,24 +11,42 @@ Native 原生支持在同一工程内并发推进多个 Change。每个 Change �
 
 根据业务目标之间的耦合关系，选择匹配的组织方式：
 
-| 目标关联度 | 推荐组织模式 |
-| --- | --- |
+| 目标关联度                                         | 推荐组织模式                                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | 属于同一宏观产品目标，包含多个需要协同交付的子模块 | 采用 [Supervisor Change](/zh/native/supervisor-change) 架构统一拆解、依赖调度与全链路验收 |
-| 属于互不相干的独立产品目标，可分别上线交付 | 为每个目标独立创建平行的 Native Change |
+| 属于互不相干的独立产品目标，可分别上线交付         | 为每个目标独立创建平行的 Native Change                                                    |
 
 Supervisor Change 专注解决单个大型复合任务内部的子模块编排。本文重点聚焦多个平行的独立 Change 如何在同一个代码仓库中井然有序地并行流转。
 
-## 全自动物理工作区隔离
+## 在同一工作区规划多个 Shape
 
-当你在诉求中提及“并行处理”、“多任务同时推进”或“开多个窗口一起做”时，Native 会直接为新 Change 分配专属的 `worktree` 隔离模式。每个 Change 独占专用的 Git 分支与物理工作目录；创建完成后，Agent 会自动切入 Runtime 返回的 `preparation.projectRoot` 工作区开展工作。
+当多个目标可以独立交付时，可以先在同一分支创建 Native v4 Shape，由一个 Agent 切换整理材料，评审人分别阅读和批准：
 
-整个准备过程会充分复用仓库的现有资源：
+```bash
+comet native new session-retry-policy --isolation current --json
+comet native new dashboard-export --isolation current --json
+comet native select session-retry-policy
+```
 
-- 若已登记的 Git worktree 与当前 Change 绑定的分支匹配，直接复用既有目录；
-- 若本地分支存在但先前的临时 worktree 已被手动清理，Runtime 会自动重建工作目录；
-- 若分支被外部重命名、被其他进程强行占用或归属无法定性，Runtime 会主动暂停并提示重新绑定。
+每个 change 保留自己的 brief、Spec、验收项和批准。共享规划目录仍由一个 Agent 写入；多个 Agent 同时编写材料或代码时，应使用独立 worktree。
 
-若你未显式声明并行偏好，Native 会结合当前目录是否存在未提交代码、是否已有活跃的 active Change，智能决定直接复用当前目录，或引导你在 `current`、`branch` 与 `worktree` 之间做出选择。
+批准后暂不实施时，在 Runtime 当前返回的 Shape 确认命令后追加 `--defer-build`。保留命令中的 `--confirmed`、状态版本和预期动作，不自行拼接旧确认命令。批准会保存，任务等待后续 `next`；只传 `--defer-build` 不会批准 Shape。
+
+## 开始 Build 并进入执行工作区
+
+准备实施时，由接收任务的真实会话执行：
+
+```bash
+comet native next session-retry-policy --session <实际会话标识> --json
+```
+
+同一规划工作区仍有其他活跃需求时，Runtime 为该 change 准备独立分支和 worktree，交接原 Run、材料及有效批准。没有其他活跃需求时，可以沿用当前工作区。后续开发和命令在返回的 `executionCwd` 执行；原目录仍可查看该任务，并选择其他 Shape 继续规划。
+
+新 worktree 使用当前分支的已提交代码。启动前先整理实施基线：规划目录之外的已跟踪代码修改需要提交后再重试；未跟踪代码不会自动带入新 worktree。交接本身不自动提交或推送。
+
+交接中断时，保留目标目录并重试原 `next` 命令。Runtime 沿用原 Run 和目标最新进度，不重复创建 Builder 或覆盖已完成的交接。原规划目录不能继续实施已交接的任务；未知执行先按当前恢复指引核对。需求或验收范围变化时，修订原 Run 并重新确认 Shape。
+
+Compat 与固定 SDK 应用继续沿用各自的隔离规则。
 
 ## Change 工作区硬绑定机制
 
