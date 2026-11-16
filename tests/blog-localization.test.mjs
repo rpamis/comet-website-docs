@@ -100,6 +100,18 @@ test('both blog indexes use the same inline banner and artwork', () => {
   for (const path of images(en)) assert.ok(existsSync(new URL(path.slice(1), root)), path);
 });
 
+test('random landscapes include every blog article cover in both languages', () => {
+  const scenes = [
+    ...read('snippets/blog-landscape.jsx').matchAll(/\bsrc:\s*["']([^"']+)["']/g),
+  ].map((match) => match[1]);
+  assert.equal(scenes.length, new Set(scenes).size, 'each landscape appears once');
+  for (const locale of ['zh', 'en']) {
+    const index = read(`${locale}/tech-blog/index.mdx`);
+    const covers = [...index.matchAll(/<img\s+src="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual([...scenes].sort(), [...new Set(covers)].sort(), locale);
+  }
+});
+
 test('both languages register all blog pages in hidden navigation groups', () => {
   const config = JSON.parse(read('docs.json'));
   for (const locale of ['zh', 'en']) {

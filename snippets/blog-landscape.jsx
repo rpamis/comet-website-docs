@@ -1,7 +1,21 @@
 export const BlogLandscape = ({ lang = "zh" }) => {
   const translations = {
     zh: {
-      scenes: ["观星", "书廊", "石桥", "远航", "麦光", "海岚", "轨道"],
+      scenes: [
+        "观星",
+        "书廊",
+        "石桥",
+        "远航",
+        "麦光",
+        "海岚",
+        "轨道",
+        "河湾",
+        "时光",
+        "雪峰",
+        "林径",
+        "扬帆",
+        "麦径",
+      ],
       caption: "在代码之外，留一点想象。",
       shuffle: "随机切换风景",
       pause: "暂停自动切换风景",
@@ -18,6 +32,12 @@ export const BlogLandscape = ({ lang = "zh" }) => {
         "Wheatfields",
         "Coast",
         "Viaduct",
+        "Riverbend",
+        "Timepiece",
+        "Snow peaks",
+        "Woodland paths",
+        "Sailing",
+        "Wheat path",
       ],
       caption: "A little room for imagination.",
       shuffle: "Shuffle landscapes",
@@ -49,6 +69,30 @@ export const BlogLandscape = ({ lang = "zh" }) => {
     { src: "/assets/blog-landscapes/wheat-oil-v2.webp", name: t.scenes[4] },
     { src: "/assets/blog-landscapes/coast-oil-v2.webp", name: t.scenes[5] },
     { src: "/assets/blog-landscapes/viaduct-oil-v2.webp", name: t.scenes[6] },
+    {
+      src: "/assets/blog-landscapes/eval-native-053-goal.webp",
+      name: t.scenes[7],
+    },
+    {
+      src: "/assets/blog-landscapes/eval-native-053-040-rc1.webp",
+      name: t.scenes[8],
+    },
+    {
+      src: "/assets/blog-landscapes/eval-native-rc1-beta16.webp",
+      name: t.scenes[9],
+    },
+    {
+      src: "/assets/blog-landscapes/eval-clarification-modes.webp",
+      name: t.scenes[10],
+    },
+    {
+      src: "/assets/blog-landscapes/eval-native-classic-040.webp",
+      name: t.scenes[11],
+    },
+    {
+      src: "/assets/blog-landscapes/eval-workflow-baseline.webp",
+      name: t.scenes[12],
+    },
   ];
   const shuffle = async () => {
     if (loadingRef.current) return;

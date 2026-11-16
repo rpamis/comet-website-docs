@@ -147,6 +147,53 @@ test("blog banner loads before carousel JavaScript and switches only to decoded 
         }
       },
     );
+
+    await t.test(
+      "every article cover can be displayed by the landscape shuffle",
+      async () => {
+        const context = await newContext({ reducedMotion: "reduce" });
+        try {
+          const page = await context.newPage();
+          await page.goto(url, { waitUntil: "domcontentloaded" });
+          const shuffle = page.getByRole("button", { name: labels.shuffle });
+          await shuffle.waitFor();
+          const covers = await page
+            .locator(".comet-blog__cover img")
+            .evaluateAll((images) => [
+              ...new Set(images.map((image) => image.getAttribute("src"))),
+            ]);
+          const seen = new Set();
+          await page.evaluate(() => {
+            Math.random = () => 0;
+          });
+          for (let index = 0; index < covers.length; index++) {
+            const active = page.locator(".comet-blog__art img.is-active");
+            await active.evaluate((image) => image.decode());
+            const source = await active.getAttribute("src");
+            seen.add(source);
+            assert.match(
+              await page.locator(".comet-blog__scene-number").innerText(),
+              new RegExp(`/\\s*${covers.length}$`),
+            );
+            if (index + 1 === covers.length) break;
+            await shuffle.click();
+            await page.waitForFunction((previous) => {
+              const image = document.querySelector(
+                ".comet-blog__art img.is-active",
+              );
+              return (
+                image?.getAttribute("src") !== previous &&
+                image.complete &&
+                image.naturalWidth > 0
+              );
+            }, source);
+          }
+          assert.deepEqual([...seen].sort(), covers.sort());
+        } finally {
+          await context.close();
+        }
+      },
+    );
   } finally {
     await browser.close();
   }
