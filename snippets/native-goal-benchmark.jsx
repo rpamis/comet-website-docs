@@ -1,84 +1,5 @@
 export const NativeGoalBenchmark = ({ language = 'zh' }) => {
   const t = (zh, en) => (language === 'en' ? en : zh);
-  useEffect(() => {
-    const section = document.getElementById('comet-native-benchmark-title')?.closest('section');
-    if (!section) return;
-    let visible = false;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const branches = section.querySelectorAll('.comet-home__benchmark-wood path');
-    branches.forEach((path, index) => {
-      path.setAttribute('pathLength', '1');
-      path.style.setProperty('--branch-reveal-delay', `${(index % 8) * 0.09}s`);
-    });
-    section.dataset.benchmarkEnhanced = 'true';
-    const update = () => {
-      if (visible && !document.hidden) section.dataset.benchmarkEntered = 'true';
-      section.dataset.benchmarkAnimate = String(visible && !document.hidden && !reduced.matches);
-    };
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        visible = entry.isIntersecting && entry.intersectionRatio >= 0.12;
-        update();
-      },
-      { threshold: 0.12 },
-    );
-    const move = (event) => {
-      if (reduced.matches || event.pointerType !== 'mouse') return;
-      const rect = section.getBoundingClientRect();
-      section.style.setProperty(
-        '--benchmark-wind',
-        (((event.clientX - rect.left) / rect.width) * 2 - 1) * 1.2 + 'deg',
-      );
-    };
-    const leave = () => {
-      section.style.removeProperty('--benchmark-wind');
-    };
-    section.addEventListener('pointermove', move);
-    section.addEventListener('pointerleave', leave);
-    reduced.addEventListener('change', update);
-    observer.observe(section);
-    document.addEventListener('visibilitychange', update);
-    return () => {
-      observer.disconnect();
-      section.removeEventListener('pointermove', move);
-      section.removeEventListener('pointerleave', leave);
-      reduced.removeEventListener('change', update);
-      leave();
-      document.removeEventListener('visibilitychange', update);
-      delete section.dataset.benchmarkAnimate;
-      delete section.dataset.benchmarkEnhanced;
-      delete section.dataset.benchmarkEntered;
-    };
-  }, []);
-  const Leaf = ({ x, y, angle, length, index, revealDelay }) => (
-    <g transform={`translate(${x} ${y}) rotate(${angle}) scale(${length / 90})`}>
-      <g
-        className="comet-home__benchmark-leaf-reveal"
-        style={{ '--leaf-reveal-delay': `${revealDelay}s` }}
-      >
-        <g
-          className="comet-home__benchmark-leaf"
-          style={{
-            '--leaf-delay': `${-(index % 6) * 1.8}s`,
-            '--leaf-duration': `${11 + (index % 5)}s`,
-          }}
-        >
-          <path
-            d="M0 0C-17-22-23-58 0-90C17-65 24-31 0 0Z"
-            strokeWidth="1.05"
-            fill="#f5f1e7"
-            fillOpacity=".018"
-          />
-          <path
-            d="M0-3C-2-28-3-57 0-85M-1-24L-13-38M-2-41L-15-55M-1-59L-10-70M-1-31L11-46M-2-50L10-63M-1-69L5-76"
-            strokeWidth=".58"
-            opacity=".65"
-          />
-        </g>
-      </g>
-    </g>
-  );
-
   const groups = [
     {
       id: 'workbuddy-code',
@@ -139,117 +60,6 @@ export const NativeGoalBenchmark = ({ language = 'zh' }) => {
 
   return (
     <section className="comet-home__benchmark" aria-labelledby="comet-native-benchmark-title">
-      <div className="comet-home__benchmark-art" aria-hidden="true">
-        <div className="comet-home__benchmark-plant comet-home__benchmark-plant--tree">
-          <svg viewBox="0 0 520 920" fill="none" preserveAspectRatio="xMidYMax meet">
-            <g
-              className="comet-home__benchmark-canopy"
-              stroke="#f5f1e7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <g className="comet-home__benchmark-wood" strokeWidth="1.25">
-                <path d="M188 935C219 788 192 655 231 536C266 429 281 323 307 220C320 168 327 128 335 110" />
-                <path d="M203 934C231 782 206 655 240 540C272 432 289 324 312 222" opacity=".45" />
-                <path d="M224 623C190 586 131 563 48 565M231 619C191 576 128 552 65 555" />
-                <path d="M245 489C208 452 162 414 94 400M247 484C205 442 157 405 112 402" />
-                <path d="M277 353C244 313 213 259 197 178M281 346C246 301 221 252 210 216" />
-                <path d="M267 397C316 371 369 362 425 325M271 389C322 365 365 356 401 338" />
-                <path d="M245 535C302 513 353 462 380 412M251 526C304 504 345 459 365 436" />
-                <path d="M318 190C352 171 386 138 409 75" />
-                <path
-                  d="M207 816C193 848 171 884 150 906M202 866C221 890 244 910 265 922"
-                  opacity=".5"
-                />
-              </g>
-              {[
-                [48, 565, -65, 85],
-                [101, 563, 22, 72],
-                [164, 588, -20, 65],
-                [94, 400, -52, 87],
-                [151, 425, 18, 69],
-                [206, 456, -24, 73],
-                [197, 178, -9, 92],
-                [211, 245, -59, 78],
-                [245, 304, 22, 75],
-                [335, 110, 8, 87],
-                [315, 196, -36, 73],
-                [409, 75, 31, 83],
-                [381, 132, -42, 71],
-                [425, 325, 53, 89],
-                [369, 360, -8, 80],
-                [316, 373, -39, 64],
-                [380, 412, 27, 86],
-                [341, 473, -53, 75],
-                [287, 514, 21, 71],
-              ].map(([x, y, angle, length], index) => (
-                <Leaf
-                  key={index}
-                  x={x}
-                  y={y}
-                  angle={angle}
-                  length={length}
-                  index={index}
-                  revealDelay={0.4 + ((920 - y) / 920) * 1.2}
-                />
-              ))}
-            </g>
-          </svg>
-        </div>
-        <div className="comet-home__benchmark-plant comet-home__benchmark-plant--bough">
-          <svg viewBox="0 0 520 920" fill="none" preserveAspectRatio="xMidYMin meet">
-            <g
-              className="comet-home__benchmark-canopy"
-              stroke="#f5f1e7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <g className="comet-home__benchmark-wood" strokeWidth="1.2">
-                <path d="M530 -12C461 48 430 121 457 214C484 305 444 357 373 411C324 449 299 522 285 620" />
-                <path
-                  d="M542 -10C469 55 440 124 465 212C492 307 450 362 378 417C332 451 309 515 299 568"
-                  opacity=".45"
-                />
-                <path d="M444 135C392 126 342 111 297 53M448 129C397 120 353 104 321 80" />
-                <path d="M460 229C403 225 348 214 300 171M462 222C408 219 359 208 324 188" />
-                <path d="M434 344C473 367 488 411 486 475" />
-                <path d="M371 412C313 405 269 379 218 335M377 405C318 397 277 374 239 351" />
-                <path d="M305 545C357 548 402 532 436 494" />
-                <path d="M293 592C269 576 250 556 247 532" opacity=".55" />
-              </g>
-              {[
-                [297, 53, -28, 87],
-                [341, 107, -68, 77],
-                [397, 128, 9, 79],
-                [300, 171, -43, 93],
-                [354, 214, -83, 75],
-                [408, 226, 18, 69],
-                [486, 475, 159, 82],
-                [479, 410, 82, 80],
-                [451, 366, 5, 78],
-                [218, 335, -44, 92],
-                [272, 382, -87, 76],
-                [324, 405, 13, 71],
-                [436, 494, 59, 82],
-                [384, 534, 110, 72],
-                [335, 545, 15, 67],
-                [285, 620, -165, 75],
-                [247, 532, -30, 72],
-              ].map(([x, y, angle, length], index) => (
-                <Leaf
-                  key={index}
-                  x={x}
-                  y={y}
-                  angle={angle}
-                  length={length}
-                  index={index + 3}
-                  revealDelay={0.6 + (y / 920) * 1.2}
-                />
-              ))}
-            </g>
-          </svg>
-        </div>
-      </div>
       <div className="comet-home__benchmark-content">
         <div className="comet-home__benchmark-heading">
           <p className="comet-home__label" translate="no">
@@ -375,7 +185,15 @@ export const NativeGoalBenchmark = ({ language = 'zh' }) => {
                           )}
                           {column <= 3 && (
                             <span
-                              className={`comet-home__benchmark-average ${Number(averageAt(row, column)) > Number(averageAt(group.rows[1 - index], column)) ? 'comet-home__benchmark-average-best' : ''}`}
+                              className={[
+                                'comet-home__benchmark-average',
+                                Number(averageAt(row, column)) >
+                                Number(averageAt(group.rows[1 - index], column))
+                                  ? 'comet-home__benchmark-average-best'
+                                  : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
                             >
                               <span className="comet-home__benchmark-average-label">
                                 {t('均分', 'Mean')}
