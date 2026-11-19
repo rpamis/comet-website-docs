@@ -6,15 +6,17 @@ description: "Define an eval task with task.toml, instruction.md, validation scr
 `comet eval` evaluates built-in tasks and local Skills. Define a custom task when your scenario needs fixed instructions, an environment, or validation scripts. This page explains how to configure the task, treatment, profile, and interaction mode.
 
 <Info>
-This article is advanced custom content. If you just want to evaluate an existing Skill, there's no need to read this article - just use {" "}
-<code>comet eval./your-skill --html</code> is fine. This article assumes that you have already been able to run {" "} successfully
-  <code>comet eval ./your-skill --collect</code>。
+  This page covers advanced custom configuration. If you only want to evaluate an existing Skill,
+  you do not need to read it: just run <code>comet eval ./your-skill --html</code>. The page assumes
+  that <code>comet eval ./your-skill --collect</code> already runs successfully.
 </Info>
 
 <Warning>
-The `eval/local/tasks/`, pytest, Dockerfile and registration process on this page are advanced content for source code/maintainers and are required
-A complete reproduction is required by pulling the Comet source code. Ordinary users only need to write "inline" in their own `comet/eval.yaml`
-task, or directly run `comet eval` in [Quick Start ](/en/eval/quickstart)]
+  The <code>eval/local/tasks/</code> directory, pytest, the Dockerfile, and the registration process
+  described here are advanced material for people working on the Comet source code itself, and they
+  require a complete reproduction from a Comet source checkout. For ordinary use, write an "inline"
+  task in your own <code>comet/eval.yaml</code>, or run <code>comet eval</code> directly as shown in
+  the [Quick Start](/en/eval/quickstart).
 </Warning>
 
 ## How do you read this page
@@ -53,11 +55,11 @@ flowchart LR
     R --> REP["Report <br/>pass@k, dimension score, failure attribution"]
 ```
 
-|"Configuration"|The questions answered|Location|
+| Configuration | The questions it answers | Location |
 | -------------------- | ----------------------------------------- | --------------------------- |
-| **Task**             |What scenario is being tested? What is to be produced? How can I verify if it's correct?| `local/tasks/<name>/`       |
-| **Treatment**        |Which skills (including skill-free baselines) were injected in this run?| `local/treatments/`         |
-| **Profile + Rubric** |On what dimension should it be scored?|task.toml's `[evaluation]`|
+| **Task**             |What scenario is tested? What must be produced? How do I check that it is correct?| `local/tasks/<name>/`       |
+| **Treatment**        |Which Skills were injected in this run, including the no-Skill baseline?| `local/treatments/`         |
+| **Profile + Rubric** |On which dimensions is the run scored?|The `[evaluation]` section of `task.toml`|
 
 Let's explain each one clearly below.
 
@@ -79,10 +81,11 @@ Each task is a directory under `local/tasks/`, containing four files:
 </Tree>
 
 <Note>
-The Task directory convention comes from eval harness (<code>eval/</code>), not your business repository. Expansion
-Comet built-in harness in warehouse, custom task on <code>eval/local/tasks/</code>{" "}
-And register to <code>eval/local/tasks/index yaml</code>; Ordinary Skill
-There is no need to copy this directory structure. inline task or package-local task can be used.
+  The task directory convention comes from the eval harness (<code>eval/</code>), not your business
+  repository. When extending the harness built into the Comet repository, put custom tasks under{' '}
+  <code>eval/local/tasks/</code> and register them in <code>eval/local/tasks/index.yaml</code>.
+  A plain Skill does not need this directory structure: it can use an inline task or a
+  package-local task.
 </Note>
 
 ### 1. Write `task.toml`
@@ -104,12 +107,12 @@ timeout_sec = 600               # Docker execution timeout (seconds)
 
 [validation]
 test_scripts = ["test_my_task.py"]   # The validation script running within Docker
-target_artifacts = ["result.md"]     # Expected product (Presence check)
+target_artifacts = ["result.md"]     # Expected artifact (presence check)
 timeout = 120                        # The verification script has timed out (in seconds
 
 [evaluation]
 profile = "generic"                       # Evaluate profile
-expected_artifacts = ["result.md"]        # The products inspected by rubric
+expected_artifacts = ["result.md"]        # The artifacts the rubric inspects
 required_skills = ["my-skill"]            # The Skill that must be invoked
 require_skill_invocation = true           # A hard failure occurs when not called
 
@@ -130,7 +133,7 @@ The functions of each block:
 | --------------- | ------------------------------------------------------------------------------------------------- |
 | `[metadata]`    |Identity information of the task. Names starting with `category = "comet"` or `comet-` will be automatically inferred as `comet-workflow` profile|
 | `[environment]` |In what Docker environment is the verification running and how long does it time out|
-| `[validation]`  |Which scripts to use for verification and which products to expect|
+| `[validation]`  |Which scripts to use for verification and which artifacts to expect|
 | `[evaluation]`  |Which profile to use for scoring, which skills must be called, and custom evaluation criteria|
 | `[interaction]` |Single-round or multi-round simulation interaction|
 
@@ -140,17 +143,17 @@ These fields directly determine the scoring results and are worth explaining sep
 
 |Field|Function|
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `profile`                  |Select rubric: `generic` (7-dimensional)/`comet-workflow` (10-dimensional)/`authoring-skill` (11-dimensional). For detailed dimensions, please refer to [Scoring Metrics and Dual-Agent Evaluation ](/en/eval/scoring)|
-| `expected_artifacts`       |rubric's `artifact_presence` dimension will check whether these products exist (supporting glob).|
+| `profile`                  |Select rubric: `generic` (7-dimensional)/`comet-workflow` (10-dimensional)/`authoring-skill` (11-dimensional). See [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring) for detailed dimensions|
+| `expected_artifacts`       |rubric's `artifact_presence` dimension will check whether these artifacts exist (supporting glob).|
 | `required_skills`          |List the skills that must be invoked; Score based on the `skill_invocation` dimension|
-| `require_skill_invocation` |When set to `true`, if the required Skill is not called, a ** hard failure ** will occur (directly judging this run as not passing).|
+| `require_skill_invocation` |When set to `true`, a required Skill that is not called causes a **hard failure**, and the run is marked as not passing.|
 | `rubric_criteria`          |Customize the judgment criteria and pass them to the LLM judge as additional dimensions (`custom_0`, `custom_1`...)|
 
 <Warning>
-<code>require_skill_invocation: true</code> is very useful but should be used with caution: it requires agent{" "}
-<strong> actually invoked the specified Skill of </strong> (from Claude Code
-Read from the event, not infer from the product. If your Skill
-If the name is written incorrectly or not injected, it will fail hard every time it runs.
+<code>require_skill_invocation: true</code> is useful but needs care: it requires the Agent to{' '}
+<strong>actually invoke the specified Skill</strong>. Comet reads this from Claude Code events rather
+than inferring it from the output. If the Skill name is wrong or the Skill is not injected, every run
+fails hard.
 </Warning>
 
 ### 2. Write `instruction.md`
@@ -169,7 +172,7 @@ Describe your implementation idea
 
 ### 3. Write verification scripts
 
-The verification script runs within Docker, and the result is written to `_test_results.json`. This is the source of the determination for "whether this operation was correct or not" :
+The verification script runs within Docker, and the result is written to `_test_results.json`. This is the source of the determination for "whether this operation was correct or not":
 
 ```python
 from pathlib import Path
@@ -179,7 +182,7 @@ def main():
     passed = []
     failed = []
 
-    # Check whether the product exists
+    # Check whether the artifact exists
     result = Path("result.md")
     if not result.exists():
         write_test_results({"passed": [], "failed": ["result.md missing"]})
@@ -251,18 +254,18 @@ COMET_FULL_040_BETA:
       base: benchmarks
 ```
 
-| Treatment             |Meaning|
+| Treatment | Meaning |
 | --------------------- | ---------------------------------------------------------------- |
 | `CONTROL` | **No-Skill baseline.** Measures Agent performance with no Skill injected. |
-| `COMET_FULL_040_BETA` |Inject the complete Comet workflow Skill package|
-|"Custom"|Inject your own Skill to compare "with Skill vs. without Skill"|
+| `COMET_FULL_040_BETA` |The full Comet workflow Skill package|
+|Custom|Your own Skill, to compare "with Skill" against "without Skill"|
 
 <Tip>
 The standard practice for comparative experiments is <code>CONTROL</code> (no Skill) vs. your Skill
 treatment. The difference between the two is the gain brought by your Skill.
 </Tip>
 
-## Select "Profile"
+## Select a profile
 
 Profile decides which rubric scoring system to use. If you choose the wrong profile, the dimension score will have no reference value
 
@@ -281,22 +284,22 @@ flowchart LR
 | `authoring-skill` |Products of `/comet-any`| 11     |`auto_user` (Multi-wheel)|
 
 <Note>
-Profile resolution priority: <code>-- PROFILE </code> coverage > manifest's {" "}
-<code>skill.profile</code> >  The task of <code>evaluation. Profile</code> & gt; {" "}
-<code>generic</code>. Comet-like tasks (<code>category = "comet"</code>
-It will be automatically inferred as <code>comet-workflow</code>.
+Profile resolution order: the <code>--profile</code> flag overrides the manifest's{' '}
+<code>skill.profile</code>, which overrides the task's <code>evaluation.profile</code>, which
+overrides <code>generic</code>. Tasks that look like Comet tasks (<code>category = "comet"</code>)
+are inferred as <code>comet-workflow</code>.
 </Note>
 
-The dimensions, weights and inspection logics of the three sets of rubric can be found in [Scoring Metrics and Dual-Agent Evaluation ](/en/eval/scoring)
+The dimensions, weights and inspection logics of the three sets of rubric can be found in [Scoring Metrics and Dual-Agent Evaluation](/en/eval/scoring)
 
 ## Configure LLM-as-judge
 
-LLM-as-judge is an optional quality overlay. It will not replace the regular `[RUBRIC]` score, nor will it directly change `weighted_score`. It will have an independent referee model read the product of this run, append the `[RUBRIC-JUDGE]` score, and help you determine whether the "product has substantive content" that is not covered by the rule score.
+LLM-as-judge is an optional quality overlay. It will not replace the regular `[RUBRIC]` score, nor will it directly change `weighted_score`. It will have an independent referee model read this run's artifacts, append the `[RUBRIC-JUDGE]` score, and help you determine whether the "artifact has substantive content" that is not covered by the rule score.
 
 Suitable for enabling in these scenarios:
 
-- You need to evaluate documents, plans, code explanations, design drafts and other products that are difficult to be fully judged by scripts.
-- You already have a basic verification script, but you want to know if the product is just an empty shell or template-based content.
+- You need to evaluate documents, plans, code explanations, design drafts, and other artifacts that are difficult to be fully judged by scripts.
+- You already have a basic verification script, but you want to know if the artifact is an empty shell or template-based content.
 - You need to check the difference between the rule score and the judge score in the comparison report.
 
 <Info>
@@ -348,27 +351,27 @@ BENCH_JUDGE_API_KEY=your-judge-api-key
 
 The priority is:
 
-|"Configuration"|"Behavior"|
+| Configuration | Behavior |
 | ------------------------------------------------- | ------------------------------------------------------------- |
-| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_AUTH_TOKEN` |Go to Anthropic Messages HTTP first; HTTP header uses bearer token|
-| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY`    |Go to Anthropic Messages HTTP first; HTTP headers use API keys|
-|Only set `BENCH_JUDGE_MODEL`|Roll back to the host machine `claude` CLI|
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_AUTH_TOKEN` |Calls Anthropic Messages over HTTP with a bearer token|
+| `BENCH_JUDGE_BASE_URL` + `BENCH_JUDGE_API_KEY`    |Calls Anthropic Messages over HTTP with an API key|
+|Only `BENCH_JUDGE_MODEL` is set|Falls back to the local `claude` CLI|
 
 <Note>
-If `BENCH_JUDGE_AUTH_TOKEN` and `BENCH_JUDGE_API_KEY` are set simultaneously, the auth token
-Priority. The judge child process will clear the inherited main `ANTHROPIC_*` provider variable and then map it
-So don't expect it to automatically reuse the provider configuration of the Agent under test.
+  If `BENCH_JUDGE_AUTH_TOKEN` and `BENCH_JUDGE_API_KEY` are both set, the auth token wins. The judge
+  child process clears the inherited main `ANTHROPIC_*` provider variable and remaps it, so do not
+  expect it to reuse the provider configuration of the Agent under test.
 </Note>
 
 ### 3. Add a custom judge standard to generic task
 
 The general Skill (`generic`/`authoring-skill`) will by default make judge output three dimensions:
 
-|"Dimension"|Judge what|
+| Dimension | What it judges |
 | ----------------------- | ------------------------------------------------------ |
-| `task_completion`       |Whether the task requirements are met, whether the product exists and is correct, and whether the basic verification has passed|
-| `output_quality`        |Whether the product is complete, structured and has substantive content|
-| `instruction_adherence` |Whether to comply with instructions, constraints and tool usage boundaries|
+| `task_completion`       |Whether the task requirements are met, whether the artifact exists and is correct, and whether the basic checks pass|
+| `output_quality`        |Whether the artifact is complete, well structured, and substantive|
+| `instruction_adherence` |Whether the run follows the instructions, constraints, and tool boundaries|
 
 If your task also has specific quality standards, write them into `task.toml`'s `[evaluation]`:
 
@@ -386,7 +389,7 @@ rubric_criteria = [
 
 These standards will be output as additional judge dimensions, named `custom_0` and `custom_1`. They only affect the `[RUBRIC-JUDGE]` overlay and do not replace your verification script.
 
-The `comet-workflow` profile uses another set of judge dimensions: `artifact_quality`, `spec_drift`, and `main_flow`. They are used to review the depth of workflow products, whether the spec has drifted, and whether the five-stage main process is complete.
+The `comet-workflow` profile uses another set of judge dimensions: `artifact_quality`, `spec_drift`, and `main_flow`. They are used to review the depth of workflow artifacts, whether the spec has drifted, and whether the five-stage main process is complete.
 
 ### 4. Run and confirm that judge is effective
 
@@ -412,7 +415,7 @@ Open the report pointed to by `Report path` and look for the `[RUBRIC-JUDGE]` li
 
 If you only see skipped or failed, troubleshoot as follows:
 
-|Phenomenon|Common causes|"Processing"|
+| Phenomenon | Common causes | What to do |
 | ------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
 | `BENCH_JUDGE_MODEL is required` |`BENCH_LLM_JUDGE=1` is enabled, but `BENCH_JUDGE_MODEL` is not set|Add `BENCH_JUDGE_MODEL`|
 | `(judge error: HTTP ...)`       |The judge endpoint, token or model name does not match|Check `BENCH_JUDGE_BASE_URL`, token, and model name|
@@ -422,7 +425,7 @@ If you only see skipped or failed, troubleshoot as follows:
 
 Single-round task (`mode: none`) runs only once and is suitable for simple scenarios where "a command is given and the result is seen". However, workflow-related skills need to be paused at the decision point, ask the user, and resume after receiving a response - single-round testing is not possible.
 
-The `auto_user` mode solves this problem: it uses ** two agents to interact automatically ** - one runs the Skill (subject) under test, and the other simulates the user's response at the decision point (simulator).
+The `auto_user` mode solves this problem: it uses **two agents to interact automatically** - one runs the Skill (subject) under test, and the other simulates the user's response at the decision point (simulator).
 
 ```mermaid
 sequenceDiagram
@@ -437,7 +440,7 @@ sequenceDiagram
     S->>S: Complete (or reach the max_turns outer-loop limit)
 ```
 
-The behavior of the simulator is controlled by the prompt word file. By default, it reads `eval/simulator-instruction.md`. You can use `BENCH_SIMULATOR_PROMPT_FILE` to point to your own version, simulating a "more picky user" or a "user who will ask for clarification" :
+The behavior of the simulator is controlled by the prompt word file. By default, it reads `eval/simulator-instruction.md`. You can use `BENCH_SIMULATOR_PROMPT_FILE` to point to your own version, simulating a "more picky user" or a "user who will ask for clarification":
 
 ```bash
 export BENCH_SIMULATOR_PROMPT_FILE=my-simulator-prompt.md
@@ -465,8 +468,8 @@ comet eval --task my-task --treatment MY_SKILL --html
 The report focuses on three key points:
 
 1. **`pass@1` and `pass^k`**: upper capability versus the reliability floor. See [Scoring metrics](/en/eval/scoring#scoring-metrics).
-2. **rubric Dimension Scores ** : Identify the dimension with an obvious low score.
-3. Failure attribution of ** ** (`harness`/`workflow`/`task`/`model`) : failure is the issue of Skill, or a task/environment problems?
+2. **Rubric dimension scores**: identify the dimension with an obviously low score.
+3. **Failure attribution** (`harness`/`workflow`/`task`/`model`): is the failure a Skill problem, a task problem, or an environment problem?
 
 ## Review the package generated by `/comet-any`
 
@@ -484,6 +487,6 @@ The manifest automatically selects the `authoring-skill` profile, injects recomm
 
 ## Next step
 
-- [Scoring metrics and Dual-Agent evaluation ](/en/eval/scoring) - Dimensions, weights and pass@k/pass^k of three sets of rubric
+- [Scoring metrics and Dual-Agent evaluation](/en/eval/scoring) - Dimensions, weights and pass@k/pass^k of three sets of rubric
 - [Evaluation system overview](/en/eval/overview) - manifest format, profiles, and tasks
-- [comet eval command ](/en/cli/eval) - Complete reference for command-line parameters
+- [comet eval command](/en/cli/eval) - Complete reference for command-line parameters

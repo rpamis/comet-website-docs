@@ -6,12 +6,10 @@ description: 'Understand how Classic build creates an implementation plan, selec
 The build stage first creates an implementation plan. You then select execution, TDD, and review modes. The workflow implements and checks each task, records spec updates, and captures debugging results.
 
 <Tip>
-  Under normal circumstances, you only need <code>/comet</code>. After selecting Classic for
-  configuration, the internal <code>/comet-classic</code> will read the status and automatically
-  call after the design is completed
-  <code>/ Comet-build </code>. This article describes the internal stage Skill. Only thinking
-  <strong> manually controls </strong>
-  Direct input is only required for manual control. See{' '}
+  In normal use you only need <code>/comet</code>. When the project uses Classic, Comet reads the
+  workflow state and calls <code>/comet-build</code> automatically after design finishes. This page
+  describes the internal stage Skill, which you only need to call directly when you advance the
+  stage by hand. See{' '}
   <a href="#how-this-phase-is-triggered">How this phase is triggered</a>.
 </Tip>
 
@@ -21,21 +19,21 @@ The build stage first creates an implementation plan. You then select execution,
 
 ### Default: Use /comet for automatic connection
 
-After exiting the design phase (`phase: build`), `/comet-classic` will automatically connect and call `/comet-build`. The next time `/comet-classic` is called, if `phase: build` is detected or there is a Design Doc but the execution is not completed, it will also be routed to build -- hotfix to run `/comet-hotfix`, tweak to run `/comet-tweak`, and full to run `/comet-build`. For details, please refer to [Automatic Propulsion Mechanism ](/en/concepts/auto-transition)
+After exiting the design phase (`phase: build`), `/comet-classic` calls `/comet-build` automatically. When you run `/comet` again, Comet routes by state: a change already in `phase: build`, or one that has a Design Doc but is not finished, goes back to the matching command — hotfix to `/comet-hotfix`, tweak to `/comet-tweak`, and full to `/comet-build`. See [automatic transition](/en/concepts/auto-transition).
 
-### Manual: When is direct /comet-build needed
+### Manual: when to call /comet-build directly
 
-- When the auto-connection (`auto_transition: false`) is turned off, `/comet-classic` will stop and print hints after the design is completed.
-- I just want to run build alone (restore a change of `phase: build` to continue execution).
-- After the verify failure, if you roll back through `comet-state transition verify-fail`, you need to re-enter the build to fix it.
+- Automatic transition is off (`auto_transition: false`), so `/comet-classic` stops after design and prints a hint.
+- You want to run build on its own, for example to resume an existing change in `phase: build`.
+- A failed verification was rolled back with `comet-state transition verify-fail`, and the change needs another build pass.
 
-Use the unified entry `/comet` normally; The stage command is directly invoked only during the manual control stage. \*\*
+In normal use, enter `/comet`; call the stage command directly only when you advance the stage by hand.
 
 ---
 
 ## What will you experience
 
-There are 2 pause points in the build phase (globally numbered 6-7, with a total of 10 in the entire five-stage workflow. See [Five-stage pause Points and User Selection points ](/en/concepts/decision-points)). The following is an explanation in the order of occurrence.
+The build phase has two pause points, numbered 6 and 7 across the ten pause points of the workflow. See [Five-stage pause points and decision points](/en/concepts/decision-points). They occur in this order:
 
 ```mermaid
 flowchart TD
@@ -59,7 +57,7 @@ flowchart TD
 <p align="center">
   <img
     src="/assets/build-phase-illustrations/01-build-task-cards.png"
-    alt=" Little Fish advances the plan card to task-by-task execution, debugging, and evidence submission during the build phase."
+    alt="Little Fish moves the plan card through task-by-task execution, debugging, and evidence submission during the build phase"
     width="800"
   />
 </p>
@@ -69,17 +67,17 @@ flowchart TD
   debugged, checked, and the submission evidence is left
 </p>
 
-### Step 0: Entry status verification
+### Step 0: Check entry state
 
 ```bash
 node "$COMET_STATE" check <name> build
 ```
 
-Read the `base-ref` and `grep` in the head of the plan to find the first unfinished task. Idempotence: A submitted task will not be resubmitted.
+Comet reads `base-ref` and greps the plan header to find the first unfinished task. Build is idempotent: a task that is already submitted is not submitted again.
 
-### Step 1: Create an implementation plan
+### Step 1: Draft the implementation plan
 
-Comet assigns a sub-agent to load the `writing-plans` write plan (this does not occupy the main session context), and when the sub-agent fails, it falls back to the main session for inline loading. The frontmatter plan must include:
+Comet dispatches a background sub-agent to load `writing-plans` and draft the plan, which keeps the main session context free. If the sub-agent cannot start, Comet falls back to drafting in the main session. The plan frontmatter must contain:
 
 ```yaml
 ---
@@ -91,143 +89,136 @@ base-ref: <git rev-parse HEAD> # The commit and verify before implementation are
 
 ### Pause point 6: Build joint decision (plan-ready)
 
-After the plan is written, Comet ** Pause for your choice ** :
+After the plan is written, Comet **pauses for your decision**:
 
-| Options                          | "Behavior"                                                                                                                                                                      |
+| Option | Effect |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A continues execution **       | Stay in the current model and enter Step 3 to select execution, TDD and review modes                                                                                            |
-| **B Pause the model switching ** | Record `build_pause: plan-ready`. This time, `/comet-build` stops. After changing the model, you can restore it normally with `/comet`, or you can manually call `/comet-build` |
+| **A: Continue now** | Stay in the current model and go to Step 3 to select execution, TDD, and review modes |
+| **B: Pause to switch models** | Record `build_pause: plan-ready` and stop this `/comet-build` run. After switching models, resume with `/comet`, or call `/comet-build` directly |
 
 <Tip>
-  The purpose of option B is to change the <strong> model to </strong>
-  For instance, use one model to write the plan and switch to a stronger coding model for execution.
-  When restoring, Comet will detect <code>build_pause: plan-ready</code> and the plan exists, it
-  tells you to stop plan-ready, after you confirm to continue, clear the pause flag.{' '}
-  <strong> will not regenerate plan</strong>
-  Directly enter the work mode selection.
+  Option B exists to <strong>switch models</strong>: plan with one model, for example, and implement
+  with a stronger coding model. On resume, Comet detects <code>build_pause: plan-ready</code> and the
+  existing plan, tells you the plan is ready, and clears the flag once you confirm.{' '}
+  <strong>It does not regenerate the plan</strong> and goes straight to mode selection.
 </Tip>
 
-### Pause point 7: Select three execution modes at once
+### Pause point 7: Select the three execution modes at once
 
-After confirming to continue, Comet asks you the three execution options **at once** (not in three separate questions). Workspace isolation is not among them - it was already determined in the workspace decision (pause point 3) of the open phase: the choice is written to `isolation`, the current branch of the actual execution directory is recorded as `bound_branch`, and the build phase only verifies that the current directory and branch match, without silently switching directories. When `branch` is chosen, the branch name is confirmed in the open phase as well (the hotfix/tweak presets default to `hotfix/YYYYMMDD/<name>` / `tweak/YYYYMMDD/<name>`).
+After you confirm, Comet asks for the three execution settings **in one panel**, not as three separate questions. Workspace isolation is not one of them: pause point 3 in the open stage already fixed it. That choice is stored in `isolation`, the current branch of the execution directory is stored in `bound_branch`, and the build stage only checks that the directory and branch still match. It never switches directories on its own. When `branch` was chosen, the branch name was also confirmed in the open stage (hotfix and tweak default to `hotfix/YYYYMMDD/<name>` and `tweak/YYYYMMDD/<name>`).
 
-#### 1. Execution Mode (build_mode
+#### 1. Execution mode (build_mode)
 
-| Options                             | Explanation                                                                                                                                                                    | "Recommended                                                               |
+| Option | Explanation | Recommended when |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| **A `subagent-driven-development`** | The main session is only coordinated, while the backend sub-proxy is implemented. Each task runs in an isolated implement-sub-agent, and the review is driven by `review_mode` | The number of tasks is ≥ 3, and the complexity is high                     |
-| **B `executing-plans`**             | Lightweight execution, no need for a sub-agent environment                                                                                                                     | Task ≤ 2. No cross-module dependencies; From the hotfix path               |
-| `direct`                            | Direct implementation                                                                                                                                                         | Only hotfix/tweak defaults; full requires explicit `direct_override: true` |
+| **A: `subagent-driven-development`** | The main session coordinates only; background sub-agents implement each task in isolation, and `review_mode` drives review | 3 or more tasks, or high complexity |
+| **B: `executing-plans`** | Lightweight: implement tasks in order in the main session, with no sub-agent setup | 2 or fewer tasks, no cross-module dependencies, or the hotfix path |
+| `direct` | Direct implementation | Only for hotfix and tweak by default; the full workflow requires `direct_override: true` |
 
 <Warning>
-  To select <code>subagent-driven-development</code>, the platform must have genuine backend
-  scheduling capabilities - otherwise Comet will pause to allow you to choose{' '}
-  <code>executing-plans</code>. By default, full workflow cannot use <code>direct</code>, unless you
-  explicitly set <code>direct_override: true</code>.
+  <code>subagent-driven-development</code> requires real background scheduling on the platform.
+  Without it, Comet pauses so you can choose <code>executing-plans</code>. The full workflow cannot
+  use <code>direct</code> unless you set <code>direct_override: true</code>.
 </Warning>
 
-#### 2. TDD Mode (tdd_mode
+#### 2. TDD mode (tdd_mode)
 
-| Options   | Explanation                                                                                                                 |
+| Option | Explanation |
 | --------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **`tdd`** | Write failure tests for each task first, Red-Green-Refactor (** Recommended **, involving business logic/new features /API) |
-| `direct`  | Direct implementation, no mandatory TDD (default for hotfix/tweak)                                                          |
+| **`tdd`** | Write a failing test for each task first, then red-green-refactor (**recommended** for business logic, new features, and API work) |
+| `direct`  | Direct implementation without mandatory TDD (default for hotfix and tweak) |
 
-#### 3. Review Mode (review_mode
+#### 3. Review mode (review_mode)
 
-| Options        | Explanation                                                                                                                                                       | "Recommended                                                 |
+| Option | Explanation | Recommended when |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `off`          | No automatic review                                                                                                                                               | Documents, configurations, copywriting, small-scale low-risk |
-| **`standard`** | By default, no reviewer is dispatched per task; one is only dispatched when a task hits a risk signal. The final comprehensive review happens in the verify phase | ** Default recommendation **, most common changes            |
-| `thorough`     | A reviewer (spec + quality) is dispatched for every task. The final comprehensive review happens in the verify phase                                              | High risk, multi-module, architecture/security               |
+| `off`          | No automatic review                                                                                                                                               | Documents, configuration, copywriting, small low-risk changes |
+| **`standard`** | No reviewer per task by default; one is dispatched only when a task hits a risk signal. The final comprehensive review runs in the verify phase | **Default recommendation**; most changes |
+| `thorough`     | A reviewer (spec and quality) is dispatched for every task. The final comprehensive review runs in the verify phase                                              | High risk, multi-module, architecture, or security work |
 
-For details, please refer to [Code Review Mechanism ](/en/concepts/review-mode)
+For details, see [code review mechanism](/en/concepts/review-mode).
 
 ### Step 3: Execute task by task
 
-After selection, press `build_mode` to execute. The experiences of the two execution methods are different:
+Comet then executes according to `build_mode`. The two execution modes dispatch work differently:
 
-| "Dimension"             | `executing-plans`                                                                                                                                                                | `subagent-driven-development`                                                                                                                                         |
+| Dimension | `executing-plans` | `subagent-driven-development` |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Who writes the code?    | Do it directly in the main session                                                                                                                                               | The main session ** only coordinates **, and the backend sub-agent implementation (prohibiting direct code writing in the main session)                               |
-| Task advancement | Execute tasks in sequence and check each one individually. | Assign a fresh subagent to each task. After the task passes its checks, Comet starts the next task automatically. |
-| Review                  | Intensity adjusts by `review_mode` (standard = no whole-change review inside build; thorough = segmented review every 3 tasks); the final comprehensive review happens in verify | Assign each task reviewer + repair agent according to review_mode (thorough= each task; standard= only risk tasks)                                                    |
-| Model selection         | The main session is executed directly                                                                                                                                            | Each distribution must explicitly specify the model (the implementer/fixer/reviewer scales separately)                                                                |
-| The progress is visible | It can be directly seen in the conversation                                                                                                                                      | Maintain the `.comet/subagent-progress.md` checkpoint                                                                                                                 |
+| Who writes the code | The main session writes code directly | The main session **coordinates only**; background sub-agents write the code, and the main session is not allowed to write code itself |
+| Task advancement | Tasks run in order, one check-off at a time | Each task gets a fresh sub-agent. Once a task passes its checks, Comet starts the next task automatically |
+| Review | Intensity follows `review_mode` (standard = no whole-change review inside build; thorough = a segmented review every 3 tasks). The final comprehensive review runs in verify | Task-level reviewers and repair agents are dispatched according to `review_mode` (thorough = every task; standard = risky tasks only) |
+| Model selection | The main session runs everything | Every dispatch specifies a model explicitly, so implementer, fixer, and reviewer can use different tiers |
+| Progress visibility | Visible directly in the conversation | Progress is tracked in `.comet/subagent-progress.md` |
 
 <Tip>
-  Under the <code> subagent-driven development</code>, after each task is accepted and selected, it
-  will
-  <strong> immediately dispatches the next task</strong>I won't stop to summarize or ask you. There
-  are only four situations when the review and repair rounds are exhausted (BLOCKED), when there is
-  a real ambiguity, when the platform has no background scheduling, or when you explicitly want to
-  stop. The review intensity is determined by <code>review_mode</code> Decision (thorough= review
-  for each task; standard= Review only for risk tasks).
+  With <code>subagent-driven-development</code>, Comet <strong>starts the next task
+  immediately</strong> after a task passes its checks, without stopping to summarize or ask you. It
+  pauses only in four cases: review and repair rounds are exhausted (BLOCKED), a real ambiguity
+  appears, the platform has no background scheduling, or you explicitly ask it to stop. Review
+  intensity follows <code>review_mode</code> (thorough = review every task; standard = review risky
+  tasks only).
 </Tip>
 
 <Note>
-  The sub-agent (implementer) <strong> cannot select the task </strong> by itself -- Only the main
-  session is selected after the two-phase acceptance is passed. The reviewer received the complete
-  task plus its implementation commit/diff + RED/GREEN evidence (in TDD) One cannot draw a
-  conclusion based solely on the summary of the implementer.
+  The implementer sub-agent <strong>cannot choose its own task</strong>; only the main session
+  selects a task, after two-stage acceptance. A reviewer receives the full task, the implementation
+  commit or diff, and RED/GREEN evidence (under TDD). A reviewer cannot reach a conclusion from the
+  implementer's summary alone.
 </Note>
 
-### Step 3b: Abnormal Debugging Protocol (Mandatory)
+### Step 3b: Abnormal debugging protocol (mandatory)
 
-When a crash, test failure, build failure or abnormal behavior occurs during execution, Comet forces the loading of `systematic-debugging`:
+When a crash, test failure, build failure, or unexpected behavior occurs during execution, Comet loads `systematic-debugging`:
 
-1. ** First identify the root cause ** - Read the complete error, check the recent changes, and trace the data stream. No fixes shall be proposed until the root cause investigation is completed. \*\*
-2. When the root cause is a bug in the source code, first add a minimum failure test to reproduce it, and then fix the source code.
-3. After the fix, run the failure test, related tests, and the project build. Confirm that they all pass.
-4. Failed tests, source code fixes, and the tasks.md checkmark are all kept within the current change. Do not open a new "Write Test Cases "change to replace the current verification loop.
+1. **Identify the root cause first.** Read the complete error, check recent changes, and trace the data flow. Do not propose fixes before the root cause investigation is complete.
+2. When the root cause is a bug in the source code, add a minimal failing test that reproduces it first, then fix the source code.
+3. After the fix, run the failing test, the related tests, and the project build, and confirm that all of them pass.
+4. Failed tests, source fixes, and the `tasks.md` check-off stay within the current change. Do not open a separate change to write test cases and bypass the current verification loop.
 
 #### Parallel troubleshooting of multiple failures
 
-Before entering the four-stage process, conduct a "failure independence assessment" first to determine whether it is serial or parallel:
+Before starting the debugging protocol, assess whether the failures are independent, which decides between serial and parallel troubleshooting:
 
-| "Situation                                                        | "Processing"                                                                                                                                                |
+| Situation | Handling |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ** Serial ** (following `systematic-debugging`)                   | Failure ≤ 2; Failure-related (fixing one might fix another); Shared status It will move the same batch of documents. Independence has not been established. |
-| "Parallelism" (Loading Superpowers `dispatching-parallel-agents`) | **≥ 3 failures from different problem domains ** (different test files, different root causes, independent damage of different subsystems)                  |
+| **Serial** (follow `systematic-debugging`) | 2 or fewer failures; the failures are related (fixing one may fix another), share state, or touch the same files, so independence is not established |
+| **Parallel** (load Superpowers `dispatching-parallel-agents`) | **3 or more failures from unrelated problem areas** (different test files, different root causes, independent subsystems) |
 
 When the parallel condition is met:
 
-1. Load Superpowers `dispatching-parallel-agents` using the Skill tool.
-2. For each independent failure, assign a background troubleshooting agent (grouped by problem domain and all dispatched in the same response for concurrent execution). Each prompt contains the complete context (specific failure, error message, allowed troubleshooting scope, and prohibition of touching other problem domain code).
-3. All agents are still subject to the constraint that "the source code cannot be modified before the root cause is located" - they only ** locate the root cause and return the discovery **, and do not directly submit the fix.
-4. After all the troubleshooting returns, the main session ** serially ** summarizes the discovery and fixes. The repair still follows the current verification and review cycle of `review_mode`.
+1. Load Superpowers `dispatching-parallel-agents` with the Skill tool.
+2. For each independent failure, dispatch a background troubleshooting agent, grouped by problem area and sent in the same response so they run concurrently. Each prompt contains the full context: the specific failure, the error message, the troubleshooting scope, and a prohibition on touching code outside that problem area.
+3. Agents still must not modify source code before the root cause is located. They only **locate the root cause and report it**, and do not submit fixes.
+4. After the agents report back, the main session consolidates the findings and applies fixes **serially**. Repairs follow the current verification and review cycle of `review_mode`.
 
 <Warning>
-  <strong> parallelism is only used for troubleshooting, not for repair. The </strong> fix is always
-  serial, avoiding multiple agents Simultaneously modifying the same batch of files conflicts - this
-  is related to <code>subagent-driven development</code>
-  The red line for "Do not distribute multiple implementation sub-agents in parallel" is consistent.
-  Even if <code>review_mode: off</code>
-  This is also an abnormal debugging protocol
-  <strong> does not skip </strong> -- <code>off</code> Only skip code review, not the debugging of
-  real problems.
+  <strong>Parallelism applies to troubleshooting only, never to code changes.</strong> Fixes always
+  run serially, so several agents do not modify the same files at once. This matches the rule in{' '}
+  <code>subagent-driven-development</code> against dispatching several implementation sub-agents in
+  parallel. <code>review_mode: off</code> does not skip this protocol:{' '}
+  <code>off</code> skips code review, not the debugging of real failures.
 </Warning>
 
-### Step 4: spec Incremental update
+### Step 4: Incremental Spec updates
 
-When it is found during execution that the spec needs to be modified, handle it according to the scale:
+When execution reveals that the spec needs to change, handle it according to the scale:
 
-| Scale    | Trigger condition                                                                 | "Method"                                                                                                               |
+| Scale | Trigger condition | Handling |
 | -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| small    | Omitted acceptance scenarios and boundary conditions                              | Directly edit delta spec + design.md and append tasks                                                                  |
-| In the   | Interface changes, new components added, and changes in data flow                 | ** Pause for your confirmation **, load `brainstorming` to update Design Doc + delta spec                              |
-| big      | "Brand-new capability                                                             | ** Pause for your confirmation of the split **, create a new change through `/comet-open` (`/opsx:new` cannot be used) |
-| Over 50% | The number of newly added tasks exceeds half of the total number of initial tasks | **Pause point 7**: Split into a new change/Continue to complete within the current change                              |
+| Small    | Missing acceptance scenarios or boundary conditions                              | Edit the delta spec and `design.md` directly, and append tasks |
+| Medium   | Interface changes, new components, or changes in data flow                 | **Pause for your confirmation**, then load `brainstorming` to update the Design Doc and delta spec |
+| Large    | A brand-new capability                                                             | **Pause and propose a split**; create a new change through `/comet-open` (`/opsx:new` cannot be used) |
+| Over 50% | New tasks exceed half of the initial task list | **Pause point 7**: split into a new change, or expand the scope of the current change |
 
-### Step 5: Check + Submit
+### Step 5: Verify and commit
 
-For each task: Execute by `build_mode` → Review by `review_mode` (if applicable) → ** Main session ** check tasks.md → Submit. Check "Use directional Verification"
+For each task: implement according to `build_mode` → review according to `review_mode` (if enabled) → **main session verifies and checks off** `tasks.md` → commit.
 
 ```bash
 node "$COMET_STATE" task-checkoff "$PLAN_FILE" "$PLAN_TASK_TEXT"
 ```
 
-The task text must appear uniquely and be checked. If verification fails, you cannot proceed to the next task. You can use `grep -c '\- \[ \]' tasks.md` to check the remaining unselected numbers.
+The task text must match exactly one unchecked item. If check-off fails, do not start the next task. `grep -c '\- \[ \]' tasks.md` shows how many tasks are still open.
 
 ### Exit
 
@@ -239,58 +230,58 @@ Advance to `phase: verify`, and set `verify_result: pending`.
 
 ---
 
-## The invoked skill
+## Skills used in this stage
 
-| Skill                         | Purpose                                       | When to call                                                                                                                    |
+| Skill | Purpose | When it is used |
 | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `writing-plans`               | Generate an implementation plan               | Step 1, sub-agent execution, failure and fallback to the main session                                                           |
-| `executing-plans`             | Lightweight execution plan                    | Step 3，`build_mode: executing-plans`                                                                                           |
-| `subagent-driven-development` | Sub-agent-driven execution                    | Step 3，`build_mode: subagent-driven-development`                                                                               |
-| `test-driven-development`     | Forced TDD                                    | Step 3, `tdd_mode: tdd`                                                                                                         |
-| `requesting-code-review`      | Code review access control                    | Step 3, `review_mode: standard`/`thorough` (executing-plans zoom in review_mode; subagent mode zoom in reviewers per task/risk) |
-| `systematic-debugging`        | Abnormal debugging                            | Step 3b: Forced loading when crash/test fails/build fails                                                                       |
-| `dispatching-parallel-agents` | Parallel troubleshooting of multiple failures | Step 3b: Load when ≥ 3 independent failures (Troubleshoot only, fix serial)                                                     |
-| `brainstorming`               | Medium-scale spec update                      | Step 4, when discovering changes in interfaces/components/data flows                                                            |
+| `writing-plans`               | Draft the implementation plan               | Step 1, run by a sub-agent first, with fallback to the main session |
+| `executing-plans`             | Lightweight sequential execution                    | Step 3, when `build_mode: executing-plans` |
+| `subagent-driven-development` | Sub-agent-driven execution                    | Step 3, when `build_mode: subagent-driven-development` |
+| `test-driven-development`     | Enforced TDD                                    | Step 3, when `tdd_mode: tdd` |
+| `requesting-code-review`      | Code review entry point                    | Step 3, when `review_mode` is `standard` or `thorough` (in executing-plans mode it follows `review_mode`; in subagent mode it follows the per-task reviewers) |
+| `systematic-debugging`        | Root-cause debugging                            | Step 3b, loaded when a crash, test failure, or build failure occurs |
+| `dispatching-parallel-agents` | Parallel troubleshooting | Step 3b, loaded for 3 or more independent failures (troubleshooting only; fixes stay serial) |
+| `brainstorming`               | Medium-scale spec updates                      | Step 4, when interfaces, components, or data flows change |
 
-## Product
+## Artifacts
 
-| Product                | Location                                         | Explanation                                             |
+| Artifact | Location | Description |
 | ---------------------- | ------------------------------------------------ | ------------------------------------------------------- |
-| Implementation plan    | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` | Containing `change`/`design-doc`/`base-ref` frontmatter |
-| subagent-progress.md   | `.comet/subagent-progress.md`                    | Sub-agent scheduling checkpoint (subagent mode only)    |
-| Check the tasks.md box | `tasks.md`                                       | `- [ ]` → `- [x]`                                       |
-| Code modification      | Repository code                                  | Submit to the isolated branch /worktree                 |
+| Implementation plan    | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` | Contains `change`/`design-doc`/`base-ref` frontmatter |
+| Sub-agent progress   | `.comet/subagent-progress.md`                    | Sub-agent checkpoint (subagent mode only)    |
+| Checked `tasks.md` items | `tasks.md`                                       | `- [ ]` → `- [x]`                                       |
+| Code changes      | Repository code                                  | Committed to the isolated branch or worktree |
 
-## Exit condition (phase guard check)
+## Exit conditions (phase guard)
 
-- Check all of tasks.md
-- The code has been submitted.
-- Explicitly run the project build/test command and pass (do not rely solely on guard's automatic guessing)
-- `isolation` is `current`, `branch` or `worktree`, and the current Git branch is consistent with `bound_branch`
-- `build_mode` selected (for subagent mode, `subagent_dispatch: confirmed` is required)
-- `tdd_mode` has been selected
-- `review_mode` selected (for `thorough`, segmented reviews have been completed every 3 tasks and CRITICAL/IMPORTANT issues fixed, or non-CRITICAL acceptance reasons recorded; for `standard`/`off`, the corresponding reasons have been recorded)
+- Every task in `tasks.md` is checked off.
+- The code is committed.
+- The project build and test commands have been run explicitly and pass; do not rely on the guard's guess.
+- `isolation` is `current`, `branch`, or `worktree`, and the current Git branch matches `bound_branch`.
+- `build_mode` is selected (subagent mode also requires `subagent_dispatch: confirmed`).
+- `tdd_mode` is selected.
+- `review_mode` is selected (for `thorough`, segmented reviews have run every 3 tasks and CRITICAL/IMPORTANT findings are fixed, or acceptance reasons are recorded for anything below CRITICAL; for `standard` and `off`, the corresponding reasons are recorded).
 
-guard will automatically detect the project build entry (such as `npm run build`, Maven or Cargo) and take the failed output as evidence. `.comet.yaml` and the repository root configuration no longer support `build_command` / `verify_command`; when you need a fixed team-level verification process, put it in the project's own build script.
+The guard detects the project build entry automatically (`npm run build`, Maven, Cargo, and so on) and treats failed output as evidence. `.comet.yaml` and the repository root configuration no longer accept `build_command` or `verify_command`. When a team needs a fixed verification process, put it in the project's own build script.
 
-## "Restore
+## Resuming
 
-Build is idempotent. When resuming, `grep -n '\- \[ \]' tasks.md | head -1` finds the first unfinished task. For `build_pause: plan-ready`, see [Pause point 6](#pause-point-6-build-joint-decision-plan-ready). After context compression, run `comet-state check <name> build --recover` to restore context. In subagent mode, reread `.comet/subagent-progress.md` to recover the current task and review round; **do not execute tasks directly in the main session**. If a `full` workflow stops at plan-ready, first confirm the existing workspace binding, then complete or confirm `build_mode`, `tdd_mode`, and `review_mode`.
+Build is idempotent. On resume, `grep -n '\- \[ \]' tasks.md | head -1` finds the first unfinished task. For `build_pause: plan-ready`, see [pause point 6](#pause-point-6-build-joint-decision-plan-ready). After context compression, run `comet-state check <name> build --recover` to restore context. In subagent mode, reread `.comet/subagent-progress.md` to recover the current task and review round; **do not implement tasks directly in the main session**. If a `full` workflow stopped at plan-ready, confirm the existing workspace binding first, then complete or confirm `build_mode`, `tdd_mode`, and `review_mode`.
 
 ## Recommended path
 
 <Tip>
   For multi-person collaboration or high-risk changes, worktree + <code>review_mode: thorough</code>{' '}
-  is preferred . For minor explicit changes, use branch + <code>standard</code>.
+  is preferred. For small, well-scoped changes, use branch + <code>standard</code>.
 </Tip>
 
-## Read the change walkthrough
+## Change walkthrough
 
-At Build completion, Comet provides a `walkthrough.html` link by default, explaining before/after behavior, reasons, and key code by feature. Verify updates actual results on the same page. The page helps you read the change and does not replace acceptance. See [walkthrough configuration](/en/native/configuration#change-walkthroughs) to disable it.
+When build completes, Comet generates a `walkthrough.html` page by default. It explains before and after behavior, the reasons for each change, and the key code, organized by feature. Verify updates the page with real results. The page helps you read the change; it does not replace acceptance. See [walkthrough configuration](/en/native/configuration#change-walkthroughs) to turn it off.
 
 ## Next step
 
-- [Verify Phase](/en/phases/verify) — Enter verification after build completes
-- [Code Review Mechanism](/en/concepts/review-mode) — Detailed review_mode explanation
-- [State Management](/en/concepts/state-management) — build_mode/isolation/tdd_mode fields
-- [Five-Phase Pause Points and Decision Points](/en/concepts/decision-points) — Detailed build pause points
+- [verify stage](/en/phases/verify) — Quality acceptance after build
+- [Code review mechanism](/en/concepts/review-mode) — How the review modes work
+- [State management](/en/concepts/state-management) — The `build_mode`, `isolation`, and `tdd_mode` fields
+- [Five-stage pause points](/en/concepts/decision-points) — The decisions the build stage asks for

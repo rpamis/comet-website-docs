@@ -55,9 +55,9 @@ All subcommands support `--json`.
 | `--project <dir>`                      | Project root directory (default: `.`)                                                                                                                            | All                        |
 | `--json`                               | Output structured JSON                                                                                                                                           | All                        |
 | `--overwrite`                          | Overwrite the existing project Skill                                                                                                                             | `add`                      |
-| `--change <dir>`                       | Bind the OpenSpec change directory (mutually exclusive with `--run-id`)                                                                                          | `run`、`continue`、`check` |
-| `--run-id <id>`                        | Store Run state with `.comet/runs/<run-id>` (mutually exclusive with `--change`)                                                                                 | `run`、`continue`、`check` |
-| `--confirm <ref>`                      | Confirm a guardrail-protected action; can be passed multiple times. When `run` prints `User confirmation required for: <ref>`, re-run with the corresponding ref | `run`、`continue`          |
+| `--change <dir>`                       | Bind the OpenSpec change directory (mutually exclusive with `--run-id`)                                                                                          | `run`, `continue`, `check` |
+| `--run-id <id>`                        | Store Run state with `.comet/runs/<run-id>` (mutually exclusive with `--change`)                                                                                 | `run`, `continue`, `check` |
+| `--confirm <ref>`                      | Confirm a guardrail-protected action; can be passed multiple times. When `run` prints `User confirmation required for: <ref>`, re-run with the corresponding ref | `run`, `continue`          |
 | `--status <succeeded\|failed>`         | Submit the result status of the action                                                                                                                           | `continue`                 |
 | `--summary <text>`                     | Result summary (Required when `--status`)                                                                                                                        | `continue`                 |
 | `--artifact <key=value>`               | Submit artifact (used when `--status`)                                                                                                                           | `continue`                 |
@@ -66,7 +66,7 @@ All subcommands support `--json`.
 | `--scope <progress\|step\|completion>` | runtime check range (default: `progress`)                                                                                                                        | `check`                    |
 
 <Info>
-<code>--change</code> and <code>--run-id </code> are mutually exclusive: only one of them can be bound at a Run. <code>--change</code> bind to the OpenSpec change directory, <code>--run-id </code> use <code>.comet/runs/< run-id> </code> stores an independent Run state.
+<code>--change</code> and <code>--run-id</code> are mutually exclusive: a Run binds only one of them. <code>--change</code> binds an OpenSpec change directory; <code>--run-id</code> stores state under <code>.comet/runs/&lt;run-id&gt;</code> for an independent Run.
 </Info>
 
 ## Package management
@@ -93,8 +93,8 @@ Parse the Skill and return the name, version, source, root directory, content ha
 Skill resolution searches in the following order. Stop once found:
 
 1. **explicit** -Selector points to an existing directory and loads directly. If the path does not exist, an error will be reported and the search will not continue.
-2. **project** - `<projectRoot>/.comet/skills/<selector>`, ** takes precedence over built-in **, so the project can override the built-in Skill by name.
-3. **builtin** — `assets/skills/<selector>`。
+2. **project** - `<projectRoot>/.comet/skills/<selector>`, **takes precedence over built-in**, so the project can override the built-in Skill by name.
+3. **builtin** — `assets/skills/<selector>`.
 4. None of them were found → **fail closed**, no silent rollback.
 
 <Warning>
@@ -103,7 +103,7 @@ Skill resolution searches in the following order. Stop once found:
   falling back. This can prevent silent downgrading when the custom version is invalid.
 </Warning>
 
-## "Run Lifecycle"
+## Run lifecycle
 
 ### run: Start
 
@@ -119,14 +119,14 @@ Do these things when starting up
 
 1. Reject the adaptive package (currently).
 2. Reject existing runs (in change mode, there can only be one Run per directory).
-3. ** Create an immutable snapshot ** - Freeze the entire Skill package to `.comet/skill-snapshots/<hash>/` and hash lock it to Run's `skillHash`.
+3. **Create an immutable snapshot** - Freeze the entire Skill package to `.comet/skill-snapshots/<hash>/` and hash lock it to Run's `skillHash`.
 4. Initialize the Run state: `currentStep = entry`, `status = running`.
 5. Record the `run_started` trajectory event.
 6. The engine parses entry step, constructs the first action, passes guardrails, writes pending action, `status = waiting`.
 
 ### continue: Submit the result or restore
 
-With outcome (actual progress) :
+With outcome (actual progress):
 
 ```bash
 comet skill continue --change ./changes/demo --status succeeded --summary "Done" --artifact report=report.md
@@ -170,24 +170,24 @@ comet skill check --run-id demo-run --project . --scope completion
 `--scope` can be selected as `progress`, `step` or `completion` (default is `progress`). Read the runtime checks of `comet/checks.yaml`.
 
 <Warning>
-  <code>comet skill check</code> only checks the completion degree of a certain Skill run and is not
-  a general Skill assessment. To evaluate the capability of a Skill product, please use{' '}
-  <a href="/en/cli/eval">comet eval</a>. For details, please refer to{' '}
-  <a href="/en/eval/runtime">Runtime check</a>.
+  <code>comet skill check</code> only checks how complete one run of a Skill is; it is not a
+  general Skill assessment. To assess a Skill's capability, use{' '}
+  <a href="/en/cli/eval">comet eval</a>. See <a href="/en/eval/runtime">Runtime check</a> for
+  details.
 </Warning>
 
 ## Run state store
 
-Run state is machine-owned. ** Do not edit manually **. Only `run_id` will be mirrored to `.comet.yaml`.
+Run state is machine-owned. **Do not edit manually**. Only `run_id` will be mirrored to `.comet.yaml`.
 
 | runnerMode   | Storage location                     | Features                                                            |
 | ------------ | ------------------------------------ | ------------------------------------------------------------------- |
 | `change`     | `<changeDir>/.comet/`                | Bind the OpenSpec change directory, with one Run for each directory |
 | `standalone` | `<projectRoot>/.comet/runs/<runId>/` | Independent Run, addressed by runId, multiple runs coexist          |
 
-Attached files (all in the change/run directory) :
+Attached files (all in the change/run directory):
 
-| "File                        | "Content                                       |
+| File | Content |
 | ---------------------------- | ---------------------------------------------- |
 | `.comet/run-state.json`      | Run state (currentStep, pending, status, etc.) |
 | `.comet/pending-action.json` | The pending action currently waiting           |
@@ -220,6 +220,6 @@ Next: record the missing artifact/state and rerun comet skill check
 
 ## Next step
 
-- [Skill and Engine (Advanced) ](/en/skill-creator/engine) - Understand the semantics of Skill packages and Skill Run (Engine Run), pending action, immutable snapshots
+- [Skill and Engine (Advanced)](/en/skill-creator/engine) - Understand the semantics of Skill packages and Skill Run (Engine Run), pending action, immutable snapshots
 - [Runtime check](/en/eval/runtime) - Distinguish between `comet skill check` and `comet eval`
-- [Overview of Skill Creator ](/en/skill-creator/overview) - The main entry point for Creating Reusable Skills
+- [Overview of Skill Creator](/en/skill-creator/overview) - The main entry point for Creating Reusable Skills

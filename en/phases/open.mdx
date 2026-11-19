@@ -3,182 +3,181 @@ title: "open Stage"
 description: "Understand how Classic open clarifies requirements, selects a workspace, and creates an OpenSpec change."
 ---
 
-The open phase will turn your ideas into an executable change: explore requirements, clarify scope, create proposals/designs /tasks, and initialize the Comet state. From your perspective, this is a "guided conversation" - Comet will repeatedly ask you questions to make sure you understand correctly before starting to write the document.
+The open stage turns your idea into a change you can implement: it explores the requirement, clarifies scope, produces the proposal / design / tasks documents, and initializes the Comet state. From your side it is a guided conversation: Comet asks focused questions and starts writing documents only after both sides agree on the goal.
 
 <Tip>
-  Normally, you only need <code>/comet</code>. When the project configuration selects Classic,
-  <code>/comet</code> forwards to <code>/comet-classic</code>. It recognizes intent, reads file state,
-  determines that the workflow is in the open phase, and invokes{" "}
-  <code>/comet-open</code>. This page documents the internal phase Skill; enter it directly only when you want to{' '}
+  In normal use you only need <code>/comet</code>. When the project uses Classic, <code>/comet</code>{' '}
+  forwards to <code>/comet-classic</code>, which reads file state, detects the open phase, and calls{' '}
+  <code>/comet-open</code>. This page describes the internal stage Skill, which you only need to call
+  directly when you want to{' '}
   <strong>control the phase manually</strong>. See{' '}
   <a href="#how-this-phase-is-triggered">How this phase is triggered</a>.
 </Tip>
 
-## How is this stage triggered
+## How this phase is triggered
 
-`/comet-open` is commonly routed automatically after `/comet` enters Classic. The internal `/comet-classic` reads the active change list and file state, builds routing context, and then runtime scoring decides which phase to enter.
+`/comet-open` is normally routed automatically after `/comet` enters Classic. `/comet-classic` reads the active change list and the files on disk, builds routing context, and then decides which phase to enter.
 
-### Default: Use /comet for automatic recognition
+### Default: let /comet route
 
-Each time `/comet-classic` is called, the file state is re-read (not dependent on the dialogue history), and it is routed to the open phase under the following conditions:
+Every call re-reads the files on disk instead of relying on conversation history. Comet routes to the open phase under these conditions:
 
-|Trigger condition|"Behavior"|
+| Condition | What Comet does |
 | ------------------------------------------------------------ | ------------------------------------------- |
-|The route is `full` and there is no active change in the project|Automatically invoke `/comet-open`|
-|The route is `full`, but there is an active change and the user has not specified it|Pause inquiry: Continue with an existing change or create a new one|
-|The `.comet.yaml` of active change is missing|Automatically invoke `/comet-open` to complete the status|
-|Insufficient confidence level, multiple active changes or hotfix/tweak/full signal conflicts|Pause the inquiry. It will not be created automatically|
+|The route is `full` and the project has no active change|Calls `/comet-open` to start a new change|
+|The route is `full`, an active change exists, and your request does not name one|Pauses and asks whether to continue the existing change or create a new one|
+|The active change has no `.comet.yaml`|Calls `/comet-open` to complete the state file|
+|Confidence is low, several changes need recovery, or the hotfix/tweak/full signals conflict|Pauses and asks you to decide|
 
-You just need to enter `/comet` and describe what you want to do. After the configuration is selected as Classic, the internal `/comet-classic` will determine whether a new change needs to be created and automatically connect to design after the open is completed. For details, please refer to [Automatic Propulsion Mechanism ](/en/concepts/auto-transition)
+In daily use, enter `/comet` with a description of what you want. Once the project is configured for Classic, `/comet-classic` decides whether a new change is needed and moves to design when open finishes. See [automatic transition](/en/concepts/auto-transition).
 
-### Manual: When is direct /comet-open needed
+### Manual: when to call /comet-open directly
 
-- The auto-transition (`auto_transition: false`) is turned off - at this point, `/comet-classic` will stop after advancing through one stage, and you need to manually call the Skill of the next stage.
-- I just want to run the open phase alone (debugging or inserting manual reviews between phases).
+- Automatic transition is off (`auto_transition: false`), so the workflow stops when a stage finishes and waits for you to call the next stage.
+- You want to run the open phase by itself, for example for debugging or to insert a manual review between stages.
 
-Use the unified entry `/comet` normally; The stage command is directly invoked only during the manual control stage. **
+In normal use, enter `/comet`; call the stage command directly only when you advance the stage by hand.
 
-### Select the workspace when creating a Change
+### Workspace isolation when creating a change
 
-When creating a Classic change, Comet confirms the workspace before generating the OpenSpec product and state file:
+Before generating the spec documents and the state file, Comet asks you to choose a workspace:
 
-- `current`: Work serially in the current branch;
-- `branch`: Create an independent branch, but still use the current directory;
-- `worktree`: Create or reuse an independent worktree, suitable for parallel work or when the current directory has been modified.
+- `current`: work serially on the current branch.
+- `branch`: create a dedicated branch and keep working in the current directory.
+- `worktree`: create or reuse a separate worktree, which suits parallel work or a current directory that already has uncommitted changes.
 
-If there is already a registered worktree with matching branches, Comet will directly reuse it. When the branch still exists but the worktree is missing, it will be rebuilt during the recovery process. You just need to select as prompted by `/comet`. Do not manually copy the change directory.
+If a worktree already matches the branch, Comet reuses it. If the branch exists but the worktree is missing, Comet recreates it during recovery. Follow the prompt from `/comet` and do not move the change directory by hand.
 
 ---
 
-## What will you experience
+## What you go through
 
-The open phase gradually generates the document through multiple rounds of dialogue and multiple pause points. Ask questions and produce documents in the language you used when triggering the workflow throughout the process.
+The open stage produces documents over several rounds of dialogue and several pause points. Comet asks questions and writes documents in the language you used to start the workflow.
 
 ```mermaid
 flowchart TD
-    Start["Express your thoughts."] --> S1["Load openspec-explore<br/> and repeatedly ask questions for clarification"]
-    S1 --> S1a{"Large PRD /<br/>multiple independent capabilities?"}
+    Start["Describe the idea."] --> S1["Load openspec-explore<br/> and ask focused questions"]
+    S1 --> S1a{"Large PRD or<br/>several independent capabilities?"}
     S1a -->|yes| Stop1["Pause point 2: PRD split pre-check<br/>choose one of three"]
-    S1a -->|no| S1sum["Generate the five essential parts of the clarification summary"]
+    S1a -->|no| S1sum["Produce the five-part clarification summary"]
     Stop1 --> S1sum
-    S1sum --> S2["Load openspec-new-change<br/> to derive the unique change name and tell you"]
-    S2 --> S2b{"Pause point 3: Workspace decision<br/>current / branch / worktree"}
-    S2b --> S3["Entry status verification + content integrity check"]
-    S2 --> S3["Entry status verification + content integrity check"]
-    S3 --> Stop4["Pause point 4: Review the three documents and confirm"]
+    S1sum --> S2["Load openspec-new-change<br/> and derive the change name"]
+    S2 --> S2b{"Pause point 3: workspace isolation<br/>current / branch / worktree"}
+    S2b --> S3["Check entry state and document completeness"]
+    S3 --> Stop4["Pause point 4: review the three documents"]
     Stop4 --> Exit["comet-guard open --apply<br/> advances to the next stage"]
 ```
 
 <p align="center">
   <img
     src="/assets/open-phase-illustrations/01-idea-to-artifacts-funnel.png"
-alt=" Little Fish clarifies and confirms vague ideas and organizes them into three documents: proposal, design, and tasks."
+    alt="Little Fish clarifies a vague idea and turns it into the proposal, design, and tasks documents"
     width="800"
   />
 </p>
 
-<p align="center">The open stage turns vague ideas into three executable OpenSpec products.</p>
+<p align="center">The open stage turns a vague idea into three OpenSpec documents you can execute</p>
 
-### The first step: Explore ideas and clarify requirements
+### Step 1: Explore the requirement and clarify scope
 
-Comet loads `openspec-explore`, and continuously asks questions around your ideas until a complete clarification summary can be compiled. It won't take a single question-and-answer session as "enough" - it will keep asking until all five parts are clear:
+Comet loads `openspec-explore` and asks questions about your goal until it can assemble a complete clarification summary. A single question-and-answer round is not enough; all five parts must be clear:
 
-|Clarify the five essential parts of the abstract|The things you need to think clearly about|
+| Part of the clarification summary | What must be settled |
 | ---------------------- | ----------------------------------- |
-|** Objective **|The real problems to be solved and the expected results|
-|"Non-target.|Clearly what not to do|
-|** Range boundary **|Involved/not involved modules, users, platforms, and data|
-|** Key Unknown items **|Assumption, risk, dependence|
-|"Draft Acceptance Scenario"|Core success scenarios + key boundary scenarios|
+|**Objective**|The real problem to solve and the result you expect|
+|**Non-goals**|What this change explicitly does not do|
+|**Scope boundary**|The modules, user roles, platforms, and data involved or excluded|
+|**Key unknowns**|Assumptions, technical risks, and external dependencies|
+|**Draft acceptance scenarios**|The main success path plus the key boundary cases|
 
-### Pause point 2: PRD split pre-check (conditional trigger)
+### Pause point 2: PRD split pre-check (conditional)
 
-If your input is a ** large PRD, roadmap or complete product plan **, or if ** multiple independent capabilities ** appear in the clarification summary, Comet will pause here and provide you with a ** candidate split list ** (each split item includes a suggested name, target scope, non-target, dependency order, core acceptance scenario) Then let you choose one of the three:
+When your input is a **large PRD, roadmap, or complete product plan**, or the clarification summary contains **several independent capabilities**, Comet pauses and presents a **candidate split list**. Each item includes a suggested name, target scope, non-goals, dependency order, and core acceptance scenario. You then choose one of three options:
 
-|Options|Meaning|
+| Option | Effect |
 | ----------------------------- | --------------------------------------------------------------- |
-|Create multiple OpenSpec changes|Create multiple independent changes based on the split list (each using its own `/comet-open`)|
-|Keep it as a change|Do not disassemble. Continue with the single change process and record the reasons for not disassembling in the document|
-|Continue after adjusting the split plan|If you describe the adjustment, Comet will re-issue the list and ask again|
+|Create multiple OpenSpec changes|Create independent changes from the split list, each through `/comet-open`|
+|Keep it as one change|Do not split; continue with a single change and record in the document why you kept it together|
+|Adjust the split plan, then confirm|Comet revises the split from your feedback and presents the updated list|
 
 <Tip>
-After the split is confirmed, Comet <strong> will not advance all subtasks into implementation at
-the same time </strong>. It pauses to ask which one you want to advance first, moves forward only
-the one you chose, and keeps the rest ready so you can resume them at any time.
+  After you confirm a split, Comet <strong>does not start all sub-changes at once</strong>. It pauses
+  to ask which one to start, advances only that one, and leaves the rest ready to resume later.
 </Tip>
 
-### Pause point 3: Workspace decision
+### Pause point 3: Workspace isolation
 
-Before creating the artifacts and `.comet.yaml`, Comet asks you to settle the workspace isolation method (this step cannot be postponed to build):
+Before generating the spec documents and `.comet.yaml`, Comet asks you to settle the isolation mode. This decision cannot be postponed to build:
 
-| Option     | Meaning                                                                          |
+| Option | Mechanism |
 | ---------- | -------------------------------------------------------------------------------- |
-| `current`  | Work directly on the current branch and bind the current Git branch as-is        |
-| `branch`   | Create a new branch in the current repository and confirm the branch name        |
-| `worktree` | A separate worktree for parallel development (use it directly when you explicitly want to work in parallel) |
+| `current`  | Work on the current branch and bind the current Git branch as it is |
+| `branch`   | Create a new branch in the current repository and confirm the branch name |
+| `worktree` | Create a separate worktree for parallel work (use it directly when you explicitly want to work in parallel) |
 
-The choice is written to `isolation`; the current branch of the actual working directory is recorded as `bound_branch`, and later entry checks block accidental branch switches. The hotfix/tweak presets default to `current`.
+The choice is stored in `isolation`, and the current branch of the working directory is stored in `bound_branch`. Later phase guards block an unexpected branch switch. The hotfix and tweak presets default to `current`.
 
-Requirement clarification and naming are **non-blocking**: when the scope and the name are clear, Comet derives the **single kebab-case English name** from the requirements (for example `refine-requirements-doc`) and shows it directly. It only asks separately when a mutually exclusive choice would change the scope or the identity of the change, or when the name conflicts with an existing change. It will not create proposal/design/tasks before confirmation, nor will it generate them all at once using `openspec-propose`.
+Requirement clarification and naming are **non-blocking**: when scope and name are clear, Comet derives the **single kebab-case English name** from the requirement (for example `refine-requirements-doc`) and shows it directly. It asks separately only when a mutually exclusive choice would change the scope or the identity of the change, or when the name conflicts with an existing change. Comet does not create proposal / design / tasks before you confirm, and it does not generate all of them at once with `openspec-propose`.
 
 ### Step 2: Create the change structure
 
-Load `openspec-new-change`. The complete workflow ** does not load by default ** `openspec-propose` (generate all at once), and is only allowed when you explicitly request it. Comet uses the ** standard product loop ** to generate Proposals → designs → tasks one by one:
+Comet loads `openspec-new-change`. The full workflow **does not load `openspec-propose`** (one-shot generation) by default, and allows it only when you explicitly ask. Comet uses the standard loop to generate proposal → design → tasks in order:
 
-1. Refresh status: `openspec status --change "<name>" --json`
-2. Obtain the instruction: `openspec instructions proposal|design|tasks --change "<name>" --json`
-3. Read `dependencies`, follow `template` and `instruction`, apply `context`/`rules` constraints (** Do not copy to the document content **), write to `resolvedOutputPath`
-4. Refresh the status for confirmation after each artifact
+1. Refresh state: `openspec status --change "<name>" --json`
+2. Fetch the instruction: `openspec instructions proposal|design|tasks --change "<name>" --json`
+3. Read `dependencies`, follow the `template` and `instruction`, apply the `context` and `rules` constraints (do not copy them into the document), and write to `resolvedOutputPath`
+4. Verify the status after each document
 
 <Warning>
-  If <code>openspec instructions</code> fails, returns invalid JSON, or does not provide a usable{" "}
-  <code>resolvedOutputPath</code>, Comet will <strong>stop immediately</strong> and report the
-  OpenSpec error. It <strong>will not</strong> fall back to a hard-coded document structure, because that would bypass project rules. The Change
-  name must be the kebab-case name you confirmed. Comet will not expand or narrow the scope on its own.
+  If <code>openspec instructions</code> fails, returns invalid JSON, or does not provide a usable{' '}
+  <code>resolvedOutputPath</code>, Comet <strong>stops immediately</strong> and reports the OpenSpec
+  error. It <strong>does not</strong> fall back to a hard-coded document structure, because that would
+  bypass project rules. The change name must be the kebab-case name you confirmed, and Comet does not
+  widen or narrow the scope on its own.
 </Warning>
 
-### Step 3: Entry status verification + content integrity check
+### Step 3: Check entry state and document completeness
 
 ```bash
 node "$COMET_STATE" check <name> open
 ```
 
-Then, confirm one by one that the three files exist and are not empty: proposal (background/objective/scope), design (architecture decision/selection/data flow), and tasks (task description). If any one is missing or empty, Comet will not continue but return to the creation step.
+Comet then confirms that the three files exist and are not empty: proposal (background and scope), design (architecture decisions and choices), and tasks (the task list). If any of them is missing or empty, Comet does not continue and returns to the creation step.
 
-### Pause point 4: Review the three documents and confirm
+### Pause point 4: Review the three documents
 
-Comet presents the summaries of three documents to you (the background and target scope of the proposal, the architecture decision selection of the design, the number of tasks and key tasks of the Tasks), and then asks you to ** choose one ** :
+Comet summarizes the three documents — the background and target scope from proposal, the architecture decisions from design, and the number and key items from tasks — and asks you to **choose one option**:
 
-|Options|Meaning|
+| Option | Effect |
 | ---------------------- | ------------------------------------------ |
-|"Confirmed. Proceed to the next stage.|The document meets expectations, and guard is advancing during the operation phase|
-|"Needs to be adjusted.|Please provide your revision suggestions. Comet will request confirmation after the relevant files have been revised|
+|Confirm and continue|The documents meet expectations, and the phase guard lets the workflow proceed|
+|Needs adjustment|Tell Comet what to change; it revises the files and presents them again|
 
-### Exit: Advance to the next stage
+### Exit: advance to the next stage
 
 ```bash
 node "$COMET_GUARD" <change-name> open --apply
 ```
 
-`--apply` is essential - without it, `.comet.yaml` will stop at `phase: open`, and the next stage of the entrance check will fail. full workflow advances to `phase: design`; hotfix/tweak directly jumps to `phase: build` (skips design).
+`--apply` is required. Without it, `.comet.yaml` stays at `phase: open` and the next stage's entry check fails. The full workflow advances to `phase: design`; hotfix and tweak go directly to `phase: build` and skip design.
 
 ---
 
-## The invoked skill
+## Skills used in this stage
 
-| Skill                 |Purpose|When to call|
+| Skill | Purpose | When it is used |
 | --------------------- | ---------------------- | -------------------------- |
-| `openspec-explore`    |Explore the problem space and clarify the requirements|Step 1, execute immediately, do not skip|
-| `openspec-new-change` |Create the "change" skeleton|Step 2: Execute immediately. Do not skip|
+| `openspec-explore`    |Explore the problem and clarify the requirement|Step 1, starts immediately and cannot be skipped|
+| `openspec-new-change` |Create the change skeleton|Step 2, runs immediately and cannot be skipped|
 
 <Warning>
-The complete workflow defaults <strong> and does not load </strong>, <code>, openspec-propose</code>
-(Generate all artifacts at once). It is only allowed when explicitly requested by the user.
+The full workflow <strong>does not load</strong> <code>openspec-propose</code> by default, because it
+generates every document at once. It is allowed only when you explicitly ask for it.
 </Warning>
 
-## Product
+## Artifacts
 
-The following figure uses `<classic-root>` to represent the current Classic OpenSpec root directory: The default for new projects is `docs/openspec/`, and for projects that retain the old layout, it is `openspec/`. The actual position is determined by `classic.artifact_layout` in `.comet/config.yaml`.
+The tree below uses `<classic-root>` for the Classic OpenSpec root. New projects default to `docs/openspec/`; projects that keep the old layout use `openspec/`. The actual location is set by `classic.artifact_layout` in `.comet/config.yaml`.
 
 <Tree>
   <Tree.Folder name="<classic-root>/changes/<name>/" defaultOpen>
@@ -193,56 +192,53 @@ The following figure uses `<classic-root>` to represent the current Classic Open
   </Tree.Folder>
 </Tree>
 
-Initialize the Comet state
+Comet initializes the state with:
 
 ```bash
 node "$COMET_STATE" init <name> full
 ```
 
-## Idempotence: It can be safely repeated
+## Idempotence
 
-You can rerun Open after an interruption by entering `/comet`. Comet skips completed steps and continues from the first incomplete step.
+The open stage is safe to repeat. After an interruption, enter `/comet` again; Comet skips completed steps and continues from the first incomplete one.
 
 ## Pause points at a glance
 
-There are 3 pause points in the open phase (globally numbered 2-4, with a total of 10 in the entire five-stage workflow. See [Five-stage Pause Points and User Selection points ](/en/concepts/decision-points)) :
+The open stage has three pause points, numbered 2 to 4 across the ten pause points of the workflow. See [five-stage pause points and decision points](/en/concepts/decision-points).
 
-|Pause point|When will it appear?|What are you going to do|
+| Pause point | When it appears | What you decide |
 | -------------- | --------------------------- | ---------------------- |
-|2 PRD split|The input is a large PRD or multiple independent capabilities|Split/keep as one/Adjust the plan|
-|3 Workspace decision|Before creating the artifacts and `.comet.yaml`|current / branch / worktree|
-|4 Document review|After the proposal/design/tasks are generated|Confirm the name, scope, and the three documents / adjust|
+|2 PRD split|The input is a large PRD or contains several independent capabilities|Split, keep as one change, or adjust the plan|
+|3 Workspace isolation|Before the documents and `.comet.yaml` are created|`current`, `branch`, or `worktree`|
+|4 Document review|After proposal / design / tasks are generated|Confirm the name, scope, and three documents, or ask for changes|
 
-Requirement clarification and naming are **non-blocking** by default: when the scope and the name are clear, Comet derives the single kebab-case English name from the requirements and shows it directly; it only asks separately when a mutually exclusive choice would change the scope or the identity of the change.
+Requirement clarification and naming are **non-blocking** by default. When scope and name are clear, Comet derives a single kebab-case English name and shows it; it asks separately only when a mutually exclusive choice would change the scope or the identity of the change.
 
-All pause points follow the [Decision Point Protocol ](/en/concepts/decision-points) - Comet cannot replace your explicit choice with recommendation rules, default values, or "users should agree"
+All pause points follow the [decision point protocol](/en/concepts/decision-points): a recommendation, a default value, or an assumed agreement never replaces your explicit choice.
 
-## Q&A
+## FAQ
 
 <AccordionGroup>
-  <Accordion title="What should I do if.comet.yaml is missing">
-Do not bypass with `/opsx:new` - it only creates OpenSpec artifacts and does not create `.comet.yaml`. change will fall outside the Comet state machine. Re-run `/comet`; After entering the Classic configuration, the status will be completed through `/comet-open`.
+  <Accordion title="What if .comet.yaml is missing">
+Do not work around it with `/opsx:new`, which creates only the OpenSpec documents and no `.comet.yaml`, leaving the change outside the Comet state machine. Run `/comet` again; once Classic is configured, Comet completes the state through `/comet-open`.
   </Accordion>
 
-<Accordion title="What restrictions apply to a Change name?">
-It must be kebab-case English (lowercase letters, numbers, hyphens). Chinese or non-compliant names are converted to
-kebab-case; when only one name exists, Comet uses and shows it directly, and only reports and asks you to choose when there are multiple candidates or a conflict with an existing change.
+<Accordion title="What are the rules for a change name?">
+It must be kebab-case English: lowercase letters, digits, and hyphens. Chinese or otherwise non-compliant names are converted to kebab-case. When only one name fits, Comet uses and shows it directly; it asks you to choose only when several candidates exist or the name conflicts with an existing change.
 </Accordion>
 
-<Accordion title="What should I do if openspec instructions fail">
-Comet will immediately stop the creation of the artifact and report the OpenSpec
-The error will not revert to a hard-coded document structure. Check the OpenSpec CLI
-Is it normal? Does `template`/`instruction`/`dependencies` meet the requirements?
+<Accordion title="What should I do if openspec instructions fails">
+Comet stops creating documents and reports the OpenSpec error instead of falling back to a hard-coded structure. Check that the OpenSpec CLI works and that `template`, `instruction`, and `dependencies` meet the requirements.
 </Accordion>
 
-  <Accordion title="Must a large PRD be dismantled">
-Not necessarily. The split pre-check will give you one choice among three options (split/keep one/adjust the plan). You can choose to keep it as one change, but you need to record the reasons for not splitting it in the document.
+  <Accordion title="Must a large PRD be split">
+No. The split pre-check offers three options: split, keep as one change, or adjust the plan. You can keep it as one change; record in the document why you did not split it.
   </Accordion>
 </AccordionGroup>
 
 ## Next step
 
-- [Design Phase](/en/phases/design) — Enter in-depth design after open completes
-- [Five-Phase Pause Points and Decision Points](/en/concepts/decision-points) — Detailed open pause points
-- [PRD Splitting](/en/guides/prd-splitting) — Complete mechanism of splitting prechecks
-- [Auto-Transition Mechanism](/en/concepts/auto-transition) — How open automatically bridges to design upon completion
+- [design stage](/en/phases/design) — Technical design after open completes
+- [Five-stage pause points](/en/concepts/decision-points) — The decisions the open stage asks for
+- [PRD splitting](/en/guides/prd-splitting) — How the split pre-check works
+- [Automatic transition](/en/concepts/auto-transition) — How open hands off to design
