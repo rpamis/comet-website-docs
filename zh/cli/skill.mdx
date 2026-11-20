@@ -27,8 +27,8 @@ description: '管理本地 Comet Skill 技能包，调试与观测 Engine Run �
 
 | 诉求目标 | 对应指令 | 说明 |
 | --- | --- | --- |
-| 安装本地自定义 Skill | `comet skill add ./my-skill --project .` | 物理复制并纳管进当前项目的 Skill 池中 |
-| 查验 Skill 来源与元数据 | `comet skill show my-skill --project .` | 确证当前加载生效的到底是哪个物理文件 |
+| 安装本地自定义 Skill | `comet skill add ./my-skill --project .` | 复制并纳管进当前项目的 Skill 池中 |
+| 查验 Skill 来源与元数据 | `comet skill show my-skill --project .` | 确证当前加载生效的到底是哪个文件 |
 | 单步调试一次 Engine Run | `comet skill run my-skill --change ./changes/demo` | 高级研发调试通道，非普通业务创建入口 |
 | 接续推进挂起的 Action | `comet skill continue ...` | 回传外部执行结果或恢复中断的 Run 实例 |
 | 针对性触发运行时检查 | `comet skill check ...` | 仅核验特定 Run 实例声明的运行时检查点 |
@@ -49,7 +49,7 @@ description: '管理本地 Comet Skill 技能包，调试与观测 Engine Run �
 
 | 选项参数 | 详细语义与影响 | 适用子命令 |
 | --- | --- | --- |
-| `--project <dir>` | 指定目标项目物理根目录（默认值为 `.` 当前目录） | 全量命令 |
+| `--project <dir>` | 指定目标项目根目录（默认值为 `.` 当前目录） | 全量命令 |
 | `--json` | 输出标准机器可读的结构化 JSON 报文 | 全量命令 |
 | `--overwrite` | 强制覆写工程内已存在的同名项目 Skill | `add` |
 | `--change <dir>` | 显式绑定关联的 OpenSpec change 目录（与 `--run-id` 互斥） | `run`、`continue`、`check` |
@@ -64,7 +64,7 @@ description: '管理本地 Comet Skill 技能包，调试与观测 Engine Run �
 
 <Info>
   <code>--change</code> 与 <code>--run-id</code> 存在严格的互斥约束：单次 Run 实例仅能绑定其中一种模式。
-  <code>--change</code> 强绑定特定 OpenSpec change 的物理目录，而 <code>--run-id</code> 则使用统一的 <code>.comet/runs/&lt;run-id&gt;</code> 独立维护隔离的状态机。
+  <code>--change</code> 强绑定特定 OpenSpec change 的目录，而 <code>--run-id</code> 则使用统一的 <code>.comet/runs/&lt;run-id&gt;</code> 独立维护隔离的状态机。
 </Info>
 
 ## Skill 包管理操作
@@ -76,24 +76,24 @@ comet skill add ./my-skill --project .
 comet skill add ./my-skill --project . --overwrite
 ```
 
-该命令会将本地 Skill 规范完整拷贝至 `.comet/skills/<name>`（底层坚决拒绝不安全的软链接，统一采取原子重命名配合备份机制）。项目私有 Skill 会**按同名绝对优先覆盖**内置官方 Skill。一旦检测到覆盖包存在非法格式，系统会执行**失败关闭（Fail Closed）**，直接报错阻断并严禁隐蔽回退至内置版本。
+该命令会将本地 Skill 规范完整拷贝至 `.comet/skills/<name>`（底层拒绝使用不安全的软链接，统一采用原子重命名配合备份机制）。项目私有 Skill 会**按同名绝对优先覆盖**内置官方 Skill。一旦检测到覆盖包存在非法格式，系统会执行**失败关闭（Fail Closed）**，直接报错阻断，不会回退到内置版本。
 
-### show：透视元数据
+### show：查看元数据
 
 ```bash
 comet skill show my-skill --project .
 ```
 
-深度解析并回显 Skill 的名称、契约版本、物理来源、根路径绝对地址、内容散列哈希值（Hash）、步骤定义（steps）、守卫门禁（guardrails）及配套的运行时自检项。
+深度解析并回显 Skill 的名称、契约版本、来源、根路径绝对地址、内容散列哈希值（Hash）、步骤定义（steps）、守卫门禁（guardrails）及配套的运行时自检项。
 
 ## Skill 探测优先级规则
 
-引擎在解析特定 Skill 时严格依循以下优先梯队查找，一旦命中即刻停止向下寻址：
+引擎在解析特定 Skill 时严格遵循以下优先梯队查找，一旦命中即刻停止向下寻址：
 
-1. **explicit（显式指定）**：当选择器直接传入一个已存在的物理目录绝对路径时，直接加载。若路径不存在立即报错抛出异常，绝不继续兜底查找。
+1. **explicit（显式指定）**：当选择器直接传入一个已存在的目录绝对路径时，直接加载。若路径不存在立即报错抛出异常，不继续兜底查找。
 2. **project（项目私有）**：探测 `<projectRoot>/.comet/skills/<selector>`，**优先级严格高于内置**，支持团队按需完全接管官方同名逻辑。
 3. **builtin（官方内置）**：探测系统内置的 `assets/skills/<selector>`。
-4. **全链路未命中**：立即触发**失败关闭（Fail Closed）**，绝不静默兜底回退。
+4. **全链路未命中**：立即触发**失败关闭（Fail Closed）**，不静默兜底回退。
 
 <Warning>
   裸包名称必须严格契合正则表达式 <code>^[A-Za-z0-9][A-Za-z0-9._-]*$</code>。在利用项目私有 Skill 同名覆盖内置逻辑时，若项目级 Skill 自身存在格式残缺，系统会断然报错并阻断降级，杜绝由于版本缺陷导致业务逻辑在暗中发生静默漂移。
@@ -104,7 +104,7 @@ comet skill show my-skill --project .
 ### run：实例化启动
 
 ```bash
-# 绑定特定 OpenSpec change 物理目录
+# 绑定特定 OpenSpec change 目录
 comet skill run my-skill --change ./changes/demo
 
 # 或显式指定全局唯一的 run-id
@@ -115,7 +115,7 @@ comet skill run my-skill --run-id demo-run --project .
 
 1. 校验并拒绝自适应变体包（当前阶段）；
 2. 防重校验，拒绝重复拉起已存在的活动 Run（单目录下仅允许并存单一活动 Run）；
-3. **拍摄不可变静态快照**：将该 Skill 全量包物理冻结存入 `.comet/skill-snapshots/<hash>/`，哈希强绑定至 Run 实例的 `skillHash` 属性；
+3. **拍摄不可变静态快照**：将该 Skill 全量包完整快照存入 `.comet/skill-snapshots/<hash>/`，哈希强绑定至 Run 实例的 `skillHash` 属性；
 4. 初始化运行时状态：设定 `currentStep = entry`，置标志位 `status = running`；
 5. 在追加式审计日志中记录 `run_started` 轨迹事件；
 6. 引擎推演首步决策：解析入口步骤、组装首个原子动作、经过安全守卫鉴权、落盘挂起动作（pending action），置状态 `status = waiting`。
@@ -144,10 +144,10 @@ comet skill continue --change ./changes/demo
 comet skill continue --change ./changes/demo --upgrade my-skill --project .
 ```
 
-版本热升级具备严格的前置守卫条件：当前绝不允许存在未决的挂起动作、Skill 包名称必须严格相符、编排拓扑模式必须兼容、且当前所处的执行步骤在新版本中必须依然合法存在。热升级成功后，系统会在审计账本中追加记录 `state_migrated` 事件。
+版本热升级具备严格的前置守卫条件：当前不允许存在未决的挂起动作、Skill 包名称必须严格相符、编排拓扑模式必须兼容、且当前所处的执行步骤在新版本中必须依然合法存在。热升级成功后，系统会在审计账本中追加记录 `state_migrated` 事件。
 
 <Warning>
-  参数 <code>--upgrade</code> 严禁与 <code>--status</code>、<code>--summary</code>、<code>--artifact</code> 或 <code>--state</code> 混用。而 <code>--summary</code>、<code>--artifact</code> 及 <code>--state</code> 则必须严格伴随 <code>--status</code> 协同传入。
+  参数 <code>--upgrade</code> 禁止与 <code>--status</code>、<code>--summary</code>、<code>--artifact</code> 或 <code>--state</code> 混用。而 <code>--summary</code>、<code>--artifact</code> 及 <code>--state</code> 则必须严格伴随 <code>--status</code> 协同传入。
 </Warning>
 
 ### check：按需针对性自检
@@ -166,13 +166,13 @@ comet skill check --run-id demo-run --project . --scope completion
   <code>comet skill check</code> 严格仅度量单次 Skill 运行实例的步骤完备度，并不等同于通用的 Skill 能力综合评测。若需对 Skill 的智能化表现开展严格打分，请使用专门的 <a href="/zh/cli/eval">comet eval</a> 命令。详见 <a href="/zh/eval/runtime">Runtime check 规范</a>。
 </Warning>
 
-## Run 状态机的物理存储分层
+## Run 状态机的存储分层
 
-Run 的底层机器状态完全由 Engine 统一维护，**严禁开发者手动编辑**。仅有关键的 `run_id` 凭据会被镜像同步至外层人类可读的 `.comet.yaml` 中。
+Run 的底层机器状态完全由 Engine 统一维护，**禁止开发者手动编辑**。仅有关键的 `run_id` 凭据会被镜像同步至外层人类可读的 `.comet.yaml` 中。
 
-| 运行架构模式 | 状态物理落盘位置 | 核心拓扑特征 |
+| 运行架构模式 | 状态实际存放位置 | 核心拓扑特征 |
 | --- | --- | --- |
-| `change` 模式 | `<changeDir>/.comet/` | 强绑定 OpenSpec change 物理目录，单目录严格独占单一 Run |
+| `change` 模式 | `<changeDir>/.comet/` | 强绑定 OpenSpec change 目录，单目录严格独占单一 Run |
 | `standalone` 模式 | `<projectRoot>/.comet/runs/<runId>/` | 独立解耦的 Run 实例，通过 runId 全局寻址，支持海量多任务并发并存 |
 
 具体的 change/run 目录内包含以下附属文件：
@@ -181,11 +181,11 @@ Run 的底层机器状态完全由 Engine 统一维护，**严禁开发者手动
 | --- | --- |
 | `.comet/run-state.json` | 引擎执行态全貌（涵盖当前步骤、挂起动作及生命周期状态） |
 | `.comet/pending-action.json` | 当前正在等待外部 Agent 或系统消费的挂起动作详情 |
-| `.comet/trajectory.jsonl` | 严禁篡改的追加式操作审计全景轨迹日志 |
+| `.comet/trajectory.jsonl` | 禁止篡改的追加式操作审计全景轨迹日志 |
 | `.comet/context.md` | 即时生成并注入的当前 Agent 专属上下文快照 |
 | `.comet/artifacts.json` | 步骤产出的所有中间产物与最终制品的索引映射表 |
 
-系统所有的内部文件读写均强制限制在合法的 change/run 物理目录沙盒内，底层坚决拦截绝对路径、用户主目录缩写 `~`、Windows 物理盘符以及 `..` 路径穿越攻击。写入流程统一采取“先写临时暂存文件、再触发原子重命名替换”的防断电设计。
+系统所有的内部文件读写均强制限制在合法的 change/run 目录沙盒内，底层拦截绝对路径、用户主目录缩写 `~`、Windows 盘符以及 `..` 路径穿越攻击。写入流程统一采取“先写临时暂存文件、再触发原子重命名替换”的防断电设计。
 
 ## 终端文本模式下的自愈提示
 

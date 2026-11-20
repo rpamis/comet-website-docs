@@ -7,12 +7,12 @@ description: '详解 Classic 的状态文件分工、进度判定方式、人工
   新建的 Classic change 采用轻量 SDK Runtime 与 <code>comet-state.yaml</code> 架构，已有 <code>.comet.yaml</code> 记录可兼容读取。所有阶段准入、决策确认、质量验证与最终归档要求保持完全一致。
 </Note>
 
-Classic 模式完全基于磁盘物理文件持久化状态。Comet 会将每一次变更的所处阶段、执行模式、分支绑定与验证结论直接写入项目仓库。每次在 Agent 中调用 `/comet` 时，系统都会重新扫描这些物理文件，完全不依赖易失的会话历史。你只需了解核心状态文件的职责与排查命令，即可在会话中断后精准接续。关于项目全局配置（`.comet/config.yaml`），请查阅 [Classic 配置](/zh/classic/configuration)。
+Classic 模式完全基于磁盘文件持久化状态。Comet 会将每一次变更的所处阶段、执行模式、分支绑定与验证结论直接写入项目仓库。每次在 Agent 中调用 `/comet` 时，系统都会重新扫描这些文件，完全不依赖易失的会话历史。你只需了解核心状态文件的职责与排查命令，即可在会话中断后精准接续。关于项目全局配置（`.comet/config.yaml`），请查阅 [Classic 配置](/zh/classic/configuration)。
 
 下文中使用 `<classic-root>` 指代当前 Classic OpenSpec 的存放根目录：新项目默认保存在 `docs/openspec/`，沿用旧版布局的项目为 `openspec/`。实际位置由配置项 `classic.artifact_layout` 决定，详见 [项目文件结构](/zh/guides/project-structure)。
 
 <Warning>
-  <strong>严禁手动随意篡改状态文件：</strong>阶段守卫遵循失败关闭原则（Fail Closed），一旦检测到状态文件不一致或存在非法篡改，将直接阻断执行：
+  <strong>禁止手动随意篡改状态文件：</strong>阶段守卫遵循失败关闭原则（Fail Closed），一旦检测到状态文件不一致或存在非法篡改，将直接阻断执行：
   <ul>
     <li>
       <code>.comet.yaml</code> 中的 <code>phase</code> 只能由守卫校验放行或合法的状态流转命令推进，直接运行 <code>comet state set &lt;name&gt; phase &lt;value&gt;</code> 会被系统底层强行拒绝。
@@ -34,11 +34,11 @@ Classic 模式完全基于磁盘物理文件持久化状态。Comet 会将每一
 
 ## 如何清晰掌握当前进度
 
-想知道“任务现在进行到哪一步、下一步该做什么”，最简单自然的方式是在 Agent 对话中重新输入 `/comet`（详见 [恢复中断的工作](/zh/guides/resuming-workflow)）；若想在终端中核对，随时运行 `comet status` 即可。两者均直接读取磁盘上的物理状态，绝不凭空臆测会话历史。
+想知道“任务现在进行到哪一步、下一步该做什么”，最简单自然的方式是在 Agent 对话中重新输入 `/comet`（详见 [恢复中断的工作](/zh/guides/resuming-workflow)）；若想在终端中核对，随时运行 `comet status` 即可。两者均直接读取磁盘上的实际状态，不凭空猜测会话历史。
 
 ### 状态机文件的分层分布
 
-| 文件名                      | 物理存放位置                                    | 维护与编辑规则                        | 核心作用                                          |
+| 文件名                      | 实际存放位置                                    | 维护与编辑规则                        | 核心作用                                          |
 | --------------------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------------- |
 | `.comet.yaml`               | `<classic-root>/changes/<name>/.comet.yaml`     | 面向人类可读，由 `/comet` 守卫驱动维护 | 核心工作流状态：阶段、执行模式、测试验收结果      |
 | `.comet/run-state.json`     | `<changeDir>/.comet/` 或 `.comet/runs/<runId>/` | 由系统自动读写，切勿手动篡改          | 底层执行细节：当前执行步骤、待处理操作与运行轨迹  |
@@ -96,7 +96,7 @@ comet state clear-selection
 
 - 当项目中仅存在唯一活跃变更时，系统会自动关联接管；
 - 存在多个活跃变更时，进入操作前必须显式执行 `select` 锁定目标；
-- 当指定了 `current`、`branch` 或 `worktree` 隔离模式后，变更还会通过 `bound_branch` 严格绑定到对应的 Git 分支。若发现本地分支发生意外漂移，请先切回原分支；只有在你明确确认希望将变更迁移至当前分支时，方可执行 `comet state rebind <change-name>`。
+- 当指定了 `current`、`branch` 或 `worktree` 隔离模式后，变更还会通过 `bound_branch` 严格绑定到对应的 Git 分支。若发现本地分支发生意外漂移，请先切回原分支；只有在你明确确认希望将变更迁移至当前分支时，才可执行 `comet state rebind <change-name>`。
 
 ## 关键参数的人工确认规则
 
@@ -107,7 +107,7 @@ comet state clear-selection
 | 字段名称              | 确认时机与规则                                                                                                  | 后续调整与生效范围                                                                                   |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `language`            | 初始化时通过选择语言生成全局默认值；每个新变更在创建时从项目配置继承快照                                        | 修改全局配置仅对新建任务生效，不追溯已存在的任务（详见 [Classic 配置](/zh/classic/configuration)）    |
-| `isolation`           | open 阶段的工作区决策（停顿点 3）中由你明确选定 `current`、`branch` 或 `worktree`；分支名亦在该节点确认           | 选定后写入 `isolation` 并绑定当前分支 `bound_branch`；后续各阶段会强制校验分支匹配，严禁擅自跳动目录 |
+| `isolation`           | open 阶段的工作区决策（停顿点 3）中由你明确选定 `current`、`branch` 或 `worktree`；分支名亦在该节点确认           | 选定后写入 `isolation` 并绑定当前分支 `bound_branch`；后续各阶段会强制校验分支匹配，禁止擅自跳动目录 |
 | `build_mode`          | build 阶段联合决策（停顿点 6）中选定 `subagent-driven-development`、`executing-plans` 或 `direct`               | 选用子代理模式需通过合法流程确认；full 流程使用 `direct` 模式需开启显式参数覆盖                  |
 | `tdd_mode`            | 在同一联合决策中选定 `tdd` 或 `direct`；轻量预设默认使用 `direct`                                                | `tdd` 强制先写失败用例；`direct` 虽然不强制红绿重构，但仍要求提供关联测试与回归证据                 |
 | `review_mode`         | 在同一联合决策中选定 `off`、`standard` 或 `thorough`；full 流程默认继承 `standard`，轻量预设固定为 `off`        | 详细机制与生效规则请参考 [代码审查机制](/zh/concepts/review-mode)                                    |

@@ -1,6 +1,6 @@
 ---
 title: '并行推进多个独立 Native Change'
-description: '在物理隔离的 Git worktree 中并发推进多个独立目标，掌握写入归属绑定、跨会话恢复及 Capability 归档次序仲裁。'
+description: '在隔离的 Git worktree 中并发推进多个独立目标，掌握写入归属绑定、跨会话恢复及 Capability 归档次序仲裁。'
 ---
 
 <Note>
@@ -29,7 +29,7 @@ Native 支持同时维护多个独立 Change。每个 Change 保存自己的需�
 | 验收契约归属     | 各自拥有全套闭环的验收用例与测试标准   | 根目标统领全局验收，各子任务覆盖特定切片           |
 | 上下游依赖       | 彼此互无依赖，或仅依赖已发布的既有特性 | Runtime 在底层统筹子任务的依赖流向与集成拓扑       |
 | 全局 Verify 终审 | 每个 change 独立走完验证闭环即可交付   | 所有子任务并入集成分支后，触发主任务全链路终审     |
-| 最终流转归档     | 各自独立流转至 Archive 并单独交付      | 子任务绝不单独归档，最终由 Supervisor 统一归档收尾 |
+| 最终流转归档     | 各自独立流转至 Archive 并单独交付      | 子任务不单独归档，最终由 Supervisor 统一归档收尾 |
 
 多个需求即便是来自于同一场产品评审会或源于同一份需求大纲，亦不代表必须强行打包进同一个 change。核心评判标准在于：各模块是否能够独立交付上线，以及是否存在共同的全局终审验收要求。
 
@@ -55,7 +55,7 @@ Native 支持同时维护多个独立 Change。每个 Change 保存自己的需�
 - 超大规模数据导出自动转为后台异步任务并支持轮询进度；
 - 导出失败时友好展示错误提示并提供重试入口。
 
-两个 change 各自独立经历 Shape → Build → Verify → Archive 的标准状态机循环。任何一个任务的方案确认、测试挂起或阶段推进绝不会对另一个任务产生任何越权干扰。
+两个 change 各自独立经历 Shape → Build → Verify → Archive 的标准状态机循环。任何一个任务的方案确认、测试挂起或阶段推进不会对另一个任务产生任何越权干扰。
 
 ## 明确写入归属，杜绝跨任务污染
 
@@ -67,25 +67,25 @@ Native 支持同时维护多个独立 Change。每个 Change 保存自己的需�
 comet native status
 ```
 
-切入对应的物理工作区后，显式锁定目标任务：
+切入对应的工作区后，显式锁定目标任务：
 
 ```bash
 comet native select session-retry-policy
 ```
 
-该选择仅用于锚定当前终端的写入归属，绝不会强行挂起其他 active change，更不会私自切换 Git 分支。若试图绑定的任务早已归档、元数据损坏或物理工作区不匹配，Runtime 会坚决拦截并拒绝写入。
+该选择仅用于锚定当前终端的写入归属，不会强行挂起其他 active change，更不会私自切换 Git 分支。若试图绑定的任务早已归档、元数据损坏或工作区不匹配，Runtime 会拦截并拒绝写入。
 
 ## 多窗口多会话并行推进
 
-你完全可以为两个隔离的物理 worktree 分别开启独立的客户端会话：
+你完全可以为两个隔离的 worktree 分别开启独立的客户端会话：
 
 ```text
 会话 A 窗口
-  物理路径: .worktrees/session-retry-policy
+  实际路径: .worktrees/session-retry-policy
   聚焦变更: session-retry-policy
 
 会话 B 窗口
-  物理路径: .worktrees/dashboard-export
+  实际路径: .worktrees/dashboard-export
   聚焦变更: dashboard-export
 ```
 
@@ -95,14 +95,14 @@ comet native select session-retry-policy
 
 ## 工作区脱节时的自愈与路径提示
 
-若在 `dashboard-export` 的物理工作区中误运行命令推进 `session-retry-policy`，Runtime 会前置核验：
+若在 `dashboard-export` 的工作区中误运行命令推进 `session-retry-policy`，Runtime 会前置核验：
 
-- 当前所在工程物理根目录绝对路径；
+- 当前所在工程根目录绝对路径；
 - 当前关联的 Git change 分支名；
 - 既定的 worktree 隔离模式；
 - `comet-state.yaml` 中持久化绑定的工作区契约。
 
-一旦发现绑定发生脱节，操作立即被拦截，状态机返回 `await-user` 并明确打印预期的目标分支与路径。开发者只需在终端中重新切入正确的物理目录即可接续。切忌在错误的路径下新建同名任务，更不可通过手动修改 YAML 绕过系统的前置防护。
+一旦发现绑定发生脱节，操作立即被拦截，状态机返回 `await-user` 并明确打印预期的目标分支与路径。开发者只需在终端中重新切入正确的目录即可接续。不要在错误的路径下新建同名任务，更不可通过手动修改 YAML 绕过系统的前置防护。
 
 ## 独立任务面临的 Capability 语义级归档冲突
 
@@ -111,15 +111,15 @@ comet native select session-retry-policy
 - `session-retry-policy` 涉及对 `specs/authentication/spec.md` 主规范的更新；
 - 另一个并行的 `session-device-limit`（设备并发限制）同样声明要修改 `authentication` 规范。
 
-在流转至 Archive 归档门禁时，Runtime 会全域扫描所有已登记 Git worktree 中的 active change。一旦检测到存在多个活跃任务竞争同一个 Capability 的修改所有权，当前变更绝不可直接轻率归档，Runtime 会主动输出 `capabilityPeers` 冲突列表，并提示开发者明确归档次序。
+在流转至 Archive 归档门禁时，Runtime 会全域扫描所有已登记 Git worktree 中的 active change。一旦检测到存在多个活跃任务竞争同一个 Capability 的修改所有权，当前变更不可直接轻率归档，Runtime 会主动输出 `capabilityPeers` 冲突列表，并提示开发者明确归档次序。
 
-## 仲裁先后次序：率先归档首发任务
+## 仲裁先后次序：先归档首发任务
 
 假设经过开发者评估，决定优先归档 `session-retry-policy`：
 
-1. 依循最新的 `continuation` 指令确认优先归档该任务；
+1. 遵循最新的 `continuation` 指令确认优先归档该任务；
 2. Runtime 二次核验冲突队列一致性与当前状态版本号；
-3. `session-retry-policy` 率先将本次修改合流至 `authentication` 主 Spec；
+3. `session-retry-policy` 先将本次修改合流至 `authentication` 主 Spec；
 4. 该 change 正式完成 Archive 归档，并依照已获授权的策略完成 Git 工作区收尾。
 
 仲裁指令在参数中强制绑定当前正在归档的特定 change 标识。若冲突队列发生动态变化或底层状态跃迁，旧的仲裁指令会被自动阻断。
@@ -136,7 +136,7 @@ comet native select session-retry-policy
 - 由全新的只读 Verifier 对全量验收用例重新跑通严审；
 - 携带最新的测试证据链流转进入 Archive 归档。
 
-冲突发生前取得的历史测试通过结论绝不可直接盲目套用，因为先前的测试代码跑在旧版的主 Spec 契约之上。
+冲突发生前取得的历史测试通过结论不可直接套用，因为先前的测试代码跑在旧版的主 Spec 契约之上。
 
 ## 跨会话与跨设备断点无损接续
 
@@ -146,13 +146,13 @@ comet native select session-retry-policy
 comet native status dashboard-export --details --json
 ```
 
-更换物理开发机时，只需确保通过 Git 提交并推送了业务源码、`.comet/config.yaml` 全局配置以及 change 目录内面向人类的技术产物。单机私有的 `.comet/runtime/native/` 执行缓存由目标设备全自动无损重建。
+更换开发机时，只需确保通过 Git 提交并推送了业务源码、`.comet/config.yaml` 全局配置以及 change 目录内面向人类的技术产物。单机私有的 `.comet/runtime/native/` 执行缓存由目标设备全自动无损重建。
 
-当仓库内同时存在多个 active change 且在对话中未明确指代具体任务名时，系统的只读恢复探测会返回 `ask_user`。它绝不会凭空臆测开发者模糊的聊天意图，更不可能擅自跨目录篡改其他任务的底层运行态。
+当仓库内同时存在多个 active change 且在对话中未明确指代具体任务名时，系统的只读恢复探测会返回 `ask_user`。它不会凭空猜测开发者模糊的聊天意图，更不可能擅自跨目录篡改其他任务的底层运行态。
 
 ## 独立完成分支交付与工作区收尾
 
-每个独立的 change 在流转至 Archive 阶段时，均享有完全自治的交付策略选择（保留本地分支与目录、本地合并入主干、推送到远端 Git 仓库或拉起 PR，详细参数请参阅[归档与交付](/zh/native/archive-and-delivery)）。某个任务选定的交付偏好绝不会机械污染另一个平行任务。
+每个独立的 change 在流转至 Archive 阶段时，均享有完全自治的交付策略选择（保留本地分支与目录、本地合并入主干、推送到远端 Git 仓库或拉起 PR，详细参数请参阅[归档与交付](/zh/native/archive-and-delivery)）。某个任务选定的交付偏好不会机械污染另一个平行任务。
 
 Runtime 仅安全清理已顺利完成归档、工作区无任何未提交残留、且已明确废弃不再使用的临时 worktree。若任务仍在途运行、工作区存有人类手动编写的代码、或底层 Git 交付被外部 Hook 拦截，相关目录会被完好保留，系统会通过 `workspaceFinishResult` 与 `recoveryArgs` 参数给出清晰的应急指引。
 

@@ -80,13 +80,13 @@ flowchart LR
 
 - **解析生成创作规划**：输出当前拟执行的 Lane 清单、各 Lane 预期交付物以及创作深度（`quick` 仅覆盖骨干通道，`full` 全量覆盖所有通道）；
 - **Schema 契约校验**：各 Lane 提交的 JSON 数据包必须严格契合该通道的元数据模型（状态码受限于 `DONE`/`DONE_WITH_CONCERNS`/`NEEDS_CONTEXT`/`BLOCKED`，且产物清单、分析洞察 findings 与证据链字段齐全）；
-- **声明真实性防伪校验（Claims Validation）**：Lane 声明产出的所有文件（Claims），物理磁盘上必须真实存在且内容哈希强匹配；
+- **声明真实性防伪校验（Claims Validation）**：Lane 声明产出的所有文件（Claims），磁盘上必须真实存在且内容哈希强匹配；
 - **固化落盘至 Bundle 状态机**：校验通过后，将成果固化进 Bundle 创作状态机（`BundleAuthoringState`），记录通道状态、问题严重度分级（`critical`/`important`/`minor`）与评审证据；
 - **多维度真实评审证据**：`skill-review` 通道记录审查来源（`deterministic-check-only`/`llm-single`/`llm-multivote`），客观记录评审员投票结果、审视维度与缺陷清单，防止硬编码“全量通过”。
 
 ### 生成文档的双区隔离架构（Authored Zones）
 
-最终编译生成的 `SKILL.md` 实行严格的双区物理隔离：
+最终编译生成的 `SKILL.md` 实行严格的双区隔离：
 
 - **Auto zone（自动生成控制区）**：Frontmatter 元数据、路由分发表、Entry/Exit 阶段门禁检查、证据格式声明及断点恢复指南。此为不变的底层控制面，完全由框架模版自动编译生成。
 - **Authored zone（智慧创作区）**：入口文档的 `## Decision Core`、各节点的 `## Guidance`。由各专门的子 Agent 结合具体项目工程深度提炼创作。
@@ -126,12 +126,12 @@ comet bundle eval-record <name> --result <file> --json
 
 ### eval-record 证据准入鉴权门禁
 
-评测结论必须在底层与当前 draft 哈希及评测清单哈希强绑定，Runtime 依循以下准则严格鉴权：
+评测结论必须在底层与当前 draft 哈希及评测清单哈希强绑定，Runtime 遵循以下准则严格鉴权：
 
 - 若 `result.schemaVersion !== 2` 或提供方不符合 `result.provider === "comet-eval"`，立即拒绝落盘；
-- 若测试报告绑定的 `result.draftHash` 与当前真实状态不符，仅写入日志文件，状态机绝不向前推演；
+- 若测试报告绑定的 `result.draftHash` 与当前真实状态不符，仅写入日志文件，状态机不向前推演；
 - 若报告中的 `result.evalManifestHash` 与当前重新计算的 `comet/eval.yaml` 哈希不一致，同样仅落盘日志，不推进状态；
-- 唯有在评测结论全绿通过（`result.passed === true` 且 `failures` 为空）时，状态机才会晋升至 `eval-passed`；
+- 只有在评测结论全绿通过（`result.passed === true` 且 `failures` 为空）时，状态机才会晋升至 `eval-passed`；
 - 一旦测试未通过，状态机立即回退至 `draft` 草稿态，清空原有的 review 审批与就绪状态。
 
 详细的 JSON Schema 契约请参阅 [发布与分发 Skill · eval-record 证据契约](/zh/skill-creator/publishing#eval-record-证据契约)。
@@ -154,7 +154,7 @@ comet bundle distribute <name> --platform <id> --scope project --preview --json
 comet bundle distribute <name> --platform <id> --scope project --json
 ```
 
-在执行发布前，必须仔细审阅 review summary 中的就绪状态（readiness）。只要有一项发布检查未通过，严禁将 Bundle 标记为 ready 并强行发布。请结合 JSON 报文中明确返回的阻塞根因完成修正，随后重新提交评审。面向普通开发者的标准发布指引请参阅 [comet publish 命令行参考](/zh/cli/publish)。
+在执行发布前，必须仔细审阅 review summary 中的就绪状态（readiness）。只要有一项发布检查未通过，禁止将 Bundle 标记为 ready 并强行发布。请结合 JSON 报文中明确返回的阻塞根因完成修正，随后重新提交评审。面向普通开发者的标准发布指引请参阅 [comet publish 命令行参考](/zh/cli/publish)。
 
 ## 通用选项参数
 
@@ -165,10 +165,10 @@ comet bundle distribute <name> --platform <id> --scope project --json
 | `--platform <id>` | 目标平台标识符（支持多次传入绑定多个平台） |
 | `--scope <project\|global>` | 分发生效范围（项目局部或全局用户目录） |
 | `--level <quick\|full>` | 设定 Eval 评测的工作量与覆盖深度 |
-| `--result <path>` | 评测客观测试报告的文件物理绝对路径 |
+| `--result <path>` | 评测客观测试报告的文件绝对路径 |
 | `--approve` / `--reject` | 明确的人工审查裁决：批准放行或驳回拦截 |
 | `--reviewer <name>` | 署名本次人工审核的责任人标识 |
-| `--preview` | 纯只读拉取分发预览报告，绝不执行物理写操作 |
+| `--preview` | 纯只读拉取分发预览报告，不执行写操作 |
 | `--confirm-executables` | 显式放行对包内可执行脚本的安全权限披露与确认 |
 | `--skip-capability <cap>` | 显式跳过可选的附加扩展能力 |
 | `--default-locale <locale>` | 声明默认语言区域（用于 `draft create`） |

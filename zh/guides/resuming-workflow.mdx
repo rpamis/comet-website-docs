@@ -22,14 +22,14 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 ## 也可以直接用自然语言说“继续”
 
-自 0.4.0-beta.4 起，`comet init` 和 `comet update` 会自动将一段 Comet 恢复指引注入到项目的 `AGENTS.md` 与 `CLAUDE.md` 中。长程开发在遭遇上下文被压缩、新建会话或换端操作时，Agent 可能忘记当前会话正由 Comet 管理，而你也可能未输入斜杠命令。此时 Agent 会率先运行只读的 `comet resume-probe` 探测命令，判断诸如“继续刚才的用户系统重构”是否能匹配到现有的 change，再决定是否重新唤起工作流。
+自 0.4.0-beta.4 起，`comet init` 和 `comet update` 会自动将一段 Comet 恢复指引注入到项目的 `AGENTS.md` 与 `CLAUDE.md` 中。长程开发在遭遇上下文被压缩、新建会话或换端操作时，Agent 可能忘记当前会话正由 Comet 管理，而你也可能未输入斜杠命令。此时 Agent 会先运行只读的 `comet resume-probe` 探测命令，判断诸如“继续刚才的用户系统重构”是否能匹配到现有的 change，再决定是否重新唤起工作流。
 
 | 交互场景 | 探测结果 | 行为表现 |
 | --- | --- | --- |
 | 明确要求继续、验证、归档或提交指定 change，且状态允许 | 返回 `auto_resume` | 自动进入对应阶段的正式入口 |
 | 新会话仅语义模糊匹配到某个 change，或只有项目级选择意图 | 返回 `ask_user` | 必须先向你确认意向，确认后再进入 |
 | 存在多个候选 change、状态冲突或需要用户裁决 | 返回 `ask_user` | 暂停并只抛出一个精准问题等待确认 |
-| 仅咨询问题、明确表示不走流程，或当前已在 Comet 流程中 | 返回 `out_of_scope` | 绝不重复唤起 workflow |
+| 仅咨询问题、明确表示不走流程，或当前已在 Comet 流程中 | 返回 `out_of_scope` | 不重复唤起 workflow |
 | 没有任何活跃中的 active Comet change | 返回 `none` | 不触发恢复动作 |
 
 该机制仅约束 Comet 的无感恢复探测，且完整保留项目原有自定义规则。探测命令会严格按配置顺序校验单套工作流，配置损坏时不会随意兜底回退。若希望彻底关闭自然语言触发的被动探测，可在 `.comet/config.yaml` 中设置 `ambient_resume: false`。该配置不影响显式 `/comet` 调用，也不会跳过既有的关键停顿点。
@@ -46,8 +46,8 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 | 机制 | 说明 |
 | --- | --- |
-| **重读物理文件，解耦会话历史** | 每次恢复均在磁盘上即时扫描 active change 并读取 `.comet.yaml`，绝不凭聊天记忆臆测当前阶段 |
-| **文件状态优先，自动纠偏元数据** | 若 `.comet.yaml` 记录与磁盘实际代码或文件冲突，以物理文件为准，Comet 自动纠偏状态元数据后继续推进 |
+| **重读文件，解耦会话历史** | 每次恢复均在磁盘上即时扫描 active change 并读取 `.comet.yaml`，不凭聊天记忆猜测当前阶段 |
+| **文件状态优先，自动纠偏元数据** | 若 `.comet.yaml` 记录与磁盘实际代码或文件冲突，以文件为准，Comet 自动纠偏状态元数据后继续推进 |
 | **阶段规则路由确定** | 依据 `phase`、`workflow`、`verify_result` 等关键字段，精准分发至对应阶段 Skill（含轻量预设：build 阶段 hotfix → `/comet-hotfix`、tweak → `/comet-tweak`） |
 
 恢复时的状态路由矩阵（从上到下按命中优先级分发）：
@@ -65,11 +65,11 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 当工作区只存在**一个**活跃 Classic change 时，`/comet-classic` 会自动选中并进入；若存在**多个**活跃 change，则会打印候选列表供你手动挑选。
 
-若采用自然语言接续，当命中多个 active change 时，Comet 绝不会替你私自决定，恢复探测会固定返回 `ask_user` 等待你选定目标。
+若采用自然语言接续，当命中多个 active change 时，Comet 不会替你私自决定，恢复探测会固定返回 `ask_user` 等待你选定目标。
 
 ### Classic Change 的工作区复用
 
-在创建或恢复 Classic change 时，Comet 会首先核验该 change 绑定的分支及 Git worktree。若存在已登记的匹配 worktree，Comet 将直接复用；若本地分支存在但 worktree 已丢失，恢复流程会自动重建。当工作目录、分支与 worktree 状态冲突时，Comet 会停顿等待你明确抉择，绝不会静默切换到无关工作区。
+在创建或恢复 Classic change 时，Comet 会首先核验该 change 绑定的分支及 Git worktree。若存在已登记的匹配 worktree，Comet 将直接复用；若本地分支存在但 worktree 已丢失，恢复流程会自动重建。当工作目录、分支与 worktree 状态冲突时，Comet 会停顿等待你明确抉择，不会静默切换到无关工作区。
 
 请确保在目标项目根目录下执行 `/comet` 或 `/comet 继续`。若有多个活跃 change，先选定目标再接续；切勿直接手动跨目录拷贝 change 文件夹来进行所谓的“手动恢复”。
 
@@ -83,7 +83,7 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 ### 跨设备断点恢复全景
 
-只要 Git 仓库状态同步，无论你在哪台物理机器、使用哪款 IDE 或 Agent 客户端，`/comet` 都能从文件状态重建断点继续推进，无须手动传达背景信息。
+只要 Git 仓库状态同步，无论你在哪台机器、使用哪款 IDE 或 Agent 客户端，`/comet` 都能从文件状态重建断点继续推进，无须手动传达背景信息。
 
 <img src="/img/comet-zero-resume.png" alt="跨设备断点恢复" />
 
@@ -101,7 +101,7 @@ Comet 具备严格的确定性保证：每个阶段 Skill 被调用时，均会�
 comet state check <change-name> <phase> --recover
 ```
 
-- 若检查发现当前的 phase、workflow 或代码证据属于**另一个**阶段，Comet 会依循脚本输出和路由规则主动切换，**绝不在错误的阶段状态下写入新数据**。
+- 若检查发现当前的 phase、workflow 或代码证据属于**另一个**阶段，Comet 会遵循脚本输出和路由规则主动切换，**不在错误的阶段状态下写入新数据**。
 - 若工作区存在未提交代码改动，会依照规范自动执行变更归因。
 
 ```mermaid
@@ -143,7 +143,7 @@ build 阶段涉及代码生成与任务调度，相对最为复杂，但常见�
 已被 `.gitignore` 忽略的构建产物（如 `node_modules/`、`dist/` 等）会被自动剔除，不计入用户变更。
 
 <Warning>
-  工作区未提交改动（dirty worktree）仅代表代码物理事实，<strong>绝不会自动修改</strong> <code>.comet.yaml</code> 的 <code>phase</code> 或私自勾选 <code>tasks.md</code>。只有在通过变更归因、通过验证并满足阶段 Guard 条件后，工作流状态才会正式演进。
+  工作区未提交改动（dirty worktree）仅代表代码客观事实，<strong>不会自动修改</strong> <code>.comet.yaml</code> 的 <code>phase</code> 或私自勾选 <code>tasks.md</code>。只有在通过变更归因、通过验证并满足阶段 Guard 条件后，工作流状态才会正式演进。
 </Warning>
 
 ## 常见的人工介入场景
@@ -156,7 +156,7 @@ build 阶段涉及代码生成与任务调度，相对最为复杂，但常见�
 - **无法判定的未提交代码**：需要你明确该批代码的归属意图
 - **多个活跃中的 change**：需要你指定当前要接续的具体任务
 
-除上述情况及各阶段固有的审查停顿点（详见[五阶段决策与停顿点](/zh/concepts/decision-points)）之外，其余中间过程 `/comet-classic` 均会自动闭环推进。
+除上述情况及各阶段固有的审查停顿点（详见[五阶段决策与停顿点](/zh/concepts/decision-points)）之外，其余中间过程 `/comet-classic` 均会自动推进。
 
 ## 何时调用 comet status 与 comet doctor
 
