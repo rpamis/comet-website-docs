@@ -1,164 +1,51 @@
 ---
 title: 'Task progress and interruption recovery'
-description: 'Understand where a task stands, when you need to act, and how Native resumes from the progress recorded in comet-state.yaml after an interruption or a device switch.'
+description: 'Find the next step for a Native change and resume the same task after a session interruption, workspace switch, or device change.'
 ---
 
-SDK Runs advance new Native tasks. `comet-state.yaml` displays progress and results and carries a portable recovery checkpoint. Do not edit it to complete Actions or approve decisions.
+After a session interruption, have the Agent continue the same change. The Runtime keeps the current stage, user decisions, and task results in the Run. Check the workspace and pending action first, then follow the latest command response.
 
-## Follow the current next step
+## Inspect progress and the next step
 
-Have the Agent read `continuation` from `comet native status <change-name> --json` or `comet native next <change-name> --json`. Use `status --details --json` for the complete record. The result indicates continue, await user, blocked, or done. Use the latest identities and confirmation details for every operation.
+Return to the change's workspace and run `comet native status <change-name> --json`. If you don't know the name, use `comet native status --json` to list changes in the current workspace. If the change uses a separate Git worktree, switch to that worktree before querying. Add `--details` to a named query for the complete record of actions and decisions.
 
-After interruption, continue the same change, Run, and original Action. Reconcile claimed executions with the original session; a wait-tool timeout does not prove failure or permit duplicate dispatch. On another device, preserve formal documents and the valid checkpoint, then let Runtime check definitions, workspace ownership, and evidence. Reconnect or inspect the execution site before proceeding with unknown results. See [SDK recovery](/en/sdk/recovery).
+Use `status` to inspect the change. The Agent follows the next step from the response and uses the new response after each operation. If the state changed, query it again before submitting a decision. If the response supplies a state version, expected action, or proposal identifier, keep those arguments in the confirmation command.
 
-Development commands and test runs execute via Agent platform tools. The Agent compares previous execution results against the current code to supplement only necessary checks; the Runtime does not restore historical processes for these commands or use file hashes to decide check reuse. New tasks permit direct verification within the same session; if independent review is explicitly configured, it must still complete the corresponding review process, while existing tasks preserve their original agreements.
+| `continuation.mode` | Current situation | How to proceed |
+| --- | --- | --- |
+| `execute` | The next action is ready. | The Agent runs the returned operation in the specified workspace. |
+| `ask` | The workflow is waiting for your input. | Review the current proposal and confirm it, request a revision, or provide missing information. |
+| `wait` | The original task was claimed and has yet to return a result. | Check or wait for the original task, then submit its result with the original claim. |
+| `reconcile` | The Runtime needs an outcome confirmed or a blocker resolved. | Inspect the original task, path, or transaction as directed, then follow the returned recovery action. |
+| `done` | The workflow has ended. | Check the final state. If the change was archived, verify the agreed Git delivery. |
 
-After SDK Archive completes, separately verify any approved Git commit, push, or PR.
-
-<Note>
-  The Compat state fields and local directories below describe the legacy format. The SDK Run owns
-  progress for default new tasks; legacy standalone YAML rules do not apply to SDK tasks.
-</Note>
-
-<Accordion title="Compat: legacy task reference">
-
-Native writes the current progress and the next action into `comet-state.yaml`. After each action an Agent completes, it reads the latest `continuation` and continues with implementation, acceptance, or archiving. Even when a conversation is interrupted, the Agent is replaced, or the local Runtime is lost, the work can continue from the progress recorded in the file.
-
-At the milestones that matter — Shape confirmation, each acceptance round, and archive approval — Comet records the current stage and result in `comet-state.yaml`. That recorded progress is the **resumption basis**; after an interruption, the work continues losslessly from the most recent record.
-
-## Whether the next step needs you
-
-Commands such as `comet native new`, `status`, `next`, `archive`, and `doctor` all return `continuation.v2`. It describes the process status, the Agent action, and what you need to know at the same time. You do not need to read every field literally: the `disposition` field in `continuation.v2` says which category this result belongs to, and checking it tells you whether this round needs you:
-
-| `disposition` | Meaning                                                                  | What you do                                                                                                             |
-| ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `continue`    | The next step is clear and the flow advances on its own                  | Do nothing; let Comet keep implementing, verifying, or archiving                                                        |
-| `await-user`  | You need to confirm, choose, or supply external information              | Reply with a choice (for example, accept the result or revise the requirements) or supply the information as instructed |
-| `blocked`     | The workspace, state, concurrency, or execution budget prevents progress | Preserve the scene, run `comet native doctor <change-name>` as prompted, or supply the missing information              |
-| `done`        | The change has finished archiving                                        | Check the workspace wrap-up and finish this round                                                                       |
-
-`await-user` needs your decision or information. `blocked` lists the blocker and allowed recovery actions. The Agent continues within existing confirmation and asks you only when a new decision is needed. Use `doctor` for diagnosis as described later in this page. The complete `continuation.v2` field table is at the bottom, under "For Agents and automation."
-
-## Where the recovery checkpoints are stored
-
-The state of an active change that can be carried across sessions and devices lives in the change directory and stays with the project code:
-
-- `brief.md`: the goal, scope, user decisions, and acceptance requirements;
-- `specs/<capability>/spec.md`: the complete target behavior after archiving;
-- `comet-state.yaml`: the stage, state version, acceptance results, Loop progress, Builder handoff, blocking causes, the last 50 execution records, and next step;
-- `verification.md`: the user-readable acceptance report generated by the Runtime.
-
-Among these, `comet-state.yaml` is the authoritative state of the recovery flow, and the progress it records is the recovery point. You do not need to create checkpoint files by hand: the `comet native checkpoint` command has been removed. `verification.md` is only for reading; when it is missing or stale, it can be rebuilt from the YAML.
-
-Local execution information is stored separately in `.comet/runtime/native/` and only matters on the current device:
-
-```text
-.comet/runtime/native/
-├── changes/<change-name>/state.json
-├── logs/
-├── locks/
-└── transactions/
-```
-
-These files record the checks, logs, locks, and short-lived transactions running on this machine. They can be cleaned up or rebuilt, they are not a basis for cross-device synchronization, and they cannot overwrite a newer `comet-state.yaml`.
-
-Recovery behavior after an interruption in any stage — Shape, Build, Verify, or `archive-ready` — is described together in [Recovery playbook](/en/native/recovery-playbook).
-
-## Continue after switching devices or sessions
-
-In a new session on the same device, you can usually ask to continue the previous task. Comet locates the active change and shows its workspace and the next action. To inspect it manually, run:
+For example, if you were working on `login-error-message`, reopen the Agent and say “Continue `login-error-message`. First tell me what it's waiting for.” The Agent can run this command in the original workspace.
 
 ```bash
-comet native status <change-name> --details --json
+comet native status login-error-message --json
 ```
 
-Before switching devices, synchronize the following:
+If `phase` is `verify` and `continuation.mode` is `wait`, an executor has already claimed the task. Locate the original review before attempting to start Verify again. If the current workspace or branch differs from the response, return to the reported `workspace.projectRoot` and check the branch before proceeding. If the change is missing in the current directory, locate its original worktree.
 
-- the project code and its branch or worktree;
-- `.comet/config.yaml`;
-- the `brief.md`, Specs, and `comet-state.yaml` in the change directory;
-- the generated `verification.md`, which can also be rebuilt on the target device.
+## Resume a task that was running
 
-The target device does not need `.comet/runtime/native/`. The Runtime checks the project root, the branch, the worktree, and the change binding. When the binding matches, it rebuilds the local execution state from the progress recorded in `comet-state.yaml`. When the binding does not match, the code is not synchronized, or an active/archive directory conflicts with a same-name directory, it keeps the existing files and waits for you to handle it.
+In the new session, check whether the original task was claimed and whether the original execution session is still running. After a wait tool times out, check progress on the original platform. If the task is still running, keep waiting for that execution. If it has ended, retrieve its actual result and submit it with the original claim.
 
-## How a regular change advances on its own
+If the outcome is unknown, inspect the original execution and any files or external results it produced before repeating an operation that may have already taken effect. Follow the Runtime's next step for failure or retry after confirming the task failed, was lost, timed out during execution, or ended without a usable result. See [SDK failure recovery and unknown results](/en/sdk/recovery).
 
-The main flow of a regular change is as follows:
+| What you see | What to check |
+| --- | --- |
+| The session closed while the Runtime waited for Shape approval or result acceptance. | Read the current proposal. Recorded decisions still apply. Act on the decision that is pending. |
+| A wait tool timed out while the original Verifier or background command kept running. | Track the original task and keep its result and execution identity. |
+| The Agent platform confirmed that the review execution failed. | Keep completed checks that still apply. Follow the returned failure action and start a new review only when the Runtime permits a retry. |
+| The original task may have written a file or submitted an external operation, but its result was never saved. | Check the original execution and its actual effects. If the result cannot be confirmed, preserve the workspace and report what evidence is missing. |
 
-```text
-Confirm Shape
-  → Builder completes the implementation and read-only code review
-  → Submit the Builder handoff
-  → Runtime runs the necessary checks
-  → A new read-only Verifier accepts items one by one
-  → Enter Archive once everything passes
-  → Finish the archive and workspace wrap-up
-```
+## Restore a missing local Run
 
-When the Verifier determines that some acceptance items have failed, the Runtime returns to Build and writes the unresolved acceptance items into the next step. When the requirements or acceptance criteria change, the Runtime returns to Shape and starts a new goal cycle. When an independent acceptance task lacks external information, fails repeatedly, or reaches the failure-count limit, the flow enters `await-user` or `blocked`.
+If the local records are missing, inspect the diagnostics with `comet native doctor <change-name> --json`. The Runtime can restore the original Run using a valid checkpoint in `comet-state.yaml` and the accompanying materials. Run the recovery command returned by Doctor. If the checkpoint is missing or materials disagree, preserve the workspace and check the available original records.
 
-When the platform cannot prove to the Runtime that the Verifier executed independently of the Builder, even an all-pass Verifier result still needs your explicit acceptance. At that point you are given three mutually exclusive options:
+Before changing devices, stop workflow activity on the original device and synchronize the current code, `comet-state.yaml`, `brief.md`, relevant Specs, referenced artifacts, and project configuration. The checkpoint preserves recorded progress. Recover unsynced code from the original workspace. Check the original task for any unknown outcomes. An active Supervisor child also requires handling its child and integration worktrees separately. See [Native Runtime components](/en/native/runtime) and [Supervisor Change](/en/native/supervisor-change) for storage and recovery boundaries.
 
-- accept the current result and prepare to archive;
-- keep the requirements and return to Build to revise the implementation;
-- revise the requirements or acceptance criteria and return to Shape.
+## Recover interrupted archiving
 
-Choose one of them; the Agent runs the command that matches your choice.
-
-## What you see when local state is abnormal
-
-Each local `state.json` is tied to a change and a `state_version`. When the Runtime reads it, it distinguishes two situations:
-
-- **State matches**: continue from the progress currently recorded;
-- **File missing, invalid, or stale**: rebuild the local execution state from `comet-state.yaml`.
-
-Both situations are handled by the Runtime automatically. For the recovery behavior after an interrupted check, a lost Verifier task, or an `archive-ready` result that lost its local execution basis, see [Recovery playbook](/en/native/recovery-playbook).
-
-## Stale commands are rejected
-
-Every command that involves a user decision or a stage transition is bound to the state version and the expected action it was generated with, and the Runtime validates both before executing. Therefore, a confirmation from an old conversation, a late Verifier result, or a command that has already expired cannot be written into the new state.
-
-**What you will see**: the command is rejected with a message that the state version or expected action does not match.
-
-**What to do**: do not retry the old command. Re-read the latest `continuation` and continue with the new action.
-
-The paging cursor of `status --details` is also bound to the state version; after the state changes, an old cursor is rejected, so acceptance items, history, and workspace information from different versions are not mixed together. For the protocol-level details of how versions are written and validated, see [Runtime protection and fault recovery](/en/native/safety-and-recovery).
-
-## Diagnosing abnormal situations
-
-Day-to-day progress follows the latest `continuation`. When abnormal situations occur — Runtime files are missing or from an old version, a change needs migration, an archive or directory move was interrupted, or the state-to-workspace relationship cannot be determined — the Agent runs the read-only diagnostic command `comet native doctor <change-name>` to get the cause and a repair suggestion; when the `continuation` asks for diagnosis, it says so as well.
-
-Run with `--repair` only when the diagnostic result explicitly provides a safe repair action. If state is corrupted, same-name directories conflict, or the recovery source is unclear, preserve the current files and runtime state and follow the reported diagnostic guidance.
-
-## continuation.v2 field table (for Agents and automation)
-
-The fields below are consumed by Agents and automation. For manual work you only need `disposition` from the first section.
-
-<Accordion title="continuation.v2 complete fields and disposition handling">
-
-| Field                 | Purpose                                                                                                                 | How to use it                                                                     |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `disposition`         | Says whether to continue, wait for the user, handle a block, or end                                                     | First decide whether the flow can advance automatically                           |
-| `action`              | Names the current action, such as confirming Shape, submitting the Builder handoff, starting the Verifier, or archiving | Execute only this one action                                                      |
-| `commandArgs`         | The complete command arguments generated by the Runtime                                                                 | Keep the state-protection arguments as they are and only fill in the placeholders |
-| `commandAlternatives` | The commands that correspond to mutually exclusive user decisions                                                       | After the user decides, choose only one of them                                   |
-| `inputOptions`        | Describes the fields the command needs and provides a JSON template                                                     | Fill in only what the template exposes                                            |
-| `runnerAction`        | Says whether the Agent should submit the implementation handoff, start the Verifier, wait for a result, or retry        | Coordinates the Builder and the Verifier                                          |
-| `userCommunication`   | Says whether you must be reported to and awaited this round                                                             | When `required: true`, pause the advancement                                      |
-
-`disposition` has four outcomes:
-
-| Outcome      | Meaning                                                                  | What happens next                                                                        |
-| ------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `continue`   | The next step is clear                                                   | Execute `action`, `commandArgs`, or `runnerAction`                                       |
-| `await-user` | You need to confirm, choose, or supply external information              | Relay what the Runtime says and wait for a reply                                         |
-| `blocked`    | The workspace, state, concurrency, or execution budget prevents progress | Preserve the scene and handle it according to the recovery action or the `doctor` result |
-| `done`       | The change has finished archiving                                        | Check the workspace wrap-up and then end                                                 |
-
-`continue` does not necessarily correspond to a Shell command. After entering Build, `runnerAction` may ask the Builder to finish the implementation first; after entering Verify, it may ask to start a new read-only Verifier. The Agent should read these fields together and not look only at `commandArgs`.
-
-</Accordion>
-
-Continue reading: [Products and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Recovery playbook](/en/native/recovery-playbook).
-
-</Accordion>
+If Archive is still running in the background, wait for the original command to return. If the command was interrupted, inspect current status and diagnostics, then follow the Runtime's instructions to resume the original archive transaction. After archiving, independently check whether the Git commit, push, or pull request was completed. See [Archive and delivery](/en/native/archive-and-delivery).
