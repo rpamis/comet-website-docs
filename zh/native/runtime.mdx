@@ -1,100 +1,59 @@
 ---
 title: 'Native Runtime 的组成'
-description: '全面解析 Native Runtime 的底层系统架构、核心子模块分工、状态安全保证及能力边界。'
+description: '了解 Native 工作流如何通过 SDK Runtime 推进 change，如何将实现与验证交给 Agent，以及 Comet 如何保存进度和保护写入。'
 ---
 
-Native 工作流中新建的 change 默认采用 SDK Runtime 进行驱动。底层的 SDK Run 集中纳管全生命周期的可执行状态机；Agent 严格遵循当前的 Action 指引、已敲定的人工决策与 `continuation` 协议稳步推进，不可通过手动编写 YAML 状态或伪造 Markdown 报告来强行推进阶段。
+新建 Native change 时，Comet 会创建一个 **Run**，记录这次工作流的阶段、待办动作、执行结果和用户决定。Native 工作流定义 Shape、Build、Verify 和 Archive 的业务规则，SDK Runtime 按规则推进并保存 Run。Agent 在平台提供的会话和工具中编写代码、运行检查并判断验收结果。
 
-## 新建任务的标准运行链路
+```mermaid
+flowchart TD
+  Agent["Agent 平台<br/>Skill、代码编辑与命令执行"]
+  CLI["Comet CLI<br/>状态查询与流程操作"]
+  Runtime["SDK Runtime<br/>Run、Action 与 Wait"]
+  Native["Native 工作流<br/>阶段规则与结果校验"]
+  State["本机 Run 与项目检查点"]
+  Guard["Hook 与 Guard<br/>核对任务归属和写入权限"]
+  Agent -->|"调用命令、提交结果"| CLI
+  CLI -->|"返回状态与下一步"| Agent
+  CLI --> Runtime
+  Runtime <-->|"应用阶段规则"| Native
+  Runtime -->|"保存进度"| State
+  Agent -->|"平台发出文件写入事件"| Guard
+  Guard -->|"读取当前阶段"| State
+```
 
-新创建的任务依次严格完成需求对齐与确认、Build 代码编写、Verify 质量验收、验收结论确认以及流转 Archive 归档。Verify 验收支持在当前会话内直接完成，亦可根据任务敏感度与你的配置要求发起隔离的独立审查；历史存量任务严格维持原有的验收约定。Runtime 负责自动化连续调度已获授权的内部子步骤，只有在遇到 Agent 编码任务、需人工裁决的决策点或环境死锁时，才会安全挂起并输出下一步指引。在 Build 阶段执行成功的有效检查可在 Verify 阶段被智能复用，而最终的逐项验收裁判始终在 Verify 阶段完成。
+## Native 工作流定义阶段规则
 
-本机的 Run 实例、底层诊断日志、文件并发锁及执行记录集中落盘于用户主目录下的 Comet 全局数据目录中，并严格按 Git Checkout 分支与 worktree 实施隔离。项目工程内部仅保留面向人类与团队协同的 `brief.md`、各能力 Specs 规范、`comet-state.yaml` 状态视图及详实的验收报告。包含有效检查点的工程即便在本地临时缓存彻底丢失后，亦能一键无损接续；若遭遇结果未明的存疑任务，则优先回溯核对现场实际状态。深层协议细节请参考 [SDK 持久化与恢复机制](/zh/sdk/recovery)。
+Native 工作流规定何时可以开始实现、提交验收结果和归档。Shape 确认将需求、范围和验收项作为后续工作的依据。Build 提交代码候选及其实际检查结果，Verify 对照同一候选逐项验收。待接受的验收结论与当前候选关联，确认后才进入 Archive。需要修改需求或修复实现时，Native 根据改动的内容决定回到哪个阶段。各阶段的准入条件见 [Native Loop](/zh/native/native-loop)。
 
-<Note>
-  下述关于旧版 Runtime 目录、底层事务账本及 Runner 调度细节主要面向兼容模式（Compat）任务。默认的 SDK 模式任务以最新命令行输出的契约规范与下一步指引为准。
-</Note>
+## SDK Runtime 保存并推进 Run
 
-<Accordion title="兼容模式（Compat）：旧版任务参考">
+**Action** 是 Runtime 记录的一项工作，例如准备 Shape 确认材料、接收 Builder 交接或执行归档。**Wait** 记录流程正在等待的决定，例如确认 Shape 或接受验收结论。Runtime 校验结果是否对应当前 Action，确认是否对应当前提案，然后把变化写入同一个 Run。若 Agent 尝试提交过期决定，Runtime 会要求它重新读取当前状态。
 
-**Runtime** 是 Comet 体系中统管工作流状态推演、持久化快照与客观证据链的核心引擎。大模型充当 Builder 与 Verifier 角色，分别负责方案落地、自检自查与质量裁判；而 Runtime 的行为完全基于严格确定的系统规则运行，不夹带任何大模型的不确定性判断。Native 状态机的每一次阶段跃迁均须经过 Runtime 鉴权：Agent 调用 `comet native` 命令行接口，Runtime 前置校验状态合法性、原子化执行底层操作，随后返回标准的下一步响应。
+`comet native status <change-name> --json` 用于查看状态，`comet native next <change-name> --json` 用于推进流程。Runtime 可以连续执行已获批准的内部步骤，直到需要 Agent 执行工作、你作决定，或遇到阻塞。Skill 读取响应中的 `continuation`，据此继续或向你说明卡在哪里。接续操作见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
 
-开发者日常无需直接与 Runtime 底层命令交互。在 Agent 客户端中直接键入 `/comet` 或 `/comet-native`，系统 Skill 会自动消费 Runtime 返回的 continuation 契约并精准调度；若怀疑底层出现状态偏离，随时可运行 `comet native doctor` 进行健康检查。
+## Agent 实现代码并提交验收证据
 
-## 核心架构组件一览
+Builder 和 Verifier 通过 Agent 平台工具运行项目的构建、测试和静态检查。提交结果时，Agent 报告实际执行的命令、工作目录、结果以及未执行的检查。Verify 可以复用仍适用于当前代码和环境的检查结果，只补跑受改动影响或缺少证据的检查。Verifier 仍须对照全部验收项给出结论。
 
-Runtime 底层由八个高内聚的子模块精密协作构成：
+验收可以在当前会话完成。若本次 change 要求独立审查，Runtime 会在领取验收任务时核验执行者是否符合独立性要求。报告记录实际采用的审查方式。证据和修复规则见 [验证与修复](/zh/native/verification-and-repair)。
 
-| 核心组件 | 核心职责与分工 | 开发者感知到的交互场景 |
-| --- | --- | --- |
-| 确定性状态机 | 掌控四阶段推演、门禁准入以及容错重试预算 | 目标未确认不可提前写代码；失败触达上限时安全挂起 |
-| Continuation 引擎 | 计算并生成下一步标准指令及待确认的人工选项 | 每条命令末尾输出的下一步建议；Agent 提示你决策的选择题 |
-| 客观检查执行器 | 在沙盒环境中真实调用测试、编译与代码静态检查 | Verify 阶段展示的各项命令真实执行日志与退出码 |
-| 证据与回执中心 | 将测试裁决绑定至特定的代码哈希与评测范围 | 源码一旦改动，陈旧过期的测试结论自动失效作废 |
-| 状态持久化分层 | 兼顾跨端同步的权威规范与本机私有的瞬态运行态 | 更换开发机后，完全依靠 `comet-state.yaml` 还原现场 |
-| 并发锁与事务引擎 | 隔离多进程并发冲突，确保跨文件批量更新原子生效 | 多任务并行时的冲突仲裁；归档中断后从已成功的断点精准接续 |
-| 审计轨迹与检查点 | 记录全生命周期的推演轨迹与断点恢复快照 | 会话被压缩后可继续推进，无需重复交待背景 |
-| 阶段写入安全守卫 | 动态拦截工作流既定阶段之外的非法文件写入 | 严厉禁止 Agent 在非 Build 阶段擅自修改业务源码 |
+## Hook 和 Guard 检查写入
 
-前四个组件直接参与代码实现与验收闭环，后四个组件则在底层支撑状态持久化与并发数据安全。
+当已启用的 Hook 收到 Agent 平台提供的文件写入事件时，Guard 根据工作区选择、当前阶段和目标路径判断是否放行。例如，选中的 change 仍在 Shape 等待确认时，Guard 会拦截该 change 的实现写入。
 
-## 确定性状态机：掌控流程演进水位
+如果你要在同一工作区处理无关改动，可以用 `comet native select --none` 取消选择。正式工作流材料和 Runtime 数据仍受保护。选回原 change 后，Guard 恢复应用它的阶段限制。适用范围见 [Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery)，选择命令见 [状态与选择](/zh/cli/status)。
 
-状态机精准维护着每个 change 的实时推进水位：所处阶段（Shape、Build、Verify、Archive）、宏观处置倾向（active、await-user、blocked、done），以及代码迭代循环的核心度量——实现轮次（`iteration`）、审查尝试次数（`attempt`）、累计失败次数与连续无进展停滞计数。
+## 项目文档和本机 Run 支持接续
 
-阶段之间的演进设立了刚性门禁：在 Shape 阶段，只有目标定义、边界、关键业务决议均获得开发者明确授权后，才可迈入 Build 阶段；在 Verify 阶段，只有全量验收用例逐项通过后，才可就绪流转 Archive 归档；当失败轮次触碰配置上限、或连续多轮未能有效收敛缺陷集合时，Runtime 立即切断自动推进，主动停机将控制权交还人类。上述准则均由 Runtime 底层硬编码强制贯彻，大模型绝无任何可能擅自绕过。
+需求与验收材料保存在项目中。本机 Run 及执行记录保存在 Comet 用户数据目录中，主工作区和各 Git worktree 分开保存。`comet-state.yaml` 用于查看进度，并在关键节点保存恢复检查点。编辑该文件或 `verification.md` 无法改变 Run 的流程状态。
 
-关于门禁准则与容错预算的详尽推演请参阅 [Native Loop 核心闭环](/zh/native/native-loop)；参数定制请参考 [Native 全局配置详解](/zh/native/configuration)。
+本机记录缺失时，Runtime 可以用有效检查点和配套项目材料恢复原 Run。若 Action 已派发但结果不明，Agent 需要先核对原执行结果，再决定如何接续。诊断时可运行 `comet native doctor <change-name>`。参见 [Native 产物与状态](/zh/native/artifacts-and-state)和 [SDK 失败恢复与未知结果](/zh/sdk/recovery)。
 
-## Continuation 引擎：标准化下一步动作契约
+## Archive 应用 Specs 并完成 Run
 
-Runtime 的每一次响应均结构化附带 continuation 契约，明确指引后续将流转至四种标准场景之一：自动继续推进（附带组装完毕的参数列表）、等待人工裁决（附带待确认议题与互斥选项）、阻断挂起以排查问题，或是当前任务结束。Agent 仅被允许执行该契约指定的命令，不得在终端执行契约未列出的命令。
+验收结论获准接受后，Runtime 核对归档条件，将已确认的 Spec 变更应用到项目 Specs，移动 change 并记录归档结果。归档中断时，Runtime 核对原 Run 和已写入的文件，从已知进度继续。Git 提交、推送和 Pull Request 由 Agent 按你批准的交付范围处理。操作见 [归档与交付](/zh/native/archive-and-delivery)。
 
-所有涉及状态推进与决策落盘的指令，均强制携带 `state_version` 状态版本号与预期动作的前置校验。若在两次交互间隙状态已发生变动，Runtime 会阻断写入，强制要求 Agent 重新拉取最新 continuation，避免延迟的脏数据覆写新状态。
+## Supervisor 协调并行任务
 
-详细字段规范与业务分流请参考 [任务推进与中断恢复机制](/zh/native/continuation-and-checkpoints)。
-
-## 客观检查执行器：真实驱动测试与构建
-
-在 Verify 阶段所声明的自动化测试均由 Runtime 本地沙盒真实唤起执行：包括单元测试、Lint 语法检查、TypeScript 编译等全量命令。Runtime 负责如实抓取并持久化每条命令的进程状态、退出码、耗时毫秒数与完整 stdout/stderr 日志，并分类存储于本机的 `logs/` 目录下。Builder 仅能在交付交接说明中陈述其代码自测情况，其自述不能替代 Runtime 的客观实测日志；Verifier 所申请的任何增补测试，同样由 Runtime 统一接管执行。
-
-Runtime 能够智能识别已通过且输入契约、执行命令、工作区文件、运行环境变量依然完好的测试项，并自动复用其历史日志，同时过滤冗余调用。提交新的候选代码时，无需运行与当前变更无关的测试。如果业务源码或参数变化，必须重新运行受影响的测试并记录结果。系统还内置了一套只读的代码异味扫描工具，能迅速排查未解决的 Git 冲突标记等低级失误，随时支持通过 `comet native check` 独立调用。
-
-关于测试执行在全流程中的编排时机，请参阅 [Native Loop 核心闭环](/zh/native/native-loop) 与 [自动化验证与修复规范](/zh/native/verification-and-repair)。
-
-## 证据与回执中心：结论与代码哈希强绑定
-
-系统对每一次执行成功的命令与通过的验收用例均会自动生成结构化的防篡改回执（Receipt）。回执不仅封存了测试结论，更深度绑定了该时刻的代码版本、验收边界与内容散列值（Hash）。一旦相关源码发生改动，陈旧的历史回执立即宣告失效；新生成的正式代码快照必须重新经历严谨核验。对于执行者身份不匹配、延迟响应或存在漏评项的审查结果，回执中心会自动拦截并剔除。
-
-`verification.md` 则是这套严肃证据链面向人类的可视化图文映射，清晰呈现了真实执行的命令、逐项验收核验明细、潜在边界风险与最终裁决；一旦该文档被误删，Runtime 随时可基于底层回执库重建。
-
-## 状态持久化分层：跨端权威与单机瞬态的解耦
-
-Runtime 实行清晰的二元状态持久化架构：位于 change 目录下的 `comet-state.yaml` 承载可跨设备无损同步的稳定状态机，是全流程断点接续的唯一权威；而位于项目根目录下 `.comet/runtime/native/` 的临时目录则专门存放本机单设备的底层执行缓存、诊断日志、并发锁与事务账本，默认不纳入 Git 仓库同步。当本机私有目录因换机或系统清理彻底消失时，Runtime 能依据 YAML 中持久化的事实重建。
-
-关于存储目录拓扑与跨端同步规范，请参阅 [Native 产物与状态机制](/zh/native/artifacts-and-state)。
-
-## 并发锁与事务引擎：强一致互斥与原子性提交
-
-在任何一次状态写入前，Runtime 会先申请项目级别的并发操作锁，确保在机制上同一毫秒内仅有一个进程被允许修改状态；若检测到先前的事务因异常崩溃未决，系统会优先启动事务自愈，待现场干净后再放行新操作。凡跨越多文件的复杂变更（例如在归档时整体搬迁 change 目录并更新主 Spec）均由底层事务机制统一包裹，即便在执行途中遭遇强行拔电，重启后亦能从已成功的断点继续，不停留在不一致的中间状态。所有写入操作均采取“先落盘安全临时文件、再单步原子重命名替换”的高安全策略。
-
-关于高并发锁冲突、状态版本号控制与路径防越权机制，请参阅 [Native 运行时安全防护与容灾自愈](/zh/native/safety-and-recovery)。
-
-## 审计轨迹与检查点：韧性断点接续
-
-Runtime 采用类似于数据库 WAL 机制的追加式日志（Append-only Event Log）如实追踪全生命周期的演进轨迹，并在核心里程碑处写入一致性检查点。无论遭遇会话崩溃、更换不同的大模型客户端还是本地临时缓存意外丢失，系统均能立即从文件还原出准确的执行现场，摆脱对易失的对话上下文记忆的依赖。
-
-## 阶段写入安全守卫：动态拦截越权污染
-
-安装于 Agent 平台的 Hook 插件会在文件写入前执行前置路径鉴权。业务源码被严格限制仅在 Build 阶段方被放行修改；而对于像 `comet-state.yaml`、`verification.md` 等由系统状态机管辖的核心产物，任何试图由 Agent 编写并直接篡改的写入行为均会被强硬拦截。这层前置防护与 Runtime 内部的合法性校验形成了双重防线：Hook 插件负责在客户端源头阻断低级误操作，Runtime 则在每条指令执行时二次核验状态版本、工作区与代码候选的一致性。
-
-## Runtime 的能力边界声明（明确不做之事）
-
-- **不代写任何业务代码**：具体业务逻辑的实现全权交由 Builder 模型探索落地，Runtime 仅专心做好工程流转守护。
-- **不主观裁定业务需求是否满意**：业务验收结论必须来自于具备只读权限的 Verifier 审查员，Runtime 仅负责客观证明测试确实在真实环境中跑通、且结论对应当前这批代码。
-- **不充当操作系统级硬隔离沙盒**：Runtime 严谨管控自身管辖的状态文件与技术产物，但不提供类似 Docker 或虚拟机级别的进程安全沙箱。
-- **不容忍手工篡改内部状态**：直接手动编辑由 Runtime 纳管的底层机器文件会导致状态版本脱节与校验崩溃；若遇异常，首选标准命令 `comet native doctor` 进行合规诊断与自愈。
-
-延伸阅读：[Native Loop 核心闭环](/zh/native/native-loop)、[Native 产物与状态机制](/zh/native/artifacts-and-state) 以及 [Native 运行时安全防护与容灾自愈](/zh/native/safety-and-recovery)。
-
-</Accordion>
+[Supervisor Change](/zh/native/supervisor-change) 在同一个父 Run 中协调子任务。每个子任务在自己的 Git worktree 中实现并验收，Runtime 按依赖顺序安排集成。子任务集成后，父 change 继续完成整体验收和归档。
