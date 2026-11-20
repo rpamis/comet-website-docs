@@ -1,163 +1,36 @@
 ---
 title: '任务推进与中断恢复'
-description: '清晰把握任务执行水位、识别关键人工交互节点，掌握会话中断或跨设备场景下如何基于 comet-state.yaml 稳妥接续。'
+description: '查看 Native change 的下一步，在会话中断、切换工作区或换设备后继续原任务。'
 ---
 
-新创建的 Native 任务均由底层 SDK Run 统一驱动。`comet-state.yaml` 负责呈现宏观阶段与验收结论，并内嵌了支持跨端恢复的断点检查点；切勿通过手动篡改该文件来伪造 Action 结果或强行跳过审批。
+会话中断后，让 Agent 继续原 change。Runtime 在 Run 中保存当前阶段、用户决定和任务结果。恢复时先核对当前工作区和待处理的动作，再按最新命令响应继续。
 
-## 基于最新的 continuation 指引接续推进
+## 查看当前进度和下一步
 
-让 Agent 读取 `comet native status <change-name> --json` 或 `comet native next <change-name> --json` 返回的 `continuation` 数据结构。若需要审查包含历史轨迹的完整全貌，可调用 `status --details --json`。任务当前的处理倾向必属于自动继续（continue）、等待用户（await-user）、硬性阻塞（blocked）或已完成（done）之一；每次调用均需采用系统最新分发的身份标识与确认信息。
+回到该 change 的工作区，运行 `comet native status <change-name> --json`。如果不知道名称，先用 `comet native status --json` 查看当前工作区的任务。若 change 使用独立 Git worktree，进入那个 worktree 再查看。需要完整的动作和决策记录时，在具名查询中加上 `--details`。
 
-遭遇会话中断后，重新唤起时会精准锚定相同的 change、Run 实例与原前置 Action。已被领取的执行任务需先回溯原会话上下文；等待外部工具响应超时不等于任务本身失败，禁止擅自重复派发。切换工作设备时，只要完整保留正式技术文档与有效的检查点，Runtime 即可全自动核验规格定义、工作区绑定与既有测试证据。若原执行结果未明，首要操作是校验现场并重建可信状态。底层深层机理请参阅 [SDK 恢复机制](/zh/sdk/recovery)。
+`status` 用于查看。Agent 按响应中的下一步推进流程，执行后以新响应为准。若提示状态已变，重新查询后再提交决定。如果响应给出了状态版本、预期动作或提案标识，提交确认时保留这些参数。
 
-常规的代码构建命令与自动化测试直接借由 Agent 平台的工具链执行。Agent 负责复核原执行结果与当前代码实现，仅按需补齐增量检查；Runtime 不会尝试恢复这些底层命令的历史系统进程，亦不单凭文件散列指纹草率决定跳过测试。新创建的任务支持在当前会话内直接完成验收；若项目显式启用了独立审查模式，则仍须走完既定的独立审查流程，历史存量任务严格遵循原有约定。
-
-在 SDK 归档完成后，开发者还须分别核验并完成已经过你明确授权的 Git 提交、远端推送或 Pull Request 流程。
-
-<Note>
-  下文保留了兼容模式（Compat）下的状态字段与本机目录拓扑以供历史任务查阅。SDK Run 是默认新任务推进的核心依据，切勿把旧版的独立 YAML 状态规则机械套用到 SDK 任务中。
-</Note>
-
-<Accordion title="兼容模式（Compat）：旧版任务参考">
-
-Native 工作流将“当前执行进展”与“下一步动作建议”实时落盘于 `comet-state.yaml`。Agent 每执行完毕一个原子动作，即可读取最新的 `continuation` 协议，明确是继续写代码、执行验收还是流转归档。即便遭遇对话中断、更换了客户端 Agent 或本地 Runtime 缓存丢失，均能基于磁盘上的文件继续推进。
-
-在 Shape 需求确认、各轮次验收裁决、最终归档核准等关键里程碑节点，Comet 均会将当前阶段与验收事实写入 `comet-state.yaml`。该文件持久化记录的执行水位即为**断点恢复依据**，遭遇中断后始终从最近一次记录无损接续。
-
-## 什么时候需要开发者亲自介入
-
-`comet native new`、`status`、`next`、`archive` 及 `doctor` 等命令均会返回结构化的 `continuation.v2` 对象。它统筹了工作流状态机演进、Agent 动作建议以及向用户汇报的关键信息。你无需逐字段深究内部报文，只需关注 `continuation.v2` 中的 `disposition` 核心处置标记，即可快速判断当前是否需要你操作：
-
-| `disposition` | 语义与状态 | 你的应对举措 |
+| `continuation.mode` | 当前情况 | 如何继续 |
 | --- | --- | --- |
-| `continue` | 下一步动作明确无歧义，流程全自动推演 | 无需任何操作，静待 Comet 自动完成编码、测试或归档 |
-| `await-user` | 遇到关键决策点，需人工裁决、二选一或补充外部信息 | 按提示直接答复你的决策（如接受验收结果、微调需求），或按需输入所需凭据 |
-| `blocked` | 遭遇工作区冲突、状态版本脱节、并发死锁或预算熔断 | 保护好当前工作区现场，按提示执行 `comet native doctor <change-name>` 排障 |
-| `done` | 当前 change 变更已完成归档 | 检查工作区 Git 收尾状态，本次任务结束 |
+| `execute` | 有明确的下一步。 | Agent 在响应指定的工作区执行返回的操作。 |
+| `ask` | 流程在等待你的决定。 | 查看当前提案，确认、要求修改或补充缺少的信息。 |
+| `wait` | 原任务已经领取，尚未返回结果。 | 查看或等待原任务，使用原领取信息提交结果。 |
+| `reconcile` | 需要核对执行结果或排除阻塞。 | 按提示核对原任务、路径或事务，再执行返回的恢复操作。 |
+| `done` | 流程已结束。 | 查看最终状态。若已归档，再核对约定的 Git 交付是否完成。 |
 
-`await-user` 意味着工作流在等待你的关键决策或补充外部输入。`blocked` 则会明确打印具体的阻塞诱因及推荐的自愈指令；若 Agent 能在已有授权边界内自动纠偏，它会直接自愈推进，仅在涉及未知决策时才会停下来发问。深入排障请参考后文的 `doctor` 章节。完整的数据契约详见本页底部的“供 Agent 与自动化”小节。
+## 恢复正在执行的任务
 
-## 恢复检查点在仓库中的实际存放位置
+新会话先核对原任务是否已经领取，以及原执行会话是否还在运行。等待工具超时后，Agent 应到原平台查看任务进度。如果任务仍在运行，继续等待这次执行。若任务已结束，先取回真实结果，并用原任务的领取信息提交。
 
-active change 中所有支持跨会话、跨设备共享的状态，均整齐存放在 change 目录内部，随同代码一起纳入 Git 协同管理：
+如果结果不明，先核对原执行和已经产生的文件或外部结果，避免重复运行可能已经生效的操作。只有确认原任务失败、丢失、超时终止或结束后没有可用结果时，才按 Runtime 返回的下一步处理失败或重试。详见 [SDK 失败恢复与未知结果](/zh/sdk/recovery)。
 
-- `brief.md`：目标范围、架构决议、验收样例与待敲定问题；
-- `specs/<capability>/spec.md`：归档后对齐的系统全量能力规格；
-- `comet-state.yaml`：当前阶段、状态版本、逐条验收结论、Loop 迭代轮次、Builder handoff 交付摘要、阻塞诱因、最近 50 条原子审计轨迹与下一步动作建议；
-- `verification.md`：由 Runtime 基于客观事实自动渲染的可视化人类可读报告。
+## 恢复缺失的本机 Run
 
-其中 `comet-state.yaml` 是状态判定的唯一权威来源，所谓的恢复点即指代该文件记录的水位。你无需手动生成任何形式的备份文件（旧版的 `comet native checkpoint` 命令早已废弃）。`verification.md` 仅为只读展示快照，即便丢失或版本稍显滞后，Runtime 随时可以基于 YAML 文件重建。
+如果本机记录缺失，先执行 `comet native doctor <change-name> --json` 查看诊断。Runtime 可以从 `comet-state.yaml` 中有效的检查点和配套材料恢复原 Run。按 Doctor 返回的命令恢复。缺少有效检查点或材料不一致时，先保留工作区，核对可用的原始记录。
 
-本机专属的私有执行态文件则存放于 `.comet/runtime/native/`，仅对当前机器有效：
+换设备前，停止在原设备上推进任务，同步当前代码、`comet-state.yaml`、`brief.md`、相关 Specs、引用的产物和项目配置。检查点保存已记录的进度，未同步的代码需要从原工作区找回。仍有执行结果不明时，先核对原任务。若是正在执行的 Supervisor 子任务，还需要单独处理子任务和集成 worktree。文件和恢复边界见 [Native Runtime 的组成](/zh/native/runtime)与 [Supervisor Change](/zh/native/supervisor-change)。
 
-```text
-.comet/runtime/native/
-├── changes/<change-name>/state.json
-├── logs/
-├── locks/
-└── transactions/
-```
+## 恢复中断的归档
 
-这些文件细致记录了本机当前挂起的测试进程、系统底层日志、并发文件锁与短期事务上下文。你可随意清理或重建该目录；它们不会被作为跨设备同步的依据，更无法反向覆盖版本更新的 `comet-state.yaml`。
-
-Shape、Build、Verify 及 `archive-ready` 等各阶段的具体中断恢复推演，详见[断点恢复实操手册](/zh/native/recovery-playbook)。
-
-## 切换设备或重启会话后的接续
-
-在同一台机器的新会话中，你通常可以输入“继续刚才的任务”。Comet 会找到当前活动的变更，并显示关联的工作区和下一步操作。若需手动查看当前详情，可运行：
-
-```bash
-comet native status <change-name> --details --json
-```
-
-更换开发机前，请确保在 Git 仓库中同步提交了以下内容：
-
-- 业务源码以及所属的特定分支或 Git worktree；
-- 项目全局配置 `.comet/config.yaml`；
-- change 目录内的 `brief.md`、各 capability Specs 规范以及 `comet-state.yaml`；
-- （可选）已生成的 `verification.md`，该报告在目标设备上同样支持一键重建。
-
-目标新设备完全无需拷贝旧机器的 `.comet/runtime/native/` 临时目录。Runtime 在启动时会核验工程根目录、分支名、worktree 拓扑与 change 的绑定合法性。当校验一致时，系统会基于 `comet-state.yaml` 记录的水位精准重建本机的执行状态；若检测到绑定脱节、代码分支未拉取或存在命名冲突，系统会安全保护现场，等待你裁决。
-
-## 常规 Change 的自动化推进闭环
-
-一个常规 change 的标准推进主线如下：
-
-```text
-确认 Shape 阶段需求与验收范围
-  → Builder 完成业务代码实现与只读自审
-  → 提交 Builder handoff 交付快照
-  → Runtime 触发必要的自动化健康检查
-  → 调度只读 Verifier 开展逐条验收核验
-  → 验收全量通过后就绪进入 Archive
-  → 执行归档并平稳完成工作区收尾
-```
-
-若 Verifier 判定某些验收用例未通过，Runtime 会将状态机回退至 Build，并将未通过的测试现场与错误日志清晰作为下一步输入。若产品需求或验收基准发生变化，Runtime 会回退至 Shape 重新对齐新目标。若独立验收任务缺失外部必要凭证、底层命令连续报错或触达重试熔断阈值，流程将进入 `await-user` 或 `blocked`。
-
-当平台环境无法提供证据证明 Verifier 与 Builder 是隔离的独立会话时，即便 Verifier 判定全部通过，最终结论依然需要你手动确认。此时系统会抛出三选一决策项：
-
-- 认可当前交付成果，准备流转归档；
-- 需求不变，退回 Build 阶段继续针对性修正代码；
-- 需求或验收基准有变，退回 Shape 阶段重新对齐目标。
-
-你只需回复明确意向，Agent 会自动执行匹配你选择的指令。
-
-## 本机状态异常时的自愈表现
-
-本机 `state.json` 内部强绑定了对应的 change 标识符与 `state_version` 状态版本。Runtime 在读取该文件时会自动区分处理：
-
-- **版本与上下文完全吻合**：直接从当前记录的水位继续向下推演；
-- **文件缺失、解析损坏或版本明显落后**：以 Git 仓库中的 `comet-state.yaml` 为准，重新校准并重建本机执行态。
-
-以上纠偏过程完全由 Runtime 自动完成。关于测试中断、Verifier 句柄丢失或 `archive-ready` 丢失执行依据等边缘场景的应对，详见[断点恢复实操手册](/zh/native/recovery-playbook)。
-
-## 严格杜绝陈旧过期指令
-
-所有涉及人工决策或核心阶段演进的指令，均在参数中强制绑定了其生成时刻的 `state_version` 与预期的原子动作。Runtime 在落盘前会对这两项发起严格的一致性前置校验。因此，历史对话中的陈旧批准、延迟返回的 Verifier 回调或已失效的阶段流转指令，均不可能污染当前的新状态。
-
-**你会遇到的现象**：终端报错拒绝写入，明确提示状态版本号或预期操作已过期不匹配。
-
-**正确的应对方式**：不要反复重试旧命令，让 Agent 重新拉取最新的 `continuation` 数据，遵循最新建议动作推进即可。
-
-`status --details` 的分页游标同样强制绑定状态版本；一旦状态机发生演进，旧游标会被主动拒绝，杜绝不同历史版本的验收用例、审计轨迹与工作区信息发生混淆污染。关于状态版本号的原子写入与校验协议，请参考 [Native 运行时安全防护与容灾自愈](/zh/native/safety-and-recovery)。
-
-## 异常工况下的深度诊断指引
-
-日常流转始终严格遵循最新的 `continuation` 动作指引。仅在遇到 Runtime 核心文件缺失、版本严重断代、change 急需跨版本迁移、归档或目录搬迁中断、状态元数据与工作区绑定关系存疑等深层异常时，Agent 会执行只读排障指令 `comet native doctor <change-name>`，直接捕获根因分析与修复建议；`continuation` 若需要排障同样会明确提醒。
-
-仅当诊断结果给出了明确且经过验证的安全修复方案时，才可追加 `--repair` 执行修复。若属于状态损坏、同名目录碰撞或恢复依据模糊，应保留当前文件和运行状态，优先按 Runtime 报错提示人工解除阻塞。
-
-## continuation.v2 契约字段表（供 Agent 与自动化参考）
-
-以下字段主要由自动化脚本与 Agent 工具链解析，开发者日常仅需理解前述的 `disposition` 核心字段即可。
-
-<Accordion title="continuation.v2 完整字段与 disposition 处理">
-
-| 字段名称 | 核心职责 | 规范消费方式 |
-| --- | --- | --- |
-| `disposition` | 宏观声明当前应当自动继续、等待用户输入、处理阻塞还是结束流程 | 优先判定当前流程是否具备全自动推演条件 |
-| `action` | 明确当前的原子动作（如确认 Shape、提交 Builder handoff、唤起 Verifier 或归档） | 严格仅执行该字段指定的单一动作 |
-| `commandArgs` | Runtime 预先拼装好的完整命令行参数列表 | 原样保留系统预置的状态保护与版本参数，仅补齐公开占位值 |
-| `commandAlternatives` | 当面临互斥的人工选择题时，提供各备选分支对应的候选命令列表 | 待用户做出明确裁决后，仅选取其中匹配的一项执行 |
-| `inputOptions` | 声明目标命令所必需的入参字段，并提供标准 JSON 模板 | 仅在模板公开声明的字段内填充数据 |
-| `runnerAction` | 指引 Agent 当前是该提交交接说明、拉起 Verifier、轮询等待结果还是触发重试 | 专用于调度协同 Builder 与 Verifier 的生命周期 |
-| `userCommunication` | 标明当前步骤是否必须在会话中向用户进行正式报告并等待回复 | 当 `required: true` 时，必须立即在交互界面安全挂起推进 |
-
-`disposition` 具备四种标准终态：
-
-| 枚举结果 | 真实语义 | 推荐后续调度行为 |
-| --- | --- | --- |
-| `continue` | 下一步动作清晰明确，具备全自动推进条件 | 调度执行 `action`、`commandArgs` 或 `runnerAction` |
-| `await-user` | 遭遇人工决策点，亟需用户裁决或录入必要信息 | 在会话界面向用户清晰复述现场并挂起等待答复 |
-| `blocked` | 遭遇工作区冲突、状态版本脱节、并发死锁或预算熔断 | 保护好当前工作区现场，按返回的恢复建议或 `doctor` 指引排障 |
-| `done` | 当前 change 变更已完成归档 | 检查工作区 Git 收尾状态，本次任务结束 |
-
-请特别注意：`continue` 并不简单等价于一条可执行的 Shell 命令。在进入 Build 阶段后，`runnerAction` 可能要求当前 Agent 先行完成业务代码编写与自审；在进入 Verify 阶段后，它可能要求拉起独立的只读 Verifier 会话。Agent 必须统筹解析上述复合字段，切勿仅盯紧 `commandArgs`。
-
-</Accordion>
-
-延伸阅读：[产物与状态机制](/zh/native/artifacts-and-state)、[自动化验证与修复](/zh/native/verification-and-repair) 以及 [断点恢复实操手册](/zh/native/recovery-playbook)。
-
-</Accordion>
+如果 Archive 命令仍在后台运行，等待原命令返回，避免再次启动归档。如果命令已中断，查看当前状态和诊断，再按 Runtime 返回的恢复指引继续原归档事务。归档完成后，单独核对 Git 提交、推送或 Pull Request 是否已经执行。见 [归档与交付](/zh/native/archive-and-delivery)。
