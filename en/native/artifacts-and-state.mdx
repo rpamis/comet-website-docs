@@ -1,149 +1,71 @@
 ---
 title: 'Native artifacts and state'
-description: 'Understand user documents, state that supports recovery across devices, and machine-local Runtime files in Native.'
+description: 'Locate requirements, Specs, progress, and verification reports for a Native change, and see which files to sync and which Comet maintains.'
 ---
 
-Native keeps requirements and verification documents in the project and SDK execution data in the user Comet data directory. The SDK Run manages execution state for new tasks.
+Native stores requirements, target Specs, state files, and verification reports in the project. The local Run keeps the current stage, approvals, and execution results. To understand a change, read `brief.md` for the agreement, `verification.md` for the acceptance evidence, and the CLI response for available actions.
 
-Formal documents, plans, and reports no longer have built-in byte caps. Read failures report the actual error instead of substituting older content.
+## Locate the change directory
 
-## Default SDK layout
+This example uses `login-error-message`. The default artifact root is `docs`. You can set `native.artifact_root` in `.comet/config.yaml`. Use the paths returned by `show` for your project.
 
 ```text
-<project>/
-  .comet/config.yaml
-  .comet/current-change.json
-  <artifact-root>/comet/changes/<change-name>/
+docs/comet/
+  changes/login-error-message/
     brief.md
-    specs/<capability>/spec.md
+    specs/authentication/spec.md
+    specs/authentication/delta.yaml
     comet-state.yaml
     verification.md
+  specs/authentication/spec.md
+  archive/
 ```
 
-Use the actual `<artifact-root>` from project configuration and Runtime responses. Local Runs, logs, and transactions are isolated by checkout and worktree; `.comet/runtime/native/` is not required in the project. A valid checkpoint in the projection restores the original Run. Users and Agents maintain document content under the workflow rules; Runtime updates reports and machine state. See [SDK persistence and recovery](/en/sdk/recovery).
+Here, `delta.yaml` applies to a change associated with an existing capability. `verification.md` might not exist until verification passes. A Supervisor Change can also have `children.yaml`.
 
-<Note>The local directories and standalone state fields below describe the Compat layout.</Note>
+```bash
+comet native show login-error-message --json
+```
 
-<Accordion title="Compat: legacy task reference">
+Find the change directory, brief, Specs, state file, and report in the returned `artifacts` object. If a path differs from what you expect, check the current workspace and project configuration first. For archived artifacts, use the directory returned by Archive.
 
-<Note>
-  New Native changes use SDK Runtime. Requirements, Specs, state projections, and verification
-  reports remain in the project. Machine-local execution data is saved by workspace in the user
-  Comet data directory. The stage and acceptance requirements on this page still apply. See [SDK
-  persistence and recovery](/en/sdk/recovery) for local directories and recovery.
-</Note>
-
-Native keeps content you need to read and synchronize in the change directory, and execution records in the project Runtime. You usually only need the brief, Spec, `comet-state.yaml`, and `verification.md`.
-
-## Project layout
-
-The default layout is as follows:
-
-<Tree>
-  <Tree.Folder name="<project>/" defaultOpen>
-    <Tree.Folder name=".comet/" defaultOpen>
-      <Tree.File name="config.yaml" />
-      <Tree.File name="current-change.json" />
-      <Tree.Folder name="runtime/native/" defaultOpen>
-        <Tree.Folder name="changes/<change-name>/" defaultOpen>
-          <Tree.File name="state.json" />
-        </Tree.Folder>
-        <Tree.Folder name="logs/" />
-        <Tree.Folder name="locks/" />
-        <Tree.Folder name="transactions/" />
-      </Tree.Folder>
-    </Tree.Folder>
-    <Tree.Folder name="docs/comet/" defaultOpen>
-      <Tree.Folder name="specs/" />
-      <Tree.Folder name="changes/" defaultOpen>
-        <Tree.Folder name="<change-name>/" defaultOpen>
-          <Tree.File name="brief.md" />
-          <Tree.File name="comet-state.yaml" />
-          <Tree.Folder name="specs/<capability>/" defaultOpen>
-            <Tree.File name="spec.md" />
-          </Tree.Folder>
-          <Tree.File name="verification.md" />
-        </Tree.Folder>
-      </Tree.Folder>
-      <Tree.Folder name="archive/" defaultOpen>
-        <Tree.Folder name="YYYY-MM-DD-<change-name>/" />
-      </Tree.Folder>
-    </Tree.Folder>
-  </Tree.Folder>
-</Tree>
-
-`native.artifact_root` can be changed to other relative directories within the project, such as `artifacts/comet/`. `.comet/config.yaml` and `.comet/current-change.json` are bound to the project. `.comet/runtime/native/` is managed by the Runtime and is added to `.gitignore` and ignored by default; it is not copied to the change directory or committed as user documentation.
-
-## Three types of user-readable files
+## Maintain requirements and target Specs in Shape
 
 ### `brief.md`
 
-The brief explains the objectives, scope, non-goals, confirmed decisions, open questions, acceptance examples, and verification expectations. It is the working description for Shape, and you can read and edit the requirements directly.
+`brief.md` records goals, scope, non-goals, constraints, user decisions that affect delivery, and the basis for acceptance. Describe which modules and key files the change creates, modifies, or deletes, along with anything deliberately excluded. Use a directory tree or a list.
 
-A focused task needs only four core sections: `Outcome`, `Scope`, `Non-goals`, and `Acceptance examples`. Add constraints, key decisions, open questions, or special check requirements when relevant. You do not need to fill every optional section with "None" to satisfy a template.
+For example, the `login-error-message` brief can limit the change to sign-in error messages and preserve the server response codes and rate-limiting rules. Write separate acceptance criteria for incorrect credentials and rate-limited requests. Mark unresolved user decisions with `[blocking]`, update the affected material when the user makes a decision, and then ask for confirmation of the complete Shape.
 
-Under `Scope`, add a `## Directory structure` section with four subsections: `### Created`, `### Modified`, `### Deleted`, and `### Not created`. List the expected modules and key files, with a short description of each path's responsibility or change. Use a tree for nested paths and a list for independent files; write "None" in empty subsections. A single-file task needs only its actual path, without a directory tree.
+### Target Spec and Delta
 
-Confirm the directory structure with the complete Shape. Adding ordinary helper files within a confirmed module requires no renewed confirmation. If scope grows or responsibilities change, update the structure and related decisions before reconfirming the plan. Changes confirmed before 0.4.5 retain their original rules and progress until their Shape is reconfirmed.
+The `specs/<capability>/spec.md` inside the change describes the capability's complete behavior after Archive. State what this change adds or updates and preserve the rules that still apply.
 
-When hand-editing the brief or a Spec, note where acceptance items come from: the Runtime generates acceptance items from only two places — the **acceptance examples at the top level of the brief** and the **complete scenarios in a Spec whose headings start with `Scenario:`**. Descriptive paragraphs, plain lists, and standalone WHEN/THEN lines are not recognized as acceptance items. So, to adjust the acceptance scope, you can only modify content in these two formats.
+- For a new capability, the Agent writes the complete target Spec.
+- For an associated existing capability, the Agent maintains the changes in `delta.yaml` using stable requirement IDs. The Runtime generates the complete target Spec from the current project Spec for Shape review and Verify.
+- To remove an existing capability, use the capability removal operation in the [Native command overview](/en/scripts/comet-native). Deleting a file cannot record that decision.
 
-When a Spec scenario describes the same behavior as an existing brief acceptance item, write `Acceptance: A1` on its own line in the scenario body, using the actual brief ID. A scenario may reference only one ID and does not create a duplicate acceptance item. New behavior still needs a separate scenario. References do not replace the complete Spec: the Verifier still checks its behavior and constraints.
+In the sign-in example, the project's `specs/authentication/spec.md` contains the current rules. The target Spec inside the change describes the proposed message behavior. The Runtime applies the approved changes to the project Specs during Archive.
 
-Shapes confirmed under the new rules preserve implementation progress across formatting-only Markdown edits to brief and Specs. Changes to goals, scope, acceptance text, or sub-tasks still return to Shape. Existing changes retain their original confirmation rules. Structural errors identify the document that needs correction.
+### `children.yaml`
 
-### `specs/<capability>/spec.md`
+A Supervisor Change uses this file to record child tasks, their dependencies, and the acceptance criteria each child covers. Children reference the original criteria by ID. The parent change retains the complete acceptance scope. See [Supervisor Change](/en/native/supervisor-change) for parallel execution.
 
-A capability is a standalone feature of the project, such as "avatar upload" or "session timeout". Specs are organized by feature, one directory per capability, and the `spec.md` in the directory describes the complete behavior of that feature after archiving. When archiving, the Runtime will execute `create`, `modify` or `remove` as declared: create, completely replace, or delete within the controlled path. To declare the removal of a capability, run `comet native spec remove` to express the removal intent — simply deleting the Spec file is not treated as a removal declaration, and that Spec is still handled as existing when archiving. When parallel changes try to modify the same capability, they will first stop to request a determination of the archiving sequence and will not automatically overwrite files.
+## Read the state and reports Comet maintains
 
-### `comet-state.yaml`
+| File or record | Location | Purpose |
+| --- | --- | --- |
+| `comet-state.yaml` | The change directory. | Shows stage and acceptance state. Saves checkpoints at key boundaries so Comet can restore the original Run. |
+| `verification.md` | The change directory, including after archiving. | Shows individual verdicts, actual checks, the review method, and known limitations. |
+| `.comet/current-change.json` | In the current project's `.comet/` directory. | Records the selection used by commands without a change name and by Hook routing. Update it with `comet native select`. |
+| Local Run and execution records | In `~/.comet/workspaces/<workspace-id>/runtime/` by default. | Stores progress, actions, decisions, and local records for transactions. The main workspace and each Git worktree have separate storage. |
 
-This is the stable state of cross-device recovery. It records the following:
+Use `comet native status` to check progress, and use the returned operation to submit decisions and results. Editing the state file or report cannot advance a Run. See [Task progress and interruption recovery](/en/native/continuation-and-checkpoints) for missing or damaged records.
 
-- the current stage and status;
-- Loop progress: `iteration` is the implementation round, incremented each time the Builder submits a new candidate implementation; `attempt` is the number of acceptance attempts on the same candidate implementation;
-- the complete acceptance items and results;
-- the Builder handoff: the handoff note the Builder writes when submitting a candidate implementation, describing this round of changes and declaring the affected acceptance items;
-- necessary check summaries, Verifier conclusions, and blocking causes;
-- the last 50 execution records and the next action.
+## Decide what to sync with the project
 
-After a session switch, device switch, or flow interruption, the Agent taking over has no previous conversation history. It first reads this file and then continues with the next action recorded in it (the continuation; for the complete field descriptions, see [Task progress and interruption recovery](/en/native/continuation-and-checkpoints)).
+Review the implementation and formal artifacts together. Deliver the archived change with the updated project Specs. Keep the state file and verification report with the change according to project rules so collaborators can review decisions and evidence.
 
-### `verification.md`
+To continue the same task on another device, sync the actual code, formal artifacts, `comet-state.yaml` with a valid checkpoint, referenced artifacts, and project configuration. A checkpoint saves recorded progress. Check unsynced work, independent child worktrees, and background tasks on the original platform separately.
 
-This is the user report generated by the Runtime based on the status, including actual checks, item-by-item acceptance, risks, limitations, and conclusions. It is a reconfigurable display file, not an input for the advancement stage. When missing or lagging, the Runtime can be rebuilt from `comet-state.yaml`.
-
-## Local Runtime
-
-`.comet/runtime/native/` only saves four kinds of local files: execution state files (overlays), logs, operation locks, and recoverable transactions. An operation lock is held only while a single operation runs, prevents two concurrent operations from modifying the same change at once, and is released when the operation ends. This directory may be missing due to equipment replacement or cleaning. The Runtime will rebuild based on the synchronized YAML and will not treat the local execution state as a cross-device fact. Logs are suitable for troubleshooting command output and cannot replace `verification.md`. For which components write these files, see [Inside the Native Runtime](/en/native/runtime).
-
-`.comet/current-change.json` only indicates which workflow/change the next write belongs to, and there is no restriction that a project can only have one active change. Status viewing is read-only. When it is necessary to clarify the ownership, use `comet native select <change-name>`.
-
-## Cross-device recovery
-
-On the target device, pull or synchronize the repository, then ask the Agent to continue the previous task. Comet locates the active change, and the Agent uses the workspace and next action returned by Runtime to resume it.
-
-What needs to be synchronized are the project code, `.comet/config.yaml`, `brief.md`, Specs and `comet-state.yaml`. If `verification.md` has already been generated, they can be synchronized together. Even if it is missing, the Runtime can rebuild it based on `comet-state.yaml` without preventing Shape or Build restoration. `.comet/runtime/native/` is in the local execution state and does not require cross-device replication.
-
-When the target device lacks Runtime or the local execution status has expired, the Runtime will automatically rebuild based on the stable boundary recorded in `comet-state.yaml`. A check that is halfway through will be treated as an interrupt. Checks that need to be re-run will be executed again, and Verifier or `archive-ready` results that cannot be safely reused will be re-verified. The recovery will not rely on the `state.json` of the old device, nor will it directly archive the old Runtime file just because it has been copied.
-
-Comet will only stop to ask you to select or correct when the code is not synchronized, the current branch or worktree does not match the change, there are multiple workspaces that match the same, or there is a conflict between the active/archive directories.
-
-The following two commands are only used when you want to check the progress or troubleshoot problems. You can also open Comet Dashboard to check the progress:
-
-```bash
-comet native status <change-name> --details
-comet native doctor <change-name>
-```
-
-## Archive and delivery
-
-The delivery choices when archiving — keep the workspace, merge locally, push, create a PR, or defer — are described in [Archive and delivery](/en/native/archive-and-delivery).
-
-## After archiving
-
-The successfully archived change only retains user-readable content such as brief, Specs, `comet-state.yaml` and `verification.md`. The local execution directory of this change in `.comet/runtime/native/` will be cleared. The machine files left over from the old version are only processed through migration or read-only adapters and will not become input for the new Native process.
-
-Continue reading: [Verification and Repair](/en/native/verification-and-repair), [Task progress and interruption recovery](/en/native/continuation-and-checkpoints) and [Recovery Manual](/en/native/recovery-playbook).
-
-</Accordion>
+Each workspace maintains its selection and local Runtime directory. You do not need to commit the local Run directory to Git. For active tasks, keep the local records so you can reconcile original results and unfinished transactions.
