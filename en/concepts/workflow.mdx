@@ -5,9 +5,15 @@ description: 'What Classic is and who it is for, what a single change goes throu
 
 You only need to call `/comet`. It reads the project configuration in `.comet/config.yaml`; when `default_workflow` is `classic`, it forwards the call to the permanent internal entry `/comet-classic`, which splits one change into five stages: open, design, build, verify, and archive. Classic and the [Native workflow](/en/concepts/native-workflow) are two independent workflows, and each keeps its own changes, state, and artifacts.
 
-Classic chains OpenSpec and Superpowers into one recoverable flow. OpenSpec owns the WHAT — requirements, proposals, the spec lifecycle, and archiving — while Superpowers owns the HOW — brainstorming, technical design, planning, execution, and verification — and Comet saves the phase and handoff state. Stage Skills do not depend on conversation history: every invocation re-reads the active change, `.comet.yaml`, and the actual file state to decide the current stage, so you do not need to figure out for yourself whether you are in open, design, build, verify, or archive.
+Classic chains OpenSpec and Superpowers into one recoverable engineering pipeline:
 
-**Classic primarily targets models in the capability tier below Fable 5 and GPT-5.6.** For these models, explicit spec, design, planning, TDD, debugging, and review stages reduce omissions and process drift. Comet's existing real-world baseline evaluations confirm that this structure keeps task coverage and completion quality on lower-capability models. Fable 5, GPT-5.6, and similarly stronger models are often better served by the Native workflow, which has fewer constraints.
+- OpenSpec focuses on requirement scope, technical proposals, the Spec lifecycle, and version archiving
+- Superpowers focuses on brainstorming, architecture design, plan breakdown, implementation, and acceptance
+- Comet enforces strict entry and exit criteria for each stage and saves the handoff context
+
+Stage Skills do not depend on conversation history: every invocation re-reads the active change, `.comet.yaml`, and the actual file state to decide the current stage, so you do not need to figure out for yourself whether you are in open, design, build, verify, or archive.
+
+**Classic primarily targets models in the capability tier below Fable 5 and GPT-5.6, or locally deployed 20B/30B small models.** For these models, explicit spec, design, planning, TDD, debugging, and review stages reduce omissions and process drift. Comet's existing real-world baseline evaluations confirm that this structure keeps task coverage and completion quality on lower-capability models. Fable 5, GPT-5.6, and similarly stronger models are often better served by the Native workflow, which has fewer constraints.
 
 The rest of this page uses `<classic-root>` for the current Classic OpenSpec root directory: `docs/openspec/` by default for new projects, and `openspec/` for projects that keep the legacy layout. The actual location is decided by `classic.artifact_layout`; see [Project file structure](/en/guides/project-structure).
 
@@ -21,19 +27,31 @@ The rest of this page uses `<classic-root>` for the current Classic OpenSpec roo
 | When you participate    | Only at decision points: requirements, the design approach, execution mode, verification failures, pre-archive confirmation       |
 | What recovery relies on | Calling `/comet` again; OpenSpec artifacts, `.comet.yaml`, and runtime evidence                                                   |
 | Lightweight presets     | `/comet-hotfix` for bug fixes and `/comet-tweak` for medium changes; both skip design                                             |
-| Advanced details        | handoff hash, routing decisions, archive flow — read during troubleshooting; see "Mechanism details and related pages" at the end |
+| Advanced details        | artifact handoff, routing decisions, archive flow — read during troubleshooting; see "Mechanism details and related pages" at the end |
 
-The full five stages fit changes that introduce new capabilities, change a public API or schema, or span multiple modules. For small, well-scoped changes, prefer the lightweight presets: fix bugs with `/comet-hotfix`, and handle light-to-medium changes to configuration, documentation, or prompts with `/comet-tweak`; both skip design. When a preset hits an escalation signal mid-run, Comet stops and lets you choose between staying on the preset and escalating to full — see "Lightweight presets and escalation" below.
-
-If you want a documented record of requirements, design, and verification, Classic's five stages and archived artifacts leave a reviewable trail. If your model is already at the Fable 5 / GPT-5.6 tier and you want it to decide its own implementation and testing approach, consider the [Native workflow](/en/concepts/native-workflow).
+- The full five stages fit changes that introduce new capabilities, change a public API or schema, or span multiple modules.
+- For small changes with a clear goal, prefer the lightweight presets: fix bugs with `/comet-hotfix`, and handle configuration tweaks, prompt refinements, or documentation edits with `/comet-tweak`; both presets skip the design stage.
+- When a preset hits an architecture-level escalation signal mid-run, Comet pauses and asks you to confirm: stay on the lightweight preset or escalate smoothly to the full flow — see "Lightweight presets and escalation" below.
+- If your team needs traceable requirement proposals, design records, and acceptance records, Classic's five-stage conventions and archive collection provide them.
+- If the model has plenty of reasoning capacity and you want it to explore implementation and testing fully on its own, use the [Native workflow](/en/concepts/native-workflow).
 
 ## What a change looks like end to end
 
-The walkthrough below follows one complete `full` change from entry to archive. Every place where you must stop and decide is numbered: routing is 1, open is 2/3/4, design is 5, build is 6/7, verify is 8, archive is 9, and the hotfix/tweak escalation review is 10. For the complete list, see [Five-stage pause points and user selection points](/en/concepts/decision-points). `/comet-classic` chains the stages automatically; with `auto_transition: false`, advance stage by stage manually instead (see [Auto-transition](/en/concepts/auto-transition)).
+The walkthrough below follows one complete `full` change from entry to archive. Throughout the flow, you wait for human confirmation only at clearly numbered "decision pause points":
+
+- Routing corresponds to pause point 1
+- open corresponds to 2/3/4
+- design corresponds to 5
+- build corresponds to 6/7
+- verify corresponds to 8
+- archive corresponds to 9
+- The escalation review when the architecture scope is exceeded corresponds to 10
+
+For the complete list, see [Five-stage pause points and user selection points](/en/concepts/decision-points). `/comet-classic` chains the stages automatically; with `auto_transition: false`, advance stage by stage manually instead (see [Auto-transition](/en/concepts/auto-transition)).
 
 ### Entry: say what you want, and routing picks the flow
 
-Type `/comet` followed by what you want to do. Based on your words, the list of active changes, and the risk signals, `/comet-classic` routes the call to one of six outcomes: `full` (the complete five stages), `hotfix`, `tweak`, `resume` (continue an existing change), `ask_user`, or `out_of_scope` (you are only asking a question). A few common directions:
+Type `/comet` followed by what you want to do. Based on your words, the list of active changes, and the risk signals, `/comet-classic` routes the call to one of six outcomes: `full` (the complete five stages), `hotfix` (urgent fixes), `tweak` (light adjustments / lightweight flow), `resume` (continue an unfinished change), `ask_user` (waiting for your choice), or `out_of_scope` (casual conversation). A few common directions:
 
 - New capability, public API, schema, or cross-module work normally routes to `full`, which opens `/comet-open`;
 - Fixing an existing bug with no new capability or interface change routes to `hotfix`, which opens `/comet-hotfix`;
