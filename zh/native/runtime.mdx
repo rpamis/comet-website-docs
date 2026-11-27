@@ -3,17 +3,17 @@ title: 'Native Runtime 的组成'
 description: '了解 Native 工作流如何通过 SDK Runtime 推进 change，如何将实现与验证交给 Agent，以及 Comet 如何保存进度和保护写入。'
 ---
 
-新建 Native change 时，Comet 会创建一个 **Run**，记录这次工作流的阶段、待办动作、执行结果和用户决定。Native 工作流定义 Shape、Build、Verify 和 Archive 的业务规则，SDK Runtime 按规则推进并保存 Run。Agent 在平台提供的会话和工具中编写代码、运行检查并判断验收结果。
+新建 Native change 时，Comet 会在后台创建一个 **Run**，记录这次任务的阶段、待办动作、执行结果和你的确认决定。Native 工作流定义 Shape、Build、Verify 和 Archive 的业务规则，SDK Runtime 按规则推进并保存 Run；Agent 在平台会话中编写代码、运行测试并完成验收。**日常使用中，你只需用自然语言与 Agent 对话，所有底层 CLI 调用都由 Agent 自动完成。**
 
 ```mermaid
 flowchart TD
   Agent["Agent 平台<br/>Skill、代码编辑与命令执行"]
-  CLI["Comet CLI<br/>状态查询与流程操作"]
+  CLI["Comet CLI<br/>由 Agent 自动调用的状态与流程接口"]
   Runtime["SDK Runtime<br/>Run、Action 与 Wait"]
   Native["Native 工作流<br/>阶段规则与结果校验"]
   State["本机 Run 与项目检查点"]
-  Guard["Hook 与 Guard<br/>核对任务归属和写入权限"]
-  Agent -->|"调用命令、提交结果"| CLI
+  Guard["Hook 与 Guard<br/>核对任务归属和写入边界"]
+  Agent -->|"后台调用命令、提交结果"| CLI
   CLI -->|"返回状态与下一步"| Agent
   CLI --> Runtime
   Runtime <-->|"应用阶段规则"| Native
@@ -24,36 +24,39 @@ flowchart TD
 
 ## Native 工作流定义阶段规则
 
-Native 工作流规定何时可以开始实现、提交验收结果和归档。Shape 确认将需求、范围和验收项作为后续工作的依据。Build 提交代码候选及其实际检查结果，Verify 对照同一候选逐项验收。待接受的验收结论与当前候选关联，确认后才进入 Archive。需要修改需求或修复实现时，Native 根据改动的内容决定回到哪个阶段。各阶段的准入条件见 [Native Loop](/zh/native/native-loop)。
+Native 工作流规定什么时候可以开始写代码、什么时候提交验收以及什么时候允许归档。Shape 确认后，需求、范围和验收项成为后续依据；Build 提交候选实现及其检查结果，Verify 对照同一候选和原始请求逐项验收；验收通过、你接受验收结果后，才进入 Archive。中途需要修代码或改需求时，Native 根据改动性质决定回到 Build 还是回到 Shape。详细流转见 [Native Loop](/zh/native/native-loop)。
 
 ## SDK Runtime 保存并推进 Run
 
-**Action** 是 Runtime 记录的一项工作，例如准备 Shape 确认材料、接收 Builder 交接或执行归档。**Wait** 记录流程正在等待的决定，例如确认 Shape 或接受验收结论。Runtime 校验结果是否对应当前 Action，确认是否对应当前提案，然后把变化写入同一个 Run。若 Agent 尝试提交过期决定，Runtime 会要求它重新读取当前状态。
+- **Action**：Runtime 记录的一项具体工作，例如提交验收条目、接收 Builder 交接、执行验收或归档。
+- **Wait**：流程正在等待你确认的决策点，例如确认 Shape 或接受验收结论。
 
-`comet native status <change-name> --json` 用于查看状态，`comet native next <change-name> --json` 用于推进流程。Runtime 可以连续执行已获批准的内部步骤，直到需要 Agent 执行工作、你作决定，或遇到阻塞。Skill 读取响应中的 `continuation`，据此继续或向你说明卡在哪里。继续任务的方法见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
+Runtime 会校验回报是否匹配当前 Action、确认是否绑定当前方案与状态版本，再把更新写入同一个 Run；如果 Agent 试图提交过期决定，Runtime 会拒绝并要求重新读取最新状态。
+
+在后台，Agent 通过 `comet native status` 只读查看状态，通过 `comet native next` 推进任务；Runtime 会自动依次执行已获批准的内部步骤，直到需要 Agent 干活、需要你作决定，或遇到阻塞。详细机制见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
 
 ## Agent 实现代码并提交验收证据
 
-Builder 和 Verifier 通过 Agent 平台工具运行项目的构建、测试和静态检查。提交结果时，Agent 报告实际执行的命令、工作目录、结果以及未执行的检查。Verify 可以复用仍适用于当前代码和环境的检查结果，只补跑受改动影响或缺少证据的检查。Verifier 仍须对照全部验收项给出结论。
+Builder 和 Verifier 直接调用 Agent 平台工具运行构建、测试和静态检查，并在提交结果时如实报告执行的命令、工作目录、退出状态、日志引用及未运行的检查。Verify 可以复用仍适用于当前代码和环境的检查结果，只补跑受改动影响或缺少证据的检查，同时仍要对照全部验收项逐条给出结论。
 
-验收可以在当前会话完成。若本次 change 要求独立审查，Runtime 会在领取验收任务时核验执行者是否符合独立性要求。报告记录实际采用的审查方式。证据和修复规则见 [验证与修复](/zh/native/verification-and-repair)。
+验收默认在当前会话以只读角色完成；如果你要求独立审查，Runtime 会在领取验收任务时校验执行者必须是独立只读会话，报告也会注明实际采用的审查方式。细则见 [验证与修复](/zh/native/verification-and-repair)。
 
 ## Hook 和 Guard 检查写入
 
-当已启用的 Hook 收到 Agent 平台提供的文件写入事件时，Guard 根据工作区选择、当前阶段和目标路径判断是否放行。例如，选中的 change 仍在 Shape 等待确认时，Guard 会拦截该 change 的实现写入。
+在支持并启用 Hook 的 Agent 平台上，每次文件写入都会先经过 Guard 检查。Guard 根据当前工作区选中的任务、所处阶段和目标路径判断是否放行——例如选中的 change 还在 Shape 等待确认时，Guard 会拦截对业务代码的写入。
 
-如果你要在同一工作区处理无关改动，可以用 `comet native select --none` 取消选择。正式工作流材料和 Runtime 数据仍受保护。选回原 change 后，Guard 恢复应用它的阶段限制。适用范围见 [Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery)，选择命令见 [状态与选择](/zh/cli/status)。
+如果你想在同一工作区临时做与 Comet 无关的修改，只需在对话里告诉 Agent 暂时退出当前任务选中（Agent 会在后台调用 `comet native select --none`）。取消选中后，普通代码写入会放行，工作流正式文件与 Runtime 数据依然受保护；回到原任务时再让 Agent 选回即可。详细规则见 [Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery)。
 
 ## 项目文档和本机 Run 支持恢复
 
-需求与验收材料保存在项目中。本机 Run 及执行记录保存在 Comet 用户数据目录中，主工作区和各 Git worktree 分开保存。`comet-state.yaml` 用于查看进度，并在关键节点保存恢复检查点。编辑该文件或 `verification.md` 无法改变 Run 的流程状态。
+需求与验收材料保存在项目仓库中。本机完整 Run 存放在用户主目录的 Comet 数据目录（默认 `~/.comet`，可通过 `COMET_DATA_DIR` 配置），主工作区和每个 Git worktree 彼此隔离。`comet-state.yaml` 用于展示进度并在关键节点保存恢复检查点（`run_checkpoint`）；直接手工编辑该文件或 `verification.md` 无法改变 Run 的状态。
 
-本机记录缺失时，Runtime 可以用有效检查点和配套项目材料恢复原 Run。若 Action 已派发但结果不明，Agent 需要先核对原执行结果，再决定如何继续。诊断时可运行 `comet native doctor <change-name>`。参见 [Native 产物与状态](/zh/native/artifacts-and-state)和 [SDK 失败恢复与未知结果](/zh/sdk/recovery)。
+本机记录丢失或换设备后，Runtime 可以从有效检查点和仓库材料还原原 Run；如果某个 Action 已派发但结果不明，Agent 会先核对原平台执行与文件副作用再决定下一步。排障流程见 [Native 任务恢复](/zh/native/recovery-playbook) 与 [Native 产物与状态](/zh/native/artifacts-and-state)。
 
 ## Archive 应用 Specs 并完成 Run
 
-验收结论获准接受后，Runtime 核对归档条件，将已确认的 Spec 变更应用到项目 Specs，移动 change 并记录归档结果。归档中断时，Runtime 核对原 Run 和已写入的文件，从已知进度继续。Git 提交、推送和 Pull Request 由 Agent 按你批准的交付范围处理。操作见 [归档与交付](/zh/native/archive-and-delivery)。
+你接受验收结论后，Runtime 依次校验归档条件、将确认的 Spec 变更合入项目正式 Specs、移动 change 目录并登记归档结果。归档中途中断时，Runtime 会核对原 Run 与事务记录，从已完成处继续而不重复写入。Git 提交、推送和 Pull Request 由 Agent 按你确认的交付范围处理，见 [归档与交付](/zh/native/archive-and-delivery)。
 
 ## Supervisor 协调并行任务
 
-[Supervisor Change](/zh/native/supervisor-change) 在同一个父 Run 中协调子任务。每个子任务在自己的 Git worktree 中实现并验收，Runtime 按依赖顺序安排集成。子任务集成后，父 change 继续完成整体验收和归档。
+[Supervisor Change](/zh/native/supervisor-change) 在同一个父 Run 中编排大型需求的子任务。每个子任务在独立 Git worktree 中实现与验收，Runtime 按依赖顺序串行合入集成分支；全部合入后，父任务在集成 worktree 完成全局全量验收、交付与清理。

@@ -1,179 +1,134 @@
 ---
 title: 'Native 配置'
-description: '全面掌握 Native 工作流的推荐配置规范、核心参数影响，以及语言、澄清模式、个人记忆、项目知识与交付策略的配置方案。'
+description: '了解 `.comet/config.yaml` 中 Native 工作流的推荐配置、各核心参数的实际行为，以及文档写入策略、变更说明、个人记忆、项目知识、Hook 白名单与自定义 PR 脚本配置。'
 ---
 
-Comet 将全局与工作流配置集中存储于项目根目录的 `.comet/config.yaml`。在执行 `comet init` 初始化时会自动生成开箱即用的基准配置，绝大多数项目无需手动干预。仅当你希望定制默认工作流、产物语言、需求澄清模式、记忆机制或交付策略时，才需按需调整。
+Comet 将项目级配置集中在根目录的 `.comet/config.yaml`。运行 `comet init` 时会自动生成默认配置，绝大多数项目无需手动调整；只有当你需要定制默认工作流、文档语言、澄清节奏、文档写入策略、并发上限、记忆/知识来源或自定义 PR 脚本时，才需要修改对应字段。
 
 ## 推荐的 Native 配置
 
-以下配置非常适合采用中文作为交付文档的新建项目：
+适合中文交付文档项目的常用配置如下：
 
 ```yaml
-# 配置格式版本，由 Comet 统一管理
+# 配置格式版本，由 Comet 自动维护
 schema: comet.project.v1
-# /comet 统一入口默认启动 Native 工作流
+# /comet 默认进入 Native 工作流
 default_workflow: native
-# 项目已激活的工作流清单
+# 当前项目启用的工作流（native、classic 或两者）
 workflows:
   - native
-# 自然语言恢复探测开关，在新会话疑似要继续旧任务时执行只读探测
+# 在新会话用自然语言继续旧任务时，启用只读恢复探测
 ambient_resume: true
+# 是否支持生成独立 HTML 变更说明（Native 下仅在用户要求时生成）
+change_walkthrough: true
 
-# 个人记忆能力（Native 与 Classic 双流共享）
+# 个人记忆（Native 与 Classic 共用）
 memory:
-  # 允许 Comet 从每一次变更交付中提炼个人偏好与经验
   learning: true
-  # 在关联任务中基于语义检索并注入已有的个人记忆
   retrieval: true
 
-# 项目知识来源提供方
+# 项目知识来源
 knowledge:
   provider: local
 
-# Native 工作流核心配置
+# Native 核心配置
 native:
-  # change 变更、Spec 规格与验证报告的归档根目录：<artifact_root>/comet/
+  # change、Spec 与验证报告的根目录：<artifact_root>/comet/
   artifact_root: docs
-  # 新建 change 的 brief、Spec 及验证报告的目标语言
+  # 新建 change 的文档语言（en | zh-CN）
   language: zh-CN
-  # batch：每轮批量聚合提问；sequential：单题递进式发问
+  # 澄清方式：batch（每轮批量问） | sequential（逐题问）
   clarification_mode: batch
-  # automatic：Verify 验收通过后自动归档；required：增加一道人工终审确认门禁
+  # 归档确认：automatic（满足安全条件时自动归档） | required（人工确认后再归档）
   archive_confirmation: automatic
-  # 同一需求允许的连续验证失败上限，触顶后主动挂起等待人工裁决
+  # 同一确认目标允许的最大 Verify 失败次数
   max_verify_failures: 5
-  # 多会话 Supervisor 模式下，允许并发推进且未完成集成的子任务上限
+  # 多会话 Supervisor 模式下允许并发推进的子任务上限
   max_parallel_children: 2
+  # 非 Build 阶段的普通文档写入策略：allow（保留并由 Agent 评估影响） | revert（严格拦截）
+  document_writes: allow
 ```
 
-套用上述配置后，运行 `/comet` 将默认进入 Native 工作流，变更文档统一存储至 `docs/comet/` 目录，全流程采用中文生成正式规格与报告，并以批处理（Batch）模式推进需求澄清。
+<Tip>
+  推荐通过 `comet init --workflow native` 生成初始配置，后续用 `comet update` 同步版本；常见选项也可以直接在 `comet dashboard` 的 **设置 → Comet 配置** 中可视化调整。
+</Tip>
 
-<Tip>推荐优先运行 `comet init --workflow native` 自动生成配置，后续通过 `comet update` 保持配置模式与最新规范对齐。</Tip>
+## 默认工作流与自然语言恢复
 
-## 默认工作流与自然语言恢复选项
-
-| 核心字段 | 默认设定 | 对开发流程的实际影响 |
+| 字段 | 默认值 | 行为说明 |
 | --- | --- | --- |
-| `schema` | `comet.project.v1` | 配置文件结构规范版本，由 Comet 框架底层管理 |
-| `default_workflow` | 初始化时选定 | 决定 `/comet` 统一入口默认分发至 Native 还是 Classic |
-| `workflows` | 初始化时选定 | 明确声明项目所启用的工作流类型（支持 `native`、`classic` 或双流并发） |
-| `ambient_resume` | `true` | 当用户在日常对话中表达“继续刚才的任务”时，自动唤起只读恢复探测 |
+| `schema` | `comet.project.v1` | 配置文件格式版本，请勿手动改动。 |
+| `default_workflow` | 初始化时选定 | 决定 `/comet` 默认进入 `native` 还是 `classic`。 |
+| `workflows` | 初始化时选定 | 声明项目启用的工作流（支持单独启用或同时启用 `native` 与 `classic`）。 |
+| `ambient_resume` | `true` | 开启后，在对话中说“继续刚才的任务”会触发只读恢复探测；设为 `false` 可停用。 |
 
-`default_workflow` 仅用于分发顶层总入口，不会破坏性地将已有的 Native change 篡改为 Classic，亦不会反向迁移 Classic change。
+修改 `default_workflow` 只影响后续新建入口的路由，不会把已有的 Native change 改成 Classic，也不会反向迁移 Classic change。想在项目中同时启用两套工作流，运行 `comet init --workflow both` 即可。
 
-若项目需要同时深度支持两套工作流，可直接执行：
+## Native 核心参数
 
-```bash
-comet init --workflow both
-```
-
-若希望彻底关闭自然语言触发的被动探测，将其配置为 `false` 即可：
-
-```yaml
-ambient_resume: false
-```
-
-此时显式调用 `/comet` 依然会严格依照 `default_workflow` 精准路由。
-
-## Native 工作流核心参数
-
-| 配置项 | 可选值 / 默认值 | 行为与影响说明 |
+| 配置项 | 可选值 / 默认值 | 作用说明 |
 | --- | --- | --- |
-| `native.artifact_root` | 项目相对路径；默认 `docs` | 约定 change、Spec 与报告集中存储在 `<artifact-root>/comet/` |
-| `native.language` | `en` \| `zh-CN`；默认 `en` | 决定新创建 change 的 brief、Spec 以及验收报告的落盘语言 |
-| `native.clarification_mode` | `batch` \| `sequential`；默认 `batch` | 决定需求澄清是按批次集中提问，还是单题递进式深度确认 |
-| `native.archive_confirmation` | `automatic` \| `required`；默认 `automatic` | 决定 Verify 阶段全量通过后，是否必须额外经过人工批准才可归档 |
-| `native.max_verify_failures` | 正整数；默认 `5` | 连续触发验收失败的最大容忍轮次，超限后主动熔断并挂起等待排查 |
-| `native.max_parallel_children` | 正整数；默认 `2` | Supervisor 架构在多会话并发模式下的子任务并发上限；单会话模式固定为 `1` |
+| `native.artifact_root` | 项目相对路径；默认 `docs` | 决定 change、Specs 与报告的存放根目录（`<artifact_root>/comet/`）。 |
+| `native.language` | `en` \| `zh-CN`；默认 `en` | 决定后续新建 change 的文档语言；已有 change 沿用创建时的语言。 |
+| `native.clarification_mode` | `batch` \| `sequential`；默认 `batch` | 控制 Shape 阶段按批提问还是逐题提问。详见 [Sequential 与 Batch 澄清](/zh/native/clarification-modes)。 |
+| `native.archive_confirmation` | `automatic` \| `required`；默认 `automatic` | 控制 Verify 全部通过后是否自动进入归档。 |
+| `native.max_verify_failures` | 正整数；默认 `5` | 同一确认目标允许的最大真实 Verify 失败次数，超限后暂停等待人工决定。 |
+| `native.max_parallel_children` | 正整数；默认 `2` | Supervisor 多会话模式下的子任务并发上限；单会话模式固定为 `1`。 |
+| `native.document_writes` | `allow` \| `revert`；默认 `allow` | 控制 Shape、Verify、Archive 阶段对普通文档类文件的写入处理策略。 |
 
 ### Supervisor 子任务并发上限
 
-支持在 **Dashboard → 设置 → Comet 配置 → Native 工作流 → Supervisor 子任务并发上限** 中进行可视化调节，亦可直接编辑配置文件：
+可以在 **Dashboard → 设置 → Comet 配置 → Native 工作流** 中调整，或直接编辑 `native.max_parallel_children`：
 
-```yaml
-native:
-  max_parallel_children: 4
-```
-
-默认并发阈值为 `2`。该配额统计已派发且尚未由 Runtime 完成代码集成收尾的活跃子任务数；前置的任务拓扑依赖仍需严格满足，单会话模式下始终按拓扑序严格串行。参数调整仅对后续派发的任务生效，正在运行的子任务会继续执行。若将配额下调至当前在途数量以下，系统会等待多余的子任务退出，再按新配额调度后续任务。
-
-处于 Builder 实现、Verifier 验收或等待集成状态的子任务均会计入配额，待 Runtime 完成集成收尾后自动归还名额；开发者无需且不应为子任务单独发起 Archive 归档。
-
-配置读取严格以主任务所在的主工程为准，子任务关联的临时 Git worktree 中的历史配置不会反向污染主任务。全局用户配置仅作为全新工程初始化的模版，不会强行覆写已有工程。SDK 流程严格遵循该项约束；兼容模式（Compat）下仍支持通过显式的 `--max-parallel` 参数进行单次动态覆盖。详见 [Supervisor Change 架构指南](/zh/native/supervisor-change)。
+- 配额统计“已派发且尚未完成集成”的活跃子任务数量（包括 Build、Verify 和等待集成中的子任务）；Runtime 完成集成后自动释放名额。
+- 修改后从下一轮派发生效；如果下调到当前活跃数量以下，系统会等已有子任务完成集成后再按新上限派发，不会中止正在运行的任务。
+- 配置始终以主项目为准，子任务 worktree 中的配置不会反向影响主任务。详见 [Supervisor Change](/zh/native/supervisor-change)。
 
 ### 产物存储根目录
 
-`artifact_root: docs` 对应项目实际路径 `<project>/docs/comet/`；`artifact_root: .` 则直接对应 `<project>/comet/`。路径必须严格限定在当前工程根目录下。
+`artifact_root: docs` 对应 `<project>/docs/comet/`，`artifact_root: .` 对应 `<project>/comet/`，路径必须位于项目根目录内。
 
-当已有项目需要迁移产物根目录时，切勿直接手动修改 YAML 或自行移动文件。请交由 Runtime 执行环境自检、安全迁移与断点元数据刷新：
+已有项目要迁移产物根目录时，不要手动改 YAML 或手搬目录。直接让 Agent 处理即可；你也可以自己在终端运行迁移命令（`show` 查看当前根目录，`move` 迁移到指定目录；迁移中断后可通过 `comet native doctor --repair --strategy <continue|rollback>` 恢复）：
 
 ```bash
 comet native root show
 comet native root move docs
 ```
 
-### 文档生成语言
+### 归档确认策略（`native.archive_confirmation`）
 
-`native.language` 用于锁定后续新建 change 的文档生成语言。已有 change 始终沿用其创建时绑定的语言标记，不会因全局配置变更而发生非预期的自动翻译或覆写。
+- **`automatic`**：当 Verify 全部通过，且同时满足“接受验收是唯一待处理等待项、无待处理证据等待、无 `running` 或 `unknown` 动作”时，Runtime 自动接受并继续归档。
+- **`required`**：Verify 全部通过后停下，等待你在对话中明确确认再归档。
 
-```yaml
-native:
-  language: zh-CN
-```
+注意：`automatic` 只决定是否跳过本地归档前的二次确认，**不会**未经同意自动执行 Git merge、push 或创建 PR。
 
-### 需求澄清交互模式
+### 验证失败上限（`native.max_verify_failures`）
 
-- `batch`：聚合本轮所有前提明确、彼此解耦的决策点集中提问，减少对话往返，适合节奏紧凑的常规迭代。
-- `sequential`：每轮仅抛出一道最核心或影响面最广的议题，待人类裁决后再行推导后续方案，非常适合前置答案可能颠覆后续路线的探索性需求。
+限制同一确认目标允许的最大真实 Verify 失败次数（默认 `5`）。达到上限时，Native Loop 暂停并列出历次失败记录，由你决定换思路继续修、调整需求还是取消任务，避免在错误方向上反复消耗 Token。平台报错或缺少外部条件等阻塞会直接暂停报告，不要靠调大该上限来掩盖环境错误。
 
-无论采取哪种模式，系统均会先探查代码库客观事实，并在正式迈入 Build 阶段前呈现完整的目标、边界、决策点、验收场景与非目标清单供你最终核准。在开发中途切换模式不会导致 `brief.md` 中尚未作答的 `[blocking]` 卡点丢失。
+### 非 Build 阶段文档写入策略（`native.document_writes`）
 
-### 归档审批门禁
+- **`allow`（默认）**：在 Shape、Verify、Archive 阶段对仓库根目录及 `docs/`、`doc/`、`documentation/`、`.github/` 等目录下的普通 Markdown/文本/LICENSE 文件（位于 Native 产物根目录之外）和 `walkthrough.html` 的写入视为中性修改，保留原 Run 并由 Agent 读取差异评估影响。
+- **`revert`**：切回严格拦截模式，非 Build 阶段的普通文档写入也会被 Hook Guard 拒绝。
 
-- `automatic`：当 Verify 最终验收全部通过后，Runtime 自动完成归档交付。
-- `required`：最终验收全部通过后，流程在归档前额外挂起，等待开发者给出最终授权。
+## 变更说明页面（`change_walkthrough`）
 
-`automatic` 仅控制是否跳过归档动作本身的二次确认，不会越权替你擅自完成 Git merge、push 或创建 PR。若任务启用了独立 branch 或 Git worktree 隔离，Comet 依然会向你呈现明确的交付策略选择题，选项详情请参阅[归档与交付](/zh/native/archive-and-delivery)。
+`change_walkthrough` 对 Native 和 Classic 共用，默认 `true`。在 Native 模式下，**仅当你明确要求生成可视化变更说明时**才会生成 `walkthrough.html`（对比前后行为、展开关键代码并附可选流程图，Verify 同步测试结果，Archive 保存归档链接）；日常任务仍以简洁文字摘要收尾。如果希望彻底禁用以节省说明 Token，可在配置文件顶层设为 `change_walkthrough: false`（或在 Dashboard 设置中关闭）。
 
-### 验证容错熔断上限
+## 个人记忆（`memory`）
 
-`max_verify_failures` 限制了在同一份既定需求下，允许代码实现连续验证失败的重试轮次上限。一旦达到该阈值，Native Loop 会主动挂起并向你汇报死锁现场，由你决定是继续重试、微调需求范围还是终止，避免由于逻辑死循环无谓空耗 Token 预算。
+`memory` 对 Native 与 Classic 共用，默认全部开启：
 
-若遇到 Runtime 底层命令崩溃、缺失必要的外部网络凭证或不可恢复的状态冲突，系统会精准返回 `await-user` 或 `blocked` 明确卡点，切勿试图通过调大计数上限来掩盖真实错误。
-
-## 变更讲解页面（Change Walkthrough）
-
-`change_walkthrough` 属于 Native 与 Classic 双流共用的功能开关，默认值为 `true`。在 Classic 模式下，Build 阶段完成后会自动渲染独立的 `walkthrough.html` 变更解说页；而在 Native 模式下，仅当你明确要求输出可视化变更说明时才会触发生成。该独立单页能直观比对前后行为差异、高亮核心代码段并附带可选架构拓扑图，Verify 阶段会在同页面即时同步真实的测试结论，最终由 Archive 阶段妥善留存。
-
-生成图形化讲解会额外消耗一定量的上下文与 Token。若团队倾向于纯文本输出或希望减少生成耗时，可在配置文件顶层将其关闭：
-
-```yaml
-change_walkthrough: false
-```
-
-亦可在 **Dashboard → 设置 → Comet 配置** 中可视化切换 **变更说明** 选项。项目的初始化与版本升级均会完整保留你的个性化选择。关闭该功能不会清理已生成的历史页面，更不会削弱核心的自动化验证防护。
-
-## 个人记忆机制
-
-`memory` 能力原生支持 Native 与 Classic 双工作流，出厂默认全量开启：
-
-| 字段 | 核心职责与能力 |
+| 字段 | 说明 |
 | --- | --- |
-| `memory.learning` | 授权 Comet 自动从每次变更的交付复盘中汲取通用的个人开发偏好与协作经验 |
-| `memory.retrieval` | 授权 Comet 在遇到语义相关的任务时，自动检索并注入已记录的个人画像记忆 |
+| `memory.learning` | 允许在任务完成时自动记录可复用的个人开发偏好与协作经验。 |
+| `memory.retrieval` | 允许在相关任务中自动检索并注入已有个人记忆。 |
 
-若希望仅消费既有记忆而不让 Agent 自动记录新经验，可配置为：
+如果只想读取已有记忆、不想自动新增，可设 `learning: false`、`retrieval: true`。
 
-```yaml
-memory:
-  learning: false
-  retrieval: true
-```
+## 项目知识（`knowledge`）
 
-## 项目知识与企业级 RAG
-
-`knowledge.provider` 默认设为 `local` 本地模式。Comet 会深度解析代码库拓扑，你也可以显式追加项目中的架构设计与规范文档：
+`knowledge.provider` 默认为 `local`。除内置代码与文档语料外，可通过 `include` 追加项目内的 Markdown Glob（正斜杠、不越出项目根目录），并按需调整单文件与总语料大小上限：
 
 ```yaml
 knowledge:
@@ -182,11 +137,11 @@ knowledge:
     include:
       - docs/architecture/**/*.md
       - packages/*/README.md
+    max_file_mb: 1
+    max_total_mb: 32
 ```
 
-`knowledge.local.include` 仅接收当前工程内部的 Markdown 文件匹配规则（Glob）。路径统一采用正斜杠 `/`，不得跨越工程根目录边界，匹配到的文档会自动合并进内置知识库中。
-
-若企业团队内部已搭建了成熟的统一 RAG 知识库微服务，可对接为远程 Provider：
+如果团队已有远程 RAG 知识库服务，可切换为 `remote`（必须使用 HTTPS，仅 `localhost`/回环地址允许 HTTP；Token 通过 `token_env` 指定环境变量名，不要明文写进配置文件；超时范围 `100`–`30000` 毫秒）：
 
 ```yaml
 knowledge:
@@ -198,31 +153,24 @@ knowledge:
     timeout_ms: 5000
 ```
 
-`endpoint` 必须填写企业服务对外暴露的真实完整 URL 地址，Comet 会直接向其发起标准 `POST` 请求（示例中的占位域名需替换为真实接口）。
+## Hook 写入白名单（`hook.allow_paths`）
 
-远程通信必须强制采用安全 HTTPS 协议（仅本地 `localhost` 与回环地址允许使用 HTTP 调试）。`token_env` 请配置存储鉴权 Token 的系统环境变量名，禁止将敏感凭据直接明文硬编码在配置文件中。请求超时时间支持配置在 `100` 至 `30000` 毫秒区间。
-
-## 阶段 Hook 写入白名单（高级选项）
-
-`hook.allow_paths` 是面向 Native 与 Classic 的高级白名单通道。它允许特定的目录在原本受到只读保护的工作流阶段中依然允许被写入，默认值为空数组。
-
-例如，在 Shape 需求设计阶段，系统默认禁止 Agent 修改业务源码；若团队约定在 Shape 期间需协同将研讨纪要写入 `docs/team-notes`，可通过如下配置放行：
+Native 与 Classic 共用，默认为空数组。如果你的项目有自定义 Hook 或脚本需要在受保护阶段向某个专用目录写文件，可在此放行（仅支持项目相对目录，采用正斜杠 `/`）：
 
 ```yaml
 hook:
   allow_paths:
+    - .my-hook-output
     - docs/team-notes
 ```
 
-路径必须为相对于项目根目录的相对路径，并以正斜杠 `/` 分隔。配置 `docs/team-notes` 将递归放行该目录下的全部子文件。
-
 <Warning>
-  该配置会直接穿透对应目录的阶段写保护机制。不要为了绕过 Shape、Verify 或 Archive 的正常合规拦截而随意放行业务源码目录。`.comet` 全局目录、Native 正式产物区以及 Classic 产物区均受核心状态机硬隔离保护，不受该白名单豁免。
+  不要把业务源码目录加入 `allow_paths`，否则会绕过 Shape、Verify 和 Archive 的写入保护。`.comet/`、Native 正式产物目录及 Classic 产物目录始终受工作流保护，无法通过 `allow_paths` 豁免。
 </Warning>
 
-## 定制 Pull Request 发起命令
+## 定制 Pull Request 创建脚本（`native.finish.pull_request`）
 
-在默认行为下，当归档阶段你选定“推送并创建 PR”时，Comet 会直接调用 `gh pr create --fill`，提取 Commit 摘要自动组装标题与描述。但若团队仓库对 PR 规范有强硬约束（例如必须携带包含特定关联 Issue 字段的 Checklist 模版），或是提 PR 后需联动触发特定的远端流水线，默认的 `--fill` 可能会被 CI 拦截。通过 `native.finish.pull_request`，你可以替换为仓库专属的自动化脚本，Comet 负责调度脚本并接收交付结果，其余交付环节保持标准一致：
+默认情况下，选择“推送并创建 PR”时会调用 `gh pr create --fill`。如果团队仓库对 PR 模板、标题或字段有专门校验，可以通过 `native.finish.pull_request` 接入仓库自带脚本，而底层的提交、推送、已有 PR 查重、分支核验和恢复仍由 Comet 处理：
 
 ```yaml
 native:
@@ -233,14 +181,12 @@ native:
       timeout_ms: 120000
 ```
 
-此时 PR 的标题生成、模版组装及仓库特异的合规校验全权交由自定义脚本接管；而底层的代码 Commit、远端推送、已有 PR 幂等查重、Base/Head 分支一致性核验以及异常重试，依然由 Comet 稳定兜底。
+配置约束：
 
-遵循以下硬性约束：
+- `provider` 当前仅支持 `repository-command`。
+- `command` 为非空参数数组；首项必须是 PATH 中的可执行程序或项目相对路径，不能用绝对路径。
+- `timeout_ms` 默认 `120000` 毫秒（2 分钟），上限 `600000` 毫秒（10 分钟）。
+- 脚本在项目根目录启动，通过 stdin 接收 `comet.native.pull-request-finish-input.v1` JSON，并通过 stdout 返回 `comet.native.pull-request-finish-result.v1` JSON。
+- 本地仍需安装并登录 GitHub CLI（`gh`），供 Comet 独立核验远端分支与 PR 状态。
 
-- `provider` 当前仅支持配置为 `repository-command`。
-- `command` 必须是一个非空的命令行参数数组；首项必须是环境变量 PATH 中的可执行程序或相对于当前项目的相对路径，禁止使用绝对路径。
-- `timeout_ms` 默认超时时间为 `120000` 毫秒（2 分钟），最大允许放宽至 `600000` 毫秒（10 分钟）。
-- 脚本会在项目根目录下被唤起执行，通过标准输入（stdin）接收 `comet.native.pull-request-finish-input.v1` 版本的 JSON 数据包，并通过标准输出（stdout）返回 `comet.native.pull-request-finish-result.v1` 格式的执行结果。
-- 即使启用了自定义 PR 脚本，本地依然需要安装并完成 GitHub CLI（`gh`）的登录授权，以供 Comet 独立核验远端分支与 PR 交付状态。
-
-延伸阅读：[用户选择点与需求澄清协议](/zh/native/decision-ownership)、[产物与状态机制](/zh/native/artifacts-and-state) 以及 [断点恢复实操手册](/zh/native/recovery-playbook)。
+延伸阅读：[哪些决定需要你确认](/zh/native/decision-ownership)、[Native 产物与状态](/zh/native/artifacts-and-state) 与 [Native 任务恢复](/zh/native/recovery-playbook)。

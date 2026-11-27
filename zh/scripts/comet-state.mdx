@@ -3,15 +3,21 @@ title: "comet state"
 description: "选择当前 change，读取和转换 .comet.yaml，记录命令证据，并解析下一步 Skill。"
 ---
 
-`comet state` 是 Classic 状态的公开命令，接口保持稳定。它负责选择当前 change、操作 `.comet.yaml` 状态、记录命令证据和解析下一步。日常使用 `/comet` 不需要直接运行它；以下场景会用到：
+`comet state` 是 Classic 状态的公开命令，接口保持稳定。它负责选择当前 change、读写 `.comet.yaml` 状态、记录命令证据和解析下一步。日常使用 `/comet` 时，这些操作由 Agent 在后台完成。
 
-- 多个 active change 并存，需要显式绑定接下来写入属于哪个 change；
-- 在 CI 中记录命令证据（record-check）供守卫审计；
+<Note>
+  本页命令由 Agent 在后台调用，你不需要手动运行。日常开发只需在对话中输入 <code>/comet</code> 提需求、回答 Agent 的提问，或说“继续”。本页供你在终端排查问题、编写脚本或接入其他 Agent 平台时查阅。
+</Note>
+
+只有下面几种情况会用到它：
+
+- 多个 active change 并存，需要指定接下来写入属于哪个 change；
+- 在 CI 中记录命令证据（record-check）供守卫检查；
 - 状态机推进被拒，需要查看字段或按提示补齐决策。
 
 ## 选择当前 change
 
-当多个 active change 共存时，开始一个新的工作目标前先执行：
+多个 active change 共存时，Agent 会在开始新的工作目标前选择当前 change，并按需查看或清除选择：
 
 ```bash
 comet state select <change-name>
@@ -22,6 +28,8 @@ comet state clear-selection
 选择记录会绑定当前 branch/worktree。切换分支、worktree，或目标 change 已归档后，旧选择会被视为失效，源码写入守卫会要求重新选择。只有一个 active change 时可以自动归属；多个 change 时不会猜测。
 
 ## 常见操作
+
+每个阶段结束时，Agent 用 `transition` 推进状态，再用 `next` 解析下一步：
 
 ```bash
 comet state transition <change-name> open-complete
@@ -34,18 +42,18 @@ comet state next <change-name>
 
 ## 记录自定义项目命令证据
 
-项目无法从 npm、Maven 或 Cargo 自动推断 build/verify 命令时，先真实运行项目命令，再记录退出结果：
+项目无法从 npm、Maven 或 Cargo 自动推断 build/verify 命令时，先实际运行项目命令，再记录退出结果：
 
 ```bash
 comet state record-check <change-name> build --command "make release" --exit-code 0
 comet state record-check <change-name> verify --command "./scripts/verify" --exit-code 0 --cwd packages/api
 ```
 
-记录内容会绑定当前 Run、命令、工作目录和退出码，供 guard 审计。它不是跳过 build 或 verify 的开关；不要记录没有实际执行的命令。
+记录内容会绑定当前 Run、命令、工作目录和退出码，供 guard 检查。它不是跳过 build 或 verify 的开关；不要记录没有实际执行的命令。
 
 ## next 输出
 
-`next` 会根据 `phase`、`workflow` 和 `auto_transition` 输出，真实格式示例：
+`next` 根据 `phase`、`workflow` 和 `auto_transition` 输出下一步，格式如下：
 
 ```text
 NEXT: auto
@@ -53,14 +61,14 @@ SKILL: comet-design
 ```
 
 - `NEXT: auto`：自动调用下一个阶段 Skill
-- `NEXT: manual`：打印 HINT，由你手动运行（仅 `auto_transition: false` 时）
+- `NEXT: manual`：打印 HINT，由你手动触发下一步（仅 `auto_transition: false` 时）
 - `NEXT: done`：流程已完成，`SKILL` 行省略
 
 `auto_transition: false` 只影响是否自动调用下一个 Skill，不影响当前阶段已经完成的状态推进。
 
 ## 状态约束
 
-`comet state` 会拒绝非法状态转换，例如 full workflow 在缺少 build 必选字段时离开 build。它也会保护由运行时自动维护的 Run 字段（machine-owned），避免手工误改。
+`comet state` 会拒绝非法状态转换，例如 full workflow 在缺少 build 必选字段时离开 build。它也会保护由 Comet 自动维护（machine-owned）的 Run 字段，避免手工误改。
 
 <Note>
   安装包仍包含 <code>comet-state.mjs</code> 兼容 launcher，但普通使用和 Agent 指令应优先采用 <code>comet state</code>。

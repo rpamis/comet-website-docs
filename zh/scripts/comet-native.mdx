@@ -3,13 +3,21 @@ title: 'Native 命令概览'
 description: 'Native 工作流的公开命令：创建、查看、选择、推进、恢复和归档。'
 ---
 
-从 0.5.5 起，新建 Native change 使用 SDK。已有 Compat change 仍可用 `comet native next <change-name>` 继续推进，并按原流程归档。Agent 按命令返回的 `runtimeFormat`、`workspace` 和 `continuation` 继续；旧 Runner 输入和 `--finish` 交付参数仅用于 Compat 任务。
+`comet native` 是 Agent 推进 Native 任务时使用的命令：创建 change、查看状态、确认 Shape、提交实现与验收结果、取消、归档和诊断。你在对话里提需求、回答 Agent 的提问、确认决策，Agent 负责在两次回复之间调用这些命令。
+
+<Note>
+  本页命令由 Agent 在后台调用，你不需要手动运行。日常开发只需在对话中输入 <code>/comet</code> 提需求、回答 Agent 的提问，或说“继续”。本页供你在终端排查问题、编写脚本或接入其他 Agent 平台时查阅。
+</Note>
+
+从 0.5.5 起，新建的 Native change 使用 SDK。已有的 Compat change 仍可用 `comet native next <change-name>` 继续推进，并按原流程归档。Agent 以命令返回的 `runtimeFormat`、`workspace` 和 `continuation` 为准决定下一步；旧 Runner 输入和 `--finish` 交付参数只用于 Compat 任务。
 
 ## 批准 Shape 后等待实施
 
-在 Runtime 返回的当前 Shape 确认命令后追加 `--defer-build`，同时保留 `--confirmed` 和全部预期状态参数。开始实施时由真实接收会话执行 `comet native next <change-name> --session <实际会话标识> --json`，进入返回的 `executionCwd`。完整规则见[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts)。
+你可以在确认方案时告诉 Agent“确认方案，但先不开始写代码”。Agent 会在 Runtime 返回的 Shape 确认命令后追加 `--defer-build`，并保留 `--confirmed` 和全部预期状态参数。等你要求开工时，接收任务的会话再执行 `comet native next <change-name> --session <实际会话标识> --json`，进入返回的 `executionCwd` 所指的目录开始实现。完整规则见[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts)。
 
 ## SDK 常用命令
+
+Agent 在任务各阶段调用的主要命令：
 
 ```bash
 comet native new <change-name> --json
@@ -19,16 +27,18 @@ comet native archive <change-name> --dry-run --json
 comet native doctor <change-name> --json
 ```
 
-用户确认、Builder 与独立 Verifier 的结果必须使用当前任务的原身份提交。不要根据示例自行填写状态版本、候选或确认哈希。完整使用流程见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
+你的确认、Builder 与独立 Verifier 的结果，必须用当前任务的原身份提交。不要照示例自己填写状态版本、候选或确认哈希。完整流程见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
 
 ## 取消未完成任务
+
+在对话里告诉 Agent“取消当前任务”并说明原因，Agent 会先预览、再执行取消：
 
 ```bash
 comet native cancel <change-name> --dry-run --json
 comet native cancel <change-name> --json
 ```
 
-取消后不再把 change 计为活动任务，保留实现、提交、分支和工作区；受管理检查会停止，尚未核对的执行需要先确认停止，之后才释放当前选择。已完成或旧 Compat 任务会给出其适用路径，不能用取消冒充归档验收。
+取消后，这个 change 不再计入活动任务，实现、提交、分支和工作区都会保留。受管理的检查会停止；结果还没核对过的执行，要先确认已经停止，之后才释放当前选择。已完成或旧的 Compat 任务会返回各自适用的处理方式，取消不能当作归档验收。
 
 <Note>下面保留 Compat 命令、状态字段和旧版本机目录参考。SDK 的可用参数以当前 `comet native <command> --help` 与返回的下一步为准。</Note>
 
@@ -52,9 +62,11 @@ comet native cancel <change-name> --json
 | `comet native check`          | 对指定 change 运行只读的 Native 验证检查                                                  |
 | `comet native doctor`         | 诊断、迁移和重建本机 Runtime                                                              |
 
-新的 Native 流程不再公开 `checkpoint`、`evidence` 或 `receipt` 命令；验收检查由 Runtime 在 Verify 中执行（可用 `comet native check` 随时只读复跑），结果进入可跨设备同步的状态和用户报告。
+新的 Native 流程不再公开 `checkpoint`、`evidence` 或 `receipt` 命令。验收检查由 Runtime 在 Verify 中执行（可用 `comet native check` 随时只读重跑），结果进入可跨设备同步的状态和用户报告。
 
 ## 查看已有任务
+
+`status` 和 `show` 是只读命令，不改变当前工作区的选择，你也可以在终端自己运行：
 
 ```bash
 comet native status --json
@@ -62,11 +74,9 @@ comet native status add-user-avatar --details --json
 comet native show add-user-avatar
 ```
 
-`status` 和 `show` 是只读命令，保留当前工作区的选择。
-
 ## 推进和 Verify
 
-`next` 不接受 Agent 自填通过结果。它只确认 Shape、接受或修订 Verify 结果、重试允许的 Verifier，或通过 `--runner-input` 提交 Runtime 定义的 handoff、检查计划和 Verifier 响应：
+`next` 不接受 Agent 自己填写的通过结果。它只做这几件事：确认 Shape、接受或修订 Verify 结果、重试允许的 Verifier，或通过 `--runner-input` 提交 Runtime 定义的 handoff、检查计划和 Verifier 响应：
 
 ```bash
 comet native next add-user-avatar --summary "Shape confirmed" --confirmed
@@ -76,40 +86,42 @@ comet native next add-user-avatar --summary "Acceptance criteria changed" --revi
 comet native next add-user-avatar --runner-input <temporary-json-file>
 ```
 
-Verify 后的用户决策用 `--accept-result`、`--revise-implementation` 和 `--revise-requirements` 表达；`--confirmed` 只确认 Shape 或明确降级的 verifier-unavailable 回退，不用于接受通过结果。Verifier 不可用时的两个选择对应：
+Verify 之后由你决定下一步，Agent 用 `--accept-result`、`--revise-implementation` 和 `--revise-requirements` 提交你的决定。`--confirmed` 只用于确认 Shape，或确认明确降级的 verifier-unavailable 回退，不能用来接受通过结果。Verifier 不可用时有两个选择：
 
 ```bash
 comet native next add-user-avatar --summary "Retry verifier" --retry-verifier
 comet native next add-user-avatar --summary "Accept degraded result" --confirmed
 ```
 
-`--retry-verifier` 保留当前候选和已完成检查，只发起新的验收尝试。Supervisor 并行推进相关的 `next` 还有 `--coordination-mode` 和 `--max-parallel`（默认 2）；带恢复上下文的调用需要 `--expected-state-version` / `--expected-action` 防止旧响应覆盖新状态。
+`--retry-verifier` 保留当前候选和已完成的检查，只发起新的验收尝试。Supervisor 并行推进时，`next` 还带 `--coordination-mode` 和 `--max-parallel`（默认 2）；带恢复上下文的调用需要 `--expected-state-version` / `--expected-action`，防止旧响应覆盖新状态。
 
-正常输入模板和字段以 `comet native status <name> --details --json` 返回的 `continuation.inputOptions.template` 为准。`request-checks` 只能由当前 Verifier 请求 Runtime 执行；Builder 自行报告通过时，change 不会直接进入 Archive。
+正常的输入模板和字段，以 `comet native status <name> --details --json` 返回的 `continuation.inputOptions.template` 为准。`request-checks` 只能由当前 Verifier 请求 Runtime 执行；Builder 自己报告通过时，change 不会直接进入 Archive。
 
-当前命令已经返回所需模板或 Verifier 任务包时，直接使用该响应，不必再查一次 Status。Supervisor 可以用 `--confirmed --coordination-mode multi-session|single-session` 同时确认完整方案和推进方式；接受结果时可以加 `--finish keep|merge|push|pull-request` 一起保存交付选择。实际执行时保留最新 continuation 给出的状态版本与预期动作参数。
+当前命令已经返回所需模板或 Verifier 任务包时，直接使用该响应，不必再查一次 status。Supervisor 可以用 `--confirmed --coordination-mode multi-session|single-session` 同时确认完整方案和推进方式；接受结果时可以加 `--finish keep|merge|push|pull-request` 一起保存交付选择。实际执行时，保留最新 continuation 给出的状态版本与预期动作参数。
 
 ## 归档
 
-先查看 Runtime 返回的 archive-ready continuation，再按需预览或执行：
+Agent 先读取 Runtime 返回的 archive-ready continuation，再按需预览或执行：
 
 ```bash
 comet native archive add-user-avatar --dry-run
 comet native archive add-user-avatar --confirmed
 ```
 
-需要符合项目提交规范时，在预览和执行命令中保留相同消息参数。例如，仅保留隔离工作区：
+项目对提交说明有要求时，在预览和执行命令里带上相同的说明参数。例如只保留隔离工作区：
 
 ```bash
 comet native archive add-user-avatar --dry-run --finish keep --commit-message "chore: archive add-user-avatar"
 comet native archive add-user-avatar --confirmed --finish keep --commit-message "chore: archive add-user-avatar"
 ```
 
-`--commit-message` 设置归档提交说明，`--merge-message` 设置本地合并说明；后者仅用于 `--finish merge`。支持中文和多行文本，传入时按当前 Shell 的规则引用。项目 Hook 仍正常执行，说明被拒绝后的恢复见 [恢复手册](/zh/native/recovery-playbook#archive-事务恢复)。
+`--commit-message` 设置归档提交说明，`--merge-message` 设置本地合并说明，后者只用于 `--finish merge`。两者都支持中文和多行文本，传入时按当前 Shell 的规则引用。项目 Hook 照常执行；说明被拒绝后的恢复见 [恢复手册](/zh/native/recovery-playbook#archive-事务恢复)。
 
-Archive 应用完整 target Specs、生成 `verification.md`、移动 change 并清理本机 Runtime；正常路径不重新执行 Verify。branch/worktree 隔离的交付方式用 `--finish keep|merge|push|pull-request` 指定（选项语义见[归档与交付](/zh/native/archive-and-delivery)）；并行 capability 冲突时，根据 `continuation` 先用 `--serial-first` 选择串行顺序。
+Archive 应用完整的 target Specs、生成 `verification.md`、移动 change 并清理本机 Runtime，正常路径不重新执行 Verify。branch/worktree 隔离的交付方式用 `--finish keep|merge|push|pull-request` 指定，各选项的含义见[归档与交付](/zh/native/archive-and-delivery)。并行的 capability 冲突时，按 `continuation` 先用 `--serial-first` 选择串行顺序。
 
 ## 诊断、迁移和恢复
+
+`comet native doctor` 是只读诊断命令，你也可以在终端自己运行；加上 `--repair` 会执行修复：
 
 ```bash
 comet native doctor
@@ -117,8 +129,8 @@ comet native doctor add-user-avatar
 comet native doctor add-user-avatar --repair
 ```
 
-`doctor --repair` 只做可确定的迁移、未完成事务的收尾和本机 overlay 重建，不替用户改需求、Spec 或代码。跨设备恢复缺少 `verification.md` 不会阻止 Shape/Build；遇到错误的 branch/worktree 或混合 active/archive 布局时会暂停，等待你处理。
+`doctor --repair` 只做能确定的迁移、未完成事务的收尾和本机 overlay 重建，不会替你改需求、Spec 或代码。跨设备恢复时缺少 `verification.md` 不会阻止 Shape/Build；遇到错误的 branch/worktree 或 active 与 archive 混在一起的目录时，它会暂停并等你处理。
 
-用户可读产物是 brief、Specs、`comet-state.yaml` 和 `verification.md`；`.comet/runtime/native/` 只放本机 state、日志、锁和事务。
+供你阅读的文件是 brief、Specs、`comet-state.yaml` 和 `verification.md`；`.comet/runtime/native/` 只存放本机的 state、日志、锁和事务。
 
 </Accordion>

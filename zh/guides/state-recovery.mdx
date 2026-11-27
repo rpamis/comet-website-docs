@@ -10,7 +10,7 @@ description: '当工作流路由异常、.comet.yaml 缺失或格式损坏、产
 <p align="center">
   <img
     src="/assets/state-recovery-illustrations/01-state-recovery-first-aid.png"
-    alt="小鱼在状态急救台上用 status 和 doctor 诊断坏状态，并按文件事实恢复证据"
+    alt="小鱼在状态处理台上用 status 和 doctor 诊断坏状态，并按文件事实恢复证据"
     width="800"
   />
 </p>
@@ -28,21 +28,22 @@ description: '当工作流路由异常、.comet.yaml 缺失或格式损坏、产
 | `.comet.yaml` 缺失或解析报错 | 状态文件损坏 | 运行 `comet doctor` 获取自动化修复建议 |
 | 声明的产物或测试证据在磁盘上丢失 | 产物证据缺失 | 运行 `comet status` 查看 `runtime_eval` 检查点提示 |
 
-## 核心诊断命令
+## 核心离线诊断命令
+
+日常恢复直接在对话输入 `/comet` 即可；当你怀疑状态文件损坏或环境配置异常、想在终端排查时，可运行以下只读诊断命令：
 
 ```bash
-comet resume-probe . --utterance "继续刚才的工作"  # 只读探测是否应自动唤起恢复
 comet status        # 查看活跃 change 的 phase、任务完成度及 runtime_eval 详情
-comet doctor        # 诊断环境依赖、Skill 完整性以及 .comet.yaml 的合规性
+comet doctor        # 诊断环境依赖、Skill 完整性以及 .comet.yaml 的格式有效性
 ```
 
-添加 `--json` 参数便于脚本或外部 Agent 解析。日常排查直接查阅默认的人类可读终端输出即可。
+加上 `--json` 便于脚本或 Agent 解析；如果还想单独排查自然语言恢复探针的命中原因，也可以在终端运行 `comet resume-probe . --utterance "继续刚才的工作"`（纯只读，不会修改任何状态）。
 
 恢复探测仅负责进入 workflow 前的只读意图判断。当其返回 `ask_user` 时，往往是在新会话中向你确认是否要继续相关变更，或是存在多个候选、需要你抉择关键选项，并不代表当前状态出现损坏。详情请参考[恢复探测命令](/zh/cli/resume-probe)。
 
 ### comet status 检查重点
 
-针对每个活跃中的 change，该命令会输出：`phase`、任务完成度 `done/total`、`workflow | build_mode`、当前运行步 `run_step`、运行时模式 `runtime_mode`、`runtime_eval`（核验声明的各步骤产物是否真切落盘）、`design`、`plan`、`verify_result`，以及下一步操作建议 `next:`。
+针对每个活跃中的 change，该命令会输出：`phase`、任务完成度 `done/total`、`workflow | build_mode`、当前运行步 `run_step`、运行时模式 `runtime_mode`、`runtime_eval`（核验声明的各步骤产物是否真切写入文件）、`design`、`plan`、`verify_result`，以及下一步操作建议 `next:`。
 
 若 `runtime_eval` 校验失败，终端会直接输出形如 `run <命令> or restore missing evidence (...)` 的操作提示，按需补齐缺失证据或重新运行该步骤即可。
 
@@ -66,12 +67,12 @@ comet doctor        # 诊断环境依赖、Skill 完整性以及 .comet.yaml 的
 - **禁止手动篡改由 Comet 自动维护的 Run 内部字段**（如 `.comet/run-state.json` 等 machine-owned 文件）。
 - **不要混淆关键字段**：`build_pause` 与 `build_mode` 承担完全不同的职责，切勿混为一谈。
 - **不绕过 verify 失败停顿点**：遇到验证不通过时，必须由开发者主动选择修复缺陷或确认接受偏差。
-- **禁止手工伪造 archive 归档标记**：归档必须经由 `/comet-archive` 或 `comet archive` 命令合规收敛。
+- **禁止手工伪造 archive 归档标记**：归档必须经由 `/comet-archive` 或 `comet archive` 命令正常完成。
 - **切勿直接编辑 `.comet.yaml` 手动推进阶段**：阶段演进必须通过 `comet guard --apply` 或 `comet state transition` 校验后推进。
 
 ## .comet.yaml 缺失或内容损坏的处理办法
 
-`/comet-classic` 内部设计了完备的容错修复路径：
+`/comet-classic` 内部设计了完整的容错修复路径：
 
 - 若 `.comet.yaml` 丢失，系统会回退至 `openspec status --json` + `tasks.md` + `docs/superpowers/` 的文件状态反向推导并重建元数据。
 - 若格式被改乱，系统以磁盘上的实际文件为准，可通过 `comet state set` 快速纠偏后继续。
@@ -97,6 +98,6 @@ flowchart TD
 ## 相关文档
 
 - [恢复探测命令](/zh/cli/resume-probe) — 了解如何区分自动恢复、人工确认与不应入流的请求
-- [恢复中断的工作](/zh/guides/resuming-workflow) — 日常正常中断只需一步唤起 `/comet`
+- [恢复中断的工作](/zh/guides/resuming-workflow) — 日常正常中断只需输入一次 `/comet`
 - [项目文件结构](/zh/guides/project-structure) — 了解工作流状态在仓库中的实际存放位置
 - [状态管理机制](/zh/concepts/state-management) — 深入了解 `.comet.yaml` 字段设计与守卫机制

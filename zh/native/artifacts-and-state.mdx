@@ -1,13 +1,13 @@
 ---
 title: 'Native 产物与状态'
-description: '查找 Native change 的需求、Specs、进度和验收报告，了解哪些文件需要同步以及哪些由 Comet 维护。'
+description: '查找 Native change 的需求、Specs、状态文件和验收报告，了解哪些文件随项目同步、哪些由 Comet 自动维护。'
 ---
 
-Native 把需求、目标 Specs、状态文件和验收报告保存在项目中。当前阶段、用户批准和执行结果由本机的 Run 保存。查看一个 change 时，可以从 `brief.md` 了解约定，从 `verification.md` 查看验收证据，从 CLI 确认当前还能做什么。
+Native 把需求文档、目标 Specs、状态检查点和验收报告保存在项目仓库中，把完整的运行记录（Run）保存在本机用户数据目录中。你想了解一个 change 约定了什么看 `brief.md`，想看验收证据看 `verification.md`，想了解当前阶段和下一步直接在对话里问 Agent（或用终端只读查看）。
 
 ## 找到 change 的实际目录
 
-以下以 `login-error-message` 为例。默认产物根目录是 `docs`，可以通过 `.comet/config.yaml` 中的 `native.artifact_root` 配置。目录随项目而异，以 `show` 返回的路径为准。
+以下以 `login-error-message` 为例。默认产物根目录是 `docs`，可在 `.comet/config.yaml` 中通过 `native.artifact_root` 调整：
 
 ```text
 docs/comet/
@@ -15,59 +15,58 @@ docs/comet/
     brief.md
     specs/authentication/spec.md
     specs/authentication/delta.yaml
+    capability-association.yaml
     comet-state.yaml
     verification.md
   specs/authentication/spec.md
   archive/
 ```
 
-这里的 `delta.yaml` 用于已关联现有 capability 的变更。验收通过前，`verification.md` 可能尚未生成。Supervisor Change 还可能有 `children.yaml`。
+说明：
 
-```bash
-comet native show login-error-message --json
-```
+- `delta.yaml` 和 `capability-association.yaml` 在修改项目已有能力（capability）时出现；
+- 首次 Verify 通过并生成报告前，`verification.md` 可能尚未出现；
+- Supervisor Change 还会包含 `children.yaml`。
 
-在返回的 `artifacts` 中查看 change 目录、brief、Specs、状态文件和报告的位置。路径与预期不符时，先核对当前工作区和项目配置。已归档的材料请查看 Archive 返回的目录。
+日常开发时，Agent 会自动按配置解析这些路径，你不需要手动查路径；如果想在终端查看某个 change 的正式文档路径和摘要，可以运行只读命令 `comet native show <change-name>`（加 `--json` 可看 `artifacts` 里的全部路径）。已归档的材料保存在 `docs/comet/archive/` 对应日期目录中。
 
-## 在 Shape 中维护需求与目标 Specs
+## 在 Shape 中维护的需求文档
 
 <span id="briefmd" />
 
 ### `brief.md`
 
-`brief.md` 记录目标、范围、明确排除的内容、约束、影响交付的用户决定和验收依据。描述工程范围时，列出要新增、修改、删除的模块与关键文件，以及明确不建的部分。目录树或列表均可。
+`brief.md` 记录目标、范围、明确排除的非目标、硬约束、影响交付的用户决定和验收依据。描述工程范围时，可以按任务需要用目录树、列表或表格列出要新增、修改或删除的关键模块。涉及用户决策的待确认问题用 `[blocking]` 标记，回答后立即同步回正文并移除标记。如果需求来自外部 PRD 或本地文档，还会在 `# Scope` 下维护 `## Source coverage` 来源覆盖表。
 
-例如，`login-error-message` 的 brief 可以约定只修改登录失败提示，保留服务端返回码和原有的限流规则。把密码错误和请求限流写成可分别检查的验收项。涉及用户决策的未决问题用 `[blocking]` 标记，解决后更新材料，再请用户确认完整 Shape。
+### 目标 Spec 与 `delta.yaml`
 
-### 目标 Spec 与 Delta
+change 目录里的 `specs/<capability>/spec.md` 描述归档后这项能力应有的完整行为——既写清本次修改，也保留该能力仍然有效的既有规则：
 
-change 目录里的 `specs/<capability>/spec.md` 描述归档后这项能力应有的完整行为。本次修改的内容要写清，同时保留该能力仍然有效的既有规则。
+- **新能力**：由 Agent 直接编写完整目标 Spec。
+- **修改已有能力**：Agent 在 `delta.yaml` 中维护需求级增删改（引用稳定的需求 ID），Runtime 基于项目当前正式 Spec 自动生成完整目标 Spec 供 Shape 评审和 Verify 核验。
+- **移除已有能力**：在对话中告知 Agent 移除该能力（后台通过 `spec remove` 登记），直接删文件无法记录移除意图。
 
-- 新能力由 Agent 编写完整目标 Spec。
-- 已关联现有能力时，Agent 在 `delta.yaml` 中维护本次变更，引用稳定的需求标识。Runtime 基于当前项目 Spec 生成完整目标 Spec，供 Shape 评审和 Verify 验收。
-- 要移除已有能力，按 [Native 命令概览](/zh/scripts/comet-native) 提交能力移除。直接删除文件无法记录这个决定。
-
-以登录提示为例，项目的 `specs/authentication/spec.md` 是已经生效的规范。change 里的目标 Spec 用来评审新增的提示规则，归档时 Runtime 才会把已确认的变更应用到项目 Specs。
+以登录提示为例，项目的 `docs/comet/specs/authentication/spec.md` 是已生效的正式规范；change 目录下的目标 Spec 用于评审与验收，直到 Archive 阶段才会由 Runtime 合入项目正式 Specs。
 
 ### `children.yaml`
 
-Supervisor Change 用它记录子任务、依赖关系和每个子任务覆盖的验收项。子任务用验收项的编号引用原文，父 change 仍保留全部验收要求。并行执行见 [Supervisor Change](/zh/native/supervisor-change)。
+Supervisor Change 用 `children.yaml`（`comet.native.children.v2`）记录各子任务的名称、依赖顺序（`depends_on`）以及覆盖的验收 ID（`covers`）。子任务只引用编号，不重复抄写验收正文；父任务保留全部验收要求。详见 [Supervisor Change](/zh/native/supervisor-change)。
 
-## 查看由 Comet 维护的状态与报告
+## 由 Comet 自动维护的状态与报告
+
+以下文件由 Runtime 维护，请勿手工编辑（编辑它们无法推进 Run，Hook Guard 也会拦截 Agent 直接改写）：
 
 | 文件或记录 | 存放位置 | 用途 |
 | --- | --- | --- |
-| `comet-state.yaml` | change 目录。 | 展示阶段和验收状态。在关键节点保存恢复检查点，供恢复原 Run。 |
-| `verification.md` | change 目录，归档后随 change 保存。 | 查看逐项结论、实际检查、审查方式和已知限制。 |
-| `.comet/current-change.json` | 当前项目的 `.comet/`。 | 记录当前工作区选中的 change，用于无名称调用与 Hook 路由。通过 `comet native select` 修改。 |
-| 本机 Run 和执行记录 | 默认位于 `~/.comet/workspaces/<workspace-id>/runtime/`。 | 保存执行进度、动作和用户决定，以及事务处理所需的本机记录。主工作区与各 Git worktree 分开保存。 |
-
-通过 `comet native status` 查看当前进度，通过返回的操作提交决定与结果。直接修改状态文件或报告无法推进 Run。需要处理缺失或损坏的记录时，见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
+| `comet-state.yaml` | change 目录。 | 记录阶段、验收状态，并在关键边界保存恢复检查点（`run_checkpoint`）。 |
+| `verification.md` | change 目录，归档后随 change 保存。 | 结构化验收结论的只读阅读视图，展示逐项结论、检查命令、审查方式和已知限制。 |
+| `capability-association.yaml` | change 目录（关联已有能力时）。 | 记录当前 change 关联的项目能力标识；需撤销关联时告诉 Agent 处理。 |
+| `.comet/current-change.json` | 当前项目的 `.comet/`。 | 记录当前工作区选中的工作流与 change，用于 Hook 路由与默认归属。 |
+| 本机 Run 和执行记录 | 默认位于 `~/.comet` 下按工作区隔离的目录（可用 `COMET_DATA_DIR` 自定义）。 | 保存完整执行历史、动作领取、用户决定与事务日志；主工作区与各 Git worktree 分开保存。 |
 
 ## 判断哪些内容需要随项目同步
 
-评审和交付时，把本次实现和对应的正式材料一起审查。归档后的 change 与更新后的项目 Specs 一起交付。按项目规则把状态文件和验收报告随该 change 保存，方便其他人核对决定与证据。
+- **需要随 Git 同步**：业务代码、正式需求材料（`brief.md`、目标 Specs、`delta.yaml`、`children.yaml`）、含恢复检查点的 `comet-state.yaml`、已生成的 `verification.md`，以及使用非默认产物目录时的 `.comet/config.yaml`。归档后，归档目录与更新后的项目正式 Specs 一并提交。
+- **仅保留在本机**：`.comet/current-change.json` 和用户主目录下的本机 Run 目录不需要提交到 Git。如果任务还在执行中，请保留本机记录，以便核对未回传的结果和未完成的事务。
 
-换设备继续同一个任务时，同步实际代码、正式材料、含有效检查点的 `comet-state.yaml`、相关产物与项目配置。检查点保存的是记录下来的进度。未提交且未同步的代码、独立子任务 worktree 和原平台的后台任务需要分别核对。
-
-当前 change 的选择和本机 Runtime 目录由各工作区维护。无需把本机 Run 目录提交到 Git。还在执行的任务应保留本机记录，以便核对原结果和未完成的事务。
+跨设备恢复和异常排障详见 [Native 任务恢复](/zh/native/recovery-playbook)。

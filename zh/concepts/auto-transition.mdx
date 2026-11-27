@@ -3,7 +3,7 @@ title: '自动推进机制'
 description: '解析 Classic 流程中的阶段自动检测、状态机流转、下一阶段自动衔接以及断点恢复机制。'
 ---
 
-在项目配置为 Classic 的情况下，在 Agent 中调用 `/comet` 时，系统底层会交由 `/comet-classic` 自动检测当前变更处于哪个阶段、推进内部状态机，并判断是否自动唤起下一阶段的 Skill。本文详细说明其背后的状态检测逻辑与恢复机制。
+项目配置为 Classic 时，你在 Agent 对话中输入 `/comet`，系统会交给 `/comet-classic` 处理：自动检测当前变更处在哪个阶段、推进内部状态机，并判断是否自动调用下一阶段的 Skill。本文详细说明其背后的状态检测逻辑与恢复机制。
 
 ## 阶段推进 vs 自动衔接
 
@@ -61,11 +61,11 @@ description: '解析 Classic 流程中的阶段自动检测、状态机流转、
 | `archived: true` 或已进入归档目录              | 提示该变更已全部完结                                              |
 | `verify_result: pass`                          | 进入 `/comet-archive`（先进行归档前确认）                         |
 | `verify_result: fail`                          | 失败 ≤3 次时自动打回 build 修复；第 4 次失败时暂停等待你决策       |
-| `phase: verify` 或任务列表全部完成勾选         | 唤起 `/comet-verify` 执行验收                                     |
+| `phase: verify` 或任务列表全部完成勾选         | 进入 `/comet-verify` 执行验收                                     |
 | `phase: build` 或已有 Design Doc 但执行未完毕  | full 流程进入 `/comet-build`，预设分别进入 hotfix 或 tweak        |
-| `phase: design` 或已有变更但尚未产出 Design Doc| 唤起 `/comet-design` 进行技术方案推敲                             |
-| `phase: open` 或仅有目录未生成 `.comet.yaml`   | 唤起 `/comet-open` 补全需求规格                                   |
-| 无任何活跃变更                                 | 唤起 `/comet-open` 创建新变更                                     |
+| `phase: design` 或已有变更但尚未产出 Design Doc| 进入 `/comet-design` 讨论技术方案                             |
+| `phase: open` 或仅有目录未生成 `.comet.yaml`   | 进入 `/comet-open` 补全需求规格                                   |
+| 无任何活跃变更                                 | 进入 `/comet-open` 创建新变更                                     |
 
 ## 状态转换链路
 
@@ -109,7 +109,7 @@ HINT: <message>         # 仅在 manual 时输出提示信息
 
 | 输出标识       | 核心含义                                  | 对应触发条件                   |
 | -------------- | ----------------------------------------- | ------------------------------ |
-| `NEXT: auto`   | 自动唤起下一个阶段的 Skill            | `auto_transition` 未设为 `false` |
+| `NEXT: auto`   | 自动调用下一个阶段的 Skill            | `auto_transition` 未设为 `false` |
 | `NEXT: manual` | 停止自动流转，输出友好提示并等待你手动执行 | `auto_transition: false`       |
 | `NEXT: done`   | 该变更已全面完成并归档                    | `archived: true`               |
 
@@ -142,7 +142,7 @@ HINT: <message>         # 仅在 manual 时输出提示信息
 
 ## auto_transition 的配置方法
 
-`auto_transition` 用于控制是否在阶段完成后自动唤起下一步。其生效优先级为：
+`auto_transition` 控制阶段完成后是否自动进入下一步。其生效优先级为：
 
 ```text
 change 级 .comet.yaml > 环境变量 > 项目级 .comet/config.yaml > 内置默认值（true）
@@ -187,8 +187,8 @@ export COMET_AUTO_TRANSITION=false
 | 异常断点场景                                                           | 系统的恢复策略                                                  |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `phase: build` 且标记为 `plan-ready`（所有配置已选定）                  | 重新呈现联合决策面板，确认无误后清除暂停标记继续执行            |
-| `phase: build` 且标记为 `plan-ready`（尚缺配置）                        | 重新唤起联合决策，等待你补选执行方式、TDD 模式与审查严格度      |
-| `phase: build` 且标记为 `plan-ready` 但计划文件丢失                    | 判定为中间文件损坏，由 Agent 重新生成落地计划                   |
+| `phase: build` 且标记为 `plan-ready`（尚缺配置）                        | 重新进入联合决策，等待你补选执行方式、TDD 模式与审查严格度      |
+| `phase: build` 且标记为 `plan-ready` 但计划文件丢失                    | 判定为中间文件损坏，由 Agent 重新生成实施计划                   |
 | `phase: verify` 且上轮验收结果为 `fail`                                | 失败 ≤3 次时自动打回 build 修复；第 4 次失败时暂停等待人工决策  |
 | `phase: open` 但实际规格文档已全部齐全                                 | 先自动运行 guard `--apply` 修正状态机，再继续推进               |
 | `phase: archive`                                                       | 限制仅能调用 `/comet-archive` 终结任务                      |

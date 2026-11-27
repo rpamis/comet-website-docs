@@ -1,83 +1,71 @@
 ---
 title: 'Supervisor Change：让大型任务安全并行'
-description: '将大型复合目标解耦为可独立完成的子任务，在隔离的工作区中并行推进，最终统一集成并完成全链路验收与交付。'
+description: '将跨模块大型需求按可独立验证的验收项拆分为子任务，在隔离 Git worktree 中并发开发与验收，串行集成并完成全局全量终审。'
 ---
 
 import { SupervisorVideo } from '/snippets/supervisor-video.jsx';
 
-当你面对大型复杂的研发需求（例如“重构用户认证体系：包含底层 Token 颁发、前端登录页面与操作审计日志三个模块”）时，如果让单个 Agent 在一个长会话中从头改到尾，极易遭遇上下文爆满、改动遗漏或代码混乱。
+当一个需求横跨多个子系统，或者包含前后依赖的多个改造步骤（例如同时改造认证 Token 接口、前端登录页和审计日志）时，让单个 Agent 在一个超长会话里从头改到尾，很容易出现上下文塞满、漏改边界条件、或者改后面忘了前面。
 
-**Supervisor Change 是 Native 工作流面向大型复杂需求的并行交付架构**：
+**Supervisor Change** 是 Native 面向这类大型任务的并行编排架构：
 
-1. **按验收项精准解耦**：将大目标拆解为拓扑有序的子任务（child），每个子任务只承接具体的验收项；
-2. **工作区严格隔离**：每个子任务独占专属的 Git worktree，多个并发 Agent 互不干扰，避免并发修改冲突；
-3. **先验收，再允许集成**：子任务代码通过独立 Verify 并验证通过后，才由 Runtime 依次合并入集成分支；
-4. **统一全链路终审验收**：所有子任务全部合流后，主任务针对整体系统目标执行 100% 覆盖的最终全量验收。
+1. **按可独立验证的结果拆分**：在 Shape 阶段把父需求拆成多个有依赖顺序的子任务（写入 `children.yaml`），每个子任务承接明确的验收项，跨模块端到端验收归父级统一负责。
+2. **独立分支与 worktree 物理隔离**：父任务拥有专属集成分支和集成 worktree；每个就绪子任务拥有专属分支（`comet/supervisor/<parent>/<child>`）和专属 worktree，并发修改互不踩踏。
+3. **先通过子验收，再串行合入集成分支**：子任务在各自 worktree 通过 Verify 后，由 Runtime 按序合入集成分支并运行集成检查；集成失败时在集成 worktree 专项修复，不会影响项目主干。
+4. **全量集成后执行全局终审**：所有子任务合入后，父任务在集成 worktree 对照原需求的全部验收项做最终 Verify，通过后再统一交付、归档并安全清理临时 worktree。
 
 ```mermaid
 flowchart TD
-  M["宏观大目标需求"] --> S["Shape 阶段：拆解子任务与依赖图 (DAG)"]
-  S --> C1["子任务 A: 认证核心 API<br/>(独占 worktree)"]
-  S --> C2["子任务 B: 审计日志模块<br/>(独占 worktree)"]
-  C1 --> C3["子任务 C: 前端登录页面<br/>(依赖 A，解锁后开工)"]
-  C2 --> C3
-  C1 -->|各自 Verify 通过| I["集成分支<br/>Runtime 串行合并"]
-  C2 -->|各自 Verify 通过| I
-  C3 -->|各自 Verify 通过| I
-  I --> V["全局终审 Verify 验收"]
-  V -->|全部通过| A["统一归档与交付"]
+  M["大型复合需求"] --> S["Shape：确认方案、children.yaml 与协作模式"]
+  S --> P["Runtime 创建父级集成分支与集成 worktree"]
+  P --> C1["子任务 A：认证核心 API<br/>(comet/supervisor/parent/A)"]
+  P --> C2["子任务 B：审计日志模块<br/>(comet/supervisor/parent/B)"]
+  C1 -->|"子 Verify 通过 → 串行合入集成分支"| C3["子任务 C：前端登录页<br/>(依赖 A，合入后解锁)"]
+  C2 -->|"子 Verify 通过 → 串行合入集成分支"| I["集成检查<br/>(失败则触发 integration-repair)"]
+  C3 -->|"子 Verify 通过 → 串行合入集成分支"| I
+  I --> V["父级最终 Verify（覆盖全部验收项）"]
+  V -->|"全部通过"| D["交付 → 归档 → 清理干净的临时 worktree"]
+  V -->|"未通过或被拒绝"| F["集成 worktree 修复 (parent.builder)<br/>或追加命名修复子任务"]
+  F --> V
 ```
 
-## 核心工程保障
+## 一、什么时候适合拆分，什么时候不该拆
 
-| 核心特性 | 实际工程价值 |
-| --- | --- |
-| 依据验收项拆解 | 每个子任务对应明确的测试用例，杜绝职责模糊的无效分工 |
-| 依赖拓扑自动调度 | Runtime 仅激活前置条件已全量达标的子任务，下游任务不抢跑 |
-| 工作区严格隔离 | 每个子任务独占专属的 Git worktree，消除多个 Agent 并行修改的冲突 |
-| 防篡改凭证与鉴权 | 任务上下文、集成基线 Commit 与 `runId` 构成三元凭据，拦截重复或过期回调 |
-| 全局回归验收 | 所有子任务集成后，针对系统完整目标实施全量回归测试，杜绝局部合格但整体跑不通 |
+Shape 阶段确认完范围和验收项后，Comet 会判断是否推荐升级为 Supervisor Change：
 
-## 任务拆解触发条件
+- **适合拆分**：能划出至少两个可以独立编写代码、独立验证结果的子任务（例如不同子系统的改动，或有清晰交接接口的分步迁移），依赖顺序清晰，且并行推进或分阶段交接有实际收益。满足条件时，Agent 会把 Supervisor Change 作为首选方案向你推荐。
+- **保持单个 Change**：改动高度集中在同一核心文件或紧密耦合模块、拆开后反复冲突协调成本更高，或者你明确要求单个 Native Change。**需求文档长、验收条目多本身不会触发拆分。**
 
-Comet 会在 Shape 阶段评估当前需求是否适合拆解。只有同时满足以下条件时，才会建议升级为 Supervisor Change：
+## 二、确认拆分方案与选择协作模式
 
-- 整体目标能够自然解耦为两个及以上可独立编码、独立测试的子任务；
-- 原始需求中的所有验收项均能被清晰分配给对应的子任务，不留死角；
-- 各子任务之间的依赖关系（先做什么、后做什么）逻辑清晰；
-- 并行推进确实能够缩短交付周期。
+Shape 最终确认前，Agent 会展示 `children.yaml` 中的子任务分工（各自的目标、依赖顺序 `depends_on`、对应的验收项范围 `acceptance_ids` 以及父级保留的集成验收项），并让你在两种协作模式中二选一：
 
-若所有改动都集中在同一个核心文件内，或者拆解带来的集成成本过高，Comet 会保持单个 Change 顺序推进。
+| 选项 | 协作模式 | 执行方式 | 并发上限 |
+| --- | --- | --- | --- |
+| **A** | **多会话 / Agent Teams（推荐）**（`multi-session`） | 当前会话充当协调者，负责派发、盯进度、处理集成和最终验收；按平台能力为就绪子任务启动独立会话或 Agent Teams 成员，平台不支持时自动改用 subagent。 | 默认 `2`，可在 `.comet/config.yaml` 中通过 `native.max_parallel_children` 调整（从下一轮派发生效）。 |
+| **B** | **单会话顺序推进**（`single-session`） | 沿用相同的拆分范围、依赖顺序和验收要求，由当前会话按依赖顺序逐个完成子任务。 | 固定为 `1`。 |
 
-## 拆解方案与协作模式选择
+注意事项：
 
-在 Shape 阶段定稿前，Comet 会向你展示子任务拆解矩阵与依赖流向图。确认方案时，可选择后续的推进模式：
+- 你可以在一次回复中同时确认完整方案和协作模式（例如“确认方案，选 A”）。只回复“确认”但没选模式，或只选了模式但没确认方案，都不会直接启动 Build。
+- 如果你在描述需求时已经明确说了“用多会话”或“用 Agent Teams”，Comet 会直接视为选择 A，不再重复发问。
+- 选定后，Runtime 会把 `coordination_mode` 保存进 `comet-state.yaml`。后续中断恢复时直接沿用已保存的模式，不会再次询问。
 
-| 协作模式 | 运行机制 | 适用环境 |
-| --- | --- | --- |
-| **A. 多会话协同推进（推荐）** | 主会话负责全局统筹调度，调度多个独立会话或 Agent Teams 并发开工 | 支持多会话的平台（如 Codex、Claude Code Agent Teams），不支持时自动降级采用 subagent |
-| **B. 单会话顺序推进** | 在当前会话窗口内，严格依照依赖拓扑顺序，逐一完成各个子任务 | 资源受限或偏好在单一终端逐步排查的场景 |
+## 三、按依赖分批调度与工作区隔离
 
-选定模式后，Runtime 会将其固化在状态文件中，后续断点恢复时自动沿用。
+完整 Shape 确认后，Runtime 会先执行 `supervisor.prepare` 建立父级集成分支与集成 worktree，再按 DAG 依赖关系分批派发子任务：
 
-## 独占绑定的工作区
+- **依赖未满足不抢跑**：只有 `depends_on` 中的前置子任务**全部完成集成**（`integrated`），下游子任务才会进入就绪队列。
+- **并发容量有上限**：每轮最多派发 `max_parallel_children - 当前活跃子任务数` 个新子任务。
+- **任务归属清晰**：每个就绪子任务在 `availableTasks` 中都带有 `task.child`、`task.scope`、专属 worktree 路径、集成分支当前基线提交和该子任务专属的验收条目。
 
-方案获批后，Runtime 会自动为主任务建立专用的集成分支与集成 worktree，并为已就绪的子任务准备好隔离的独立 worktree。
+在多会话模式下，Hook Guard 会强制阻止父会话在 Build 阶段直接改业务源码；子任务执行者也只能在 Runtime 分配给它的 worktree 中写代码，完成后把结果交回主会话，由主会话保留原 Action、子会话标识和结果模板顺序提交，不能直接修改父任务状态或项目目标分支。
 
-每个分发的子任务均内嵌：
-- 该子任务负责的验收 ID 集合与职责范围；
-- 独占的工作区绝对路径；
-- 当前集成分支的代码基线 Commit 哈希；
-- 专属的 `runId` 防伪凭据；
-- 明确的停机退出指标。
+## 四、在不同平台中并发运行
 
-在多会话模式下，默认最多并发推进 2 个在途子任务（支持在 Dashboard 或通过 `native.max_parallel_children` 弹性调节）；单会话模式下始终按拓扑序串行推进。
+### Codex：多独立会话
 
-## 主流平台并发实录
-
-### 在 Codex 中通过多会话并发推进
-
-在 Codex 中选定多会话后，当前主会话自动升格为总调度中枢（Supervisor）。它负责分发任务、轮询进度、调度代码集成与主持最终验收。各个子任务作为独立任务执行，互不干扰：
+在 Codex 中选择多会话模式后，当前会话担任协调者，为每个就绪子任务开启独立会话并切入 Runtime 创建好的子 worktree（不要让 Codex 额外创建另一套 worktree）：
 
 <SupervisorVideo
   src="/vedio/codex_compact.mp4"
@@ -87,15 +75,13 @@ Comet 会在 Shape 阶段评估当前需求是否适合拆解。只有同时满�
   fallback="你的浏览器不支持 HTML5 视频"
 />
 
-### 在 Claude Code 中借助 Agent Teams 并行推进
+### Claude Code：Agent Teams
 
-在 Claude Code 终端中，可借助 Agent Teams 特性并发驱动不同子任务。在终端中激活：
+在交互式 Claude Code 终端启用 Agent Teams 后，当前会话担任 Team Lead，为每个就绪子任务分配一名 Teammate，在各自指定的子 worktree 中并行开发：
 
 ```bash
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
 ```
-
-当前主会话充当 Team Lead，为就绪的子任务分配对应的 Teammate。Teammate 严格在指定的独立子工作区内编码，禁止越权修改主干分支：
 
 <SupervisorVideo
   src="/vedio/claude%20code_compact.mp4"
@@ -105,36 +91,37 @@ export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
   fallback="你的浏览器不支持 HTML5 视频"
 />
 
-## 先验证，后集成
+如果平台不支持独立会话或 Agent Teams，或者恢复后原会话已丢失，Comet 会在 `multi-session` 下自动改用 subagent 继续，不会私自改回 `single-session`。
 
-每个子任务必须严格走完完整生命周期：
+## 五、子任务验收、串行集成与集成修复
 
-```text
-active（编码中） → verified（独立验收达标） → integrated（已入集成分支）
-```
+每个子任务都必须依次走完以下环节：
 
-1. **子任务编码**：Builder 在子任务专属 worktree 中完成实现；
-2. **子任务独立验收**：Verifier 核查该子任务对应的具体验收项与测试命令；
-3. **凭证鉴权与合流**：验证全部通过后，Runtime 自动将该子任务的 Commit 干净合并入集成分支，并触发集成构建检查；
-4. **解锁下游任务**：状态敲定为 `integrated` 后，依赖它的下游子任务才会正式进入就绪状态。
+1. **子任务 Build（`supervisor.child.builder`）**：在专属 worktree 实现功能、运行检查并提交候选提交（`candidateCommit`）。
+2. **子任务 Verify（`supervisor.child.verifier`）**：对照该子任务承接的全部验收项逐条给出 `pass`、`fail` 或 `blocked`（支持 `--review current-session` 或 `--review independent`）。未通过则在原 worktree 修复重交。
+3. **校验并串行合入集成分支（`supervisor.child.integrate`）**：Runtime 核对分支路径、候选提交哈希和绑定通过的 Verifier 记录全部匹配后，按 Run 顺序逐个合入父级集成分支。子任务不单独归档，也不直接合入目标主干。
+4. **集成检查与集成修复（`supervisor.child.integration-repair`）**：如果合入后的集成检查或扩展检查失败，流程不会退回主分支或打散子任务，而是在父级集成 worktree 生成集成修复任务。修复并提交新的 `integrationCommit` 后，Runtime 会用 Git 祖先关系校验（`git merge-base --is-ancestor`）确认新提交基于原失败合并提交演进，且工作区干净、检查无失败项，再解锁下游子任务。
 
-子任务不单独触发最终归档，亦无权擅自合并入项目主干分支。
+## 六、父级全量终审、交付与安全清理
 
-## 全量集成后的全链路终审验收
+所有子任务都完成集成后，Runtime 自动在父级集成 worktree 发起**全局最终 Verify**，对照原需求的全部验收项（复用仍适用的子任务检查，并补足跨模块集成测试）：
 
-所有子任务均达到 `integrated` 状态后，Runtime 立即在集成 worktree 中发起**全局最终 Verify 阶段**，执行全套端到端集成测试，核验整体目标的完整交付标准。
+- **全部通过**：进入交付、归档与清理流水线：
+  1. **清理预检**：甚至在 `supervisor.parent.deliver` 修改你的目标分支之前，Runtime 就会先对所有临时子 worktree 和集成 worktree 做清理预检，提前暴露脏目录或异常状态。
+  2. **交付与归档**：将验证通过的集成提交交付到目标分支，并完成 Spec 合并与目录归档（`archive.finalize`）。
+  3. **安全清理（`supervisor.cleanup`）**：只有确认归档已完成、目标分支精确指向已验证的集成提交、且所有本次创建的临时 worktree 均干净无人占用时，才删除对应的子 worktree、集成 worktree 和临时分支。只要发现未提交文件或进程占用，就会保留现场并报告阻塞原因，不会强制删除。
+- **父级验收未通过或被拒绝**：不会重新打开已经合入的子任务。Runtime 会在集成 worktree 生成父级修复任务（`supervisor.parent.builder`），提交新的 `candidateCommit` 后重新验收；如果需要拆分独立的修复补丁，也可以追加一个命名唯一、引用有效验收 ID 的修复子任务。如果问题涉及修改整体需求或拆分计划，Agent 会在后台调用 `--revise-requirements` 回到 Shape 重新确认。
 
-- **全量变绿**：获准进入 Archive 阶段，统一合并入主干或生成 PR；
-- **若验收未通过**：Runtime 完整保留集成分支现场，不打散已完成的子任务；流程会自动追加一个专门的“修复子任务”，针对具体未通过的缺陷用例引导你确认修复范围，修复并复验通过后再行归档。
+## 七、中断恢复与跨检出迁移
 
-## 断点恢复与任务还原
+Supervisor 的子任务依赖图、协作模式、任务领取和集成进度全部持久化。会话意外断开时，直接回到原工作区输入 `/comet 继续` 即可，Agent 会在后台读取完整状态并继续调度：
 
-全局子任务拓扑、就绪队列、集成进度均实时持久化在本地文件中。如果遇到会话截断或重启终端，直接在 Agent 中输入：
+- 原多会话或 Agent Team 丢失时，Agent 会先向原平台核对子任务是否仍在运行，不会把会话断开当成子任务已完成。
+- 如果需要把进行中的 Supervisor Child Build（含父检查点、多个分支、worktree 和未提交代码）整体迁到另一台设备或另一份本地检出，确认所有相关 Agent 已停止后，在终端运行迁移命令：
+  ```bash
+  comet native transfer export <change-name> --output <新建私有目录> --confirmed-stopped
+  comet native transfer import --input <导出目录>
+  ```
+  完整校验规则和异常恢复步骤见 [Native 任务恢复](/zh/native/recovery-playbook#迁移进行中的-supervisor-子任务transfer)。
 
-```text
-/comet 继续
-```
-
-Comet 会立即从磁盘读出完整进度现场。若原先绑定的多会话或团队进程丢失，Comet 会自动重新扫描并平滑改用 subagent 继续执行，不丢失任何已完成的代码或执行证据。
-
-延伸阅读：[Native Loop 核心闭环](/zh/native/native-loop)、[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts) 以及 [断点恢复实操手册](/zh/native/recovery-playbook)。
+延伸阅读：[Native Loop：从实现到可信交付](/zh/native/native-loop)、[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts) 与 [Native 配置](/zh/native/configuration)。

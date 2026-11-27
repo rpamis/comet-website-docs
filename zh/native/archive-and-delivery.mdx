@@ -1,46 +1,58 @@
 ---
 title: '归档与交付'
-description: '接受 Native 验收结果，检查归档条件，应用 Spec 变更，并核对提交、推送或 Pull Request。'
+description: '接受 Native 验收结果，了解 Archive 如何检查条件并合并 Specs，以及如何核对 Git 提交、合并、推送或 Pull Request。'
 ---
 
-Native 在当前验收结果获准接受后执行 Archive。Runtime 应用已确认的 Spec 变更，并把 change 移到归档目录。代码和正式材料如何进入 Git，由你确认的交付范围决定。查看结果时，分别核对归档和 Git 交付。
+你接受验收结果后，Native 会执行 Archive：将已确认的 Spec 变更合入项目正式 Specs，并把 change 目录移入归档历史目录。代码和归档文档如何进入 Git（保留在本地、提交、合并、推送或提 PR），由你在对话中明确指定的交付范围决定。日常归档由 Agent 在后台自动完成，不需要手敲命令；收尾时请分别核对“归档完成”和“Git 交付完成”。
 
 ## 接受当前验收结果
 
-Verify 通过后，查看 `verification.md` 中的验收项、实际检查和已知限制。确认的是这一版实现及其结论。发现需要修复的问题时，按当前提示回到 Build。需要调整需求或验收标准时，先确认受影响的 Shape 决定。
+Verify 全部通过后，查看 `verification.md`（或 Agent 转述的摘要）中的逐项验收结论、检查证据和已知限制。你确认的是这一版实现及其验收结论：
 
-如果你已经明确要求“全部通过后自动接受并归档”，Agent 可以在提交通过结果时使用该决定。否则，Agent 会等你接受。接受结果时可以同时指定交付范围，例如“接受当前结果，归档后在当前分支提交，不推送”。
+- 发现需要继续修的问题时，直接在对话里告诉 Agent 修复实现，回到 Build；
+- 需要调整需求或验收标准时，说明新要求回到 Shape 重新确认；
+- 如果你已经明确告诉 Agent“全部通过后直接接受并归档”（或在项目配置中开启了 `native.archive_confirmation: automatic` 且满足安全条件），Runtime 会在通过后自动接受并推进归档。
 
-## 检查条件并执行 Archive
+接受结果时可以一并说明交付方式，例如：“接受当前结果，归档后在当前分支提交，先不推送”。
 
-接受结果后，如果 Runtime 返回归档已完成，先核对结果。如果仍有待执行的 Archive 动作，Agent 在返回的工作区执行当前命令。需要核对条件时，可以先用 `--dry-run`。例如，检查 `login-error-message` 是否已就绪。
+## 后台检查条件并执行 Archive
 
-```bash
-comet native archive login-error-message --dry-run --json
-```
+接受结果后，Agent 会在后台自动推进归档流程（依次完成 `archive.prepare` 预检、`archive.execute` 应用 Specs 和 `archive.finalize` 目录搬迁）：
 
-查看响应中的 `ready` 和 `blockers`。即使命令执行成功，`ready: false` 也表示当前条件还不满足。先处理列出的原因，例如结果尚未获准接受、当前工作区与 change 不一致，或项目 Spec 已发生冲突。预览不会应用 Spec 变更或移动 change。
+- **预检未通过（`ready: false`）**：Runtime 会列出具体阻塞原因（例如结果尚未接受、工作区与绑定不一致、或项目正式 Spec 出现冲突），且不会修改任何 Specs 或目录。先按提示解决阻塞再继续。
+- **预检通过**：Runtime 将本次确认的 Spec 变更合入项目正式 Specs（例如 `docs/comet/specs/authentication/spec.md`），将 change 目录连同 `brief.md`、`comet-state.yaml` 和 `verification.md` 移入 `docs/comet/archive/` 下的归档目录。使用自定义产物目录时以项目配置为准。
 
-归档时，Runtime 核对当前 Run、已接受的结果、正式材料和目标路径。条件满足后，Runtime 会应用项目 Spec 变更，移走活动 change 目录，并登记归档结果。例如，`login-error-message` 的要求从目标 Spec 应用到项目的 `docs/comet/specs/authentication/spec.md`，brief 和验收报告随 change 保存到 `docs/comet/archive/` 下本次返回的目录。使用自定义产物目录时，以命令返回的路径为准。
-
-如果另一项 change 刚更新了同一个 capability，先查看最新项目 Spec 和当前冲突提示。重新对齐本次需求后，由 Agent 核对哪些批准和证据仍有效，并按当前提示补验证。处理不同 worktree 中的归档冲突，见 [多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts)。
+如果另一个并行 change 刚刚更新了同一份能力 Spec，Archive 会暂停并提示冲突；按提示先同步最新项目 Spec、补跑受影响检查后再归档。详见 [多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts)。
 
 ## 核对归档结果
 
-Archive 完成后，状态应显示 Run 已结束。核对归档目录可读，并确认项目 Specs 包含本次批准的改动。确认报告和状态文件随 change 保存。要确认某个具体行为如何验收，在 Archive 返回的目录中打开 `verification.md`。
+Archive 完成后，Run 状态变为 `completed`、业务状态变为 `done`。你可以顺手确认三件事：
 
-如果命令中断，先查询原 change 和归档目标，再按照返回的恢复命令继续原事务。已生效的步骤会按原记录核对，避免再次应用 Spec 或另建归档目录。参见 [任务推进与中断恢复](/zh/native/continuation-and-checkpoints)。
+- 归档目录可读，且保留了 `brief.md`、`comet-state.yaml` 和 `verification.md`；
+- 项目正式 Specs 已包含本次批准的新增或修改内容；
+- 如果归档中途发生中断，在对话中让 Agent 查诊断并恢复原事务——已完成的写入不会重复执行。详见 [Native 任务恢复](/zh/native/recovery-playbook)。
 
 ## 完成并核对 Git 交付
 
-Agent 在执行 Git 操作前，先确认当前分支、目标分支和本次 change 涉及的文件。暂存范围只包括本次实现、更新的项目 Specs 和正式归档材料。提交前查看暂存差异，并遵守项目的提交规范及 Git Hook。有其他未提交改动时，保留它们。
+执行 Git 操作前，Agent 会先核对当前分支、目标分支和本次 change 涉及的文件。暂存范围只包含本次实现代码、更新后的项目 Specs 和正式归档材料，提交前审查 staged diff 并遵守项目的提交规范与 Git Hook；工作区里与本次任务无关的改动会原样保留。
 
-| 你确认的交付范围 | 如何核对 |
+| 你确认的交付范围 | 需要核对的结果 |
 | --- | --- |
 | 仅归档，保留工作区。 | 确认归档路径以及工作区仍保留的改动。 |
-| 提交到当前分支。 | 确认提交 SHA、分支和提交内容。 |
-| 合并到目标分支。 | 确认目标分支包含已交付的改动。如果采用 squash 等方式，核对实际合并提交。 |
+| 提交到当前分支。 | 确认提交 SHA、所在分支和提交内容。 |
+| 本地合并到目标分支。 | 确认目标分支包含已交付的改动（若采用 squash 等方式，核对实际合并提交）。 |
 | 推送到远端。 | 确认远端名称、目标分支和远端提交与预期一致。 |
-| 创建 Pull Request。 | 确认 PR 链接、来源分支、目标分支与包含的提交。 |
+| 创建 Pull Request。 | 确认 PR 链接、来源分支、目标分支和包含的提交。 |
 
-例如，如果你要求把 `login-error-message` 提交并推送到变更分支，最终需要核对本地提交与远端分支。若推送中断，先查远端分支实际指向，确认哪些操作已经生效，再完成剩余的 Git 工作。
+如果推送或创建 PR 中途中断，先查远端分支和 PR 实际状态，确认哪些动作已经生效后再补做剩余步骤，不要盲目重复提交。
+
+日常归档由 Agent 在后台完成，不需要你手动运行命令。想自己确认归档前的就绪状态时，可以在终端运行下面的只读预览命令，它不会修改任何文件。
+
+<Accordion title="终端只读预览命令（日常由 Agent 自动执行，想在终端手动检查就绪状态时可用）">
+
+```bash
+# 仅做只读预检，查看 ready、blockers 与待应用的 Spec 预览，不写入任何文件
+comet native archive <change-name> --dry-run --json
+```
+
+</Accordion>

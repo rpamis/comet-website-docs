@@ -4,11 +4,11 @@ description: '详解 Comet 在五阶段工作流中创建的各类中间文件�
 ---
 
 在运行 `/comet` 的五阶段流程中，Comet 会在各个阶段动态生成一系列中间工作文件。
-这些文件专用于**长上下文压缩、意外断点恢复、质量证据留存以及各阶段间的可靠交接**。最终交付给用户的，依然是干净的业务代码、需求文档与标准架构方案。
+这些文件专用于**长上下文压缩、意外断点恢复、保存质量证据以及各阶段之间的可靠交接**。最终交付给用户的，依然是干净的业务代码、需求文档与标准架构方案。
 
-深入了解这些中间文件的作用，能帮助你在会话被压缩后恢复进度，在遇到异常时快速定位排查，并在归档前确认交付物是否完备。
+深入了解这些中间文件的作用，能帮助你在会话被压缩后恢复进度，在遇到异常时快速定位排查，并在归档前确认交付物是否齐全。
 
-## 中间产物流转全景
+## 中间产物流转过程
 
 ```mermaid
 flowchart TD
@@ -21,7 +21,7 @@ flowchart TD
     D3["design_doc 路径写入状态机"]
   end
   subgraph build["build 阶段"]
-    B1["落地实施计划 plan<br/>带 base-ref 元数据"]
+    B1["实施计划 plan<br/>带 base-ref 元数据"]
     B2["subagent-progress.md<br/>子代理调度检查点"]
     B3["tasks.md 逐项完成勾选"]
   end
@@ -64,7 +64,7 @@ flowchart TD
 | **更新时机** | 每个阶段守卫放行时自动更新对应字段          |
 | **维护方式** | 机器严格维护（由脚本读写、guard 命令校验）  |
 
-这是 Comet 唯一的跨阶段权威状态文件。随着工作流稳步推进，其中的状态字段会逐步固化，详见 [状态管理](/zh/concepts/state-management)。
+这是 Comet 唯一的跨阶段权威状态文件。随着工作流稳步推进，其中的状态字段会逐步确定下来，详见 [状态管理](/zh/concepts/state-management)。
 
 <Note>
   在 Classic 工作流中，<code>.comet.yaml</code> 始终是当前运行状态的唯一权威来源。
@@ -92,7 +92,7 @@ design 阶段主要负责需求澄清与方案定稿，确保上下文传递给�
 
 Classic 模式直接引用 proposal、design、tasks 与增量 Specs 原始文档，Agent 根据任务需要按需加载，无需重复生成冗余的 Hash 镜像包。
 
-只有当你希望在一个独立的 Markdown 文件中集中通读全部上下文时，才需要运行 `comet handoff <change-name> design --write --full`。该命令会在 `.comet/handoff/design-context.md` 生成只读的汇总视图，仅供人类阅读，不能替代原始材料，详见 [comet handoff 脚本](/zh/scripts/comet-handoff)。
+只有当你希望在一个独立的 Markdown 文件中集中通读全部上下文时，才需要让 Agent 生成汇总视图（后台执行 `comet handoff <change-name> design --write --full`）。该命令会在 `.comet/handoff/design-context.md` 生成只读的汇总视图，仅供阅读，不能替代原始材料，详见 [comet handoff 脚本](/zh/scripts/comet-handoff)。
 
 ### 脑暴进展快照：brainstorm-summary.md
 
@@ -106,7 +106,7 @@ Classic 模式直接引用 proposal、design、tasks 与增量 Specs 原始文�
 该快照负责记录：
 - 双方已达成共识的技术架构与选型；
 - 方案的核心取舍与潜在风险点；
-- 预先拟定的测试策略；
+- 事先定好的测试策略；
 - 尚未最终敲定的待定选项（明确标注为 `pending` 或 `candidate`）。
 
 <Tip>
@@ -117,13 +117,13 @@ Classic 模式直接引用 proposal、design、tasks 与增量 Specs 原始文�
 
 build 阶段的中间文件专注于任务拆解跟踪与多子代理（Subagent）的调度恢复。
 
-### 落地实施计划（plan）
+### 实施计划（plan）
 
 | 关键属性 | 具体说明                                            |
 | -------- | --------------------------------------------------- |
 | **存放路径** | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`    |
 | **创建时机** | build 阶段由子代理调用计划生成工具编写产出          |
-| **核心作用** | 编码落地指南，其文档头（frontmatter）是后续验收的关键证据 |
+| **核心作用** | 编码实施指南，其文档头（frontmatter）是后续验收的关键证据 |
 | **维护方式** | 由 Agent 自主编写并由用户确认                       |
 
 该计划的文档头记录了代码验证所需的重要元数据：
@@ -155,7 +155,7 @@ base-ref: <编码前的 git HEAD commit hash>
 - 审查反馈意见与当轮重修轮次。
 
 <Warning>
-  <code>subagent-progress.md</code> 每完成一个子任务便会刷新一次。负责编码或审查的后台 Subagent <strong>禁止编辑该文件</strong>，该文件完全由主调度会话统一管理。这从机制层面杜绝了子代理擅自把自己标记为“已通过”的隐患。
+  <code>subagent-progress.md</code> 每完成一个子任务便会刷新一次。负责编码或审查的后台 Subagent <strong>禁止编辑该文件</strong>，该文件完全由主调度会话统一管理。这从机制层面避免了子代理擅自把自己标记为“已通过”的隐患。
 </Warning>
 
 ### 任务完成跟踪：tasks.md 勾选
@@ -175,8 +175,8 @@ Comet 不设立多余的任务完成计数器，直接以 `tasks.md` 内的标�
 | 关键属性 | 具体说明                                                            |
 | -------- | ------------------------------------------------------------------- |
 | **存放路径** | `docs/superpowers/reports/YYYY-MM-DD-<change-name>-verify.md`       |
-| **创建时机** | verify 验收阶段，全部通过并落盘后才可标记为 pass                    |
-| **核心作用** | 严谨的验收凭据：包含各项检查结果明细、PASS/FAIL 状态及例外接受理由  |
+| **创建时机** | verify 验收阶段，全部通过并写入文件后才标记为 pass                    |
+| **核心作用** | 验收依据：包含各项检查结果明细、PASS/FAIL 状态及例外接受理由  |
 | **维护方式** | 由 Agent 自动生成并保存                                             |
 
 报告路径会同步记录在 `.comet.yaml` 中。阶段守卫在放行进入归档前，会强制校验该验证报告在磁盘上是否存在且状态达标。

@@ -1,90 +1,86 @@
 ---
-title: "真实案例：用 Supervisor Change 交付项目知识引擎"
-description: "深度复盘 Comet 官方仓库中已归档的 Supervisor Change，了解大型复杂架构如何解耦拆分、分支集成、修复缺陷并完成统一验收。"
+title: '真实案例：用 Supervisor Change 交付项目知识引擎'
+description: '复盘 Comet 仓库中已归档的 Supervisor Change（agent-project-knowledge-engine），看大型多模块重构如何按依赖拆分、隔离集成、用修复子任务补齐缺口并完成 49 项全量验收。'
 ---
 
-import { SupervisorVideo } from "/snippets/supervisor-video.jsx";
+import { SupervisorVideo } from '/snippets/supervisor-video.jsx';
 
-本文真实复盘 Comet 官方仓库中已经顺利交付的 `agent-project-knowledge-engine` 变更。该任务于 2026 年 8 月 22 日正式归档并合并入 `040rc1` 分支。案例中的目标定义、子任务（child）切分、拓扑依赖、Git Commit 哈希与各项验收数据均直接取自仓库的审计记录。
+本文复盘 Comet 仓库中一次真实交付的大型 Supervisor Change：`agent-project-knowledge-engine`。该变更于 2026 年 8 月 22 日归档并合入 `040rc1` 分支，文中提到的目标边界、子任务拆分、依赖顺序、Git 提交哈希和验收记录均来自仓库中的归档记录（`docs/comet/archive/2026-08-22-agent-project-knowledge-engine/`）。
 
-本次变更对 Project Knowledge（项目知识库）进行了彻底重构：早期版本仅在检索时简单通过 ripgrep 实时扫描本地文档；重构后，它演进为 Agent 可以深度依赖的底层代码理解中枢。最终交付涵盖 SQLite FTS5 与 ripgrep 混合召回、结构化项目知识单元、受控学习机制、管理 CLI、Dashboard 可视化大盘以及评估套件。
+这次变更重构了 Project Knowledge（项目知识库）：早期实现只在检索时用 ripgrep 临时扫描本地 Markdown；重构后升级为包含 SQLite FTS5 + ripgrep 混合召回、结构化项目知识单元、受控学习流、CLI 管理命令、Dashboard 页面与评估套件的完整系统。
 
-![小鱼把三个 child 的成果装订进父级交付，并补齐最终验收缺口](/assets/supervisor-change-delivery-illustrations/01-integrated-delivery.png)
+![小鱼把三个子任务的成果装订进父级交付，并补齐最终验收缺口](/assets/supervisor-change-delivery-illustrations/01-integrated-delivery.png)
 
-## Supervisor 在 Codex 中的执行实况
+## 一、Supervisor 在 Codex 中的运行实况
 
-下方的录屏直观呈现了 Supervisor 在 Codex 环境中拉起独立任务、派发子任务并持续全局统筹的真实画面。录屏旨在展示系统的运行调度机制；本文中的子任务切分、提交哈希与验收指标均真实对应于 `agent-project-knowledge-engine` 归档包。
+下面的录屏展示了 Supervisor Change 在 Codex 中启动独立会话、为就绪子任务分配工作区并持续统筹的运行方式（录屏用于演示多会话调度机制，下文的拆分方案、提交哈希与 49 项验收数据均来自 `agent-project-knowledge-engine` 归档记录）：
 
 <SupervisorVideo
   src="/vedio/codex_compact.mp4"
   width={1230}
   height={858}
-  label="Comet Supervisor Change 在 Codex 中通过多个独立任务推进 child"
+  label="Comet Supervisor Change 在 Codex 中通过多个独立任务推进子任务"
   fallback="你的浏览器不支持 HTML5 视频"
 />
 
-## 以宏观整体目标贯穿多个实施阶段
+## 二、为什么必须由父任务统一把关
 
-项目知识引擎的重构横跨查询解析、倒排索引、数据建模、插件生命周期事件、CLI 命令、WebUI 与测试评测。各模块虽然支持分阶段实施，但必须共同收敛于一个核心产品目标：**在大幅降低 Agent 重复摸索耗时的同时，确保一切结论依然以当前代码、配置及自动化测试为绝对可信基准**。
+这次重构跨越查询解析、SQLite 倒排索引、知识单元数据模型、插件事件、CLI、Dashboard 前端和评测脚本。尽管不同层可以分阶段实现，但最终必须共同满足五条全局约束：
 
-父级 Change 统领并牢牢锁定了以下全局边界：
+1. **检索与降级**：Local Provider 默认结合 SQLite FTS5 全文索引与 ripgrep 混合召回，环境不支持 FTS5 时自动回退到纯文本检索；
+2. **与个人记忆严格隔离**：项目知识（Project Knowledge）和个人记忆（Personal Memory）各自独立存储、独立维护所有权与 Token 预算；
+3. **来源可核查**：提取出的每条项目知识都绑定具体文件来源，不能凭空编造，也不能替代对当前代码的直接核对；
+4. **故障隔离**：索引异常、文件权限受阻或适配器报错时，不能阻塞正常的开发工作流；
+5. **全端一致**：CLI、Dashboard、上下文注入、Retrieval Eval 与 Agent A/B 测试共用同一套能力边界。
 
-- Local Provider 默认采用 SQLite FTS5 全文索引与 ripgrep 混合召回，在 FTS5 环境不可用时提供平滑降级；
-- Project Knowledge（项目知识）与 Personal Memory（个人画像记忆）实行严格的所有权隔离、独立存储与独立 Token 预算；
-- 所有提取的项目知识必须强绑定当前的文件来源，不可凭空猜测，更不可取代实时的代码核对；
-- 索引故障、文件权限受阻或语义适配器异常不可反向阻塞正常工作流；
-- CLI 工具、Web 控制台、生成的技术资产、Retrieval Eval 评测及 Agent A/B 测试均共享同一套能力边界。
+这五条约束靠单个模块的单元测试无法证明，必须等全部子任务合入集成分支后，在父任务里做端到端的全量验收。
 
-上述硬性约束只有在全量子任务合流后开展端到端统筹验收，才能确证。各个子模块哪怕各自的单元测试全部通过，亦无法单独证明宏观产品目标已经成立。
+## 三、按真实数据流拆出 3 个功能子任务
 
-## 遵循真实依赖解耦出三个 Feature Child
+在 `children.yaml`（`comet.native.children.v2` 格式）中，整体方案按数据依赖拆成三个顺序递进的功能子任务：
 
-归档中的 `children.yaml` 严格遵循 `comet.native.children.v2` 规范。最初的架构实施方案遵循真实的数据流向，被拆分为三个顺序递进的 feature child：
-
-| 子任务标识（Child） | 前置依赖 | 核心交付物与工程职责 | 独立实现 Commit |
+| 子任务名称 | 前置依赖 | 负责交付内容 | 独立实现提交 |
 | --- | --- | --- | --- |
-| `project-knowledge-hybrid-retrieval` | 无 | 查询规划引擎、SQLite 分块索引、混合召回管道、索引生命周期管理及 Retrieval Eval 评测框架 | `d42226fb` |
-| `project-knowledge-units` | hybrid retrieval | 知识单元数据模型、确定性事实提取器、来源校验及拓扑一跳关系网络 | `efe007c9` |
-| `project-knowledge-learning-management` | knowledge units | 变更复盘自适应学习流、Plugin Event 钩子、显式知识共享、CLI 运维指令、Dashboard 视图与 Agent A/B 测试 | `cca74993` |
+| `project-knowledge-hybrid-retrieval` | 无 | 查询规划、SQLite 分块索引、混合召回管道、索引生命周期管理与 Retrieval Eval 评测 | `d42226fb` |
+| `project-knowledge-units` | `project-knowledge-hybrid-retrieval` | 知识单元数据模型、规则化事实提取、来源校验与一跳关系网络 | `efe007c9` |
+| `project-knowledge-learning-management` | `project-knowledge-units` | 变更后受控学习流、插件事件接入、显式知识共享、CLI 管理命令、Dashboard 视图与 Agent A/B 测试 | `cca74993` |
 
-这三个子任务在拓扑上构成了单向依赖流水线：
+依赖链路如下：
 
 ```text
-project-knowledge-hybrid-retrieval（混合检索基座）
-  → project-knowledge-units（知识单元抽象）
-    → project-knowledge-learning-management（上层运维与管理）
+project-knowledge-hybrid-retrieval（混合检索基础模块）
+  → project-knowledge-units（知识单元模型与提取）
+    → project-knowledge-learning-management（学习流、CLI 与 Dashboard）
 ```
 
-Supervisor Change 原生支持完全解耦任务的并发推进，同样深度支持此类按拓扑依赖分阶段实施的大型工程。Runtime 在调度时仅将前置条件全部达成的 child 移入 `readyChildren` 就绪池。后续子任务始终基于前序集成后的最新基线 Commit 开展编码，避免了基于尚未定型的接口进行超前开发。
+这里有一个值得注意的实战经验：**Supervisor Change 不只适合“完全无依赖的纯并行”任务，同样适合有严格上下游依赖的分层重构**。Runtime 只有在上游子任务通过子验收并合入集成分支后，才会把下游子任务放进就绪队列，确保下游始终基于上游已验收集成的代码提交开工，不会对着未定型的接口盲写。
 
-## 每个 Child 在隔离工作区中产出可集成资产
+## 四、隔离 worktree 开发与串行合入集成分支
 
-三个 feature child 分别入驻各自隔离的 Git worktree 中完成编码与测试验证。它们无权直接侵入目标主分支，而是遵循规范统一合流入 Supervisor 专属的集成分支。
+三个子任务各自在独立的 Git worktree 中编码与验收，不直接修改目标主分支，而是通过验收后由 Runtime 依次合入 Supervisor 的集成分支。仓库记录了三次清晰的集成提交：
 
-代码仓库中完整记录了三次真实的串行集成提交：
-
-| 集成 Commit 哈希 | 集成交付成果与代码变更 |
+| 集成提交 | 合并内容 |
 | --- | --- |
-| `6a230657` | 合流 hybrid retrieval 模块，新增 19 个核心文件，奠定 SQLite 索引、CLI 骨架与检索评测底座 |
-| `576f4c25` | 合流 knowledge units 模块，引入确定性提取管道、知识单元持久化模型及配套单测套件 |
-| `be58f9cc` | 合流 learning management 模块，贯通学习流水线、管理指令集、可视化看板大盘与 Agent A/B 框架 |
+| `6a230657` | 合入 `project-knowledge-hybrid-retrieval`，新增 19 个核心文件，建立 SQLite 索引、CLI 骨架与检索评测基础模块。 |
+| `576f4c25` | 合入 `project-knowledge-units`，引入知识单元数据模型、提取管道及配套单元测试。 |
+| `be58f9cc` | 合入 `project-knowledge-learning-management`，打通学习流、管理命令、Dashboard 页面与 Agent A/B 评测。 |
 
-每个子任务的局部业务开发 Commit 与集成分支的合流 Commit 分层清晰存档。Runtime 藉此精准判别特定代码候选是否已通过局部核验、当前集成分支是否已具备完整的依赖前提，以及异步迟到的异地响应是否依然合法。
+把“子任务局部实现提交”和“父级集成分支合并提交”分开记录，让每一步都可追溯：Runtime 能明确判断哪个候选已经通过局部验收、集成分支是否已经满足下游依赖，也能拦截过期或重复的回调。
 
-## 父级全局 Verify 暴露跨模块缝隙
+## 五、父级全局 Verify 查出两轮跨模块缺口
 
-在三个 feature child 陆续合流入集成分支后，父级主任务并未草率宣布归档。归档目录中的 `verification.md` 如实记录了随后遭遇的两轮验收失利：
+三个功能子任务全部合入后，流程并没有直接归档，而是进入父级全局 Verify。归档中的 `verification.md` 记录了随后发现的两轮真实缺陷：
 
-| 目标周期编号 | Verify 裁决结论 | 全局审查捕获的核心跨模块缺陷 |
+| 周期 | Verify 结论 | 暴露的跨模块问题 |
 | --- | --- | --- |
-| 周期 2 | failed 未通过 | 前期方案调研的部分关键结论尚未完全反映在实际代码中，存在实质性设计缺口 |
-| 周期 3 | failed 未通过 | 知识来源的可信度校验、多工作区隔离、规则激活门禁、增量构建性能开销及全量评测覆盖率依然欠缺 |
+| 周期 2 | `failed` | 前期方案调研的部分关键要求没有完整落到代码里，存在实现缺口。 |
+| 周期 3 | `failed` | 知识来源校验边界、多 worktree 隔离、上下文激活条件、增量构建开销及端到端评测覆盖仍不完整。 |
 
-这些缺陷并非局限在某单个子任务内部，而是典型的跨模块协同缝隙。若此时粗暴打散并重新激活已经集成的历史子任务，势必破坏已获确认的架构边界，亦难以对全局新暴露的验收范围进行清晰界定。Runtime 会保留集成分支的当前状态，让主变更返回 Shape 阶段，补充验收用例并调整子任务清单。
+这些问题横跨三个子模块，单个模块的单测查不出来。如果为了修它们去打散已经合入的三个子任务，既破坏了已验证的边界，又很难界定新一轮改动范围。Runtime 保留了当前集成分支的成果，让父任务回到 Shape 补充验收范围，并调整子任务计划。
 
-## 追加 Closure Child 定向收敛真实缺陷
+## 六、追加修复子任务定向补齐缺口
 
-在最终归档定稿的 `children.yaml` 中，架构师增设了第四个专门修复子任务：
+在最终的 `children.yaml` 中，父任务没有重开前三个子任务，而是追加了第四个专门补齐验收缺口的修复子任务：
 
 ```yaml
 - name: project-knowledge-closure
@@ -92,49 +88,41 @@ Supervisor Change 原生支持完全解耦任务的并发推进，同样深度�
   covers: [A4, A8, A10, A15, A19, A20, A27, A29, A30, A31]
 ```
 
-`project-knowledge-closure` 靶向聚焦父级 Verify 暴露出的全部具体缝隙，包括来源边界控制、定向增量刷新、上下文激活门禁、多 worktree 隔离容灾及端到端评测闭环。后续的修复代码严格圈定在既定验收范围内，专注补齐代码实现与客观测试证据链。
+`project-knowledge-closure` 专门针对父级 Verify 暴露出的 10 项验收缺口（来源边界、定向增量刷新、激活条件、多 worktree 隔离与端到端评测）。在提交 `3cd0c25b` 中，它集中补齐了知识单元解析、学习流、插件集成、文件持久化与两个评测脚本的边界问题，同时完整保留了前三个子任务的既有提交。
 
-其中，提交 `3cd0c25b` 修复了最后一轮审查边界缺陷，覆盖了知识单元解析、学习流程流转、插件联动集成、底层文件持久化以及两个核心评测脚本。该子任务为复杂的跨模块问题单独划定了明确的排错范围，同时保留了前三个 feature child 的既有成果。
+## 七、49 项全量终审与区分无关测试噪音
 
-## 全链路终审覆盖 49 项业务行为
+进入第 4 个周期的第 2 轮 Verifier 审查时，全部验收通过。`verification.md` 记录了完整证据：
 
-进入第四个目标周期的第二轮 Verifier 审查时，测试全部通过。最终生成的 `verification.md` 记录：
+- **49 项端到端验收用例全部 `passed`**；
+- 子任务局部验证、父级串行集成和父级全套检查全部完成；
+- 专项测试、Native 框架测试、TypeScript 类型检查与生产构建全部通过；
+- 独立代码审查（Code Review）指出的 3 项高风险隐患全部修复，无遗留严重阻塞。
 
-- 49 项端到端业务验收用例全部达成 `passed`；
-- 所有子任务局部核验、父级分支合流与父级全套构建检查均合规走完；
-- 聚焦针对性测试、Native 框架测试、TypeScript 类型校验及生产打包构建全数通过；
-- 独立代码审查（Code Review）指出的 3 项高危架构隐患已全量修复；
-- 确认不存在任何未决的 Critical 严重缺陷或遗留卡点。
+还有一个贴近真实工程的细节：跑全仓测试时，仓库里一条与知识引擎无关的历史基线测试（`/comet` Skill 长度限制）触发了告警。Verify 如实记录了这条外部历史问题，没有把它误判成本次特性的功能缺陷，也没有因为无关噪音掩盖本次 49 项核心验收的真实证据。
 
-在执行全量仓库测试时，系统敏锐捕获到一个与本次知识引擎改动完全解耦的既有 `/comet` Skill 长度基线报警。归档审查机制并未将这一外部历史包袱当成本次特性的缺陷，亦未让无关的外部环境抖动掩盖本次核心功能的全套专项客观证据。
+## 八、统一归档，向主干呈现一次干净合并
 
-## Archive 阶段一次性原子交付入主干
-
-当父级主任务彻底跑通全链路 Verify 审查后，系统生成了不可变的归档提交 `de780ce2`。随后通过提交 `58b6dfb2`，正式将 `comet/agent-project-knowledge-engine` 完整并入 `040rc1` 发版分支。
-
-整项宏观大型交付在对外主干上仅呈现一次干净、纯粹的原子化合并：
+父级全量验收通过后，Runtime 生成归档提交 `de780ce2`，再通过提交 `58b6dfb2` 将 `comet/agent-project-knowledge-engine` 统一合入 `040rc1` 分支。对外主干只看到一次完整、经过终审的合并：
 
 ```text
-3 个并行实施的 Feature Child
-  → 3 次依序分支合流
-  → 2 轮父级全局 Verify 暴露隐患
-  → 1 个专门收敛缝隙的 Closure Child
-  → 49 项业务验收全部通过
-  → 流转 Archive 归档
-  → 一键合入 040rc1 主线
+3 个功能子任务（各自独立 worktree 开发与验证）
+  → 3 次串行合入父级集成分支
+  → 2 轮父级全局 Verify 暴露跨模块缺口
+  → 追加 1 个修复子任务（project-knowledge-closure）定向补齐
+  → 49 项验收全部 passed
+  → 统一 Archive 归档并合入 040rc1
 ```
 
-## 从实战复盘中提炼架构拆解准则
+## 九、从这次案例看何时用 Supervisor Change
 
-本次真实交付体现了 Supervisor Change 架构的四项核心支柱：
-
-| 核心工程机制 | 案例中的落地实践 |
+| 工程机制 | 在本案例中的实际作用 |
 | --- | --- |
-| 依赖拓扑驱动 | 下游子任务严格在上游核心基座合流至集成分支后才可开工 |
-| 工作区隔离 | 每个子任务在专有 Git worktree 中自研自测，最后由 Runtime 统一接管合流 |
-| 父级全链路终审 | 局部单元测试通过后仍需整体验收，在集成分支上核验全盘业务目标与跨模块边界 |
-| 容错闭环可追加 | 面对全局终审暴露的跨领域缝隙，通过增补 closure child 靶向收敛，不篡改历史集成基线 |
+| 按依赖拆分与调度 | 下游子任务等上游合入集成分支后才开工，避免基于未定型接口返工。 |
+| 独立 worktree 隔离 | 每个子任务在独立目录开发与测试，不直接动目标分支，由 Runtime 统一合入。 |
+| 父级全量终审 | 局部单测通过不等于整体达标，合入后由父级对照 49 项端到端要求做最终审查。 |
+| 可追加修复子任务 | 全局终审发现跨模块缺口时，通过追加命名修复子任务定向解决，不破坏已有集成基线。 |
 
-选用 Supervisor Change 架构的核心衡量准绳，在于整体目标是否需要拆分为多个能够独立自测验证的技术结果，且在宏观层面依然保有不可逾越的最终端到端终审验收。子任务能够并发推进仅能带来时间效率上的收益；而真正决定是否拆解的关键，在于**依赖拓扑是否清晰、代码候选能否隔离，以及最终交付能否进行全链路统一验收**。
+判断是否采用 Supervisor Change，不只看“能不能同时开多个窗口省时间”，更看三件事：**模块依赖是否清晰、各段改动能否隔离验证、以及最终是否需要围绕同一个大目标做统一终审**。
 
-本案例的全量原始客观证据完好封存在 Comet 源码仓库的 `docs/comet/archive/2026-08-22-agent-project-knowledge-engine/` 目录中。延伸阅读：[Supervisor Change 核心架构](/zh/native/supervisor-change)、[Native Loop 闭环机制](/zh/native/native-loop) 以及 [自动化验证与修复规范](/zh/native/verification-and-repair)。
+延伸阅读：[Supervisor Change：让大型任务安全并行](/zh/native/supervisor-change)、[Native Loop：从实现到可信交付](/zh/native/native-loop) 与 [验证与修复](/zh/native/verification-and-repair)。

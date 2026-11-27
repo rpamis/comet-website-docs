@@ -7,7 +7,7 @@ description: '详解 Classic 的状态文件分工、进度判定方式、人工
   新建的 Classic change 采用轻量 SDK Runtime 与 <code>comet-state.yaml</code> 架构，已有 <code>.comet.yaml</code> 记录可兼容读取。所有阶段准入、决策确认、质量验证与最终归档要求保持完全一致。
 </Note>
 
-Classic 模式完全基于磁盘文件持久化状态。Comet 会将每一次变更的所处阶段、执行模式、分支绑定与验证结论直接写入项目仓库。每次在 Agent 中调用 `/comet` 时，系统都会重新扫描这些文件，完全不依赖易失的会话历史。你只需了解核心状态文件的职责与排查命令，即可在会话中断后精准恢复。关于项目全局配置（`.comet/config.yaml`），请查阅 [Classic 配置](/zh/classic/configuration)。
+Classic 模式完全基于磁盘文件持久化状态。Comet 会将每一次变更的所处阶段、执行模式、分支绑定与验证结论直接写入项目仓库。每次在 Agent 中调用 `/comet` 时，系统都会重新扫描这些文件，完全不依赖不会保留的会话历史。你只需了解核心状态文件的职责与排查命令，即可在会话中断后精准恢复。关于项目全局配置（`.comet/config.yaml`），请查阅 [Classic 配置](/zh/classic/configuration)。
 
 下文中使用 `<classic-root>` 指代当前 Classic OpenSpec 的存放根目录：新项目默认保存在 `docs/openspec/`，沿用旧版布局的项目为 `openspec/`。实际位置由配置项 `classic.artifact_layout` 决定，详见 [项目文件结构](/zh/guides/project-structure)。
 
@@ -81,22 +81,23 @@ flowchart LR
 
 ### 多任务并行开发时明确操作目标
 
-在多个任务并行时，`.comet/current-change.json` 记录了当前会话选定的变更目标，彻底消除写错目录的隐患：
+在多个任务并行时，`.comet/current-change.json` 记录了当前工作区选定的变更目标，避免把改动写到错误的目录里：
+
+- 当项目中只有唯一活跃变更时，系统会自动关联；
+- 存在多个活跃变更时，在对话中直接说明要操作哪一个任务即可，Agent 会在后台锁定目标；
+- 当指定了 `current`、`branch` 或 `worktree` 隔离模式后，变更会通过 `bound_branch` 绑定到对应 Git 分支。如果本地分支偏离，优先切回原分支；只有在你明确要在当前分支接管该任务时，再让 Agent 重新绑定分支。
+
+<Accordion title="底层命令参考（日常由 Agent 自动调用，终端排障可用）">
 
 ```bash
-# 显式选定目标变更
+# 显式选定目标变更 / 查看当前选定 / 清除选定 / 重绑分支
 comet state select <change-name>
-
-# 查看当前选定的变更
 comet state current
-
-# 清除当前目标选定
 comet state clear-selection
+comet state rebind <change-name>
 ```
 
-- 当项目中仅存在唯一活跃变更时，系统会自动关联接管；
-- 存在多个活跃变更时，进入操作前必须显式执行 `select` 锁定目标；
-- 当指定了 `current`、`branch` 或 `worktree` 隔离模式后，变更还会通过 `bound_branch` 严格绑定到对应的 Git 分支。若发现本地分支发生意外漂移，请先切回原分支；只有在你明确确认希望将变更迁移至当前分支时，才可执行 `comet state rebind <change-name>`。
+</Accordion>
 
 ## 关键参数的人工确认规则
 
@@ -142,7 +143,7 @@ comet state clear-selection
 
 ### 查阅状态变更审计流水
 
-Classic 状态流转均遵从严格的事件驱动模型。每一次成功的阶段跃迁或归档，都会自动向审计文件追加一行结构化记录：
+Classic 状态流转均遵从严格的事件驱动模型。每一次成功的阶段推进或归档，都会自动向审计文件追加一行结构化记录：
 
 ```text
 <classic-root>/changes/<name>/.comet/state-events.jsonl
@@ -167,7 +168,7 @@ Classic 状态流转均遵从严格的事件驱动模型。每一次成功的阶
 - `comet status`：全面展示活跃变更的所处阶段、验收结论、磁盘证据有效性以及推荐的下一步；
 - `comet doctor`：检查开发环境、平台适配、Skill 完整度以及各变更状态机的健康度。
 
-详细排障流程与自愈技巧请参考 [状态损坏与恢复](/zh/guides/state-recovery)。
+详细排查流程与修复方法请参考 [状态损坏与恢复](/zh/guides/state-recovery)。
 
 ## 附录：`.comet.yaml` 核心字段速查表
 
@@ -180,7 +181,7 @@ Classic 状态流转均遵从严格的事件驱动模型。每一次成功的阶
 | `workflow`        | `full` \| `hotfix` \| `tweak`                          | 当前变更采用的工作流模式                                                                      |
 | `language`        | `en` \| `zh-CN`                                        | 产物主输出语言，由创建时从项目配置继承                                                        |
 | `phase`           | `open` \| `design` \| `build` \| `verify` \| `archive` | 当前所处阶段。初始化为 `open`，通过守卫核验后向前推进                                         |
-| `auto_transition` | `true` \| `false`                                      | 阶段守卫放行后是否自动唤起下一步 Skill                                                        |
+| `auto_transition` | `true` \| `false`                                      | 阶段守卫放行后是否自动调用下一步 Skill                                                        |
 
 ### 实施与审查配置
 
@@ -198,7 +199,7 @@ Classic 状态流转均遵从严格的事件驱动模型。每一次成功的阶
 | 字段名                | 数据类型 / 允许值             | 核心说明                                                                                      |
 | --------------------- | ----------------------------- | --------------------------------------------------------------------------------------------- |
 | `verify_result`       | `pending` \| `pass` \| `fail` | 自动化质量验收结论                                                                            |
-| `verify_failures`     | 整数（系统自动计数）          | 连续验证失败次数。单次失败递增，测试通过后归零；连续失败达 3 次后强制暂停由人工裁决           |
+| `verify_failures`     | 整数（系统自动计数）          | 连续验证失败次数。单次失败递增，测试通过后归零；连续失败到 3 次后强制暂停，由你决定           |
 | `verification_report` | 相对路径字符串                | 最终结构化验证报告的磁盘路径，验收通过前必须真实存在                                          |
 | `branch_status`       | `pending` \| `handled`        | 远端分支交付状态，在归档确认后标记为 `handled`                                                |
 | `archived`            | `true` \| `false`             | 标记变更是否已完结归档                                                                        |
@@ -207,5 +208,5 @@ Classic 状态流转均遵从严格的事件驱动模型。每一次成功的阶
 
 - [Classic 配置](/zh/classic/configuration) — 掌握全局配置与环境变量覆盖
 - [状态损坏与恢复](/zh/guides/state-recovery) — 深度排查异常状态的实操指南
-- [代码审查机制](/zh/concepts/review-mode) — 深入理解多档审查模式的执行边界
+- [代码审查机制](/zh/concepts/review-mode) — 理解不同审查严格度的边界
 - [工作流核心概念](/zh/concepts/workflow) — 全景了解 Classic 五阶段协同机制

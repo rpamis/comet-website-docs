@@ -1,9 +1,9 @@
 ---
 title: '意图识别与路由'
-description: '输入自然语言需求后，Comet 会在 full、hotfix、tweak、resume、ask_user、out_of_scope 六种路由中精准分发。若证据不足或存在潜在风险，系统会主动暂停等待你确认。'
+description: '输入自然语言需求后，Comet 会把请求分到 full、hotfix、tweak、resume、ask_user、out_of_scope 六种路由之一。若证据不足或存在潜在风险，Comet 会主动暂停，等待你确认。'
 ---
 
-在 Classic 模式下，日常开发只需在 Agent 中输入 `/comet` 并附带任务描述。系统内部的 `/comet-classic` 路由引擎会综合**意图分类**、**关键槽位提取**与代码仓库的实际状态，精准裁决本次任务该走向哪个工作流。
+在 Classic 模式下，日常开发只需在 Agent 中输入 `/comet` 并附带任务描述。系统内部的 `/comet-classic` 路由引擎会综合**意图分类**、**关键槽位提取**与代码仓库的实际状态，判断这次任务该进入哪个工作流。
 
 <p align="center">
   <img
@@ -21,7 +21,7 @@ description: '输入自然语言需求后，Comet 会在 full、hotfix、tweak�
 
 输入需求后，Comet 会自动将本次调用匹配至以下六种走向之一：
 
-| 路由走向（route） | 核心含义                                         | 唤起的下一步 Skill     | 是否需要人工确认 |
+| 路由走向（route） | 核心含义                                         | 下一步进入的 Skill     | 是否需要人工确认 |
 | ----------------- | ------------------------------------------------ | ---------------------- | ---------------- |
 | `full`            | 走完整的五阶段（open → design → build → verify → archive） | `comet-open`           | 否               |
 | `hotfix`          | 快速修复已有已知异常，跳过独立设计文档           | `comet-hotfix`         | 否               |
@@ -54,7 +54,7 @@ description: '输入自然语言需求后，Comet 会在 full、hotfix、tweak�
 - 核心风险信号全为 `false`；
 - 具备强有力的 `workflow_candidate: hotfix` 事实依据。
 
-→ 路由至 **`hotfix`**，直接唤起 `comet-hotfix`。这是典型的修复场景：快速修复现有行为异常，不增加新业务能力，也不破坏接口与 Schema。
+→ 路由至 **`hotfix`**，直接进入 `comet-hotfix`。这是典型的修复场景：快速修复现有行为异常，不增加新业务能力，也不破坏接口与 Schema。
 
 ### 场景二：口头说“微调”，实则破坏了对外接口
 
@@ -79,7 +79,7 @@ description: '输入自然语言需求后，Comet 会在 full、hotfix、tweak�
 
 → 路由至 **`resume`**，系统根据 `note-board` 当前停顿的具体阶段精准唤醒。
 
-### 场景四：纯粹咨询答疑
+### 场景四：只是咨询答疑
 
 ```text
 /comet Comet 的 verify 阶段主要做哪些检查？
@@ -108,7 +108,7 @@ node "$COMET_INTENT" route '{"schema_version":"comet.intent.v1", ...}'
 node "$COMET_INTENT" route --stdin < frame.json
 ```
 
-系统会输出最终裁决的 `route`、分歧诊断报告 `diagnostics` 以及规范化后的 `normalizedFrame`。
+系统会输出最终的 `route`、分歧诊断报告 `diagnostics` 以及规范化后的 `normalizedFrame`。
 
 ## 与独立命令 `/comet-tweak` 的分工
 
@@ -126,9 +126,9 @@ node "$COMET_INTENT" route --stdin < frame.json
 
 ### 为什么需要结构化的意图帧？
 
-在早期版本中，路由分发很大程度上依赖 Prompt 中的自然语言约定（例如“若是 Bug 就走 hotfix……”）。这种朴素做法在实际工程中存在三大痛点：
+在早期版本中，路由分发很大程度上依赖 Prompt 中的自然语言约定（例如“若是 Bug 就走 hotfix……”）。这种做法在实际工程中有三个问题：
 
-| 痛点问题     | 具体表现                                                           |
+| 问题     | 具体表现                                                           |
 | ------------ | ------------------------------------------------------------------ |
 | **不可解释** | 为什么选了这条路径？模型无法给出结构化论据，全凭提示词模糊推测    |
 | **不可复核** | 缺乏结构化的中间参数，一旦路线选错，难以快速定位是哪条信号产生误导 |
@@ -194,7 +194,7 @@ flowchart TD
     F -->|"上下文依据不足"| AU3["ask_user"]
 ```
 
-这一套严谨的判定链路杜绝了猜测：
+这条判断链路不靠猜：
 1. **置信度不足（< 0.7）直接进入 `ask_user`**：宁可多问一句，不冒险走错流程；
 2. **存在多个未结任务且未指明时进入 `ask_user`**：由你明确指定要继续哪一个；
 3. **客观风险信号永远具有一票否决权**：即便要求走轻量修复，只要改动越界，立刻暂停请示。
@@ -202,5 +202,5 @@ flowchart TD
 ## 下一步
 
 - [工作流核心概念](/zh/concepts/workflow) — 深入了解 Classic 五阶段流转细节
-- [决策停顿点全景速查](/zh/concepts/decision-points) — 掌握所有需要人工把关的关键时刻
-- [核心脚本概览](/zh/scripts/overview) — 了解底层脚本如何高效协同
+- [决策停顿点全景速查](/zh/concepts/decision-points) — 掌握需要你确认的节点
+- [核心脚本概览](/zh/scripts/overview) — 了解底层脚本如何配合

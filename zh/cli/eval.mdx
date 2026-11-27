@@ -1,17 +1,19 @@
 ﻿---
 title: 'comet eval'
-description: '自动化评测本地 Skill 技能包、评测清单配置或完整 SDK 工作流应用，生成可复查、可审计的图文评测报告。'
+description: '评估本地 Skill、评测清单或完整 SDK 应用，生成可复查的评测报告。'
 ---
 
-`comet eval` 是专门面向 Skill 与工作流的独立评测系统入口。你可以直接对现有的本地 Skill 开展自动化评测，无需预先调用 `/comet-any`，亦无需手动编写繁琐的 `comet/eval.yaml`。
+`comet eval` 是你在终端运行的评测命令，用来评估 Skill 或完整应用。可以直接评估现有的本地 Skill，不需要先运行 `/comet-any`，也不用提前写 `comet/eval.yaml`。
 
-针对完整的 SDK 工作流应用，直接执行 `comet eval ./weekly-report/application.json --html`，系统会基于真实的生产制品包、固定的静态依赖及冻结的评测用例集展开严格核验，详情请参考 [评估 SDK 应用](/zh/eval/applications)。
+评估完整的 SDK 应用时，运行 `comet eval ./weekly-report/application.json --html`。Comet 会用真实的应用包、固定依赖和冻结的用例检查流程行为。详见 [评估 SDK 应用](/zh/eval/applications)。
 
-## 官方内置行业基准数据集
+## 内置的基准数据集
 
-系统原生支持选择固定版本的 WorkBuddy Code 或 SkillsBench 标准评测集，以原始命题与官方评分器评测 Comet Native 工作流的表现。亦可单独将 Claude Code Goal 作为基线对照组运行；Goal 模式专属于 Claude Code 原生方案，严格在干净无污染的工作区中运行，完全不预装 Comet CLI、Skill 或 Runtime 组件。
+可以选择固定版本的 WorkBuddy Code 或 SkillsBench 数据集，用原始题目和官方评分器评估 Comet Native 工作流。Claude Code Goal 可以作为对照组单独运行。Goal 模式只支持 Claude Code，它在没有 Comet CLI、Skill 和 Runtime 的干净工作区里运行。
 
-推荐遵循“先审查来源、后显式拉取”的原则。npm 发行包本身仅包含元数据与适配驱动，不附带沉重的数据集归档包；查看数据集信息或纯静态采集不会擅自拉起 Docker 容器或消耗大模型 Token。
+建议先查看来源再下载。npm 包里只有元数据和适配代码，不含数据集。查看数据集信息或做静态采集不会启动 Docker 容器，也不消耗 Token。
+
+例如，查看可用数据集、下载 SkillsBench 并做静态检查：
 
 ```bash
 comet eval --list-datasets
@@ -19,62 +21,62 @@ comet eval --dataset skillsbench --fetch-dataset --dataset-root ./.comet/eval/ca
 comet eval --dataset skillsbench --dataset-root ./.comet/eval/cache/datasets/skillsbench --collect
 ```
 
-WorkBuddy 数据集对应的唯一标识为 `workbuddy-code`，在下载或运行前必须仔细阅读其开源协议并显式追加 `--accept-dataset-license`。下载过程会校验官方版本号与内容哈希摘要，同版本同摘要自动复用本地缓存。静态预览会清晰罗列出当前环境不支持的用例及其根因；一旦选定了不受支持的用例，整次运行会安全终止，不会替换用例。
+WorkBuddy 数据集的 ID 是 `workbuddy-code`。下载或运行前要先读它的开源协议，并在命令里加 `--accept-dataset-license`。下载时会校验版本号和内容哈希，都相同就复用本地缓存。静态预览会列出当前环境不支持的用例和原因。选了不支持的用例时，整次运行直接终止，不会换成别的用例。
 
-在核对评测任务集、目标模型与重复执行轮次后，正式发起运行：
+确认任务、模型和重复次数后，再发起运行：
 
 ```bash
 comet eval --dataset skillsbench --dataset-root ./.comet/eval/cache/datasets/skillsbench --task dialogue-parser --count 1 --agent claude-code --model <model-id> --project . --html
 ```
 
-通过 `--dataset-treatment goal` 可单独运行对照组，默认处理条件为 `native`。两组对照实验分别独立拉起，并严格保持原始题目、测试重复轮数、Agent 平台、目标模型、请求端点与计算预算完全一致；若基线条件脱节，仅支持并列比对数据。原始用例得分、局部部分得分与系统流程异常会分别独立统计，部分用例通过不代表全数据集可跑，也不是官方榜单的复现结论。
+加 `--dataset-treatment goal` 可以单独运行 Goal 对照组，默认条件是 `native`。两组分开启动。运行时两组的题目、重复次数、Agent 平台、模型、请求端点和计算预算要保持一致；条件不一致时，结果只能并排看。原始用例得分、部分得分和流程异常分开统计。部分用例通过，不代表整个数据集都能跑，结果也不是对官方榜单的复现。
 
-Dashboard 控制台中的 **Eval → 新建评估 → 内置数据集** 提供了完全一致的可视化通道。初次打开或切换数据源仅展示元数据详情；点击下载后才正式发起拉取，并实时回显进度与缓存状态。正式运行要求本地具备 uv 工具链、Docker 守护进程及目标 Agent 的鉴权凭据；默认评测规划对单题耗时与构建时长均设有刚性熔断上限，你可按需手动调整或随时手动终止。
+Dashboard 的 **Eval → 新建评估 → 内置数据集** 功能相同。首次打开或切换数据集时只显示元数据；点击下载后开始拉取，并显示进度和缓存状态。正式运行需要本机有 uv、Docker 和所选 Agent 的凭据。默认给每道题的运行时间和镜像构建时间都设了上限，可以手动调整，也可以随时终止。
 
 ## 最短运行路径
 
 ```bash
-# 仅做纯静态自检：核验 Skill 规范、manifest 配置及用例探测
+# 静态自检：检查 Skill 结构、manifest 配置和用例能否被识别
 comet eval ./my-skill --collect
 
-# 低成本极速冒烟评测
+# 少量用例的冒烟评测
 comet eval ./my-skill --quick --html
 
-# 运行完整的本地全量评测
+# 完整的本地评测
 comet eval ./my-skill --html
 ```
 
-`target` 既可以是本地 Skill 目录、直接指向的 `SKILL.md`，亦可为 `comet/eval.yaml` 清单文件。直接传入目录时，Comet 会自动向下搜寻对应的 manifest。若未提供 manifest，常规运行会在受限沙盒中基于当前代码快照自动生成 2–4 个典型测试任务，不改写源文件。
+`target` 可以是本地 Skill 目录、`SKILL.md` 文件，或 `comet/eval.yaml` 清单。传入目录时，Comet 会在目录里查找 manifest。没有 manifest 时，常规运行会基于当前代码快照在受限沙盒里生成 2–4 个测试任务，不改源文件。
 
-三种声明目标的形式各司其职：
+三种指定目标的方式：
 
-| 目标指定方式 | 最佳适用场景 | 命令行调用示例 |
+| 方式 | 适合什么情况 | 示例 |
 | --- | --- | --- |
-| 位置参数 target | 评测本地现成的 Skill 目录或指定 manifest（日常首选） | `comet eval ./my-skill --html` |
-| `--manifest <path>` | 评测专有的某份测试清单，而 Skill 资产存放在其他目录 | `comet eval --manifest ./evals/smoke.yaml` |
-| `--skill-path` + `--skill-name` | 编写 CI 流水线时固定输入，彻底解耦对当前相对路径的依赖 | `comet eval --skill-path ./skills --skill-name my-skill` |
+| 位置参数 target | 评测本地现成的 Skill 目录或 manifest，日常首选 | `comet eval ./my-skill --html` |
+| `--manifest <path>` | 测试清单和 Skill 不在同一个目录 | `comet eval --manifest ./evals/smoke.yaml` |
+| `--skill-path` + `--skill-name` | 写 CI 流水线时固定输入，不依赖当前路径 | `comet eval --skill-path ./skills --skill-name my-skill` |
 
-- `--collect` 严格仅执行静态依赖解析与配置健全性校验，不启动任何 Agent 进程、Docker 容器、插件或外部网络调用；
-- `--quick` 自动绑定内置的 `generic-skill-smoke` 通用冒烟用例，快速排查语法与初级逻辑；
-- `--html` 在输出终端日志与 Markdown 报告的同时，同步渲染可视化 HTML 离线报告；
-- 评测报告与运行轨迹默认保存在 Skill 内部或通过 `--project` 指定的 `.comet/eval/runs/` 目录中。
+- `--collect` 只做静态解析和配置检查，不启动 Agent、Docker 容器、插件，也不发网络请求；
+- `--quick` 使用内置的 `generic-skill-smoke` 通用用例，快速检查语法和基本逻辑；
+- `--html` 在输出终端日志和 Markdown 报告的同时，生成 HTML 离线报告；
+- 报告和运行记录默认保存在 Skill 目录内，或 `--project` 指定的 `.comet/eval/runs/` 目录下。
 
-若 Skill 存放在外部共享目录中，可显式指定包含评测 Harness 框架的项目工程根目录：
+Skill 在外部共享目录里时，可以指定包含 `eval/` 框架的项目根目录：
 
 ```bash
 comet eval ./my-skill --project ./my-project --html
 ```
 
-## 用户全局环境配置（.env）
+## 全局环境配置（.env）
 
-通过 npm 全局安装的 Comet CLI 无需开发者拉取源码。将鉴权配置文件直接置于本机的全局 Eval 专用配置目录即可：
+通过 npm 全局安装的 CLI 不需要拉源码。把鉴权配置放到本机的全局 Eval 配置目录即可：
 
 ```text
 Unix / macOS:  ~/.comet/eval/.env
 Windows:       %USERPROFILE%\.comet\eval\.env
 ```
 
-主测大模型（Bench）与大模型裁判员（LLM-as-judge）采用隔离的独立模型、端点与鉴权凭据：
+被测模型（Bench）和裁判模型（LLM-as-judge）使用各自独立的模型、端点和凭据：
 
 ```dotenv
 BENCH_API_KEY=subject-key
@@ -86,21 +88,21 @@ BENCH_JUDGE_BASE_URL=https://judge.example/v1
 BENCH_JUDGE_MODEL=judge-model
 ```
 
-当前终端的系统环境变量优先级高于 `.env` 文件；而 CLI 显式参数与 manifest 清单配置优先级又高于系统环境变量。Claude Code、Codex、CodeBuddy 会自动将通用环境变量映射至各 Agent 平台的原生配置契约。Codex 会自动载入隔离的运行时 `config.toml`；Qoder 则严格遵循其官方规定的鉴权与代理接口。各平台专有的原生环境变量优先级严格高于通用兜底变量。
+优先级从高到低：CLI 显式参数和 manifest 配置 > 当前终端的系统环境变量 > `.env` 文件。Claude Code、Codex、CodeBuddy 会把通用环境变量映射成各自的配置。Codex 会加载独立的运行时 `config.toml`；Qoder 按官方的鉴权和代理接口使用。各平台自己的环境变量优先级高于通用变量。
 
-安全红线：Eval 评测系统不会将任何 API Key 敏感信息写入导出的分发包、manifest 清单、测试报告或 Skill 源码中。在借助 Docker 调度 Agent 时，Codex、Qoder、CodeBuddy 均会在容器内部开辟专属的临时独立配置空间。Codex 的 `config.toml` 仅动态引用环境变量，CodeBuddy 的 `settings.json` 严格通过 `apiKeyHelper` 安全拉取，实际凭据仅存于当前容器的受控内存中，容器销毁后凭据随之清除。
+Eval 不会把 API Key 写进分发包、manifest、测试报告或 Skill 源码。用 Docker 调度 Agent 时，Codex、Qoder、CodeBuddy 都会在容器内创建临时配置目录。Codex 的 `config.toml` 只引用环境变量，CodeBuddy 的 `settings.json` 通过 `apiKeyHelper` 取凭据；凭据只存在容器内存中，容器销毁后清除。
 
-## 评测任务优先级推演
+## 评测任务的选择顺序
 
-评测任务的选择严格遵循以下优先级判定：命令行显式 `--task` > 快捷冒烟 `--quick` > manifest 中的 `evaluation.tasks` > 声明的 `recommendedTasks` > 系统全自动合成的任务。自动生成的测试用例会结合 Skill 静态快照、目标 Agent 与测试配置安全缓存，在后续相同轮次中直接复用。
+选择任务时按这个顺序判断：命令行 `--task` > `--quick` 冒烟用例 > manifest 中的 `evaluation.tasks` > 声明的 `recommendedTasks` > 系统自动生成的任务。自动生成的用例会结合 Skill 快照、目标 Agent 和测试配置缓存，后续相同的运行直接复用。
 
-若需建立高度稳定的团队质量验收门禁，推荐在 `comet/eval.yaml` 中编写内联任务（Inline Tasks）：
+要给团队建立稳定的质量检查，可以在 `comet/eval.yaml` 里写内联任务（Inline Tasks）：
 
 ```yaml
 evaluation:
   tasks:
     - name: writes-summary
-      prompt: 梳理本次改动并生成 summary.md 文档。
+      prompt: 整理本次改动并生成 summary.md 文档。
       expect:
         files:
           - summary.md
@@ -109,17 +111,17 @@ evaluation:
             - '# Summary'
 ```
 
-亦可通过 `source` 属性直接引入 Skill 包内部内嵌了 `task.toml` 与 `instruction.md` 的规范任务包。内联任务全面支持文件存在性、文本关键词、结构化 JSON 解析与断言命令校验。任务的所有工作区现场与产物必须严格限定在被评测的 Skill 包内部或沙盒工作区内。
+也可以用 `source` 引入 Skill 包里自带 `task.toml` 和 `instruction.md` 的任务包。内联任务支持检查文件是否存在、文本关键词、结构化 JSON 和断言命令。任务的工作区和产物必须限制在被测 Skill 包内或沙盒工作区内。
 
-## 选定评测 Agent
+## 选择评测 Agent
 
-系统默认的主评测 Agent 为 `claude-code`，亦可按需指定 `codex`、`qoder` 或 `codebuddy`：
+默认用 `claude-code`，也可以指定 `codex`、`qoder` 或 `codebuddy`：
 
 ```bash
 comet eval ./my-skill --agent codex --model subject-model
 ```
 
-主测 Agent 与裁判 Judge Agent 支持完全解耦独立配置：
+被测 Agent 和裁判 Agent 可以分别配置：
 
 ```yaml
 execution:
@@ -133,87 +135,87 @@ judge:
   baseUrl: https://judge.example/v1
 ```
 
-命令行参数始终优先于 manifest 配置。一旦激活了 Judge 裁决者机制，必须为 Judge 配置独立的模型与鉴权参数，不会隐蔽借用或冒充主测 Agent 的身份凭据。
+命令行参数优先于 manifest 配置。启用裁判机制后，必须为裁判配置独立的模型和凭据，不能借用被测 Agent 的凭据。
 
-若需接入自研的自定义 Agent，必须预先注册适配器；Comet 不会单纯因为某个二进制文件恰好存在于系统的 PATH 中就调用。适配器统一配置规范位于：
+接入自研 Agent 需要先注册适配器；Comet 不会因为某个可执行文件在 PATH 里就直接调用。适配器配置放在：
 
 ```text
 ~/.comet/eval/adapters/<agent-id>/adapter.yaml
 ```
 
-注册完成后，通过原生参数分发：
+注册后就可以用 `--agent` 指定：
 
 ```bash
 comet eval ./my-skill --agent my-agent
 ```
 
-## 评测数据套件（Suite）选型
+## 评测数据套件（Suite）
 
-出厂默认采用 `local` 本地套件，专为单机日常研发与 HTML 报告离线审阅优化。当团队需要将每次变更打点接入协同监控大盘时，可对接 LangSmith 套件：
+默认使用 `local` 本地套件，适合单机日常研发和离线查看 HTML 报告。需要把每次评测接入团队的监控面板时，可以使用 LangSmith：
 
 ```bash
 comet eval ./my-skill --suite langsmith --html
 ```
 
-若需将完整的模型调用轨迹、用例打分与 A/B 实验大盘同步至 Langfuse，可选用官方支持的 Langfuse 套件：
+需要把模型调用记录、用例得分和 A/B 实验数据同步到 Langfuse 时：
 
 ```bash
 LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-... \
   comet eval ./my-skill --suite langfuse --html
 ```
 
-Langfuse 套件在向云端同步遥测的同时，本地依然完好保留全套离线 HTML 报告。执行静态采集指令 `--collect --suite langfuse` 不初始化外部 SDK，不发起任何网络连接，亦不下载冗余插件。
+Langfuse 套件同步云端数据的同时，本地仍保留完整的离线 HTML 报告。执行 `--collect --suite langfuse` 时不会初始化外部 SDK、不发起网络连接，也不下载插件。
 
-## 容器镜像构建超时豁免
+## 构建超时设置
 
-在首次冷启动拉取底层评测依赖时，可能受限于网络状况较为耗时。若需要取消本地 Docker 镜像构建的硬性超时上限，可在启动评测的当前终端中配置环境变量 `COMET_EVAL_BUILD_TIMEOUT_SECONDS=0`：
+首次运行时拉取评测依赖可能因为网络较慢而超时。要取消本地 Docker 镜像构建的超时限制，可以在当前终端设置 `COMET_EVAL_BUILD_TIMEOUT_SECONDS=0`：
 
 ```powershell
 $env:COMET_EVAL_BUILD_TIMEOUT_SECONDS = "0"
 ```
 
-该参数只放宽底层镜像制作与工作区挂载阶段，不影响真实的用例执行与评分超时预算。若底层存在明确的语法或构建错误依然会报错。配置核验、任务选择或静态预览不会启动模型调用；实际评测只有在你明确运行评测命令后才开始。
+这个设置只放宽镜像构建和工作区挂载阶段，不影响用例执行和评分的时限。底层确实有语法或构建错误时仍会报错。配置检查、任务选择和静态预览不会调用模型；真正的评测只在你运行评测命令后才开始。
 
-## 常用参数速查一览
+## 常用参数
 
 ```text
 comet eval [target] [options]
 ```
 
-| 选项参数 | 核心职责说明 |
+| 选项 | 说明 |
 | --- | --- |
-| `--project <dir>` | 显式指定包含 `eval/` 框架的项目根目录 |
-| `--manifest <path>` | 直接指向指定的 `comet/eval.yaml` 清单文件 |
-| `--skill-path <path>` | 指定本地待测 Skill 目录绝对路径或具体 `SKILL.md` |
-| `--skill-name <name>` | 声明待测 Skill 的规范名称标识符 |
-| `--agent <agent>` | 选定主评测 Agent（如 `claude-code`、`codex`） |
-| `--model <model>` | 显式覆盖主评测大模型的唯一标识符 |
-| `--base-url <url>` | 显式覆盖主评测模型的 API 接口请求地址 |
-| `--judge-agent <agent>` | 选定独立的裁判 Judge Agent 平台 |
-| `--judge-model <model>` | 选定独立的裁判大模型标识符 |
-| `--judge-base-url <url>` | 显式覆盖裁判模型的 API 接口地址 |
-| `--profile <name>` | 指定加载的评测 Profile 预设文件 |
-| `--report-config <path>` | 挂载专属的自定义报告渲染配置文件 |
-| `--suite <suite>` | 选定遥测套件：支持 `local`、`langsmith` 或 `langfuse` |
-| `--task <task>` | 精准定向仅执行指定的某个单一测试任务 |
-| `--collect` | 纯静态探查与前置配置依赖自检，不发网络请求 |
-| `--quick` | 自动挂载冒烟用例集，适合日常快速验证 |
-| `--html` | 在输出终端日志的同时，同步编译生成离线图文 HTML 报告 |
+| `--project <dir>` | 指定包含 `eval/` 框架的项目根目录 |
+| `--manifest <path>` | 直接指定 `comet/eval.yaml` 清单 |
+| `--skill-path <path>` | 指定待测 Skill 目录或 `SKILL.md` 的路径 |
+| `--skill-name <name>` | 指定待测 Skill 的名称 |
+| `--agent <agent>` | 选择被测 Agent，如 `claude-code`、`codex` |
+| `--model <model>` | 指定被测模型 |
+| `--base-url <url>` | 指定被测模型的 API 地址 |
+| `--judge-agent <agent>` | 选择裁判 Agent |
+| `--judge-model <model>` | 指定裁判模型 |
+| `--judge-base-url <url>` | 指定裁判模型的 API 地址 |
+| `--profile <name>` | 指定评测 Profile |
+| `--report-config <path>` | 指定自定义报告渲染配置 |
+| `--suite <suite>` | 选择数据套件：`local`、`langsmith` 或 `langfuse` |
+| `--task <task>` | 只运行指定的一个测试任务 |
+| `--collect` | 静态检查配置和依赖，不发网络请求 |
+| `--quick` | 使用冒烟用例，适合日常快速验证 |
+| `--html` | 在终端日志之外生成离线 HTML 报告 |
 
-## 深入解读测试报告与故障归因
+## 报告与问题归因
 
-在正式唤起测试前，CLI 会在终端打印清晰的测试拓扑：涵盖 target 目标、选用套件、执行用例集、实验标识 Experiment 及报告落盘地址。最终的权威报告将所有问题严格按照四维正交体系进行归因定性：
+开始评测前，CLI 会在终端打印本次的信息：目标、套件、用例集、实验标识 Experiment 和报告保存位置。报告把所有问题归为四类：
 
-- `harness`（基础设施故障）：底层依赖残缺、Docker 守护进程崩溃、磁盘路径越权或环境配置缺失；
-- `workflow`（工作流逻辑缺陷）：Skill 自身的状态机推演、步骤编排或命令组合未达预期；
-- `task`（测试用例设计缺陷）：评测用例的 Prompt 引导存在歧义，或断言预期设计脱离实际；
-- `model`（模型推理不稳定）：模型自身的逻辑幻觉、调用超时或非预期的输出格式漂移。
+- `harness`（基础设施故障）：依赖缺失、Docker 守护进程崩溃、路径越权或环境配置缺失；
+- `workflow`（工作流逻辑问题）：Skill 的状态机推进、步骤编排或命令组合不符合预期；
+- `task`（测试用例设计缺陷）：用例的 Prompt 有歧义，或断言的预期不符合实际；
+- `model`（模型不稳定）：模型出现幻觉、调用超时，或输出格式不符合预期。
 
-请务必厘清职责：`comet eval` 全面度量 Skill 解决业务问题的端到端综合能力；而 `comet skill check` 则纯粹度量某次具体运行是否跑通了单步健康检查。两者定位分明，不可混淆。
+`comet eval` 评估 Skill 端到端解决问题的能力；`comet skill check` 只检查某一次运行的单步是否健康。两者不能混用。
 
 ## 相关文档
 
-- [Eval Agent 环境初始化配置](/zh/eval/agent-setup) — 全面掌握 Claude Code、Codex 或 Qoder 的 CLI 安装、环境鉴权与模型协议对齐
-- [自动化评测体系架构概览](/zh/eval/overview) — 深入理解多维评分规则与评测工程设计
-- [评测报告指标深度解读](/zh/eval/reports) — 读懂报告中的 Pass@k 通过率、置信度区间与多维归因
-- [comet publish 交互发布指南](/zh/cli/publish) — 了解如何将客观评测证据链转化为发版审计凭据
+- [Eval Agent 环境配置](/zh/eval/agent-setup) — Claude Code、Codex 或 Qoder 的安装、鉴权和模型配置
+- [自动化评测体系概览](/zh/eval/overview) — 评分规则和评测设计
+- [评测报告解读](/zh/eval/reports) — 报告中的 Pass@k、置信区间和归因
+- [comet publish](/zh/cli/publish) — 把评测证据用于发布前的检查

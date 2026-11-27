@@ -3,13 +3,13 @@ title: "Comet 与业界实践对照"
 description: "Comet 的运行时、工作流、评估、Skill 创作与分发分别对应业界的哪些实践。本文不展开这些文章的细节，而是按维度列出 Comet 的每项做法及其对应的业界参考，作为延伸阅读的索引。"
 ---
 
-Comet 的工程设计并非凭空而来。在评测方法论、Skill 组合与分发、运行时状态机与工作流治理等多个关键领域，业界同行已经展开了深入的探索与实践。**Comet 在开源之初许多业界实践尚未公开发表；后续对比显示，Comet 的多项工程决策与业界实践一致**，同时 Comet 也针对复杂工作流 Skill 场景做出了独特的工程延伸。
+Comet 的工程设计并非凭空而来。在评测方法论、Skill 组合与分发、运行时状态机与工作流治理等多个领域，业界同行已经做过很多探索和实践。**Comet 在开源之初许多业界实践尚未公开发表；后续对比显示，Comet 的多项工程决策与业界实践一致**，同时 Comet 也针对复杂工作流 Skill 场景做出了独特的工程延伸。
 
-本文梳理了 Comet 各核心模块的工程实现，梳理其与业界代表性实践的对应关系，并在文末附上参考文献。本文旨在提供一份清晰的“业界实践对照索引”——若需深入了解 Comet 评测的具体技术细节，请阅读 [评估：Skill 演进的罗盘](/zh/eval/why-eval) 与 [Comet 怎么用评估驱动 Skill 演进](/zh/eval/eval-driven-evolution)。
+本文介绍 Comet 各核心模块的工程实现，以及它们与业界代表性实践的对应关系，并在文末附上参考文献。本文旨在提供一份“业界实践对照索引”：想进一步了解 Comet 评测的技术细节，请阅读 [评估：Skill 演进的罗盘](/zh/eval/why-eval) 与 [Comet 怎么用评估驱动 Skill 演进](/zh/eval/eval-driven-evolution)。
 
 ## 一、评估方法论
 
-Comet Eval 评估的核心对象是“注入 Agent 后的 Skill 是否真正带来正向价值”，而非大模型本身的基模型能力。这一核心定位决定了其在评测维度、实验对照、打分机制与交互测试上的工程设计。
+Comet Eval 评估的核心对象是“注入 Agent 后的 Skill 是否真正带来正向价值”，而非大模型本身的基模型能力。这一核心定位决定了它在评测维度、实验对照、打分机制与交互测试上的工程设计。
 
 ### 评测对象：Skill 的边际增益，而非模型原生智力
 
@@ -18,83 +18,83 @@ Comet 采用有无 Skill 的**实验对照组体系**：
 - CONTROL: 无 Skill 原生基线
 - COMET_FULL: 挂载完整 Comet Skill 流程基线
 
-**在相同任务、相同隔离环境下精准度量 Skill 的净增益**。SkillsBench<sup>[1]</sup> 同样秉持该思路：把 Skill 自身视为评测标的，通过配对实验验证“挂载 Skill 是否带来实质改善”。Comet 的评测设计深度参考了 LangChain 的实践<sup>[2]</sup>，后者明确指出：评估 Skill 本质上是度量“Agent 配合特定 Skill 所构成的混合系统，能否准确理解并有效利用 Skill 提供的专业上下文”。
+**在相同任务、相同隔离环境下精准度量 Skill 的净增益**。SkillsBench<sup>[1]</sup> 也采用同样的思路：把 Skill 自身视为评测对象，通过配对实验验证“挂载 Skill 是否带来实质改善”。Comet 的评测设计参考了 LangChain 的实践<sup>[2]</sup>，后者明确指出：评估 Skill 本质上是度量“Agent 配合特定 Skill 所构成的混合系统，能否准确理解并有效利用 Skill 提供的专业上下文”。
 
 ### 多轮交互：双 Agent 自动模拟真实用户
 
-工作流/Coding 类 Skill 在关键决策点通常需要暂停并等待用户反馈。为了实现无人值守的自动化评测，Comet 引入了**双 Agent 协同测试架构**：被测 Agent 负责执行具体的 Skill 逻辑，如在 Claude Code 中绑定 Comet Skill 针对任务进行执行，对应的是用户真实使用 Agent 平台实现任务的场景，而专门的用户模拟 Agent 则在遇到决策点时根据任务预设给出合理反馈，对应的是用户与 Agent 平台之间的真实交互。阿里巴巴的 Harness 工程化方案也采用了相同思路，通过 Agent 模拟用户交互，让全流程评测在无人干预下自动跑通<sup>[3]</sup>。
+工作流/Coding 类 Skill 在关键决策点通常需要暂停，等待用户反馈。为了实现无人值守的自动化评测，Comet 引入了**双 Agent 协同测试架构**：被测 Agent 负责执行具体的 Skill 逻辑，例如在 Claude Code 中绑定 Comet Skill 执行任务，对应用户真实使用 Agent 平台完成任务的场景；专门的用户模拟 Agent 则在遇到决策点时根据任务预设给出合理反馈，对应用户与 Agent 平台之间的真实交互。阿里巴巴的 Harness 工程化方案也采用了相同思路，通过 Agent 模拟用户交互，让全流程评测在无人干预下自动跑通<sup>[3]</sup>。
 
-### 指标设计：多维 Rubric 评分 + 极限能力与稳定性解耦
+### 指标设计：多维度 Rubric 评分 + 极限能力与稳定性解耦
 
-Comet 的 **Rubric 体系将交付质量解构为多个可量化的维度，每个维度细分为客观的二元检查项（Pass / Fail），最后按权重综合计算**。诸如 SWE-bench、SWE-bench Pro、τ-bench 与 HumanEval 等主流基准，均采用确定性的客观测试信号取代主观打分<sup>[5][6][7]</sup>；Comet 文档中的 Rubric 打分方法也汲取了 Galileo、Hebbia 和 τ-bench 的工程经验。
+Comet 的 **Rubric 体系把交付质量拆成多个可量化的维度，每个维度再细分为客观的二元检查项（Pass / Fail），最后按权重综合计算**。SWE-bench、SWE-bench Pro、τ-bench 与 HumanEval 等主流基准都采用确定性的客观测试信号取代主观打分<sup>[5][6][7]</sup>；Comet 文档中的 Rubric 打分方法也借鉴了 Galileo、Hebbia 和 τ-bench 的工程经验。
 
-此外，Comet 同时引入 pass@k（能力上限）与 pass^k（可靠性下限），明确区分“偶尔能做对”与“每次都能做对”。其中 pass@k 沿用了 HumanEval 提出的无偏估计器算法<sup>[7]</sup>。SkillsBench 出于确定性考虑采用了 3 次重复运行的均值通过率；这是 Comet 与其在指标设计上的微小差异。
+此外，Comet 同时引入 pass@k（能力上限）与 pass^k（可靠性下限），明确区分“偶尔能做对”与“每次都能做对”。其中 pass@k 沿用了 HumanEval 提出的无偏估计器算法<sup>[7]</sup>。SkillsBench 出于确定性考虑采用了 3 次重复运行的均值通过率；这是 Comet 与 SkillsBench 在指标设计上的微小差异。
 
 ### Harness 工程化：容器隔离与链路可观测
 
-Comet 通过 **Docker 容器为每个测试任务提供绝对干净的隔离环境，由 pytest 统一调度执行，并自动产出交互式评估报告**。将评测体系本身作为一个严谨的系统工程来构建（环境沙箱化、任务弹性调度、测试数据采集、可视化报告呈现），在腾讯的大规模 Agent 评测实践<sup>[4]</sup>与阿里巴巴的 Harness 方案<sup>[3]</sup>中均有深入体现。Comet 对 LangSmith 与 Langfuse 的集成直接复用本地测试用例套件，将本地评估接入企业级可观测平台，这一设计与 LangChain 的推荐做法保持一致<sup>[2]</sup>。
+Comet 通过 **Docker 容器为每个测试任务提供干净的隔离环境，由 pytest 统一调度执行，并自动生成交互式评估报告**。把评测体系本身当作严谨的系统工程来构建（环境沙箱化、任务弹性调度、测试数据采集、可视化报告呈现），这种做法在腾讯的大规模 Agent 评测实践<sup>[4]</sup>与阿里巴巴的 Harness 方案<sup>[3]</sup>中都有体现。Comet 对 LangSmith 与 Langfuse 的集成直接复用本地测试用例套件，将本地评估接入企业级可观测平台，这一设计与 LangChain 的推荐做法保持一致<sup>[2]</sup>。
 
 ### Skill 触发保障：把实际调用记录作为硬性门禁
 
-若模型在执行过程中根本没有加载或调用 Skill，那么评测的实际上只是裸模型的表现。LangChain 在实践报告中指出：即便在 Prompt 中明确引导，模型对 Skill 的实际调用率也往往只有约 70%<sup>[2]</sup>。Comet 的应对方案是：**通过平台 AGENTS.md/CLAUDE.md 埋入任务必须使用 Comet 执行的提示词、PreToolUse hook 拦截与底层流式 JSON 调用日志解析，把真实的 Skill 调用证据作为评测生效的硬性门禁**。业界文章揭示了这一挑战，而 Comet 提供了落地的硬约束机制。
+如果模型在执行过程中根本没有加载或调用 Skill，评测的就只是裸模型的表现。LangChain 在实践报告中指出：即便在 Prompt 中明确引导，模型对 Skill 的实际调用率也往往只有约 70%<sup>[2]</sup>。Comet 的应对方案是：**通过平台 AGENTS.md/CLAUDE.md 埋入任务必须使用 Comet 执行的提示词、PreToolUse hook 拦截与底层流式 JSON 调用日志解析，把真实的 Skill 调用证据作为评测生效的硬性门禁**。业界文章指出了这个挑战，Comet 则给出了已实现的硬约束机制。
 
 ### 业界对照速查表
 
 | Comet 工程做法 | 对应的业界实践与参考 |
 | --- | --- |
 | 聚焦 Skill 增量价值的对照评测 | SkillsBench<sup>[1]</sup>、LangChain<sup>[2]</sup> |
-| 双 Agent 模拟交互，全链路自动化 | 阿里 Harness 实践<sup>[3]</sup> |
+| 双 Agent 模拟交互，全流程自动化 | 阿里 Harness 实践<sup>[3]</sup> |
 | Rubric 二元客观检查项 + 加权打分 | SWE-bench<sup>[5]</sup>、SWE-bench Pro<sup>[6]</sup>、τ-bench、HumanEval<sup>[7]</sup> |
 | pass@k 极限能力无偏估计 | HumanEval 无偏估计器<sup>[7]</sup> |
 | Docker 沙箱隔离 + Harness 工程体系 | 腾讯自动化评测实践<sup>[4]</sup>、阿里工程方案<sup>[3]</sup> |
-| 深度对接 LangSmith / Langfuse 平台 | LangChain 可观测实践<sup>[2]</sup> |
-| 针对 Skill 假调用设立证据硬门禁 | LangChain（指出调用率痛点）<sup>[2]</sup> |
+| 集成 LangSmith / Langfuse 平台 | LangChain 可观测实践<sup>[2]</sup> |
+| 针对 Skill 假调用设立证据硬门禁 | LangChain（指出调用率问题）<sup>[2]</sup> |
 | 评测校验 + Hook 前置拦截（门禁外置） | 阿里云开发者社区<sup>[8]</sup>、阿里技术团队<sup>[9]</sup> |
 
 ## 二、运行时与工作流
 
 ### 跨平台 Node 运行时体系
 
-从 0.4.0 版本起，Comet 将原有的 Bash 脚本体系重构为跨平台的 Node `.mjs` 执行器，底层由统一的 TypeScript 运行时提供支撑，Windows 开发者不再需要配置 WSL 或 Git Bash。跨平台轻量运行时是现代 Agent 工具链的重要基石，具体演进过程请参考 [0.3.9 到 0.4.0 的运行时重构复盘](/zh/tech-blog/comet-0.3.9-to-0.4.0)。
+从 0.4.0 版本起，Comet 将原有的 Bash 脚本体系重构为跨平台的 Node `.mjs` 执行器，底层由统一的 TypeScript 运行时提供支撑，Windows 开发者不再需要配置 WSL 或 Git Bash。跨平台轻量运行时是现代 Agent 工具链的重要基础，具体演进过程请参考 [0.3.9 到 0.4.0 的运行时重构复盘](/zh/tech-blog/comet-0.3.9-to-0.4.0)。
 
 ### 状态机分层与零依赖断点恢复
 
-Comet 将任务状态划分为清晰的三层结构：面向人类可读编辑的 `.comet.yaml`、由机器严格维护的 `run-state.json`、以及仅允许追加的审计日志 `state-events.jsonl`。无论因何种原因中断，流程均能基于检查点复原，无需 Agent 依赖易失的上下文猜测状态。关于状态机的详细架构，请阅读 [状态管理](/zh/concepts/state-management)。
+Comet 把任务状态分为三层：供人阅读和编辑的 `.comet.yaml`、由 Comet 自动维护的 `run-state.json`，以及只允许追加的审计日志 `state-events.jsonl`。无论因为什么原因中断，流程都能基于检查点复原，Agent 不需要靠不会保留的上下文来猜测状态。关于状态机的详细架构，请阅读 [状态管理](/zh/concepts/state-management)。
 
 ### 意图识别与参数槽位提取
 
-Comet 将自然语言需求结构化解析为意图帧（`CometIntentFrame`），涵盖意图分类（带置信度）、核心实体抽取、以及风险参数槽位填充（如 `requested_action`、`workflow_candidate`、`scope`、`public_api_change` 等危险信号），最终由运行时根据确定性优先级计算出最优路由。这是自然语言理解（NLU）与工业级任务型对话系统的**标准工程范式**。Comet 将这套在智能客服与任务机器人中高度成熟的技术，应用在 AI 编程工作流的调度上，将路由逻辑从“不可控的自然语言模糊推测”升级为“结构化证据驱动的确定性判定”。详见 [意图识别与路由](/zh/concepts/intent-routing)。
+Comet 将自然语言需求结构化解析为意图帧（`CometIntentFrame`），涵盖意图分类（带置信度）、核心实体抽取，以及风险参数槽位（slot，从请求里提取的关键字段）填充，例如 `requested_action`、`workflow_candidate`、`scope`、`public_api_change` 等危险信号。最终由运行时根据确定性优先级计算出最优路由。这是自然语言理解（NLU）与工业级任务型对话系统的**标准工程做法**。这套技术在智能客服和任务机器人中已经很成熟，Comet 把它应用在 AI 编程工作流的调度上，把路由逻辑从“不可控的自然语言模糊推测”升级为“结构化证据驱动的确定性判定”。详见 [意图识别与路由](/zh/concepts/intent-routing)。
 
 ### 门禁外置：校验检测 + Hook 拦截防护
 
-Comet 的阶段安全由双层防线协同守护：`comet-guard` 与 `comet-state transition` 共享同一套 TypeScript 状态转换规则表，阶段条件未全部满足时直接阻断状态更新；同时，在工具调用执行前由 PreToolUse hook（`comet-hook-guard.mjs`）实施动态拦截，对破坏性写操作进行强制围栏。阿里云开发者社区在总结 Harness 架构时提出了高度一致的观点<sup>[8]</sup>：该文强调的校验体系是 Harness 稳定的命脉，并详细阐述了通过确定性校验门禁墙与实时 Hook 围栏守护执行边界的理念。
+Comet 的阶段安全由双层防线协同守护：`comet-guard` 与 `comet-state transition` 共享同一套 TypeScript 状态转换规则表，阶段条件未全部满足时直接阻断状态更新；同时，在工具调用执行前由 PreToolUse hook（`comet-hook-guard.mjs`）动态拦截破坏性的写操作。阿里云开发者社区在总结 Harness 架构时提出了高度一致的观点<sup>[8]</sup>：该文强调，校验体系是 Harness 保持稳定的命脉，并详细说明了用确定性校验门禁和实时 Hook 拦截来保护执行边界的做法。
 
-“门禁外置”的重要性具备充分的研究实证：验证反馈质量（Effective Feedback Compute）对 Agent 任务成功率差异的解释度高达 R²=0.94–0.99，显著超越单纯增加 Token 消耗或堆砌工具调用的效果（R²=0.33–0.42）<sup>[8]</sup>。这表明高质量的自动化检查对最终交付的可靠性起着决定性作用。**这正是 Comet 坚持将评测证据作为发布硬条件、并用 Hook 实施底层守卫的核心原因**。**阿里技术的 Harness Engineering 实践进一步将此总结为约束机制、反馈机制与结构化 Rubric 评估构成的完整工程链路**<sup>[9]</sup>，**与 Comet 的“创建 → 评测 → 发布”体系高度契合**。
+“门禁外置”的重要性有充分的研究数据支持：验证反馈质量（Effective Feedback Compute）对 Agent 任务成功率差异的解释度高达 R²=0.94–0.99，显著超越单纯增加 Token 消耗或堆砌工具调用的效果（R²=0.33–0.42）<sup>[8]</sup>。这表明高质量的自动化检查对最终交付的可靠性起着决定性作用。**这正是 Comet 坚持将评测证据作为发布硬条件、并用 Hook 实施底层守卫的核心原因**。**阿里技术的 Harness Engineering 实践进一步将此总结为约束机制、反馈机制与结构化 Rubric 评估构成的完整工程链路**<sup>[9]</sup>，**与 Comet 的“创建 → 评测 → 发布”体系高度契合**。
 
 ## 三、Skill 创作与分发
 
 ### 任意 Skill 的模块化拼装与可分发 Bundle
 
-`/comet-any` 支持将松散的 Skill 模块化拼装为可分发的 Skill Bundle，内嵌工作流协议、解析证据、Engine 运行时元数据以及可控的操作面。从创建到落地的完整链路包括：需求定义 → 本地评测 → 同行评审 → 签名打包 → 全平台分发，并在实际写入前强制执行效果预览。关于这一套完整的创作体系，请参考 [Skill Creator 完整工作流](/zh/skill-creator/workflow)。
+`/comet-any` 支持把松散的 Skill 模块化拼装成可分发的 Skill Bundle，内嵌工作流协议、解析证据、Engine 运行时元数据以及可控的操作入口。从创建到应用的完整流程包括：需求定义 → 本地评测 → 同行评审 → 签名打包 → 全平台分发，并在实际写入前强制预览效果。关于这套创作体系，请参考 [Skill Creator 完整工作流](/zh/skill-creator/workflow)。
 
 ### 发布硬性门禁：评测证据强绑定
 
-Comet 将 **真实评测证据作为 Skill 发布的硬性门禁**：若缺失针对当前草稿的测试证据、评测结果未达标、或测试证据与当前代码版本脱节，系统将直接拒绝执行发布。这与 LangChain 提倡的“以评测驱动 Skill 交付”理念一脉相承<sup>[2]</sup>。
+Comet 将 **真实评测证据作为 Skill 发布的硬性门禁**：如果缺少针对当前草稿的测试证据、评测结果未达标，或者测试证据与当前代码版本脱节，系统会直接拒绝发布。这与 LangChain 提倡的“以评测驱动 Skill 交付”理念一脉相承<sup>[2]</sup>。
 
 ## 四、Comet 的工程延伸与开放探索
 
 **Comet 重点工程化的特色方向**：
 
-- 双 Agent 仿真交互配合真实的调用凭据拦截，杜绝虚假调用；
-- 实际状态分层设计，将“可恢复性”落地为确凿的文件记录；
+- 双 Agent 模拟交互配合基于真实调用记录的拦截，防止虚假调用；
+- 实际状态分层设计，把“可恢复性”落实为具体的文件记录；
 - 引入 NLU 意图识别与槽位抽取，提升开发意图分发的稳定性；
 - 评测证据与草稿强绑定，构建严格的软件发布门禁。
 
-**当前技术生态共同面对的开放课题**（正如 SkillsBench 所指出的，该领域整体仍处于探索初期）：
+**当前业界共同面对的开放课题**（正如 SkillsBench 所指出的，这个领域整体仍处于探索初期）：
 
-- 针对复合型 Agent Skill 的基准评测，全行业尚未形成公认的黄金标准<sup>[1]</sup>；
-- 注入丰富 Skill 难免会占用较多上下文，如何更纯净地将收益归因于具体逻辑依然充满挑战<sup>[1]</sup>；
-- 模拟用户的逼真程度、LLM-as-a-judge 裁判的客观性、以及超长周期任务的测试覆盖面，都是值得长期探索的方向<sup>[1]</sup>。
+- 针对复合型 Agent Skill 的基准评测，全行业还没有形成公认的黄金标准<sup>[1]</sup>；
+- 注入丰富的 Skill 难免占用较多上下文，如何把收益准确地归因到具体逻辑上仍然很有挑战<sup>[1]</sup>；
+- 模拟用户的逼真程度、LLM-as-a-judge 裁判的客观性，以及超长周期任务的测试覆盖面，都是值得长期探索的方向<sup>[1]</sup>。
 
 文末参考文献提供了更多学术与工程维度的探讨，供感兴趣的开发者延伸阅读。
 
@@ -114,9 +114,9 @@ Comet 将 **真实评测证据作为 Skill 发布的硬性门禁**：若缺失�
 
 7. Chen, M., et al. *Evaluating Large Language Models Trained on Code* (HumanEval). arXiv preprint arXiv:2107.03374, 2021. \[[论文链接](https://arxiv.org/abs/2107.03374)\]
 
-8. 阿里云开发者社区. *AI 不缺智商缺纪律：给 Claude Code 装上 harness，让长程任务稳定落地*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/2kWi0Fld09fNMVIUg9ddKQ)\]
+8. 阿里云开发者社区. *AI 不缺智商缺纪律：给 Claude Code 装上 harness，让长时间运行的任务稳定完成*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/2kWi0Fld09fNMVIUg9ddKQ)\]
 
-9. 阿里技术. *Harness Engineering：长程自动化 AI Coding / Skills 开发实践*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/mSjb20PDsfiK88C9AQB7og)\]
+9. 阿里技术. *Harness Engineering：长时间运行的自动化 AI Coding / Skills 开发实践*. 微信公众平台, 2026. \[[原文链接](https://mp.weixin.qq.com/s/mSjb20PDsfiK88C9AQB7og)\]
 
 ## 延伸阅读
 

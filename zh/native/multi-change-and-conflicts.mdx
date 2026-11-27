@@ -1,120 +1,143 @@
 ---
 title: '多 Change 并行与冲突控制'
-description: '了解 Native 如何借助独立 Git worktree、工作区硬绑定及 Spec 归档仲裁机制，实现多变更安全高效并行。'
+description: '了解如何在一份仓库中共享规划多个独立 Change、通过延迟创建 worktree 安全并行编码，以及在 Archive 阶段通过需求级 Delta Spec 合并与冲突处理。'
 ---
 
-Native 支持同时维护多个独立 Change。每个 Change 保存自己的需求、验收项和批准。Native v4 内置流程允许多个 Shape 共享同一分支和规划工作区；开始实施时，再按当前活跃任务准备执行工作区。多个 Agent 并行编码时使用独立 worktree。
+开发团队经常同时推进多个需求：一边在改登录重试策略，一边在加报表导出功能。如果把它们混在同一个分支或同一个对话里，代码改动、测试结果和需求文档很容易搅成一团。
 
-多任务并行防护分为两层：Git worktree 负责隔离未提交的代码变更，Spec 冲突检查负责保护系统的正式需求规格。前者解决“代码安全写在哪个目录”，后者解决“多个 Change 并发修改同一能力规格时，该遵循何种次序收敛更新”。
+Native 允许在同一个仓库中同时维护多个独立 Change，日常全流程都可以在对话里用自然语言指挥 Agent 完成，底层用两层机制保证互不干扰：
 
-## Change 组织模式评估
+1. **Git worktree 隔离代码**：让并发编码的多个 Agent 各写各的目录和分支，互不覆盖未提交修改。
+2. **需求级 Spec 冲突检测与归档冲突处理**：在修改项目正式规格前，按能力（capability）和具体需求条目（Requirement ID）检查冲突，先理清业务契约的演进顺序，再做代码集成。
 
-根据业务目标之间的耦合关系，选择匹配的组织方式：
+## 一、先选对组织方式
 
-| 目标关联度                                         | 推荐组织模式                                                                              |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 属于同一宏观产品目标，包含多个需要协同交付的子模块 | 采用 [Supervisor Change](/zh/native/supervisor-change) 架构统一拆解、依赖调度与全链路验收 |
-| 属于互不相干的独立产品目标，可分别上线交付         | 为每个目标独立创建平行的 Native Change                                                    |
+| 需求之间的关系 | 推荐做法 |
+| --- | --- |
+| 属于同一个大目标，需要拆成多个子模块协同集成、统一全量验收 | 使用 [Supervisor Change](/zh/native/supervisor-change)，由父任务统筹依赖调度、串行集成和最终终审。 |
+| 彼此独立的业务目标，可以各自编码、各自测试、分别上线 | 为每个目标分别创建独立的 Native Change。 |
 
-Supervisor Change 专注解决单个大型复合任务内部的子模块编排。本文重点聚焦多个平行的独立 Change 如何在同一个代码仓库中井然有序地并行流转。
+下文重点说明如何同时规划和并行开发多个独立的 Native Change。
 
-## 在同一工作区规划多个 Shape
+## 二、共享分支规划多个 Shape，按需延迟开工
 
-共享 Shape 规划需要 Git 分支；非 Git 项目继续使用单 change 的当前工作区流程。
+在 Git 项目中，不必一上来就为每个刚冒出来的想法新建一堆 worktree。你可以先在同一分支上，让 Agent 依次为多个需求建好 Shape 做澄清和方案评审（非 Git 项目仍使用单 change 的当前工作区流程）。
 
-当多个目标可以独立交付时，可以先在同一分支创建 Native v4 Shape，由一个 Agent 切换整理材料，评审人分别阅读和批准：
+例如，你可以先在对话里提出第一个需求 `/comet 调整登录重试与账号锁定策略`，规划完之后接着提第二个需求 `/comet 给数据看板增加异步 CSV 导出`。每个 Change 各自保存独立的 `brief.md`、草拟 Specs、验收项和审批记录；需要切回前一个继续补充时，直接说“切回 `session-retry-policy` 继续规划”即可。
+
+同一规划目录同一时刻只由一个 Agent 写入；如果需要让多个 Agent 同时编写材料或代码，直接告诉 Agent 为每个任务使用独立 worktree。
+
+### 批准 Shape 后暂缓进入 Build
+
+想先把两三个需求的方案一口气确认完、稍后再分批开工时，在最终确认直接告诉 Agent：“确认这个方案，但先别开始写代码”。
+
+Agent 会在后台确认时自动附带 `--defer-build` 以及状态版本号、预期动作等保护参数（只传 `--defer-build` 不会生效，必须伴随你的明确批准）。批准会保存下来，创建执行工作区和进入 Build 会推迟到你后续通知开工时。
+
+## 三、开工时自动准备独立 Build worktree
+
+当你准备开工某一个已批准的 Change 时，在对话中告诉 Agent“开始实施 `session-retry-policy`”即可。Agent 会在后台触发开工，Runtime 会自动判断当前规划工作区是否还有其他活跃 Change：
+
+- **没有其他活跃 Change**：直接沿用当前工作区进入 Build，不额外建 worktree。
+- **仍有其他活跃 Change**：Runtime 自动执行交接，并在响应中返回新工作区路径（`executionCwd`）：
+  1. 创建独立分支（默认 `comet/<change-name>`；如果已被占用，自动追加 `-build`、`-build-2` 等后缀避免冲突）与独立 worktree（`.worktrees/<change-name>`）；
+  2. 把原 Run、change 正式材料和已确认的 Shape 批准完整交接到新 worktree；
+  3. 后续编码都在新 worktree 中进行；原规划目录会被 Hook Guard 自动保护，禁止继续写入已交接任务的代码，但你仍可在原目录查看其状态，或切换到其他 Shape 继续规划。
+
+### 交接前的四条基线保护
+
+自动准备 Build worktree 基于当前分支的已提交代码（`HEAD`），交接本身**不会**替你自动提交或推送，防止把半成品误带进新分支：
+
+1. **已跟踪代码需先提交**：如果 change 产物目录和 `.comet/config.yaml` 之外存在未提交的已跟踪代码修改，Runtime 会暂停并提示先提交实施基线，提交后再继续即可。
+2. **未跟踪文件留在原目录**：未跟踪的临时文件不会自动带入新 worktree。
+3. **复用已有分支或 worktree 时必须保持干净且基线一致**：如果目标分支已存在，它必须与当前 `HEAD` 指向同一个提交；如果复用的 worktree 中存在未提交改动，或已经包含该 change 的 Runtime 归属记录，Runtime 会保留双侧现场并拒绝覆盖。
+4. **交接中途中断可直接重试**：保留目标目录，重新让 Agent 继续即可完成剩余交接，不会重复创建 Builder 或覆盖已完成步骤。
+
+## 四、一开始就直接隔离开发
+
+如果你一开始就明确要开多个窗口并发开发，或者当前目录已经有未提交改动、已有其他活跃 Change，只需在提需求时说一句“用独立 worktree 开发这个需求”。
+
+如果没有主动说明隔离方式：
+
+- 当前目录干净且没有其他活跃 Change 时，默认在当前目录（`current`）直接推进；
+- 一旦当前目录有未提交工作、已有其他活跃 Change，或你提到需要隔离/并行，Agent 会自动弹出单选题让你选择 **A（当前目录 `current`）**、**B（新分支 `branch`）** 或 **C（独立 `worktree`）**，并在后台创建对应分支与目录。
+
+## 五、工作区绑定与分支校验
+
+Runtime 会把每个 Change 的隔离方式、change 分支、目标分支和工作区目录持久化绑定，每次写入和推进前都会核验，拦截三类常见失误：
+
+- 在主目录误改属于独立 worktree 的业务代码；
+- 本地手动切了 Git 分支后，沿用上一个 Change 的状态继续推进；
+- 复制旧会话里的上下文，在错误目录执行 Build 或 Archive。
+
+普通状态查询和诊断只检查当前所在的工作区，不会自动扫描本机所有 worktree。要操作独立 worktree 里的任务，把 Agent 窗口切到对应目录即可。如果只是本地误切了分支，切回原绑定分支就能继续；如果确实要在当前分支接管一个没有运行中动作的空闲任务，告诉 Agent 在当前分支重绑即可（后台会确认无未核对执行后再调用 `--rebind`）。
+
+## 六、需求级 Delta Spec 合并与归档冲突处理
+
+在 Native 中，每个产品能力（capability）的正式规格存放在项目的 `specs/<capability>/spec.md`。修改已有能力时，change 目录中通过 `delta.yaml` 记录需求级变更操作（`add`、`modify`、`remove`、`rename`），并附带目标需求条目的前置哈希（`expected_hash`）与完整需求基线快照（`base_requirements`）。
+
+这样的细粒度设计，让多 Change 并行归档既安全又灵活：
+
+```mermaid
+flowchart LR
+  C1["Change A 修改 authentication"] --> P{"Archive 预检<br/>检查 capabilityPeers 与需求哈希"}
+  C2["Change B 修改 billing"] --> OK1["互不冲突，各自独立归档"]
+  C3["Change C 也修改 authentication"] --> P
+  P -->|"修改互不影响的独立需求条目"| RB["按基线快照安全 rebase 合入"]
+  P -->|"修改同一需求条目或存在同伴冲突"| ARB["暂停并列出冲突对象<br/>人工确定归档顺序"]
+  ARB --> S1["先归档方确认顺序并合入正式 Spec"]
+  S1 --> S2["后归档方重读最新 Spec → 同步后重验 → 归档"]
+```
+
+具体分三种情况：
+
+1. **修改不同能力**（例如 `authentication` 与 `billing`）：全程独立并行 Build、Verify 和 Archive，代码合并由常规 Git 流程处理。
+2. **修改同一能力但无语义冲突**：基于需求条目的前置哈希和独立性校验，Runtime 能区分哪些需求条目互不影响，在安全范围内完成合并。
+3. **修改同一需求条目或存在并发同伴冲突**：
+   - Archive 预检（`archive.prepare`）会提前发现冲突并暂停，列出冲突的同伴 Change（`capabilityPeers`）或具体冲突的需求 ID，**不会直接覆盖主 Spec**；
+   - 你在对话中决定先归档哪一个，Agent 会在后台附带 `--serial-first <change-name>` 确认顺序并将先归档方合入正式 Spec；
+   - 后归档一方拉取最新的正式 Spec，结合自己的 `brief.md` 保留双方意图并重新整理目标规格，执行 Runtime 给出的同步动作，并针对最新基线补跑受影响的验证，再继续归档。
+
+## 七、归档前的需求范围一致性核对
+
+Archive 还会核对当前 Change 声明的目标 Specs 和验收项是否与 Shape 阶段确认的基线一致：
+
+- 代码内部重构、清理实现细节但需求未变时，归档正常推进；
+- 目标 Specs 范围或验收标准发生未经确认的偏离时，流程会退回 Shape 重新确认，防止正式规格变更绕过你的审批。
+
+## 八、并行过程中你需要做哪些决定
+
+日常的分支创建、worktree 交接、绑定校验和预检都由 Agent 和 Runtime 自动处理，你通常只在四个关键节点拍板：
+
+1. 新提需求时，决定建独立 Change 还是用 Supervisor Change 拆分；
+2. 当前目录已有未提交改动或活跃 Change 时，选择 `current`、`branch` 还是 `worktree`；
+3. 分支或工作区与绑定记录不一致时，选择切回原分支还是在当前分支重绑；
+4. 多个并行 Change 改动同一份能力 Spec 且存在冲突时，决定归档先后顺序以及后归档一方的同步结果。
+
+<Accordion title="底层原理与终端排障命令（日常由 Agent 自动执行，无需手敲）">
+
+以下为 Agent 在共享规划、延迟开工、worktree 创建和分支重绑时调用的公开命令，供需要深入了解或手动排查时参考：
 
 ```bash
+# 在当前分支规划多个 Shape 并切换当前任务
 comet native new session-retry-policy --isolation current --json
 comet native new dashboard-export --isolation current --json
 comet native select session-retry-policy
+
+# 批准 Shape 但暂缓创建执行工作区与进入 Build
+comet native next session-retry-policy --summary "Shape confirmed" \
+  --confirmed --defer-build --expected-state-version <n> --expected-action confirm-shape
+
+# 开工触发自动创建 Build worktree 并返回 executionCwd
+comet native next session-retry-policy --session <会话标识> --json
+
+# 创建时直接指定分支或独立 worktree（可选 --change-branch / --worktree-path）
+comet native new session-timeout --isolation branch --target-branch main
+comet native new session-timeout --isolation worktree --target-branch main
+
+# 空闲 Run 显式重绑到当前分支
+comet native select <change-name> --rebind --json
 ```
 
-每个 change 保留自己的 brief、Spec、验收项和批准。共享规划目录仍由一个 Agent 写入；多个 Agent 同时编写材料或代码时，应使用独立 worktree。
+</Accordion>
 
-批准后暂不实施时，在 Runtime 当前返回的 Shape 确认命令后追加 `--defer-build`。保留命令中的 `--confirmed`、状态版本和预期动作，不自行拼接旧确认命令。批准会保存，任务等待后续 `next`；只传 `--defer-build` 不会批准 Shape。
-
-## 开始 Build 并进入执行工作区
-
-准备实施时，由接收任务的真实会话执行：
-
-```bash
-comet native next session-retry-policy --session <实际会话标识> --json
-```
-
-同一规划工作区仍有其他活跃需求时，Runtime 为该 change 准备独立分支和 worktree，交接原 Run、材料及有效批准。没有其他活跃需求时，可以沿用当前工作区。后续开发和命令在返回的 `executionCwd` 执行；原目录仍可查看该任务，并选择其他 Shape 继续规划。
-
-新 worktree 使用当前分支的已提交代码。启动前先整理实施基线：规划目录之外的已跟踪代码修改需要提交后再重试；未跟踪代码不会自动带入新 worktree。交接本身不自动提交或推送。
-
-复用已有 worktree 时，分支必须与当前已提交基线一致，且目标不能有未提交的本地改动；遇到阻塞时保留现场，先核对并整理，再重试原命令。
-
-交接中断时，保留目标目录并重试原 `next` 命令。Runtime 沿用原 Run 和目标最新进度，不重复创建 Builder 或覆盖已完成的交接。原规划目录不能继续实施已交接的任务；未知执行先按当前恢复指引核对。需求或验收范围变化时，修订原 Run 并重新确认 Shape。
-
-Compat 与固定 SDK 应用继续沿用各自的隔离规则。
-
-## Change 工作区硬绑定机制
-
-Runtime 会在底层将当前 Change 的隔离策略、专有分支、目标集成主干及绝对工作目录持久化绑定。后续所有写操作在触发前均会核验这组绑定契约。一旦检测到当前所在分支、目录类型或工程根目录与落盘记录发生分歧，Change 立即进入挂起状态，并给出正确的目标工作区路径。
-
-工作区硬绑定能精准拦截以下几类高频人为事故：
-
-- 在主干目录中误改原本属于 linked worktree 的业务代码；
-- 在本地手动切换 Git 分支后，继续沿用上一个 Change 的旧状态；
-- 从历史聊天记录中复制旧命令，在错误的目录中执行 Build 或 Archive；
-- 两个平行的工作目录同时声称自己是同一个 Change 的合法承载地。
-
-即便 Agent 平台默认传入的是仓库主根目录，Native 亦能精准识别出当前实际对应的 linked worktree，将所有读写操作限定在正确的沙盒中。当出现多个同样符合条件的歧义工作区时，Runtime 会主动提示绑定不唯一，由你裁决保留哪一个可信源。
-
-## 跨工作区扫描与断点恢复
-
-在恢复推进时，Native 会扫描 Git 中登记的所有 worktree，深度读取各目录内的项目配置与 Change 状态，优先匹配工作区绑定一致的目标。你可以在工程的任意已登记子目录下发起恢复，Agent 会自动穿透定位到 Change 真实的实际存放位置，并在该目录内继续推进。
-
-因此，无论是在多个 IDE 窗口间频繁切换还是重新打开项目，磁盘中的实际状态与工作区绑定共同构成恢复的可靠基础。只有在多个候选分支均合理、绑定关系发生漂移或原分支归属发生异常时，才会需要你介入决断。
-
-若想在终端中统览全局 Change 及其实际路径，可运行：
-
-```bash
-comet native status
-comet native status <change-name> --details --json
-```
-
-上述命令仅供离线查阅与诊断，日常正常的断点恢复完全由 Native 自动调度闭环。
-
-## Spec 语义冲突检测机制
-
-在系统中，每份 Spec 均严谨描述一组完整的产品能力（例如认证授权、计费订阅或站内通知）。例如，用户认证相关的 Spec 集中存放在 `specs/authentication/spec.md`。每个 Change 均会在 `comet-state.yaml` 中明确声明本次计划新建、修改或废弃哪些 Spec。在归档（Archive）触发前，Runtime 会全域扫描所有已登记 worktree 中的 active Change，识别出正在并发修改同一份 Spec 的并行变更。
-
-该检查严格聚焦于**业务产品语义**。两个 Change 即便各自修改的代码文件完全不相交，只要它们同时试图修改 `authentication` 这份系统核心 Spec，就构成归档次序冲突。反之，分别独立修改 `authentication` 与 `billing` 的两个 Change 则可以并发 Build 与 Verify，直至最终归档时再交由常规的 Git 集成检查守护。
-
-这使得业务语义层面的冲突在系统主 Spec 被修改前就得以提前拦截，远早于最终 Git 代码合并时的冲突标记。团队得以先厘清业务交互的先后契约，再处理底层的代码集成。
-
-## Spec 归档次序仲裁
-
-当多个活跃的 active Change 声明了相同的目标 Spec 时，Runtime 会在 Archive 入口主动挂起，并列出涉及冲突的 Change 列表，请求开发者明确“先归档哪一个”。这一决策确立了主 Spec 规格的更新演进次序，双方已完成的既有成果仍安全保存在各自的分支与工作区中。
-
-先获准归档的 Change 会优先将改动合并入系统主 Spec。排在后面的 Change 则需重新拉取最新的主 Spec 规范，将自身未竟的目标与全新基线对齐校准，并在必要时针对最新基线补齐代码实现与验收测试。在基线演进前取得的旧 Verify 结论仅代表旧版本下的表现，重新对齐后必须重新跑通测试以形成新的有效证据。
-
-以 `add-session-expiry`（会话超时）与 `support-passkeys`（通行密钥支持）均需变更 `authentication` 为例：
-
-1. 两个 Change 在各自独立的 worktree 中并行开展 Build 编码与 Verify 验收；
-2. 流转至 Archive 时，检测到二者均声明了对 `authentication` 的变更诉求；
-3. 开发者裁决优先归档 `add-session-expiry`；
-4. `support-passkeys` 基于合并后的最新认证 Spec 重新对齐差异，随后顺利继续流转 Archive。
-
-## 需求与验收标准漂移防护
-
-Archive 阶段还会重新计算当前 Change 声明的目标 Spec 与验收用例，并与最初在 Shape 阶段确认的快照进行全量比对。一旦发现 Spec 范围、核心验收文本或覆盖矩阵发生了非预期的偏离，Runtime 会强制将 Change 回退至 Shape 阶段，引导开发者重新梳理需求并触发二次确认。
-
-该机制清晰界定了代码正常重构演进与业务需求意外漂移的边界。代码实现细节允许持续优化，但正式业务契约与验收红线的变动必须经过你的明确审批；且最终的验证报告版本必须与状态机版本保持强一致。
-
-## 人工介入的明确边界
-
-在日常的多任务并行推进中，Native 全权接管了 worktree 的自动创建、复用、全域状态感知与绑定合法性校验。开发者通常仅在以下三个核心交互节点需要做出裁决：
-
-- 在新提需求时，明确声明该需求是归属于现有宏观目标的一个子任务，还是独立的全新变更；
-- 当工作区归属因外部 Git 操作产生真实歧义时，核对并确认正确的目标路径或分支；
-- 当多个并发 Change 同时声明了同一份 Spec 时，裁决它们归档入库的先后次序。
-
-代码层面的微观 Git 冲突依然依照仓库标准工作流解决。Native 会坚实守护各 Change 的业务需求、状态机与验证流水，待代码冲突妥善解决后，引导流程平稳切回既定工作流继续闭环。
-
-延伸阅读：[Supervisor 复合变更架构](/zh/native/supervisor-change)、[产物与状态机制](/zh/native/artifacts-and-state)、[运行时安全防护](/zh/native/safety-and-recovery) 以及 [断点恢复实操手册](/zh/native/recovery-playbook)。
+延伸阅读：[Supervisor Change：让大型任务安全并行](/zh/native/supervisor-change)、[Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery) 与 [Native 任务恢复](/zh/native/recovery-playbook)。

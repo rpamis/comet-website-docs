@@ -1,144 +1,223 @@
 ---
 title: 'Native 任务恢复'
-description: '掌握 Native 工作流在应对会话崩溃、换机迁移、工作区漂移及归档中断等复杂场景下的断点自愈与排障指引。'
+description: '排查并恢复 Native 工作流中的会话中断、结果未知任务、Builder 或 Verifier 异常、分支偏离、本机记录丢失、跨设备迁移及归档中断。'
 ---
 
-排查异常时先不要改动文件：完整保留未提交改动与状态文件，再让 Agent 读取 `comet native status <change-name> --details --json` 与 `comet native doctor <change-name> --json` 的结构化输出。新创建的任务均依据底层的 SDK Run 与有效的跨端检查点恢复；本机的私有运行态记录集中落盘于用户主目录下的 Comet 全局数据目录中，按具体工作区隔离。
+当 Native 任务因为会话崩溃、网络断开、电脑重启、误切分支或归档中断而停下时，**第一原则是先保护现场，不要删除状态文件，也不要重建同名 change**。
 
-## SDK 任务的精准恢复工序
+日常遇到异常时，直接回到原工作区的 Agent 对话说明情况即可（例如输入 `/comet 继续`，或直接说“帮我查一下刚才那个任务停在哪了，先别改代码”）。Agent 会在后台先执行只读诊断，核对当前阶段、待处理动作和具体阻塞项，再告诉你下一步该怎么选——**你不需要自己去记或手敲一长串恢复参数**。
 
-1. **核对环境基线**：核准所属工程根目录、Git worktree、绑定的 change 名称以及应用版本。
-2. **加载挂起 Action 与下一步**：读取当前 Action 与 `continuation` 指引。处于待执行状态的任务依照记录继续推进；对于执行中突发失联或结果未知的任务，必须先回溯核查原会话上下文、底层进程存活状态以及文件层面的实际副作用。
-3. **针对性补测，复用有效资产**：严格仅重跑已失效或缺失的测试项，完好保留依然有效的测试证据与已敲定的人工决策。若业务需求发生变化，必须回退至 Shape 阶段重新触发确认门禁。
-4. **遵循 Runtime 指令修复**：只有在 Runtime 明确给出可恢复指令时才可执行自愈。禁止私自强删原 Run 实例、手动篡改检查点文件或在状态里伪造虚假的测试全通结果。
+Native 之所以能在各种中断下安全恢复，依靠的是**双层持久化设计**：
 
-当需求文档或业务代码经过人工手动修改后，应先让 Agent 扫描当前差异，并遵循 Runtime 规划的安全路径平滑收敛。外在业务需求的漂移必须重新确认；凡受到代码改动波及、或无法自证依然有效的测试必须重新执行。在继续推进中断的归档事务时，系统具备幂等性，已完成的检查与 Spec 主干更新不重复执行。
+- **本机完整运行记录（Run）**：保存在用户主目录的 Comet 数据目录中，按工作区隔离，记录每一次动作领取、提交回执、等待确认项和归档进度。
+- **随 Git 同步的恢复检查点（`run_checkpoint`）**：保存在项目仓库的 `comet-state.yaml` 中，与 `brief.md`、目标 Specs 一起随代码同步。即使换一台机器或清空了本机数据目录，也能从仓库里的检查点还原原任务，同时不会把本机会话令牌或正在运行中的动作误带到新环境。
 
-`native archive --recover` 仅专门处理由 Runtime 明确识别出的归档挂起、集成交付或临时工作区清理中断。如果操作结果未知，该命令不会将操作标记为完成。当本机所有运行态数据彻底丢失且缺乏有效检查点时，应安全保留业务代码，遵循 Doctor 给出的排障分支逐步恢复，不可凭空宣称原验收结论依然合法。深层协议细节请参考 [SDK 恢复协议](/zh/sdk/recovery)。
+## 一、按故障现象快速查找恢复方式
 
-<Note>
-  下文保留了兼容模式（Compat）下的自动重建与旧版本机目录机制说明，并不代表 SDK 模式能够单凭人类报告或非权威 YAML 任意伪造已终态的执行证据。
-</Note>
+先对照下表找到你遇到的现场，明确你只需在对话里告诉 Agent 什么，以及 Comet 会在后台怎么处理。
 
-<Accordion title="兼容模式（Compat）：旧版任务参考">
+| 遇到的现场 | 背后原因 | 你该怎么做（由 Agent 自动配合完成） |
+| --- | --- | --- |
+| 对话关闭、窗口重启或上下文被压缩 | 聊天上下文丢失，但磁盘上的 Run 和等待状态完好 | 回到原目录告诉 Agent 继续，Agent 读取状态后按最新 `continuation` 继续推进。 |
+| 等待后台测试或 Verifier 时工具超时 | 工具超时不等于原任务失败，原会话可能仍在跑 | 让 Agent 先到原平台核查该会话状态；仍在运行就继续等，已结束则回传原结果。 |
+| 提示存在结果未知（`unknown`）的动作 | 动作已派发但在回传前中断，可能已产生文件或外部改动 | 先核对原会话与实际文件/远端状态，确认后再回传，不要盲目重派。 |
+| Builder 改了一半代码后报错失败（`failed`） | 工作区已有部分代码，且原失败记录已保存 | 看完改动和报错后，在对话里告诉 Agent“接着现有改动继续修”或“调整需求重新确认”。 |
+| Verifier 启动失败、报错或遇到外部阻塞 | 当前候选实现和已有检查证据仍然有效 | 平台故障让 Agent 重试验收；缺环境/权限补齐后让 Agent 恢复验收。 |
+| 本地切错分支或进错目录 | 当前分支/目录与 Run 绑定不一致 | 切回原分支或原 worktree；确认要在当前分支接管空闲 Run 时，让 Agent 执行工作区重绑。 |
+| 换了电脑、重新克隆仓库或本机数据目录丢失 | 仓库里有 `comet-state.yaml` 检查点，但本机无 Run | 拉取代码后让 Agent 诊断，确认检查点有效后从检查点恢复原 Run。 |
+| 要把进行中的 Supervisor 子任务移到另一份检出 | 涉及父检查点、多个子分支、worktree 和未提交改动 | 确认原 Agent 已停止后，在终端用 `comet native transfer export/import` 导出并导入。 |
+| 归档、交付或临时工作区清理中途中断 | 归档流水线某一步停在 `unknown` 或预检失败 | 确认原进程已停止后，让 Agent 核对现场并恢复未完成的归档事务。 |
+| 升级后旧的已完成/已取消 Run 提示存储待关闭 | 业务已结束，只剩历史存储分区迁移 | 同步升级 CLI 与平台 Hook 后，让 Agent（或在终端）执行一次历史存储迁移。 |
+| 移动产物根目录中途中断 | `.comet/config.yaml` 中留有 `pending_root_move` | 按提示选择继续完成或回滚原目录迁移。 |
 
-Native 具备对绝大多数日常中断的全自动自愈能力。系统会完整保留在 Git 仓库中有据可查的业务需求、代码实现水位及逐条验收结论，仅针对性重跑已经丢失的本机临时进程或瞬态证据。你可直接在对话中说明要继续，Runtime 会立即重读磁盘现场、校验工作区完整性，并给出确定的下一步操作建议。
+## 二、处理运行中或结果未知的任务（`running` / `unknown`）
 
-恢复依据保存在仓库文件中：`brief.md`、各能力 Specs 规范、`comet-state.yaml` 与 `verification.md` 完整记录了所有已确认的交付成果；`.comet/runtime/native/` 只保存当前机器上的临时执行记录，随时可以按需重建。
+当诊断提示存在 `running` 或 `unknown` 状态的动作（例如诊断码 `native-execution-outcome-unresolved`）时，说明有一项外部工作已经派出，但 Runtime 还没收到明确结果。
 
-## 自动化断点自愈机制
+Native **不再依赖操作系统 PID 或进程树来判断任务死活**，也不会按历史 PID 强杀进程或自动重跑命令。因为 PID 在机器重启或容器重建后可能复用，而且杀掉进程无法撤销已经写到一半的文件或已经发出的远端请求。
 
-每次恢复 Change 时，Native 均会自动比对 Git 仓库文件与本机执行流水：
+遇到这类情况，Agent 会按三步与你配合核对：
 
-1. 准确定位 Change 所绑定的真实分支与 Git worktree 实际路径；
-2. 完整读取最近一次成功落盘的 `comet-state.yaml`；
-3. 审查在途运行的后台命令、测试脚本或 Verifier 审查任务是否已异常中断；
-4. 按需安全重建缺失或陈旧的本机执行缓存；
-5. 基于当前已掌握的客观证据推进当前阶段，或回退至需要重新校验的断点。
+1. **查原平台会话**：回到派发该任务的 Agent 平台，确认原会话或子任务是否仍在执行。如果还在运行，继续等待它完成，不重新领取或另派相同任务。
+2. **核对实际副作用**：如果原会话已退出，检查对应工作区的 `git status`、修改过的文件、测试日志，以及远端仓库的提交、分支推送或 PR 状态。
+3. **按核实后的事实推进**：
+   - **已确认结果**：由原领取者携带原认领标识回传结果（相同结果重复提交是幂等的，不会产生重复推进）。
+   - **属于归档、交付或清理阶段的唯一 `unknown` Action**：确认原执行进程已停止后，走归档恢复路径（见第六节）。
+   - **无法确认是否已生效**：保留现场并说明缺少的证据，等待人工核实，不重放可能有外部副作用的操作。
 
-若 Shape 或 Build 阶段的本机缓存丢失，Native 会留在原阶段继续，已确认的需求决策与验收项清单不丢失。由于 Verify 与 Archive 强依赖当机执行证据，若此时相关凭证缺失，系统会稳妥重跑当期代码的各项测试。
+底层恢复协议见 [SDK 失败恢复与未知结果](/zh/sdk/recovery)。
 
-## 会话异常中断应对指南
+## 三、Builder 失败与 Verifier 异常的恢复
 
-会话上下文被压缩或窗口关闭，并不代表后台的长时间测试进程已经失败。在同一台机器上恢复时，Agent 会先检查原检查命令或 Verifier 进程是否仍在后台运行：若任务仍在执行，则继续保持等待；只有在确认进程崩溃、任务通信句柄丢失或退出后未产生合法产物时，才会触发重试。若更换了机器或本机缓存损坏，则基于 Git 中已提交的文件恢复。
+### 1. Builder 部分实现后失败
 
-| 遭遇中断的节点 | Native 状态机的自愈策略 |
-| --- | --- |
-| Shape 需求定义阶段 | 完整重载已持久化的所有决策与存疑项，平滑继续需求澄清 |
-| Build 代码实现阶段 | 完整保留既定需求边界与当前已写的代码，从当前文件继续编码 |
-| Verify 处于 `verify-ready` | 安全复用依然有效的代码快照与基线结论，重跑缺失测试并唤起新 Verifier |
-| Verify 处于等待裁决阶段 | 先尝试找回并等待原 Verifier 响应；确认进程失联后，针对当前代码快照重新评测 |
-| Archive 归档就绪阶段 | 安全退回 Verify，针对最终同步后的代码重新复核全量验收项 |
-| 幂等无副作用检查执行中 | 直接针对性重新执行该项自动化检查 |
-| 包含外部副作用且无法幂等重放的测试 | 强制回退至 Build 阶段，生成全新的候选快照后再行审慎验证 |
+Builder 改了一部分代码后因报错、环境异常或中断提交了 `failed` 时，Runtime 会保留当前工作区代码和这条失败记录。**不要**丢弃原任务重新创建，也不需要手动重置状态。
 
-因断点恢复引发的测试重跑纯属“执行级自愈”，代码实现失败计数与连续无进展计数保持原样不变。仅在真实唤起全新 Verifier 时，审查尝试次数才会合规递增。
+Agent 会向你展示当前改了哪些文件、失败原因和继续修改的风险，你只需在对话中二选一：
 
-## 跨设备继续推进
+- **基于已有修改继续开发**：告诉 Agent“检查过改动，接着现有代码继续完成”。Agent 会在后台携带当前提案摘要与版本号提交继续指令（`--continue-builder`），由 Runtime 创建一个绑定原失败记录的新 Builder Action，在原工作区接着做，完成后重新检查与验收。
+- **修改需求或缩小范围**：如果失败暴露出原方案或验收标准不合理，直接告诉 Agent 要调整哪些需求，Agent 会在后台退回 Shape 重新确认。
 
-在更换开发机前，请确保在 Git 仓库中完整提交并推送了以下内容：
+### 2. Verifier 报错、受阻或验收不通过
 
-- 业务源码以及所属的特定分支或 Git worktree；
-- Change 目录内部的 `brief.md`、各 capability Specs 以及 `comet-state.yaml`；
-- （可选）已渲染好的 `verification.md` 图文报告；
-- （若使用了自定义产物目录）项目全局配置 `.comet/config.yaml`。
+| 异常类型 | 你在对话中怎么处理 | 后台机制与保留的内容 |
+| --- | --- | --- |
+| Verifier 平台执行出错或不可用 | 告诉 Agent 重试验收。 | 后台调用 `--retry-verifier`，保留当前候选代码与已有有效检查，生成新的 Verifier Action。 |
+| 缺少测试环境、权限或外部输入导致 `blocked` | 补齐缺失条件后，告诉 Agent 条件已就绪、继续验收。 | 后台调用 `--resolve-verifier-blocker`，保留当前候选与有效检查，恢复验收（已完成的 Supervisor 子任务恢复后会生成新的 Builder）。 |
+| 验收明确判定代码有缺陷（`fail`） | 确认按未通过项修复实现。 | 后台调用 `--revise-implementation`，保留已确认的 Shape 和需求范围，回到 Build 修复。 |
+| 需要调整目标或验收标准 | 说明需求改动内容。 | 后台调用 `--revise-requirements`，保留已有代码，回到 Shape 更新并重新确认。 |
 
-在新设备上克隆或拉取仓库后，Native 会基于上述文件完整重建本机的临时执行态。旧机器上的后台进程与旧会话上下文安全停留在原设备；新机器完全基于仓库内可核实的确定性证据创建全新的执行环境。
+## 四、本机 Run 丢失与跨设备恢复
 
-已流转完成的 Shape 与 Build 阶段成果完整保留。若 Change 在旧机器上正处于 Verify 审查中、或已处于等待 Archive 归档状态，新设备会针对同步到本地的代码重跑验收。在恢复期间，既有的验收失败次数与无进展停滞指标均保持原样锁定。
+本机完整 Run 存放在用户主目录的数据目录里，不会随 Git 提交。更换开发机、重新克隆仓库或清理本机缓存后，仓库中仍有 change 文档和 `comet-state.yaml`，此时就能通过检查点还原进度。
 
-在旧机器上未执行 `git commit` 或未推送的代码无法凭空还原。若拉取后的代码无法完全跑通既定验收项，新拉起的 Verifier 会客观指出未通过的具体用例，并驱动 Change 稳妥退回 Build 阶段继续补齐。
+### 检查点为什么安全可靠
 
-## 工作区拓扑与分支恢复
+Runtime 在写入 `comet-state.yaml` 中的 `run_checkpoint` 时做了三项保护，专门防止跨机恢复出事故：
 
-Native 启动时会自动扫描 Git 中登记的所有 worktree，优先绑定与 Change 关联的分支。即便你在终端中处于仓库的主根目录，Runtime 亦能准确识别出 Change 实际所在的子目录，并引导 Agent 在正确的沙盒中作业。
+1. **会话令牌脱敏**：本机的原始 `claimToken` 会被单向哈希为 `portable-<sha256>`，本机会话凭据不会泄漏进 Git 仓库。
+2. **进行中的任务自动降级为 `unknown`**：写入检查点时，任何仍处于 `running` 状态的动作都会自动标记为 `unknown`。在新机器上恢复时，不会错误继承旧机器上的执行认领去重复运行带副作用的任务。
+3. **防篡改校验与历史压缩**：检查点同时写入内容哈希（`hash`）、原本地版本号与绑定哈希（`sourceRevision` / `sourceHash`），长任务还会启用共享值池压缩（`v2` 格式带 `storageHash`）。任何手工篡改或截断都会在恢复前被拒绝。
 
-若当前所在分支、worktree 模式或工程根路径与落盘元数据发生分歧，Runtime 会立即终止写入并明确打印预期目录。若原目录依然存在，Agent 会平滑切换至正确路径；若 worktree 此前被手动删除但 Git 分支依然完好，Native 会自动重建该 worktree。
+### 跨设备切换的标准步骤
 
-只有在出现以下真实歧义时，才需要开发者介入确认：
+**在旧设备上**：
 
-- 绑定的分支被外部重命名，或被其他并发分支合并覆盖；
-- 本地扫描发现多个同样符合条件的歧义工作目录；
-- 原 Git 分支与关联目录均已彻底丢失；
-- 同一个 Change 的状态机元数据在两个不同路径下检测到版本冲突。
+1. 停止继续推进该任务；如果有仍在执行的任务，先等它结束或核实其结果。
+2. 将以下内容提交并推送到远端分支：
+   - 当前代码改动与所属分支；
+   - change 目录下的 `comet-state.yaml`、`brief.md`、目标 Specs 和引用的产物；
+   - 如果配置了自定义产物目录，一并提交 `.comet/config.yaml`。
 
-此时你可以指定信任的实际路径、从 Git 历史检出或终止该 Change。Runtime 会安全封存当前文件，等待你的明确授权。
+**在新设备（或丢失本机 Run 的目录）上**：
 
-## Archive 事务级归档恢复
+1. 拉取仓库并切到对应分支，在 Agent 对话中说明要继续该 change（例如“继续 `<change-name>`，帮我先检查状态”）。
+2. Agent 会先做只读诊断，确认返回 `runtime-recovery-required`（检查点有效且未损坏）后，经你确认在后台从 `run_checkpoint` 还原原 Run。
+3. Runtime 会还原原 Run 的阶段、已确认的 Shape、用户批准和历史记录，**不会自动重做已完成的 Shape 和 Build**。随后 Agent 会检查是否存在原设备未回传的 `unknown` 动作，并根据新机器环境只补跑失效或缺失的检查。
 
-Archive 归档操作在底层会依次有序推进：更新系统主 Spec、写入终态元数据、渲染最终验证报告，最后将 Change 整体迁入归档历史目录。Runtime 在底层通过事务机制追踪每一步执行水位；若进程在中途遭遇强杀或机器掉电，重启后随时可从已成功的断点安全恢复。
+> 未提交到 Git 的代码改动无法仅凭状态文件恢复。如果拉取时出现 Git 冲突，或同一状态版本出现两份不同内容，先手动解决冲突再恢复，不要手工编辑 `comet-state.yaml`。
 
-重新触发同一个处于中断状态的 Archive 时，Native 会严格比对底层事务账本与真实磁盘文件：
+### 迁移进行中的 Supervisor 子任务（`transfer`）
 
-- 事务记录与文件一致时，平滑从下一步继续流转；
-- Change 核心已归档成功、但 Git 工作区收尾动作受阻时，安全保留归档成果，并精准输出 Git 纠偏指令；
-- 检测到 active 与 archive 目录同时并存时，保留双侧现场，触发挂起等待排查；
-- 多个并发 Change 同时声明同一份 Spec 时，暂停推进并等待开发者裁决归档次序。
-
-若工作区收尾失败发生在 Archive 写入之后，表明 Change 已经在元数据层面完成了归档。此时请依照系统返回的 `recoveryArgs` 参数核查 Git 现场，继续完成分支 merge、push 或创建 PR 流程。
-
-若项目配置的 `commit-msg` Git Hook 拦截了 Commit 内容，Agent 会严格尊重项目 Hook 约定，通过 `--commit-message` 或 `--merge-message` 纠正未竟步骤的文案格式，再重新执行恢复指令。已成功的 Commit 与主 Spec 发布不会重复执行，先前选定的交付策略亦无需重新选择。Status 与 Doctor 诊断命令会清晰展示具体哪一步未走完，不会将已归档的 Change 错误当成丢失目录去发起二次迁移。
-
-若你此前已在终端中手动完成了 Git Commit 或 Merge，请先执行 `doctor` 评估现场。只有在 Runtime 能够证明本地改动、Commit 记录与交付策略完全契合时，`doctor --repair` 才会安全清理掉本地多余的暂存记录；而远端推送与 PR 创建始终由 Archive 与远端平台核对为准。归档目录的存在，不能简单盲信为 Git 交付已全量完成。
-
-## 验证报告的一键重建机制
-
-`verification.md` 负责将 `comet-state.yaml` 中的机器状态格式化渲染为图文并茂的人类报告。若该 Markdown 报告文件被误删、写入遭遇意外截断或版本稍显滞后，Native 随时可根据底层权威 YAML 状态重新渲染。
-
-若仅是报告文件丢失，但底层的状态元数据与本机执行流水能够相互印证，恢复过程仅轻量补齐 Markdown 报告即可。但若在流转至 Archive 前夕连本机的执行凭证也一并丢失，Native 会返回 Verify，重新运行检查并记录结果。
-
-这一设计既减少了不必要的重测耗时，又从架构上避免了在缺乏客观证据的情况下将未经检验的代码轻率归档。
-
-## 必须交由开发者亲自裁决的场景
-
-在面临可能引发代码意外覆盖、产生不可逆外部副作用或错误归档的临界点时，Native 会放弃自动推进，主动停机：
-
-| 异常现场 | 开发者所需决策或处理的事项 |
-| --- | --- |
-| 本地工作区与 Change 绑定发生分歧 | 核对并指定正确的 Git 分支或 worktree 路径 |
-| 多个并发推进的 Change 同时改动了同一份能力 Spec | 明确裁决谁先归档入库的先后次序 |
-| 跨端 Git 同步时产生业务代码或文档冲突 | 在编辑器中手动解冲突并提交，随后通知流程继续验证 |
-| 针对外部第三方平台的网络操作结果无法确证 | 登入远端控制台核对实际状态，随后决定重试或跳过 |
-| 连续排错失败轮次触碰配置熔断阈值 | 评估是继续在当前思路上深究、微调需求范围还是终止 |
-| active 目录与 archive 归档目录状态自相矛盾 | 保留当前目录和运行状态，执行 `comet native doctor` 诊断 |
-| 历史旧版本 Change 急需格式迁移 | 遵循 Runtime 提供的标准化迁移指令执行元数据升级 |
-
-`await-user` 标明下一步在等待你作出业务决定；`blocked` 则表明在当前环境下缺失安全的推演路径。Runtime 在挂起时会同步打印阻塞根因、责任归属方以及系统允许执行的合规修复动作。
-
-## 离线状态查阅与一键诊断
-
-日常正常的中断恢复完全由 Native 自动完成。若需要深入了解系统底层细节或排障，随时可在终端中执行：
+如果 Supervisor Change 已经准备好集成 worktree 和子任务 worktree，且正在 Child Build 阶段（还未进入独立 Verify、集成或父级修复），又需要把多分支和未提交工作整体移到另一台机器或另一份本地检出，就要由你在终端运行下面的迁移命令。这是少数需要你直接在终端执行的操作：
 
 ```bash
-comet native show <change-name>
-comet native status <change-name> --details --json
-comet native doctor <change-name>
+# 1. 在原检出：确认所有子任务 Builder 和 Supervisor Agent 都已停止后导出
+comet native transfer export <change-name> --output <新建的私有目录> --confirmed-stopped
+
+# 2. 在目标检出（必须停在相同的目标基线提交）导入
+comet native transfer import --input <导出目录>
 ```
 
-`show` 与 `status` 直观展示正式技术产物、工作区路径、各用例验收进度以及下一步指引。`doctor` 深度检查数据迁移、事务完整性、目录映射与状态机一致性。请格外注意：`doctor --repair` 仅在诊断报告给出了清晰经过校验的修复动作时才被允许执行。
+迁移包会自动生成包含所有已跟踪文件、未跟踪文件、Git bundle、补丁和检查点 SHA-256 哈希的校验清单：导入时会校验目标分支、目标提交和每份文件的哈希，并拒绝路径穿越或符号链接；导出时仍在运行的 Builder 会在导入后自动标记为 `unknown`，必须先核对再继续，不会误标为已完成。
 
-在整个恢复处置周期中，请交由 Runtime 接管 `comet-state.yaml`、本机运行态缓存、并发锁与事务。严格遵循 `continuation`、`recoveryArgs` 或 `doctor` 返回的标准动作推演，即可完好保护已有成果与故障第一现场。
+## 五、工作区与分支偏离恢复
 
-延伸阅读：[任务推进与中断恢复机制](/zh/native/continuation-and-checkpoints)、[Native 运行时安全防护](/zh/native/safety-and-recovery)、[多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts) 以及 [产物与状态机制](/zh/native/artifacts-and-state)。
+为了防止跨目录误操作，普通状态查询和诊断只检查当前所在的工作区，**不会自动扫描本机所有 Git worktree**。
+
+- **在主目录查不到独立 worktree 里的 change**：把终端或 Agent 切到该 change 对应的 worktree 目录后再继续，不要在主目录新建同名 change。
+- **本地切错了分支（`native-workspace-branch-mismatch`）**：
+  - 如果是误切分支，切回原绑定分支即可恢复。
+  - 如果你明确想在当前分支上接管同一个空闲 Run，告诉 Agent“在当前分支接管这个任务”。Agent 会在确认没有运行中或结果未知的动作后，在后台执行显式重绑（`select --rebind`），保留已有改动和已确认的批准；若存在未核对结果的执行，重绑会被拒绝。
+
+## 六、中断的归档、交付与清理恢复
+
+Native SDK 的归档流水线按固定顺序推进：
+
+```text
+supervisor.parent.deliver（仅 Supervisor） → archive.prepare → archive.execute → archive.finalize → supervisor.cleanup（仅 Supervisor）
+```
+
+归档中途如果断电或进程退出，在对话中让 Agent 先查诊断结果，再按中断位置安全恢复：
+
+| 中断位置与现象 | 处理方式与内部保障 |
+| --- | --- |
+| `archive.prepare` 预检失败（如候选代码被改动、目录或配置不匹配） | `archive.prepare` 是幂等只读预检。修复阻塞项（若候选代码变化则先修订实现并重新验收），再继续归档。 |
+| `archive.finalize` 在写入前因候选变动失败（`candidate-drift`） | 恢复已确认的实现与材料后继续归档，Runtime 会接着原 Spec 事务完成收尾，不重复应用 Specs。 |
+| 交付、归档或清理成为唯一 `unknown` Action | 确认原执行进程已停止后，由 Agent 在后台调用归档恢复（`archive --recover`）核对并收尾。 |
+
+### 归档恢复（`archive --recover`）的内部防错机制
+
+执行归档恢复时，Runtime 会逐项核对现场证据，不会盲目重放：
+
+- **恢复 `supervisor.parent.deliver`**：只在目标分支精确指向已验证的集成提交时，向原 Action 补记完成；如果目标分支还没前进或已经偏离，直接拒绝，不重新执行快进合并。
+- **恢复 `archive.execute` / `archive.finalize`**：核对原 Run、事务日志、候选实现、已应用的 Specs 和验收报告。目录已经搬迁过就不会再搬迁；已经完成的收尾只凭完整持久化收据补记结果。
+  - 响应中若出现 `historicalRecovery: true`、`currentImplementationRevalidated: false` 或 `resumedFinalization: true`，表示本次只是补记或继续完成了**历史已验收候选的归档收尾**，不代表对后续新增改动重新跑过验收。
+- **恢复 `supervisor.cleanup`**：只在临时子 worktree 和集成 worktree 完全干净、且对应分支已合入目标提交时继续清理；发现未提交修改会保留现场并拒绝删除。
+
+注意：`doctor --repair` **不会**替 SDK 执行归档事务。遇到未完成归档事务时，先排除环境问题，再走 `archive --recover`。归档完成后，Git 推送、合并或创建 PR 仍需单独核对实际远端状态，见 [归档与交付](/zh/native/archive-and-delivery)。
+
+## 七、什么情况必须停下来人工介入
+
+`comet native doctor` 严格区分“只读诊断”和“显式修复”，避免排查时误改状态。遇到以下高风险现场时，Runtime 会主动停下等待人工核查，**切勿手动删目录或改 YAML 绕过**：
+
+- 同一个 change 同时出现在 active 和 archive 目录；
+- 配置文件、brief、Spec 或检查点文件损坏且没有可信来源；
+- 存在冲突的 active 与 history 运行归属记录且无法自动确认；
+- 事务日志与磁盘文件相互矛盾。
+
+本页的恢复和修复命令由 Agent 在后台调用，下面的内容供你在终端排障时查阅：
+
+<Accordion title="底层原理与终端排障命令（日常由 Agent 自动执行，离线排障时可手动运行）">
+
+### 1. 只读诊断（随时可安全运行）
+
+```bash
+comet native status <change-name> --details --json
+comet native doctor <change-name> --json
+```
+
+### 2. 常见恢复与修复命令
+
+| 命令 | 作用 | 使用边界 |
+| --- | --- | --- |
+| `comet native doctor <change> --repair --confirmed --json` | 从 `comet-state.yaml` 的 `run_checkpoint` 恢复缺失的本机 Run | 仅在只读 `doctor` 返回 `runtime-recovery-required` 后使用。 |
+| `comet native doctor <change> --repair --json` | 完成已取消或已完成 Run 的剩余存储收尾 | 不执行 SDK 归档事务，不删除未完成事务。 |
+| `comet native doctor --repair --strategy <continue\|rollback> --json` | 恢复中断的 `comet native root move` 产物根目录迁移 | 仅在配置存在 `pending_root_move` 时使用。 |
+| `comet native doctor --migrate-history --json` | 校验并关闭业务清理已完成的已结束 Run 存储分区 | 不能与其他修改参数混用；需先同步升级 CLI 与平台 Hook。 |
+| `comet native select <change> --rebind --json` | 将空闲 SDK Run 显式重绑到当前 Git 分支 | 仅当无运行中或结果未知的动作时允许。 |
+| `comet native archive <change> --recover --json` | 核对并恢复唯一的 `unknown` 归档、交付或清理动作 | 必须先确认原执行进程已停止。 |
+
+### 3. Builder / Verifier 恢复命令（由 Agent 携带最新保护参数调用）
+
+```bash
+# Builder 部分修改失败后在原工作区继续
+comet native next <change-name> --continue-builder --summary "<说明>" \
+  --proposal-hash <hash> --expected-state-version <n> --expected-action continue-builder
+
+# Verifier 执行出错重试 / 外部阻塞解除后继续
+comet native next <change-name> --retry-verifier --summary "<说明>" \
+  --proposal-hash <hash> --expected-state-version <n> --expected-action retry-verifier
+comet native next <change-name> --resolve-verifier-blocker --summary "<说明>" \
+  --proposal-hash <hash> --expected-state-version <n> --expected-action resolve-verifier-blocker
+```
+
+### 4. 旧归档事务缺少原 Spec 的 Git 版本（`--legacy-spec-backup`）
+
+在恢复早期已写入 Specs 的归档事务时，Runtime 会优先以只读方式从 Git index 和 `HEAD` 中匹配原 Spec 哈希。仅当报错明确提示缺少原 Spec 的 Git 版本时，才需要一份归档前备份 JSON（放在**项目目录之外**，普通文件、非符号链接，最大 8 MiB），由 Agent 携带它继续归档恢复：
+
+```json
+{
+  "schema": "comet.native.archive-originals.v1",
+  "runId": "my-change",
+  "transactionId": "<原归档事务 ID>",
+  "files": [
+    {
+      "ref": "docs/comet/specs/example/spec.md",
+      "content": "# Example\n归档前的完整 Spec。\n"
+    }
+  ]
+}
+```
+
+```bash
+comet native archive my-change --legacy-spec-backup /absolute/path/original-specs.json
+# 原 Action 结果未知且已确认原进程停止时
+comet native archive my-change --recover --legacy-spec-backup /absolute/path/original-specs.json
+```
+
+Runtime 会校验 `schema`、`runId`、`transactionId`、路径归属、原文件哈希和完整候选摘要；备份只能用于恢复原已验收候选，不能批准新增代码改动，也不能在原候选摘要缺失时补造验收依据。
 
 </Accordion>
+
+延伸阅读：[任务推进与中断恢复](/zh/native/continuation-and-checkpoints)、[Native 的运行时保护与故障恢复](/zh/native/safety-and-recovery) 与 [多 Change 并行与冲突控制](/zh/native/multi-change-and-conflicts)。

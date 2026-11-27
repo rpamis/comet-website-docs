@@ -13,7 +13,7 @@ description: '遭遇会话中断、上下文压缩或切换工作设备后，如
 /comet 继续
 ```
 
-Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会重新读取项目配置、OpenSpec 规格、`.comet.yaml` 状态以及磁盘上的运行证据。
+Comet 完全不依赖不会保留的对话上下文：在 Classic 模式下，它会重新读取项目配置、OpenSpec 规格、`.comet.yaml` 状态以及磁盘上的运行证据。
 
 <Tip>
   <strong>日常恢复无需先执行 <code>comet status</code> 或 <code>comet doctor</code>。</strong>
@@ -22,17 +22,17 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 ## 也可以直接用自然语言说“继续”
 
-自 0.4.0-beta.4 起，`comet init` 和 `comet update` 会自动将一段 Comet 恢复指引注入到项目的 `AGENTS.md` 与 `CLAUDE.md` 中。长程开发在遭遇上下文被压缩、新建会话或换端操作时，Agent 可能忘记当前会话正由 Comet 管理，而你也可能未输入斜杠命令。此时 Agent 会先运行只读的 `comet resume-probe` 探测命令，判断诸如“继续刚才的用户系统重构”是否能匹配到现有的 change，再决定是否重新唤起工作流。
+自 0.4.0-beta.4 起，`comet init` 和 `comet update` 会自动将一段 Comet 恢复指引注入到项目的 `AGENTS.md` 与 `CLAUDE.md` 中。长时间运行的开发遇到上下文被压缩、新建会话或换端操作时，Agent 可能忘记当前会话正由 Comet 管理，而你也可能未输入斜杠命令。此时 Agent 会先运行只读的 `comet resume-probe` 探测命令，判断诸如“继续刚才的用户系统重构”是否能匹配到现有的 change，再决定是否重新唤起工作流。
 
 | 交互场景 | 探测结果 | 行为表现 |
 | --- | --- | --- |
 | 明确要求继续、验证、归档或提交指定 change，且状态允许 | 返回 `auto_resume` | 自动进入对应阶段的正式入口 |
 | 新会话仅语义模糊匹配到某个 change，或只有项目级选择意图 | 返回 `ask_user` | 必须先向你确认意向，确认后再进入 |
-| 存在多个候选 change、状态冲突或需要用户裁决 | 返回 `ask_user` | 暂停并只抛出一个精准问题等待确认 |
-| 仅咨询问题、明确表示不走流程，或当前已在 Comet 流程中 | 返回 `out_of_scope` | 不重复唤起 workflow |
+| 存在多个候选 change、状态冲突或需要你决定 | 返回 `ask_user` | 暂停并只问一个具体问题等你确认 |
+| 仅咨询问题、明确表示不走流程，或当前已在 Comet 流程中 | 返回 `out_of_scope` | 不重复进入工作流 |
 | 没有任何活跃中的 active Comet change | 返回 `none` | 不触发恢复动作 |
 
-该机制仅约束 Comet 的无感恢复探测，且完整保留项目原有自定义规则。探测命令会严格按配置顺序校验单套工作流，配置损坏时不会随意兜底回退。若希望彻底关闭自然语言触发的被动探测，可在 `.comet/config.yaml` 中设置 `ambient_resume: false`。该配置不影响显式 `/comet` 调用，也不会跳过既有的关键停顿点。
+该机制仅约束 Comet 的无感恢复探测，且完整保留项目原有自定义规则。探测命令会按配置顺序检查一套工作流，配置损坏时不会自动改用其他方式。若希望彻底关闭自然语言触发的被动探测，可在 `.comet/config.yaml` 中设置 `ambient_resume: false`。该配置不影响显式 `/comet` 调用，也不会跳过既有的关键停顿点。
 
 详见[恢复探测命令](/zh/cli/resume-probe)。
 
@@ -69,13 +69,13 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 ### Classic Change 的工作区复用
 
-在创建或恢复 Classic change 时，Comet 会首先核验该 change 绑定的分支及 Git worktree。若存在已登记的匹配 worktree，Comet 将直接复用；若本地分支存在但 worktree 已丢失，恢复流程会自动重建。当工作目录、分支与 worktree 状态冲突时，Comet 会停顿等待你明确抉择，不会静默切换到无关工作区。
+在创建或恢复 Classic change 时，Comet 会首先核验该 change 绑定的分支及 Git worktree。若存在已登记的匹配 worktree，Comet 将直接复用；若本地分支存在但 worktree 已丢失，恢复流程会自动重建。当工作目录、分支与 worktree 状态冲突时，Comet 会停顿等待你明确抉择，不会自动切换到无关工作区。
 
 请确保在目标项目根目录下执行 `/comet` 或 `/comet 继续`。若有多个活跃 change，先选定目标再继续推进；切勿直接手动跨目录拷贝 change 文件夹来进行所谓的“手动恢复”。
 
 ## 跨设备与跨平台恢复
 
-所有支持跨设备恢复的 Classic 状态均保存在 Git 追踪的仓库文件中：`.comet/config.yaml`、OpenSpec 规格根目录（新项目为 `docs/openspec/`）、各 change 的 `.comet.yaml` 与运行证据文件，以及 `docs/superpowers/`。因此，只要将代码推送到远端并在另一台机器或另一个 Agent 平台拉取，输入 `/comet` 即可一键拉起工作流。Native change 的跨设备恢复请参考[恢复手册](/zh/native/recovery-playbook)。
+所有支持跨设备恢复的 Classic 状态均保存在 Git 追踪的仓库文件中：`.comet/config.yaml`、OpenSpec 规格根目录（新项目为 `docs/openspec/`）、各 change 的 `.comet.yaml` 与运行证据文件，以及 `docs/superpowers/`。因此，只要将代码推送到远端并在另一台机器或另一个 Agent 平台拉取，输入 `/comet` 即可直接进入工作流。Native change 的跨设备恢复请参考[恢复手册](/zh/native/recovery-playbook)。
 
 <Note>
   请特别留意：工作区中尚未提交（uncommitted）的代码改动不会随 <code>git push</code> 同步到远端。更换机器前请务必先将代码 <code>commit</code> 并 <code>push</code>，否则新设备上虽然保留了 <code>tasks.md</code> 的勾选记录，但会缺失未提交的业务代码实现。
@@ -95,14 +95,10 @@ Comet 完全不依赖易失的对话上下文：在 Classic 模式下，它会�
 
 日常恢复推荐统一使用 `/comet`。各个独立的阶段入口主要用于高级手动调试或断点介入：`/comet-open`、`/comet-design`、`/comet-build`、`/comet-verify`、`/comet-archive`、`/comet-hotfix`、`/comet-tweak`。
 
-Comet 具备严格的确定性保证：每个阶段 Skill 被调用时，均会首先定位配套脚本，并执行该阶段的前置**入口校验与恢复检查**；流转永远以磁盘实际文件事实为准。
+Comet 提供确定性入口校验：每个阶段 Skill 被调用时，都会在后台自动定位脚本并先执行入口校验与恢复检查（即 `comet state check <change-name> <phase> --recover`，不需要你手动运行），流转始终以磁盘上的实际文件为准：
 
-```bash
-comet state check <change-name> <phase> --recover
-```
-
-- 若检查发现当前的 phase、workflow 或代码证据属于**另一个**阶段，Comet 会遵循脚本输出和路由规则主动切换，**不在错误的阶段状态下写入新数据**。
-- 若工作区存在未提交代码改动，会依照规范自动执行变更归因。
+- 若检查发现当前的 `phase`、`workflow` 或代码证据属于**另一个**阶段，Comet 会按检查输出自动切换到正确阶段，**不在错误状态下写入新数据**；
+- 若工作区存在未提交代码改动，会按规则自动做变更归因。
 
 ```mermaid
 flowchart TD
@@ -125,7 +121,7 @@ build 阶段涉及代码生成与任务调度，相对最为复杂，但常见�
 | 现场状态 | 恢复行为 |
 | --- | --- |
 | `build_pause: plan-ready` 且执行配置齐全 | 重新发起同一次联合决策确认，你确认后自动清除挂起标记并推进 |
-| `build_pause: plan-ready` 且 plan 存在，但执行配置缺失 | 重新拉起 plan-ready 联合决策，**提示你补齐**执行模式、TDD 及审查配置（不会无故重新生成 plan） |
+| `build_pause: plan-ready` 且 plan 存在，但执行配置缺失 | 重新进入 plan-ready 联合决策，**提示你补齐**执行模式、TDD 及审查配置（不会无故重新生成 plan） |
 | `build_pause: plan-ready` 但 plan 文件丢失 | 判定为状态损坏，回退至 `/comet-build` 修复或重新生成 plan |
 | `isolation`、`build_mode` 或 `tdd_mode` 未设置 | 返回对应配置节点，**引导你补充完成设置** |
 | 配置均已就绪，尚有未完成任务 | 读取 `tasks.md` 中下一个未打勾的任务继续执行 |
@@ -148,10 +144,10 @@ build 阶段涉及代码生成与任务调度，相对最为复杂，但常见�
 
 ## 常见的人工介入场景
 
-`/comet-classic` 会自动串联所有无歧义的执行步骤，但遇到**核心决策点**时必须等待你亲自裁决。恢复过程中常见的人工交互节点包括：
+`/comet-classic` 会自动串联所有无歧义的执行步骤，但遇到**核心决策点**时必须等你决定。恢复过程中常见的人工交互节点包括：
 
 - **验证未通过**（`verify_result: fail`）：需要你决策针对性修复还是接受已知偏差
-- **plan-ready 挂起**：需要你确认实现方案并选择隔离等级与执行模式
+- **plan-ready 暂停**：需要你确认实现方案并选择隔离等级与执行模式
 - **build 策略缺失**：需要你补全 `isolation`、`build_mode` 或 `tdd_mode`
 - **无法判定的未提交代码**：需要你明确该批代码的归属意图
 - **多个活跃中的 change**：需要你指定当前要继续的具体任务
@@ -164,8 +160,8 @@ build 阶段涉及代码生成与任务调度，相对最为复杂，但常见�
 
 | 命令 | 推荐使用时机 |
 | --- | --- |
-| `comet status` | 想要直观查阅“当前变更处于何种阶段、声明的产物是否齐备”，或怀疑路由异常、证据脱节时 |
-| `comet doctor` | 怀疑底层开发环境或依赖损坏时：例如全局 CLI 或 Skill 丢失、`.comet.yaml` 格式损坏、入口唤起失败等 |
+| `comet status` | 想要在终端查看“当前变更处于哪个阶段、声明的产物是否完整”，或怀疑路由异常、证据脱节时 |
+| `comet doctor` | 怀疑底层开发环境或依赖损坏时：例如全局 CLI 或 Skill 丢失、`.comet.yaml` 格式损坏、入口无法进入等 |
 
 ```bash
 comet status        # 查看当前 active change 的阶段、任务进展及 runtime_eval 状态
@@ -177,7 +173,7 @@ comet doctor        # 深度诊断环境依赖、配置合法性及 Skill 安装
 ## 相关文档
 
 - [恢复探测命令](/zh/cli/resume-probe) — 了解自然语言被动恢复的只读探测原理
-- [状态异常排查与修复](/zh/guides/state-recovery) — 状态文件损坏或路由偏差时的急救方案
-- [项目文件结构](/zh/guides/project-structure) — 了解状态与产物在项目中的实际落盘位置
-- [自动流转机制](/zh/concepts/auto-transition) — 深入了解恢复后的自动化状态机推演
-- [五阶段决策与停顿点](/zh/concepts/decision-points) — 梳理流程中所有需要人工裁决的交互锚点
+- [状态异常排查与修复](/zh/guides/state-recovery) — 状态文件损坏或路由出错时的处理方法
+- [项目文件结构](/zh/guides/project-structure) — 了解状态和产物在项目里的实际存放位置
+- [自动流转机制](/zh/concepts/auto-transition) — 了解恢复后状态机如何推进
+- [五阶段决策与停顿点](/zh/concepts/decision-points) — 整理流程中所有需要你决定的节点

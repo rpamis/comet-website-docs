@@ -3,7 +3,7 @@ title: 'verify 阶段'
 description: 'verify 阶段按改动风险执行质量验收、固化测试报告，并将合格变更交付给 archive；分支交付不在本阶段执行。'
 ---
 
-verify 阶段的核心任务是确认代码实现与 Design Doc、OpenSpec 需求规格以及任务清单完全吻合，并将完整的测试证据持久化为一份清晰可查的验证报告。本阶段专注于**质量核验与证据留存**，不涉及 Git 分支的合并、推送或清理操作。
+verify 阶段的核心任务是确认代码实现与 Design Doc、OpenSpec 需求规格以及任务清单完全吻合，并将完整的测试证据持久化为一份清晰可查的验证报告。本阶段负责**核验质量和保存证据**，不涉及 Git 分支的合并、推送或清理操作。
 
 <Tip>
   日常开发直接输入 <code>/comet</code> 即可。当项目选用 Classic 时，系统底层会自动读取进度，在 build 阶段全部达标后自动流转至 <code>/comet-verify</code>。
@@ -25,10 +25,10 @@ flowchart TD
     Scale --> Checks["构建、自动化测试、安全扫描与规格核查"]
     Checks -->|测试失败| Repair["按失败策略打回 build 修复，或接受非阻塞偏差"]
     Checks -->|全部通过| Drift{"是否存在 Spec 规格漂移？"}
-    Drift -->|需要重新对齐| Repair
-    Drift -->|无漂移或已妥善处理| Report["落盘结构化验证报告 verification_report"]
+    Drift -->|需要重新处理| Repair
+    Drift -->|无漂移或已妥善处理| Report["写入结构化验证报告 verification_report"]
     Report --> Guard["运行 comet guard verify --apply"]
-    Guard --> Archive["跃迁至 phase: archive<br/>branch_status 保持 pending"]
+    Guard --> Archive["进入 phase: archive<br/>branch_status 保持 pending"]
 ```
 
 ## 验证严格度分级
@@ -48,7 +48,7 @@ Full 全量验证会调用 `openspec-verify-change` 深入检查规格覆盖度�
 | `requesting-code-review`         | 轻量级代码审查               | light 验证模式下，当 `review_mode` 为 standard 或 thorough 时执行 |
 | `openspec-verify-change`         | OpenSpec 规格覆盖深度检查    | full 全量验证模式下，全面核查 proposal、设计与验收用例的覆盖情况 |
 
-若检测到 Spec 漂移需要重新推敲架构，verify 阶段不会直接调起脑暴：它会触发 `verify-fail` 将任务规范退回至 build 阶段，由 build 重新唤起研讨。
+若检测到 Spec 漂移需要重新推敲架构，verify 阶段不会直接开始方案讨论：它会触发 `verify-fail` 将任务规范退回至 build 阶段，由 build 重新开始讨论。
 
 ## 失败处理策略
 
@@ -57,35 +57,38 @@ Full 全量验证会调用 `openspec-verify-change` 深入检查规格覆盖度�
 - **CRITICAL 与 IMPORTANT 级别的严重缺陷不允许豁免**；
 - 在 verify 阶段推进期间，分支交付状态 `branch_status` 始终保持为 `pending`。
 
-## 保存验证证据与阶段放行
+## 后台保存验证证据与阶段放行
 
-各项测试通过后，将生成的验证报告路径写入状态机：
+各项检查全部通过后，Agent 会在后台自动完成两步收尾（你不需要手动敲命令）：
+
+1. 生成验证报告并登记报告路径（`verification_report`），同时保持 `branch_status` 为 `pending`（绝不在 Verify 阶段提前标记分支已交付）；
+2. 调用阶段守卫校验报告在磁盘上确实存在且内容达标，通过后将 `phase` 推进到 `archive`，同时写入 `verify_result: pass` 和验收时间 `verified_at`，再把分支交付留到 Archive 阶段等你确认。
+
+<Accordion title="底层命令参考（由 /comet-verify 自动执行，无需手敲）">
 
 ```bash
+# 登记验证报告路径
 comet state set <change-name> verification_report docs/superpowers/reports/YYYY-MM-DD-<name>-verify.md
-```
 
-切勿在 Verify 阶段提前写入 `branch_status: handled`，也不要手动将状态篡改为 `verify_result: pass`。
-
-随后运行阶段守卫：
-
-```bash
+# 通过 verify 阶段守卫校验并推进至 archive
 comet guard <change-name> verify --apply
 ```
 
-守卫在确认磁盘上真实存在该验证报告后，放行推进至 `phase: archive`，同时固化 `verify_result: pass` 与验收时间戳 `verified_at`。`branch_status` 继续保持 `pending`，留待归档阶段在获得你的明确授权后再行处理。
+不要手动将状态改成 `verify_result: pass`，也不要在 Verify 阶段提前设置 `branch_status: handled`。
+
+</Accordion>
 
 ## 应对 Spec 规格漂移
 
 当全量验证发现增量 Spec 与最初的 Design Doc 存在逻辑分歧时，你可以选择：
 
 - 在 Design Doc 末尾追加“Implementation Divergence（实现偏差说明）”，记录合理的实现调整；
-- 触发 `verify-fail` 退回 build 阶段，重新对齐设计与代码实现；
+- 触发 `verify-fail` 退回 build 阶段，让设计文档和代码实现重新一致；
 - 接受非阻塞的技术偏差，在归档时以主 Spec 为最终权威准绳。
 
 ## 下一步
 
 - [archive 阶段](/zh/phases/archive) — 验收通过后正式进入交付与版本归档
-- [决策停顿点速查](/zh/concepts/decision-points) — 掌握 verify 阶段的关键裁决项
+- [决策停顿点速查](/zh/concepts/decision-points) — 了解 verify 阶段需要你决定的节点
 - [代码审查机制](/zh/concepts/review-mode) — 了解审查在验证阶段的协同逻辑
 - [状态管理](/zh/concepts/state-management) — 掌握验收字段在状态机中的定义
