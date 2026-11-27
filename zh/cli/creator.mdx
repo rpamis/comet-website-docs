@@ -1,25 +1,25 @@
 ---
 title: 'comet creator'
-description: '掌控 Comet Any 创作运行态，启动、检查与恢复 SDK 创作 Run，实现 Agent 平台动作流转与人类决策回传。'
+description: '通过命令行启动、查看、推进和恢复 Comet Any 创作流程。'
 ---
 
-日常的无感创作推荐直接在对话框中调用 [Comet Any](/zh/skill-creator/getting-started)。`comet creator` 则为其提供标准化的底层命令行入口，专用于状态机审计、长程任务自愈以及与各类 Agent 平台的工程化集成。
+日常创作建议在 Agent 对话中直接使用 [Comet Any](/zh/skill-creator/getting-started)。需要查看运行状态、从中断处恢复，或在脚本和 Agent 平台中集成时，使用 `comet creator`。
 
 ## 核心子命令
 
-| 命令形式 | 核心用途与职责 |
+| 命令形式 | 用途 |
 | --- | --- |
-| `start <name>` | 基于自然语言目标描述，正式拉起具备可恢复性的长程创作流程 |
-| `list` | 结构化陈列当前项目空间中的全部创作记录 |
-| `status <name>` | 深度读取当前的 Run 实例、挂起 Action、待决 Wait 审批及客观证据链 |
-| `next <name>` | 全自动驱动本地已就绪的步骤，直至遇到需平台执行的动作或人类决策点 |
-| `dispatch <name>` | 原子领取动作、回传真实执行结果，或提交用户确认的业务决议 |
-| `guide` | 查阅首次交互引导、偏好配置指引及断点恢复手册 |
-| `candidates` | 全域探查可供本次创作吸纳复用的既有 Skill 候选组件 |
+| `start <name>` | 按目标描述启动一次可恢复的创作流程。 |
+| `list` | 列出当前项目的全部创作记录。 |
+| `status <name>` | 查看当前运行状态、待执行动作、等待确认项和验收证据。 |
+| `next <name>` | 自动推进本地可执行步骤，遇到需要 Agent 执行或用户确认时停下。 |
+| `dispatch <name>` | 认领待执行动作、回传执行结果，或提交用户确认决定。 |
+| `guide` | 查看首次使用说明、偏好配置指引和中断恢复说明。 |
+| `candidates` | 扫描当前项目中可复用的已有 Skill。 |
 
-全量子命令均原生支持追加 `--project <dir>` 与 `--json` 输出结构化数据。
+所有子命令都支持 `--project <dir>` 和 `--json` 参数。
 
-## 启动创作并实时查看状态
+## 启动创作并查看状态
 
 ```bash
 comet creator start weekly-report --project . --host codex --goal "整理已验收任务，生成周报并检查来源；用户确认后发布本地文件" --install-target .comet/creator/exports/weekly-report --json
@@ -27,30 +27,30 @@ comet creator status weekly-report --project . --json
 comet creator next weekly-report --project . --json
 ```
 
-`--host` 参数支持指定目标 Agent 平台，可选 `codex` 或 `claude-code`。`--install-target` 指定的是完整 SDK 应用制品包在工程内的导出目录，切勿误填为平台的普通 Skill 入口目录。
+`--host` 指定目标 Agent 平台，可选 `codex` 或 `claude-code`。`--install-target` 指定完整应用包的导出目录，不要填成平台的普通 Skill 入口目录。
 
-可选追加 `--eval-config <file>` 挂载评测配置文件。大模型的敏感 API Key 凭据统一由底层本机或平台环境安全提供，不会明文落盘于配置文件、制品包或公开的评测报告中。
+可选追加 `--eval-config <file>` 指定评测配置文件。模型 API Key 由本机或 Agent 平台环境变量提供，不会写入配置文件、应用包或评测报告。
 
-## Agent 平台操作与人类决策回传
+## Agent 平台操作与用户确认回传
 
-跨进程的调度请求以标准 JSON 文件进行流式交互：
+Agent 平台通过 JSON 请求文件向当前创作流程提交操作：
 
 ```bash
 comet creator dispatch weekly-report --project . --request request.json --json
 ```
 
-| 请求操作类型 | Agent 平台必须严格保持的执行元数据 |
+| 请求操作类型 | 必须携带的字段 |
 | --- | --- |
-| `claim`（认领动作） | 当前绑定的 Run 实例、Action 标识符、执行端口、真实会话凭据、不可伪造的 `claimToken` 与实际能力清单 |
-| `record-outcome`（回传结果） | 匹配当前动作的认领凭证、输出日志与落盘的真实技术产物 |
-| `resolve-wait`（提交审批） | 当前挂起的 Wait ID、提案签名摘要、唯一决策编号及人类用户的真实裁决 |
+| `claim`（认领动作） | 当前 Run ID、Action ID、执行器 ID、会话标识、`claimToken` 和平台能力清单。 |
+| `record-outcome`（回传结果） | 对应动作的认领令牌、输出内容和生成的文件路径。 |
+| `resolve-wait`（提交确认） | 当前 Wait ID、方案校验摘要、选项编号和用户决定。 |
 
-在发起调用前，必须先读取 `status` 回显的具体版本号与当前状态机，禁止单凭名称主观猜测 Action 或 Wait 编号。代码分析动作由配置的 `creator-host` 端口统一执行，并要求平台必须具备真实的 `skill-load`（动态装载）与 `handoff`（上下文交接）能力。
+调用前先用 `status` 获取最新的版本号和状态，不要猜测 Action 或 Wait ID。代码分析动作由 `creator-host` 执行器运行，目标平台需要具备 `skill-load`（加载 Skill）和 `handoff`（任务交接）能力。
 
-人工审批提交的选项必须严格限定在当前待办 Wait 声明的合法备选集内。一旦在等待期间调整了架构方案、正文规则或底层依赖，此前确认过的旧提案立即失效，不能套用到新版本。
+提交用户确认时，所选决定必须在当前 Wait 声明的选项范围内。等待期间如果修改了方案、规则或依赖，旧方案的确认会失效，不能沿用到新版本。
 
-## 韧性断点自愈
+## 中断恢复
 
-`next` 推进指令具备强确定性：它不会越权替外部 Agent 执行结果未知的敏感操作，更不可能代替人类开发者擅自盖章批准。若检测到关键技术产物缺失或业务验收未通过，流程会严格依照返回的重试、代码修订或驳回路径稳步推演；大模型 Eval 阶段的跳过（skip）标记不可用于绕过严格的本地检查。
+`next` 只推进本地已就绪的步骤，不会替 Agent 执行外部操作，也不会代替用户确认。产物缺失或业务校验不通过时，流程按返回的重试、修订或拒绝路径处理；跳过模型 Eval 不会绕过本地检查。
 
-若检测到某个动作已成功派发但外部返回结果未明，首要操作是向原执行端核实真实文件，确证后再行回传。完整工作机制请参考 [创作、验收与安装](/zh/skill-creator/workflow)。生产运行态与分发部署请分别参阅 [comet runtime](/zh/cli/runtime) 与 [comet application](/zh/cli/application)。
+如果动作已派发但结果未回传，先向原执行端核对实际文件和状态，确认后再回传结果。完整流程见 [创作、验收与安装](/zh/skill-creator/workflow)，应用运行与分发见 [comet runtime](/zh/cli/runtime) 和 [comet application](/zh/cli/application)。
