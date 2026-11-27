@@ -18,9 +18,16 @@ export const SponsorBrands = ({ sponsors = [], tier = 'standard', lang = 'zh' })
     if (tier === 'friend') {
       return <Element className="comet-sponsor__friend-brand" href={linked ? sponsor.url : undefined} rel={linked ? 'sponsored' : undefined}>{sponsor.name}</Element>;
     }
+    const baseBrandClass = `comet-sponsor__brand comet-sponsor__brand--${tier}`;
+    const brandClassName = tier === 'chief' && sponsor.description
+      ? `${baseBrandClass} comet-sponsor__brand--with-description`
+      : baseBrandClass;
+    const imageClassName = sponsor.dark
+      ? 'comet-sponsor__brand-image comet-sponsor__brand-image--dark'
+      : 'comet-sponsor__brand-image';
     return (
-      <Element className={`comet-sponsor__brand comet-sponsor__brand--${tier}${tier === 'chief' && sponsor.description ? ' comet-sponsor__brand--with-description' : ''}`} href={linked ? sponsor.url : undefined} rel={linked ? 'sponsored' : undefined} aria-hidden={duplicate ? 'true' : undefined}>
-        <div className={`comet-sponsor__brand-image${sponsor.dark ? ' comet-sponsor__brand-image--dark' : ''}`}>
+      <Element className={brandClassName} href={linked ? sponsor.url : undefined} rel={linked ? 'sponsored' : undefined} aria-hidden={duplicate ? 'true' : undefined}>
+        <div className={imageClassName}>
           <img src={sponsor.logo} alt={duplicate ? '' : `${sponsor.name} Logo`} width="200" height="80" loading="lazy" />
         </div>
         {tier === 'chief' && sponsor.description && (
