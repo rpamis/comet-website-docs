@@ -3,11 +3,11 @@ title: 'Native 的运行时保护与故障恢复'
 description: '了解 Native 的任务归属隔离、Hook Guard 写入拦截规则、文档与白名单配置、无 PID 锁机制以及只读环境感知恢复探针。'
 ---
 
-AI 编程工具在复杂仓库里最容易出两类事故：一是在需求还没确认、或者正在验收时顺手改了业务代码；二是在多分支、多任务并存时把文件写进了错误的目录，或者把状态文件改坏。
+AI 编程工具在复杂仓库里最容易出两类事故：一是在需求还没确认、或者正在验收时直接修改了业务代码；二是在多分支、多任务并存时把文件写进了错误的目录，或者把状态文件改坏。
 
-Native 通过清晰的分工控制这些风险：**Agent 负责理解需求、运行平台检查和评估改动影响；Runtime 和 Hook Guard 在后台把守任务归属、阶段写入边界、正式状态保护和归档事务。** 这些保护全程自动生效，你不需要手动敲命令去开关或维护状态。
+Native 通过清晰的分工控制这些风险：**Agent 负责理解需求、运行平台检查和评估改动影响；Runtime 和 Hook Guard 在后台把守任务归属、阶段写入边界、正式状态保护和归档事务。** 这些保护全程自动生效，你不需要手动运行命令去开关或维护状态。
 
-## 一、任务归属与临时退出工作流
+## 任务归属与临时退出工作流
 
 同一个项目可以同时启用 Native 和 Classic，但每个具体 change 只属于其中一套工作流。当前工作区的选中记录保存在 `.comet/current-change.json` 中，Hook Router 读取归属后，只调用对应工作流的 Guard。
 
@@ -19,7 +19,7 @@ Native 通过清晰的分工控制这些风险：**Agent 负责理解需求、�
   - 工作流正式目录和状态文件依然受保护，不会因为取消选中而被误改；
   - 需要回到原任务时，在对话里说继续原任务即可恢复归属。
 
-## 二、Hook Guard 的七类写入拦截保护
+## Hook Guard 的七类写入拦截保护
 
 在支持 Hook 的 Agent 平台上，Agent 的每次文件写入工具调用都会先经过 Hook Guard 检查；一旦拦截，Guard 会返回明确原因和可直接执行的修正动作，让 Agent 自动纠偏。除了最基本的阶段控制外，Guard 在底层还会拦截七类常见误操作：
 
@@ -35,47 +35,30 @@ Native 通过清晰的分工控制这些风险：**Agent 负责理解需求、�
 ### 2. 六类常见路径与归属误操作防护
 
 1. **禁止手改 Runtime 控制文件**：直接编辑 `.comet/current-change.json`、工作区运行态目录，或 change 内的 `comet-state.yaml`、`verification.md`、`capability-association.yaml` 会被立即拒绝。
-2. **拦截未登记的正式文件与错误根目录**：还没通过正常流程登记就手工创建 `changes/<name>/brief.md`，或者把文件写进默认 `.comet/comet/changes/` 而偏离了项目配置的 `native.artifact_root` 时，Guard 会直接拦截并给出正确的登记动作或目标路径。
+2. **拦截未登记的正式文件与错误根目录**：还没通过正常流程登记就手工创建 `changes/<name>/brief.md`，或者把文件写进错误的 `.comet/comet/changes/` 目录而偏离项目配置的 `native.artifact_root`（默认 `docs/comet/changes/`）时，Guard 会直接拦截并给出正确的登记动作或目标路径。
 3. **保护已发布的项目正式 Specs**：直接修改项目已发布的 `specs/<capability>/spec.md` 会被拦截，并引导把改动合并到当前 change 目录下的草拟 Spec，待 Archive 时统一合入。
 4. **禁止单次操作混改正式需求与代码**：一次写入调用如果同时修改 `brief.md`/`specs/` 和业务源码或普通文档，会被拒绝，要求将正式需求修改与代码实现分步进行。
 5. **拦截跨 change 误写**：试图修改属于另一个活跃 change（或未登记 change）的正式文件时，Guard 会提示先切换目标任务，或为新需求创建独立 worktree。
 6. **共享规划与交接后防错写**：多个活跃 change 共享同一规划分支时，在准备独立 Build worktree 之前禁止直接写代码；change 交接到新 worktree（`executionCwd`）后，继续在旧规划目录写该 change 的文件会被拦截并指出新路径。
 
-## 三、文档写入策略与自定义 Hook 白名单
+## 文档写入策略与 Hook 边界
 
-### 1. 控制非 Build 阶段的文档编辑：`native.document_writes`
+Hook Guard 会根据 `.comet/config.yaml` 中的以下两项配置控制非 Build 阶段的放行范围（完整字段与 YAML 示例见 [Native 配置](/zh/native/configuration)）：
 
-在 `.comet/config.yaml` 中配置：
+- **非 Build 阶段文档写入（`native.document_writes`）**：默认 `allow` 会放行 `walkthrough.html`、`.comet/config.yaml` 以及产物目录外的普通文档编辑，保留原 Run 并交由 Agent 读取差异评估影响，不机械清空批准或验收记录；设为 `revert` 时，非 Build 阶段的普通文档写入也会被 Guard 拒绝。
+- **自定义 Hook 白名单（`hook.allow_paths`）**：为项目自定义脚本放行指定的项目相对目录及其子路径（项目目录外目标默认放行）。`.comet/`、Native 正式产物目录与 Classic 产物目录无法通过白名单绕过；单次写入同时命中白名单目录和受保护目录时，未放行目标仍会被拦截。
 
-- **`allow`（默认）**：`walkthrough.html`、`.comet/config.yaml` 以及中性文档类文件在 Shape、Verify、Archive 阶段放行；即使在 Verify 或 Archive 发生编辑，也保留原 Run 和人工修改，交由 Agent 读取差异后判断实际影响，不会机械清空批准或验收记录。
-- **`revert`**：切回严格拦截模式，非 Build 阶段的文档写入也会被 Guard 拒绝。
-
-### 2. 放行自定义 Hook 的输出目录：`hook.allow_paths`
-
-如果你的项目有自己的 Hook 或辅助脚本，需要在受保护阶段向项目内某个专用目录写文件，可以在 `.comet/config.yaml` 中配置白名单（Native 与 Classic 共用）：
-
-```yaml
-hook:
-  allow_paths:
-    - .my-hook-output
-    - docs/team-notes
-```
-
-- 路径必须为项目相对目录，目录本身及其子路径都会放行，即使当前存在多个活跃 change 且还没选中也不会要求先选任务；
-- 写入项目目录之外的目标默认直接放行；
-- **安全红线**：`.comet/`、Native 的 `native.artifact_root/comet/` 以及 Classic 工作流产物目录**不能**通过 `allow_paths` 绕过；如果单次 Hook 事件同时写了白名单目录和受保护目录，未放行的目标仍会被拦截。
-
-### 3. 坦诚说明 Hook 的边界
+### Hook 的安全边界
 
 Hook Guard 只拦截 Agent 平台公开暴露的文件写入工具调用，**不是操作系统级别的硬沙箱**。通过外部编辑器直接保存、第三方后台进程或平台未暴露通道修改的文件不会触发 Hook。另外，部分 Agent 平台需要你在设置中显式开启或信任 Hook，单纯安装插件不代表 Hook 已生效。因此，Verify 阶段的改动核对以及 Archive 阶段的候选与工作区校验仍然是最终底线。
 
-## 四、无 PID 锁机制与并发隔离
+## 无 PID 锁机制与并发隔离
 
 - **平台工具直跑命令**：开发构建、测试和静态检查直接由 Agent 平台工具执行，Runtime 不托管这些进程，也不维护命令 PID 或停止回执。
 - **单写者与 worktree 隔离**：同一个工作区同一时刻只允许单一写入者更新状态；并行任务通过独立的 Git worktree 物理隔离。
 - **进程退出即释放锁**：本机事务锁随进程退出自动释放，不再依赖历史 PID 判定进程是否存活，也不需要手工清理残留的锁文件。
 
-## 五、只读环境感知恢复探针（`comet resume-probe`）
+## 只读环境感知恢复探针（`comet resume-probe`）
 
 在新会话里用自然语言说“继续刚才的改动”“把验证跑完”时，后台的只读恢复探针 `comet resume-probe` 会检查当前工作区是否有可恢复的活跃任务，**不会修改选中 change，也不会私自切换 Git 分支**。
 
@@ -86,7 +69,7 @@ Hook Guard 只拦截 Agent 平台公开暴露的文件写入工具调用，**不
 - **显式退出探测**：说“不走 comet”“直接解释”“只回答”或“without comet”时直接跳过工作流路由。
 - **配置开关**：在 `.comet/config.yaml` 中设置 `ambient_resume: false`（或让 Agent 取消当前任务选中）可停用被动探测。
 
-## 六、事务保护与离线诊断入口
+## 事务保护与离线诊断入口
 
 Archive 归档和产物根目录迁移均由事务记录保护，中途断电或崩溃后可按事务状态继续，已完成的步骤不会重复执行。日常排查直接问 Agent 即可；如果你想自己查看现场，可以在终端运行下面的只读诊断命令（不修改任何状态）：
 

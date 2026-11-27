@@ -3,17 +3,21 @@ title: 'Native command overview'
 description: 'The public Native commands for creating, inspecting, selecting, progressing, recovering, and archiving a change.'
 ---
 
-Starting in 0.5.5, new Native changes use the SDK. Existing Compat changes can resume with `comet native next <change-name>` and follow their original Archive flow. The Agent follows the returned `runtimeFormat`, `workspace`, and `continuation`. Legacy Runner input and `--finish` delivery arguments apply only to Compat tasks.
+`comet native` is the command set the Agent uses to advance Native changes: creating a change, checking status, confirming Shape, submitting implementation and verification results, canceling, archiving, and diagnosing. You describe requirements, answer questions, and confirm decisions in conversation; the Agent invokes these commands between turns.
 
 <Note>
   The commands on this page are called by the Agent behind the scenes. You do not run them yourself. In day-to-day work you just enter <code>/comet</code> in the conversation, answer the Agent's questions, or say "continue". This page is for troubleshooting in a terminal, writing scripts, or integrating another Agent platform.
 </Note>
 
+Starting in 0.5.5, new Native changes use the SDK. Existing Compat changes can resume with `comet native next <change-name>` and follow their original Archive flow. The Agent follows the returned `runtimeFormat`, `workspace`, and `continuation`. Legacy Runner input and `--finish` delivery arguments apply only to Compat tasks.
+
 ## Defer implementation after Shape approval
 
-Append `--defer-build` to the current Shape confirmation command returned by Runtime, preserving `--confirmed` and all expected-state arguments. To start implementation, the actual receiving session runs `comet native next <change-name> --session <actual-session> --json` and continues in the returned `executionCwd`. See [Multi-change parallelism and conflict control](/en/native/multi-change-and-conflicts) for the complete rules.
+When confirming a plan, you can tell the Agent to confirm the plan without starting implementation yet. The Agent appends `--defer-build` to the current Shape confirmation command returned by Runtime while preserving `--confirmed` and all expected-state arguments. When you ask to start implementation, the receiving session runs `comet native next <change-name> --session <actual-session> --json` and continues in the returned `executionCwd`. See [Multi-change parallelism and conflict control](/en/native/multi-change-and-conflicts) for the complete rules.
 
 ## Common SDK commands
+
+Main commands the Agent calls across task phases:
 
 ```bash
 comet native new <change-name> --json
@@ -26,6 +30,8 @@ comet native doctor <change-name> --json
 User decisions, Builder results, and independent Verifier results must use the current task's original identity. Do not invent state versions, candidates, or proposal hashes from examples. See [continuation and recovery](/en/native/continuation-and-checkpoints).
 
 ## Cancel unfinished work
+
+When you tell the Agent to cancel the current task and explain why, the Agent previews and then executes cancellation:
 
 ```bash
 comet native cancel <change-name> --dry-run --json
@@ -60,13 +66,13 @@ The new Native flow no longer exposes `checkpoint`, `evidence`, or `receipt` com
 
 ## Inspect an existing change
 
+`status` and `show` are read-only commands that preserve the workspace selection; you can also run them directly in a terminal:
+
 ```bash
 comet native status --json
 comet native status add-user-avatar --details --json
 comet native show add-user-avatar
 ```
-
-`status` and `show` are read-only commands that preserve the workspace selection.
 
 ## Progress and Verify
 
@@ -80,7 +86,7 @@ comet native next add-user-avatar --summary "Acceptance criteria changed" --revi
 comet native next add-user-avatar --runner-input <temporary-json-file>
 ```
 
-Use `--accept-result`, `--revise-implementation`, and `--revise-requirements` for the user decision after Verify. `--confirmed` only confirms Shape or an explicit verifier-unavailable fallback; it does not accept a passing result. When the Verifier is unavailable, the two choices are:
+After Verify, you decide the next step, and the Agent submits your decision with `--accept-result`, `--revise-implementation`, or `--revise-requirements`. `--confirmed` only confirms Shape or an explicit verifier-unavailable fallback; it does not accept a passing result. When the Verifier is unavailable, the two choices are:
 
 ```bash
 comet native next add-user-avatar --summary "Retry verifier" --retry-verifier
@@ -95,7 +101,7 @@ Use the current response directly when it already includes the required template
 
 ## Archive
 
-Read the archive-ready continuation, then preview or execute as needed:
+The Agent reads the archive-ready continuation returned by Runtime, then previews or executes Archive as needed:
 
 ```bash
 comet native archive add-user-avatar --dry-run
@@ -114,6 +120,8 @@ comet native archive add-user-avatar --confirmed --finish keep --commit-message 
 Archive applies complete target Specs, writes `verification.md`, moves the change, and cleans local Runtime; the normal path does not rerun Verify. For branch/worktree isolation, specify the delivery with `--finish keep|merge|push|pull-request` (the option semantics are described in [Archive and delivery](/en/native/archive-and-delivery)). For a capability conflict, choose the serial order first with `--serial-first`.
 
 ## Diagnose, migrate, and recover
+
+`comet native doctor` is a read-only diagnostic command that you can also run directly in a terminal; adding `--repair` executes repairs:
 
 ```bash
 comet native doctor

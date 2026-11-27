@@ -1,59 +1,62 @@
 ---
 title: 'Native Runtime components'
-description: 'Learn how the SDK Runtime advances a Native change, how Agents implement and verify it, and how Comet saves progress and guards writes.'
+description: 'Learn how the Native workflow advances changes through the SDK Runtime, delegates implementation and verification to Agents, and protects progress and writes.'
 ---
 
-When you create a Native change, Comet creates a **Run** that records its stage, pending actions, results, and user decisions. The Native workflow defines the rules for Shape, Build, Verify, and Archive. The SDK Runtime applies those rules and persists the Run. The Agent writes code, runs checks, and evaluates acceptance criteria using the platform's sessions and tools.
+When you create a Native change, Comet creates a **Run** in the background that records its stage, pending actions, execution results, and your confirmation decisions. The Native workflow defines the rules for Shape, Build, Verify, and Archive; the SDK Runtime enforces those rules and persists the Run; and the Agent writes code, runs tests, and completes verification inside your platform session. **In daily use, you simply talk to the Agent in natural language—the Agent invokes all underlying CLI commands automatically.**
 
 ```mermaid
 flowchart TD
   Agent["Agent platform<br/>Skills, code edits, and commands"]
-  CLI["Comet CLI<br/>Status and workflow operations"]
+  CLI["Comet CLI<br/>Status and workflow interface called by the Agent"]
   Runtime["SDK Runtime<br/>Run, Action, and Wait"]
   Native["Native workflow<br/>Stage rules and result validation"]
   State["Local Run and project checkpoint"]
-  Guard["Hook and Guard<br/>Change ownership and write permissions"]
-  Agent -->|"Calls commands and submits results"| CLI
-  CLI -->|"Returns status and the next step"| Agent
+  Guard["Hook and Guard<br/>Task ownership and write boundaries"]
+  Agent -->|"Calls commands and submits results in background"| CLI
+  CLI -->|"Returns status and next step"| Agent
   CLI --> Runtime
   Runtime <-->|"Applies stage rules"| Native
   Runtime -->|"Saves progress"| State
-  Agent -->|"Platform reports a file-write event"| Guard
-  Guard -->|"Reads the current stage"| State
+  Agent -->|"Platform emits file-write events"| Guard
+  Guard -->|"Reads current stage"| State
 ```
 
 ## The Native workflow defines stage rules
 
-The Native workflow determines when implementation can begin, when the Agent can submit verification results, and when the change can be archived. Shape confirmation establishes the requirements, scope, and acceptance criteria. In Build, the Agent submits an implementation candidate and actual check results. Verify evaluates every acceptance criterion against that candidate. Acceptance applies to the current candidate, and the change enters Archive after the result is accepted. When requirements change or the implementation needs repair, Native determines which stage to revisit based on what changed. See [Native Loop](/en/native/native-loop) for the conditions for entering each stage.
+The Native workflow defines when coding can begin, when verification results can be submitted, and when archiving is allowed. Once Shape is confirmed, requirements, scope, and acceptance criteria serve as the contract for later stages. Build submits an implementation candidate and its check results, and Verify evaluates every acceptance criterion against that same candidate and your original request. Only after verification passes and you accept the result does the change enter Archive. If you need to fix code or revise requirements mid-task, Native decides whether to return to Build or Shape based on what changed. See [Native Loop](/en/native/native-loop) for detailed transitions.
 
 ## The SDK Runtime persists and advances the Run
 
-An **Action** records work for the Runtime to track, such as preparing the Shape proposal, receiving the Builder handoff, or applying the archive. A **Wait** records a pending decision, such as confirming Shape or accepting the verification result. The Runtime checks that results match the current Action and decisions match the current proposal, then saves the updated Run. If the Agent submits a stale decision, the Runtime asks it to read the current state again.
+- **Action**: A concrete unit of work tracked by the Runtime, such as submitting acceptance items, receiving a Builder handoff, running verification, or executing an archive.
+- **Wait**: A decision point waiting for your confirmation, such as confirming Shape or accepting a verification verdict.
 
-Use `comet native status <change-name> --json` to inspect a change and `comet native next <change-name> --json` to advance it. The Runtime can run successive approved internal steps until an Agent needs to act, you need to decide, or a blocker needs attention. The Skill reads the response's `continuation` to proceed or explain what is blocking progress. See [Task advancement and interruption recovery](/en/native/continuation-and-checkpoints).
+The Runtime verifies that submitted results match the current Action and that confirmations bind to the current proposal and state version before updating the same Run. If the Agent attempts to submit a stale decision, the Runtime rejects it and requires reading the latest state first.
+
+In the background, the Agent inspects state read-only with `comet native status` and advances the workflow with `comet native next`. The Runtime automatically executes successive approved internal steps until an Agent needs to perform work, you need to make a decision, or a blocker occurs. See [Task progress and interruption recovery](/en/native/continuation-and-checkpoints) for the underlying mechanics.
 
 ## Agents implement code and submit verification evidence
 
-The Builder and Verifier run project builds, tests, and static checks using Agent platform tools. In its submission, the Agent reports the commands it ran, their working directories and results, and any checks it skipped. Verify can reuse results that still apply to the current code and environment, then run the checks affected by the change or missing evidence. The Verifier evaluates every acceptance criterion.
+The Builder and Verifier run builds, tests, and static checks directly through Agent platform tools, reporting the commands run, working directories, exit status, log references, and any checks that were not run. Verify can reuse check results that still apply to the current code and environment, rerunning only checks affected by edits or missing evidence, while still delivering an item-by-item verdict for every acceptance criterion.
 
-Verification can take place in the current session. If the change requires independent review, the Runtime checks whether the executor qualifies when it claims the verification task. The report records the review method used. See [Verification and repair](/en/native/verification-and-repair) for evidence and repair rules.
+Verification runs in the current session as a read-only role by default. If you request independent review, the Runtime enforces that an independent read-only session claims the verification task, and the report records the review method used. See [Verification and repair](/en/native/verification-and-repair) for details.
 
 ## Hooks and Guard check writes
 
-When an enabled Hook receives a file-write event from the Agent platform, the Guard checks the workspace selection, current stage, and target path. For example, it blocks implementation writes for a selected change that is still waiting for Shape confirmation.
+On Agent platforms that support and enable Hooks, every file write passes through the Guard first. The Guard decides whether to allow the write based on the workspace's selected change, current stage, and target path—for example, blocking edits to application code while the selected change is still waiting for Shape confirmation.
 
-To make unrelated edits in the same workspace, run `comet native select --none` to clear the selection. The Guard still protects formal workflow artifacts and Runtime data. Selecting the original change reapplies its stage restrictions. See [Native runtime protection and recovery](/en/native/safety-and-recovery) for coverage and [Status and selection](/en/cli/status) for commands.
+If you need to make temporary edits unrelated to Comet in the same workspace, tell the Agent in chat to step out of the current task selection (the Agent runs `comet native select --none` in the background). Once unselected, ordinary code edits are allowed while formal workflow artifacts and Runtime data remain protected; ask the Agent to reselect the change when you return to it. See [Native Runtime protection and recovery](/en/native/safety-and-recovery) for full rules.
 
 ## Project documents and local Runs support recovery
 
-The project holds the requirements and verification artifacts. Comet's user data directory holds the local Run and execution records, with separate storage for the main workspace and each Git worktree. `comet-state.yaml` shows progress and saves checkpoints at key boundaries. Editing it or `verification.md` cannot change the workflow state of the Run.
+Requirements and acceptance materials live in your repository. Complete local Runs are stored in the Comet data directory under your home directory (default `~/.comet`, configurable via `COMET_DATA_DIR`), isolated per workspace across the main checkout and every Git worktree. `comet-state.yaml` displays progress and saves recovery checkpoints (`run_checkpoint`) at key boundaries; hand-editing `comet-state.yaml` or `verification.md` cannot alter the Run's workflow state.
 
-If local records are missing, the Runtime can restore the original Run from a valid checkpoint and the accompanying project materials. If an Action was dispatched and its outcome is unknown, the Agent checks the original execution before deciding how to continue. To diagnose an issue, run `comet native doctor <change-name>`. See [Native artifacts and state](/en/native/artifacts-and-state) and [SDK failure recovery and unknown results](/en/sdk/recovery).
+If local records are lost or you switch devices, the Runtime restores the original Run from a valid checkpoint and repository artifacts. If an Action was dispatched with an unknown outcome, the Agent reconciles the original platform execution and file side effects before deciding how to proceed. See [Native task recovery](/en/native/recovery-playbook) and [Native artifacts and state](/en/native/artifacts-and-state) for troubleshooting.
 
 ## Archive applies Specs and completes the Run
 
-Once the verification result is accepted, the Runtime checks the archive prerequisites, applies the approved Spec changes to the project Specs, moves the change, and records the result. If archiving is interrupted, the Runtime checks the original Run and the files already written before resuming from recorded progress. The Agent handles Git commits, pushes, and pull requests within the delivery scope you approved. See [Archive and delivery](/en/native/archive-and-delivery).
+After you accept the verification verdict, the Runtime checks archive prerequisites, merges confirmed Spec changes into your project's official Specs, moves the change directory, and records the archive outcome. If archiving is interrupted partway through, the Runtime checks the original Run and transaction records to resume from the last completed step without duplicating writes. The Agent handles Git commits, pushes, and pull requests within the delivery scope you confirm. See [Archive and delivery](/en/native/archive-and-delivery).
 
 ## Supervisor coordinates parallel work
 
-A [Supervisor Change](/en/native/supervisor-change) coordinates child tasks in the same parent Run. Each child is implemented and verified in its own Git worktree, and the Runtime schedules integration according to the dependencies. Once the children are integrated, the parent change proceeds through overall verification and archive.
+A [Supervisor Change](/en/native/supervisor-change) orchestrates subtasks for large requirements within a single parent Run. Each child is implemented and verified in its own Git worktree, and the Runtime merges children serially into an integration branch according to their dependency order. Once all children are integrated, the parent runs comprehensive final verification, delivery, and cleanup in the integration worktree.

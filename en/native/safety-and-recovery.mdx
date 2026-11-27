@@ -1,75 +1,96 @@
 ---
 title: 'Native Runtime protection and recovery'
-description: 'Stage guards, task ownership, Agent checks, and recovery from interruption or blockers.'
+description: 'Understand Native task ownership isolation, Hook Guard write interception rules, document and allowlist settings, PID-free locking, and the read-only ambient resume probe.'
 ---
 
-Native uses stage guards, execution identities, and recoverable transactions to constrain workflow progress. The Agent interprets requirements, runs checks, and assesses edits. Runtime records user decisions, advances the original task, and handles Archive and delivery.
+AI coding tools tend to cause two kinds of accidents in complex repositories: editing application code before requirements are confirmed or during verification, and writing files into the wrong directory or corrupting state files when multiple branches and tasks coexist.
 
-## Identify the owning change
+Native manages these risks through a clear division of responsibilities: **the Agent interprets requirements, runs platform checks, and assesses edit impact; the Runtime and Hook Guard enforce task ownership, stage write boundaries, formal state protection, and archive transactions in the background.** These protections stay active automatically—you do not need to toggle or maintain them with manual commands.
 
-`.comet/current-change.json` selects the current workflow and change. A project may enable several workflows, but each requirement belongs to one. Hook Router resolves ownership before calling that workflow's Guard.
+## Task ownership and temporarily stepping out of the workflow
 
-When selection is missing and exactly one valid task exists, ownership may be inferred. Multiple candidates, damaged selection, or workspace mismatches require resolving the target first, without guessing from the default workflow. Use `comet native select <change-name>` when manual selection is needed.
+A single repository can enable both Native and Classic, but each individual change belongs to one workflow. The current workspace selection is stored in `.comet/current-change.json`, and the Hook Router reads ownership before invoking that workflow's Guard.
 
-## Stage-aware changes
+- **Automatic ownership**: When the current workspace has exactly one active change and no explicit selection, Comet associates writes with that task automatically.
+- **Multiple active tasks or ambiguous ownership**: Comet pauses and lists candidates for you to choose instead of guessing a default.
+- **Switch the active task**: Tell the Agent in chat "Switch to `<change-name>`", and the Agent updates workspace ownership in the background.
+- **Make temporary edits unrelated to Comet**: Tell the Agent in chat "I need to make a quick unrelated edit outside the current Comet task", and the Agent clears the workspace selection in the background (via `comet native select --none`):
+  - The setting applies across sessions in the same workspace, allowing ordinary project code edits and pausing passive resume probing;
+  - Formal workflow directories and state files remain protected even while unselected;
+  - When you are ready to return, tell the Agent to continue the original task to restore ownership.
 
-- **Shape**: Prepare goals, the proposal, and acceptance criteria; implementation waits for your confirmation.
-- **Build**: Implement in the task's workspace. Supervisor children write only in their own worktrees; the parent coordinates and submits results sequentially.
-- **Verify**: Check the original request and every acceptance item. Return to Build before implementing a repair.
-- **Archive**: Archive accepted results within the actual delivery decision, without expanding the approved scope.
+## Seven write-interception protections in Hook Guard
 
-Ordinary edits follow `native.document_writes`. The default preserves edits and lets the Agent assess their impact. Wording changes do not automatically revoke approval; requirement changes need reconfirmation, implementation changes revise the candidate, and check changes refresh affected or missing evidence. With `revert`, follow the Guard's rejection and recovery instructions. See [Continue after edits](/en/guides/mid-workflow-changes#continue-the-current-task-after-edits).
+On Agent platforms that support Hooks, every file-write tool call passes through Hook Guard first. When a write is blocked, the Guard returns an explicit reason and actionable next step so the Agent can self-correct. Beyond basic stage gating, the Guard blocks six additional classes of common misoperations.
 
-## Protection before observable writes
+### 1. Stage-based code write boundaries
 
-Hooks handle only events and paths supplied by the platform; they are not an operating-system sandbox. IDEs, background processes, and writes the platform does not expose may bypass immediate interception. Later Agent review and Runtime checks of ownership, workspace, and delivery still apply.
+| Stage | Allowed write scope | Blocked behavior |
+| --- | --- | --- |
+| **Shape** | The current change's `brief.md`, draft Specs, and `children.yaml`. | Blocks edits to application source code before requirements are confirmed (if you intend an unrelated edit, prompts to clear task selection first). |
+| **Build** | Application code and tests inside the change's bound workspace. | Blocks writing into a shared planning directory before a Build worktree is provisioned, and blocks a Supervisor parent from editing code directly during Build. |
+| **Verify** | Read-only inspection (under `native.document_writes: allow`, manual tweaks are preserved for the Agent to assess impact). | Blocks bypassing the workflow to edit implementation during verification; issues must return to Build via `continuation`. |
+| **Archive** | Spec merges and directory moves executed transactionally by the Runtime. | Blocks Verify-only revisions from Archive and blocks manual edits to archive control files. |
 
-Enable or trust Hooks when the platform requires it. Installing a plugin does not itself grant Hook trust.
+### 2. Six path and ownership misoperation guards
 
-## Agent-run checks
+1. **Block manual edits to Runtime control files**: Direct edits to `.comet/current-change.json`, workspace runtime state directories, or a change's `comet-state.yaml`, `verification.md`, and `capability-association.yaml` are rejected immediately.
+2. **Block unregistered formal files and wrong artifact roots**: Creating `changes/<name>/brief.md` manually without registering the change, or writing into a misconfigured `.comet/comet/changes/` path outside the project's `native.artifact_root` (default `docs/comet/changes/`), is intercepted with the correct registration step or target path.
+3. **Protect published project Specs**: Editing published `specs/<capability>/spec.md` directly is blocked; the Guard directs edits into the current change's draft Spec so they merge cleanly during Archive.
+4. **Block mixing formal requirements and code in a single write**: A single write call that modifies both `brief.md`/`specs/` and application source code or ordinary documents is rejected so requirement updates and implementation remain separate steps.
+5. **Block cross-change miswrites**: Attempting to edit formal files belonging to another active change (or an unregistered change) prompts you to switch tasks first or open a dedicated worktree for the new requirement.
+6. **Prevent miswrites during shared planning and after worktree handoff**: When multiple active changes share a planning branch, code edits are blocked until a dedicated Build worktree is prepared; once a change hands off to its new worktree (`executionCwd`), writes to the old planning directory are intercepted and redirected to the new path.
 
-Development commands and tests run through Agent platform tools. Record actual commands, working directories, results, and limitations. Runtime no longer manages these processes, binds PIDs, waits for stop receipts, or fingerprints project files to decide check reuse.
+## Document write policy and Hook boundaries
 
-The Agent determines whether previous checks still apply to the current candidate and environment, retains valid results, and runs necessary verification. Passing tests does not complete acceptance: Verify still covers the original request and every acceptance item. Explicit independent-review requirements remain. See [Verification and repair](/en/native/verification-and-repair).
+Hook Guard uses two settings in `.comet/config.yaml` to control allowed writes outside Build (see [Native configuration](/en/native/configuration) for full fields and YAML examples):
 
-## Workspace writers and unfinished transactions
+- **Non-Build document writes (`native.document_writes`)**: Default `allow` permits edits to `walkthrough.html`, `.comet/config.yaml`, and ordinary documents outside the artifact root, preserving the Run so the Agent can inspect the diff and assess impact without blindly wiping approvals or verification records. Setting `revert` blocks ordinary document edits outside Build as well.
+- **Custom Hook allowlist (`hook.allow_paths`)**: Allows project-specific scripts to write to designated project-relative directories and their subpaths (paths outside the project root are allowed by default). `.comet/`, the Native artifact root, and the Classic artifact root cannot be bypassed via the allowlist; if a single write touches both an allowlisted path and a protected path, the protected target is still blocked.
 
-One writer maintains state per workspace; child worktrees isolate parallel work. Ordinary workflows no longer create coordination locks or require recovery of obsolete lock records.
+### Hook security boundary
 
-Directory migration and Archive still check actual unfinished transactions. Resolve pending steps, uncertain directories, or workspace conflicts through the original transaction. Do not delete state or transaction records to bypass blockers.
+Hook Guard intercepts only file-write tool calls exposed by the Agent platform—it is **not an operating-system sandbox**. Files saved directly in an external editor, written by third-party background processes, or modified through unexposed platform channels do not trigger Hooks. In addition, some Agent platforms require explicitly enabling or trusting Hooks in settings; installing a plugin alone does not guarantee Hooks are active. For this reason, diff verification in Verify and candidate/workspace checks in Archive remain the final line of defense.
 
-## Paths and file ownership
+## PID-free locking and concurrency isolation
 
-Use Runtime-returned paths for formal documents and state. The relevant entry points still check directory moves, symbolic links, archive targets, and workspace ownership. Growing documents no longer hit built-in byte caps; read failures report actual errors rather than substituting old content.
+- **Commands run directly via platform tools**: Builds, tests, and static checks run directly through Agent platform tools. The Runtime does not host these processes or track command PIDs and stop receipts.
+- **Single writer and worktree isolation**: Only one writer updates state in a workspace at a time, while parallel tasks are physically isolated in separate Git worktrees.
+- **Locks release on process exit**: Local transaction locks release automatically when a process exits, removing reliance on historical PIDs to judge liveness and eliminating manual stale-lock cleanup.
 
-Path and transaction checks do not mean Runtime snapshots ordinary edits. Do not reconstruct local state manually, alter execution identities, or copy another task's records.
+## Read-only ambient resume probe (`comet resume-probe`)
 
-## Recoverable Archive transactions
+When you open a new session and say something like "continue that change" or "finish running verification", the read-only `comet resume-probe` checks whether the current workspace has a recoverable active task **without changing the selected change or switching Git branches**.
 
-Archive preserves the original Run, accepted results, approved scope, and actual delivery progress. After interruption, inspect the original transaction and follow the suggested action to continue archiving. Do not repeat completed steps; reconcile unknown external results first.
+The probe understands clause-level negation and exclusions to minimize false triggers:
 
-Preserve the execution site when active and archive directories coexist, a transaction is damaged, a directory is busy, or tasks conflict. Spec updates and Git delivery still require checks. Creating another task cannot overwrite unfinished transactions. See [Archive and delivery](/en/native/archive-and-delivery).
+- **Detects negated clauses**: It splits sentences on punctuation and conjunctions like "but" / "however". If a change name or resume verb appears inside a negated clause (such as "don't resume auth-fix, just answer a question first"), it will not treat the prompt as a resume request.
+- **Distinguishes declining a new workflow from resuming an old task**: Saying "don't start a new workflow, continue the previous one" is still recognized as resuming the existing task.
+- **Explicit opt-out phrases**: Phrases like "without comet", "just explain", or "answer only" bypass workflow routing immediately.
+- **Configuration switch**: Set `ambient_resume: false` in `.comet/config.yaml` (or ask the Agent to clear task selection) to disable passive probing.
 
-## Resume the original task
+## Transaction protection and offline diagnostics
 
-Recovery continues the same change and Run. Formal documents and valid checkpoints support cross-device recovery; local execution data is isolated by checkout and worktree. Directory locations use the actual path returned by the Runtime rather than relying on legacy `.comet/runtime/native/` layouts.
-
-If the original Agent task is still running, continue waiting for it to finish. A tool-waiting timeout does not indicate execution failure; do not dispatch duplicate runs. If a clear failure, lost task, or unusable result occurs, record the root cause before recovering through the standard workflow. See [Task progress and recovery](/en/native/continuation-and-checkpoints).
-
-## Read-only resume probes
-
-`comet resume-probe` reads current selections and recoverable tasks without modifying changes or switching branches. When multiple candidates exist or ownership is ambiguous, it prompts the user to select; if no matching task is found, it does not enter the workflow and remains in normal conversation. Setting `ambient_resume: false` disables automatic probing for ordinary natural-language requests.
-
-## Diagnosis and recovery
-
-Follow the latest task and commands returned by Runtime. For diagnosis, inspect:
+Both Archive and artifact root migrations are protected by transaction logs so recovery after a power loss or crash resumes from recorded progress without repeating completed steps. For routine checks, just ask the Agent. If you want to inspect the workspace yourself in a terminal, run these read-only diagnostic commands (they do not modify any state):
 
 ```bash
 comet status
 comet native status <change-name> --details --json
-comet native doctor <change-name>
+comet native doctor <change-name> --json
 ```
 
-If the workspace does not match, return to the designated directory; if an outdated command is rejected, re-read the latest action; if a migration or Archive operation is interrupted, follow the recovery path explicitly provided by diagnosis. If diagnostics do not provide a repair action, preserve the current workspace and runtime state. Avoid manually editing state files.
+Switching or clearing task selection is normally handled by the Agent via `comet native select`; the commands below are provided for offline terminal troubleshooting:
 
-Read the [Recovery playbook](/en/native/recovery-playbook).
+<Accordion title="Underlying command reference: manually switching or clearing task ownership (normally called by the Agent)">
+
+```bash
+# Switch the selected change for the current workspace
+comet native select <change-name>
+
+# Clear task selection to allow unrelated edits in the current workspace
+comet native select --none
+```
+
+</Accordion>
+
+For step-by-step troubleshooting by failure mode, see [Native task recovery](/en/native/recovery-playbook).

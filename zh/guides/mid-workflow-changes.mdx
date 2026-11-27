@@ -1,11 +1,11 @@
 ---
 title: '中途修改 Spec 或回退工作流'
-description: '代码想重写、中途调整需求、验收没通过要退回、归档前想再验一遍——各种情况的处理方式和状态保留规则。'
+description: '说明开发过程中修改代码、调整需求、验证失败回退以及归档前重新核验的处理方式与状态保留规则。'
 ---
 
-开发过程中改需求、重构代码、修测试都是常事。除了按顺序往前推进，Comet 也提供了受状态机保护的修改和回退方式。本页讲每种情况该怎么处理。
+开发过程中改需求、重构代码、修测试都是常事。除了按顺序往前推进，Comet 也提供了受状态机保护的修改和回退方式。本页说明各类场景的处理方式。
 
-## 改完文件后接着做
+## 编辑后继续当前任务
 
 无论 Native 还是 Classic，在 Build、Verify 或归档之前，你在工作区里的改动都会被保留，Agent 核实改动范围后继续。常规的代码微调不需要重新创建变更：
 
@@ -16,17 +16,21 @@ description: '代码想重写、中途调整需求、验收没通过要退回、
 
 ## 前提：不要手动改 phase
 
-`.comet.yaml` 里的 `phase` 由状态机维护。直接运行 `set phase build` 会被拒绝。回退阶段必须通过**合法的状态流转事件**触发，每个事件都要通过阶段检查。
+`.comet.yaml` 里的 `phase` 由状态机维护，直接强行修改会被系统拒绝。回退阶段必须通过**合法的状态流转事件**触发，且每个事件都会经过阶段检查。日常开发中，你只需在对话中说明意图或在停顿点选择对应选项，由 Agent 在后台调用 `comet state transition <change-name> <event>` 完成流转，无需手动执行命令。
 
-只有极端情况下需要手动修状态时，才用 `COMET_FORCE_PHASE=1` 强制覆盖（命令会给出安全警告）：
+<Accordion title="极端排障：强制覆盖 phase（仅限故障修复）">
+
+只有在极端异常下需要手动修复状态时，才在终端中使用 `COMET_FORCE_PHASE=1` 强制覆盖（命令会输出安全警告）：
 
 ```bash
-COMET_FORCE_PHASE=1 node "$COMET_STATE" set <name> phase verify
+COMET_FORCE_PHASE=1 comet state set <name> phase verify
 ```
 
-日常开发请用下面这些正常方式。
+</Accordion>
 
-## 可以用的状态流转事件
+日常开发请使用以下标准流转方式。
+
+## 支持的状态流转事件
 
 | 事件          | 方向                | 触发场景                                           |
 | --------------------- | ----------------------- | -------------------------------------------------- |
@@ -65,11 +69,15 @@ COMET_FORCE_PHASE=1 node "$COMET_STATE" set <name> phase verify
 
 ## 场景二：代码不满意，从验证阶段退回重写
 
-进入 verify 阶段后，如果测试中发现重大逻辑问题，想重新写：
+进入 verify 阶段后，如果测试中发现重大逻辑问题需要重写，在对话中说明意图或在停顿点选择退回修改即可，Agent 会在后台触发 `verify-fail` 状态流转。
+
+<Accordion title="Agent 后台调用命令参考">
 
 ```bash
-node "$COMET_STATE" transition <change-name> verify-fail
+comet state transition <change-name> verify-fail
 ```
+
+</Accordion>
 
 回退后的状态：
 - `phase`：回到 `build`；
@@ -78,13 +86,17 @@ node "$COMET_STATE" transition <change-name> verify-fail
 
 改完代码并通过本地测试后，再次推进到 `build-complete`，重新验收。
 
-## 场景三：验证通过了，归档前还想调
+## 场景三：验证通过后，归档前需要调整
 
-进入 archive 阶段后，最终确认时发现漏了测试或想微调：
+进入 archive 阶段后，如果最终确认时发现漏了测试或需要调整，在停顿点选择“需要调整或重新验证”（或在对话中说明需求）即可，Agent 会在后台触发 `archive-reopen` 状态流转。
+
+<Accordion title="Agent 后台调用命令参考">
 
 ```bash
-node "$COMET_STATE" transition <change-name> archive-reopen
+comet state transition <change-name> archive-reopen
 ```
+
+</Accordion>
 
 重新打开后的状态：
 - `phase`：回到 `verify`；
@@ -92,17 +104,21 @@ node "$COMET_STATE" transition <change-name> archive-reopen
 - `branch_status`：保持 `pending`；
 - `verified_at`：清空为 `null`。
 
-随后重新核验，确认后再归档。
+随后进入 verify 阶段（`/comet-verify`）重新核验，确认后再归档。
 
 ## 场景四：hotfix / tweak 升级为完整流程
 
-用 hotfix 或 tweak 时发现改动超出预期，需要补正规的设计文档：
+使用 hotfix 或 tweak 过程中发现改动超出预期、需要补充正式设计文档时，在升级停顿点选择升级为完整流程（或在对话中明确告知 Agent）即可，Agent 会在后台触发 `preset-escalate` 状态流转。
+
+<Accordion title="Agent 后台调用命令参考">
 
 ```bash
-node "$COMET_STATE" transition <change-name> preset-escalate
+comet state transition <change-name> preset-escalate
 ```
 
-这条命令一次把工作流类型改成 `full`、把 `phase` 退回 `design`，并清理临时标记。之后系统自动进入 `/comet-design` 补 Design Doc。已有的代码和测试可以继续用。
+</Accordion>
+
+该流转一次性把工作流类型改成 `full`、把 `phase` 退回 `design`，并清理临时标记。之后系统自动进入 `/comet-design` 补充 Design Doc，已有的代码和测试可继续复用。
 
 ## 场景五：恢复时发现本地有未提交改动
 

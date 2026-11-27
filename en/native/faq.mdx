@@ -1,125 +1,90 @@
 ---
-title: 'Common Questions about Native'
-description: 'Answer common questions about Native mode selection, requirement clarification, state recovery, validation Loop, workspace, and parallel change.'
+title: 'Native FAQ'
+description: 'Answers to common questions about choosing Native, requirement clarification, verification and repair, cross-device recovery, Supervisor parallelism, and troubleshooting.'
 ---
 
-<Note>
-  New changes use SDK Runs with local execution data in the user Comet data directory. References to
-  `.comet/runtime/native/`, standalone YAML recovery, and `--finish` apply only to Compat. For
-  default SDK operations, see [Runtime](/en/native/runtime) and [Archive
-  delivery](/en/native/archive-and-delivery).
-</Note>
-
-Common questions about the applicable scenarios of Native, the four-stage workflow, state that syncs across devices, verification, recovery, and conflict handling.
-
-## Basic concepts
+## Basics and workflow selection
 
 <AccordionGroup>
-  <Accordion title="How should one choose between Native and Classic">
-When the main models are Fable 5, GPT-5.6 and other strong models of the same level, Native should be given priority: These models can be independently planned and implemented. Imposing methodological constraints would instead waste their capabilities. Native leaves the choice of methods to it and only locks in the results and evidence. When the model capability profile is lower and more explicit process constraints are required, Classic is used. It provides five-stage governance including open, design, build, verify, and archive through OpenSpec and Superpowers. Two workflows are selected by `.comet/config.yaml`.
+  <Accordion title="How should I choose between Native and Classic?">
+    Prefer Native when using strong cloud reasoning models: these models already handle code comprehension and task decomposition well, so Native focuses on requirement and acceptance boundaries plus evidence-based verification while leaving implementation methods to the model. Choose Classic (combining OpenSpec and Superpowers) if your model is less capable or your team prefers advancing through a fixed five-phase document and plan workflow. Both workflows can be enabled or switched per project in `.comet/config.yaml`.
   </Accordion>
 
-<Accordion title="Does Native rely on OpenSpec, Superpowers, or other external skills">
-  Not dependent. Native comes with Shape, Build, Verify, Archive and Runtime. Only Classic Just
-  installed and used Classic references such as OpenSpec and Superpowers.
-</Accordion>
+  <Accordion title="Does Native require installing OpenSpec, Superpowers, or other external skills?">
+    No. Native includes the complete Shape, Build, Verify, and Archive workflow along with the SDK Runtime built in. You only need to install OpenSpec and Superpowers when using the Classic workflow.
+  </Accordion>
 
-<Accordion title="Why can the Builder not archive just by reporting completion?">
-  The Builder submits a candidate implementation. Runtime checks and Verify covering every
-  acceptance item are still required. New tasks allow same-session acceptance, with independent
-  review selected for task needs and your requirements. Passing results still require acceptance
-  unless you explicitly delegated acceptance and Archive on pass in advance. Existing tasks retain
-  their original contracts. See [verification and repair](/en/native/verification-and-repair).
-</Accordion>
+  <Accordion title="Do I need to memorize and type comet native commands manually in daily use?">
+    No. Daily development happens in natural language inside Agent chat (starting with `/comet <your request>`). All underlying `comet native ...` commands—creating changes, advancing phases, submitting verification results, and passing confirmation guards—are executed automatically by the Agent in the background. You only need terminal commands when you want to inspect progress outside chat (`comet status` / `comet native doctor`) or move a Supervisor child task across checkouts (`comet native transfer`).
+  </Accordion>
 
-<Accordion title="Why does Verify return to Build?">
-  Failed acceptance, failed checks, missing Verifier items, or invalid results appear in the next
-  continuation and return the change to Build. After repair, Verify checks every acceptance item
-  again while preserving valid checks.
-</Accordion>
+  <Accordion title="Why can't a change be archived right after the Builder says coding is done?">
+    Code submitted by the Builder is only a candidate implementation. Verify must still check every acceptance criterion against your original request and formal Specs. Routine tasks can complete verification in a read-only role within the current session (recorded as `self-reviewed`), or you can request an independent read-only review session. Only after all criteria pass—and according to your confirmation or automatic archive policy—does the change enter Archive. See [Verification and repair](/en/native/verification-and-repair).
+  </Accordion>
 
-<Accordion title="Can it be restored without verification.md">
-  Sure. Shape and Build require synchronized briefs, Specs and `comet-state.yaml`;"
-  `verification.md` is a reconfigurable report. Verify or archive-ready On another device, the local
-  execution state will be reconstructed and reconfirmed, and the old local results will not be
-  directly reused.
-</Accordion>
+  <Accordion title="What if extra test commands need to run during Verify?">
+    The Agent runs the required build, unit test, typecheck, or static analysis commands directly through platform tools and records the command, working directory, exit status, and log reference faithfully in the verification evidence. The Runtime does not re-execute ordinary commands and never accepts fabricated or unrun checks as passes.
+  </Accordion>
 
-<Accordion title="What are the differences between the cross-device state of Native and the native Runtime">
-  `comet-state.yaml` save stage, Loop, acceptance, handoff, check summary, Verifier Conclusion,
-  blockage and next step are cross-device stable boundaries. `.comet/runtime/native/` only saves
-  this machine `state.json`, logs, locks and transactions can be rebuilt when they are missing or
-  the versions do not match.
-</Accordion>
+  <Accordion title="Why do new projects default to batch clarification mode?">
+    `batch` mode asks all independent decision points whose prerequisites are already clear in a single round, cutting down on back-and-forth turns. If requirements are still exploratory and earlier answers directly change downstream branches, switch to `sequential` in `.comet/config.yaml` to clarify one question at a time. In either mode, you confirm the complete final Shape before entering Build.
+  </Accordion>
 
-<Accordion title="Why do new projects default to Batch">
-  Batch First, the problem dependencies will be sorted out, and then the questions that are already
-  available in the current premise will be asked again to reduce repetitive back-and-forth.
-  Sequential It can still be configured to ask the most upstream question by round. Both need to
-  confirm shared understanding before building.
-</Accordion>
+  <Accordion title="Does a missing verification.md affect interruption recovery or cross-device continuation?">
+    No. `verification.md` is only a human-readable view rendered by the Runtime from structured verification verdicts. The local Run and repository files—`comet-state.yaml` (including `run_checkpoint`), `brief.md`, and target Specs—are the basis for recovery. If the report file is missing, it is automatically re-rendered from recorded verdicts without losing evidence, and editing the Markdown file by hand cannot change verification outcomes.
+  </Accordion>
 
-<Accordion title="What if additional checks are needed">
-  The current Verifier requests the Runtime to execute through `request-checks`. Runtime It will
-  remove duplicate equivalent plans, limit the number of request rounds and return results. Do not
-  create a "Check receipt" by yourself or fill in "Pass" in the status file.
-</Accordion>
+  <Accordion title="What is the difference between comet-state.yaml in the repository and the local Run directory?">
+    The complete local Run lives in the Comet data directory under your home directory (`~/.comet` by default, isolated per workspace and Git worktree) and records every action claim, submission, and transaction log in real time without being committed to Git. `comet-state.yaml` inside the repository displays business state and writes a tamper-evident recovery checkpoint (`run_checkpoint`, with redacted tokens and in-flight actions downgraded to `unknown`) at key boundaries for cross-device recovery or restoring lost local records.
+  </Accordion>
 
-  <Accordion title="Can multiple Native Changes run in parallel">
-Sure. When creating a change, the `current`, `branch`, and `worktree` selections will be displayed when applicable. `.comet/current-change.json` only selects the next write attribution and does not limit the number of active changes. When two changes need to modify the same capability, the Archive will require a clear order.
+  <Accordion title="Can multiple independent Native changes be developed in parallel?">
+    Yes. You can plan multiple Shapes on the same branch and defer Build at confirmation time. When you start implementing, if other active tasks remain in the same directory, the Runtime automatically creates an independent branch and Git worktree and hands the task off. You can also create a change directly in an independent worktree from the start. If two parallel changes edit the same capability Spec, Archive runs requirement-level checks and pauses on conflicts so you can set the archive order. See [Multi-change parallelism and conflict control](/en/native/multi-change-and-conflicts).
   </Accordion>
 </AccordionGroup>
 
 ## Supervisor Change
 
 <AccordionGroup>
-  <Accordion title="When should Supervisor Change be used">
-Supervisor Change is suitable when an overall goal contains at least two results that can be independently implemented and verified, and unified integration and final acceptance are still required. The Runtime allocates children by acceptance items, manages dependencies and independent worktrees, and verifies the complete target after all children are integrated.
-
-Goals without a common final acceptance should create multiple independent changes. When multiple parts need to frequently modify the same core area, or when the splitting cost is higher than the parallel benefit, continue to use a single Native Change.
-
+  <Accordion title="When should I use Supervisor Change versus multiple independent changes?">
+    Use Supervisor Change when a large goal splits into two or more child tasks that can be coded and verified independently but must merge into an integration branch for unified end-to-end verification (layered refactors with sequential dependencies also fit). If requirements are independent and can ship separately, create multiple independent Native changes. If edits concentrate heavily in the same core file, keep a single change and advance sequentially.
   </Accordion>
 
-  <Accordion title="Why choose multi-session collaboration or single-session advancement">
-The advancement mode only decides where each child runs; split results, dependencies, acceptance, and integration rules stay the same in both modes. Multi-session collaboration is coordinated by the current session, with priority given to Codex independent sessions or Claude Code Agent Teams; single-session advancement is completed by the current session in sequence.
-
-When the Runtime confirms the Supervisor Shape, it saves the selection as `coordination_mode`. When restoring tasks or re-entering Shape due to changes in requirements, this option will be used without repeated inquiries.
-
+  <Accordion title="What is the difference between multi-session and single-session mode in Supervisor?">
+    Child decomposition, dependency order, child verification, and integration rules are identical; only the execution carrier differs. In `multi-session`, the main session coordinates concurrent progress using independent sessions or Claude Code Agent Teams based on platform capability (default limit `2`, adjustable via `native.max_parallel_children`, falling back automatically to subagents when unsupported). In `single-session`, the current session completes children sequentially in dependency order (concurrency fixed at `1`). Your choice is saved in `comet-state.yaml` and reused automatically on recovery.
   </Accordion>
 
-  <Accordion title="How to restore a multi-session task after it disappears">
-Comet will first re-read the Runtime and will not determine that the child has been completed based on the residual information of the old session. When persisting to `multi-session`, if the independent session or Agent Team is unavailable, it will automatically switch to subagent instead of switching to a single session.
-
-Tasks that have been distributed but lost will first inactivate the old `runId` through `supervisor-cancel`, and then be redistributed using the new task package and `runId`. The late results of the old execution will be rejected. When the subagent is also unavailable, Comet will report a real block.
-
+  <Accordion title="What if a multi-session child task's window closes or its session is lost?">
+    Return to the original workspace and ask the Agent to continue. Comet first checks with the original platform whether the child task is still running and never treats a disconnected session as complete. If the original independent session or Agent Team is unavailable, Comet automatically continues via subagent under `multi-session` instead of silently downgrading to single-session. To move an in-progress child task across machines or checkouts, use `comet native transfer export/import`.
   </Accordion>
 </AccordionGroup>
 
 ## Recovery and troubleshooting
 
 <AccordionGroup>
-  <Accordion title="What should I do if the requirements change after verification has been passed">
-If the change is merely to complete the implementation of the confirmed goal, continue to Build and Verify the Loop. When changes modify the user-visible target, scope, or acceptance criteria, Native will make change return a Shape, record the new decision, and invalidate the old validation. Even if the change is archive-ready, the requirements should be reconfirmed first, and then new verification results should be obtained for the current goal.
+  <Accordion title="What if requirements change after Verify passes or while waiting to archive?">
+    Describe the change directly in conversation. If you are only fixing the internal implementation of the original requirement, the Agent takes the implementation revision path back to Build while keeping the confirmed Shape. If user-visible behavior or acceptance criteria change—and archive writes have not executed yet—the Agent returns to Shape, presents a before/after change summary, and asks you to re-confirm while keeping all existing code intact. See [Continuing a Native change after requirement changes](/en/native/scenarios/requirement-changes).
   </Accordion>
 
-  <Accordion title="Can existing Native Changes still continue after upgrading?">
-The status can be determined first through `comet status` and `comet native doctor <change-name>`. active changes that can be migrated will be conservatively migrated according to the actions returned by the Runtime; The old version of the archive remains read-only. Do not manually move the old Runtime, modify the status file, or copy the validation records.
+  <Accordion title="How do I recover a task after switching devices or clearing local cache?">
+    As long as your code, `comet-state.yaml`, `brief.md`, target Specs (and `.comet/config.yaml` when using a custom root) are committed to the repository, pull the repository on the new device and ask the Agent to diagnose the task. Once the checkpoint is verified valid, the Agent restores the original Run in the background via `comet native doctor <change-name> --repair --confirmed` (which you can also run manually in the terminal for offline troubleshooting) without redoing completed Shape or Build work.
+  </Accordion>
 
-After the upgrade, run `comet update` first to refresh the Skill and Runtime. `comet native doctor <change-name> --repair` will only be run when Doctor explicitly provides a repair action.
+  <Accordion title="After upgrading Comet, are existing Compat or older changes affected?">
+    No. Upgrading never force-migrates in-flight legacy changes or modifies their existing state and verification contracts; newly created changes automatically use the new SDK Runtime. If completed historical Runs indicate that storage partitioning needs to be finalized, upgrade both the CLI and platform hooks and let the Agent (or run in the terminal) perform the one-time history migration. See [Native recovery playbook](/en/native/recovery-playbook).
+  </Accordion>
 
+  <Accordion title="What are the standard read-only terminal commands for offline troubleshooting?">
+    Preserve the current workspace as-is without manually editing `comet-state.yaml` or `.comet/current-change.json`, and run read-only diagnostics to inspect state and exact blockers:
+
+    ```bash
+    comet status
+    comet native status <change-name> --details --json
+    comet native doctor <change-name> --json
+    ```
+
+    Then follow the matching scenario in [Native recovery playbook](/en/native/recovery-playbook).
   </Accordion>
 </AccordionGroup>
 
-Run first:
-
-```bash
-comet status
-comet native status <change-name> --details --json
-comet native doctor <change-name>
-```
-
-Do not manually modify `comet-state.yaml`, `.comet/current-change.json` or `.comet/runtime/native/`. If the code, artifact root, branch/worktree are not synchronized, or the active/archive directory is mixed, the Runtime will return the specific `await-user`/`blocked` actions.
-
-The change-local Runtime, old receipt/evidence or `native.snapshot` configuration left by the old version is only used for migration and read-only compatibility. The newly created Portable State change in RC1 will not continue to create this old version of the ledger.
-
-Continue reading: [Native Configuration](/en/native/configuration), [Native artifacts and state](/en/native/artifacts-and-state), [Verification and Repair](/en/native/verification-and-repair) and [Recovery Manual](/en/native/recovery-playbook).
+Further reading: [Native configuration](/en/native/configuration), [Native artifacts and state](/en/native/artifacts-and-state), [Verification and repair](/en/native/verification-and-repair), and [Native recovery playbook](/en/native/recovery-playbook).

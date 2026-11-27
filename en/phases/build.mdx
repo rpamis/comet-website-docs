@@ -25,7 +25,7 @@ After exiting the design phase (`phase: build`), `/comet-classic` calls `/comet-
 
 - Automatic transition is off (`auto_transition: false`), so `/comet-classic` stops after design and prints a hint.
 - You want to run build on its own, for example to resume an existing change in `phase: build`.
-- A failed verification was rolled back with `comet-state transition verify-fail`, and the change needs another build pass.
+- A failed verification was rolled back via `verify-fail`, and the change needs another build pass.
 
 In normal use, enter `/comet`; call the stage command directly only when you advance the stage by hand.
 
@@ -51,7 +51,7 @@ flowchart TD
     SpecPause --> TaskLoop
     TaskLoop --> Done{"All done?"}
     Done -->|no| Exec
-    Done -->|yes| Exit["comet-guard build --apply<br/>advances to Verify"]
+    Done -->|yes| Exit["comet guard <name> build --apply<br/>advances to Verify"]
 ```
 
 <p align="center">
@@ -69,11 +69,7 @@ flowchart TD
 
 ### Step 0: Check entry state
 
-```bash
-node "$COMET_STATE" check <name> build
-```
-
-Comet reads `base-ref` and greps the plan header to find the first unfinished task. Build is idempotent: a task that is already submitted is not submitted again.
+The Agent verifies entry state in the background (`comet state check <name> build`), reads `base-ref`, and checks the plan to find the first unfinished task. Build is idempotent: a task that is already committed is not committed again.
 
 ### Step 1: Draft the implementation plan
 
@@ -212,21 +208,26 @@ When execution reveals that the spec needs to change, handle it according to the
 
 ### Step 5: Verify and commit
 
-For each task: implement according to `build_mode` → review according to `review_mode` (if enabled) → **main session verifies and checks off** `tasks.md` → commit.
-
-```bash
-node "$COMET_STATE" task-checkoff "$PLAN_FILE" "$PLAN_TASK_TEXT"
-```
-
-The task text must match exactly one unchecked item. If check-off fails, do not start the next task. `grep -c '\- \[ \]' tasks.md` shows how many tasks are still open.
+For each task: implement according to `build_mode` → review according to `review_mode` (if enabled) → **main session verifies and checks off** `tasks.md` → commit. Task check-off validation runs automatically in the background; the task text must match exactly one unchecked item, and if check-off fails, the Agent does not start the next task.
 
 ### Exit
 
+After every task is checked off and the project build passes, the Agent runs the phase guard in the background to advance the state machine to `phase: verify` and set `verify_result: pending`.
+
+<Accordion title="Background Agent command reference">
+
 ```bash
-node "$COMET_GUARD" <change-name> build --apply
+# Verify entry state for build
+comet state check <change-name> build
+
+# Validate check-off for a single task
+comet state task-checkoff "$PLAN_FILE" "$PLAN_TASK_TEXT"
+
+# Run the phase guard after all tasks complete and advance to verify
+comet guard <change-name> build --apply
 ```
 
-Advance to `phase: verify`, and set `verify_result: pending`.
+</Accordion>
 
 ---
 
@@ -266,7 +267,7 @@ The guard detects the project build entry automatically (`npm run build`, Maven,
 
 ### Resuming
 
-Build is idempotent. On resume, `grep -n '\- \[ \]' tasks.md | head -1` finds the first unfinished task. For `build_pause: plan-ready`, see [pause point 6](#pause-point-6-build-joint-decision-plan-ready). After context compression, run `comet-state check <name> build --recover` to restore context. In subagent mode, reread `.comet/subagent-progress.md` to recover the current task and review round; **do not implement tasks directly in the main session**. If a `full` workflow stopped at plan-ready, confirm the existing workspace binding first, then complete or confirm `build_mode`, `tdd_mode`, and `review_mode`.
+Build is idempotent. On resume, Comet scans `tasks.md` for the first unfinished item (`- [ ]`). For `build_pause: plan-ready`, see [pause point 6](#pause-point-6-build-joint-decision-plan-ready). After context compression, the Agent runs `comet state check <name> build --recover` to restore context. In subagent mode, the Agent rereads `.comet/subagent-progress.md` to recover the current task and review round and does not implement tasks directly in the main session. If a `full` workflow stopped at plan-ready, confirm the existing workspace binding first, then complete or confirm `build_mode`, `tdd_mode`, and `review_mode`.
 
 ### Recommended path
 

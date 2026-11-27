@@ -1,46 +1,58 @@
 ---
 title: 'Archive and delivery'
-description: 'Accept a Native verification result, check archive readiness, apply Spec changes, and verify commits, pushes, or pull requests.'
+description: 'Accept Native verification results, understand how Archive checks prerequisites and merges Specs, and verify Git commits, merges, pushes, or pull requests.'
 ---
 
-Native enters Archive after the current verification result is accepted. The Runtime applies approved Spec changes and moves the change to the archive directory. How code and formal artifacts reach Git depends on the delivery scope you approve. Verify Archive and Git delivery separately.
+Once you accept a verification result, Native executes Archive: it merges the confirmed Spec changes into your project's official Specs and moves the change directory into the archive history directory. How code and archived artifacts enter Git—left in your working tree, committed, merged, pushed, or opened as a pull request—depends on the delivery scope you specify in chat. Everyday archiving runs automatically via the Agent in the background without manual commands; at wrap-up, verify "Archive completed" and "Git delivery completed" separately.
 
 ## Accept the current verification result
 
-After Verify passes, read the criteria, actual checks, and known limitations in `verification.md`. Acceptance applies to this implementation and verdict. If the implementation needs repair, follow the current instructions to return to Build. If the requirements or criteria need to change, confirm the affected Shape decisions first.
+After Verify passes, review the per-item verdicts, check evidence, and known limitations in `verification.md` (or the summary reported by the Agent). Your acceptance applies to this specific implementation and verdict:
 
-If you explicitly requested automatic acceptance and archiving after all criteria pass, the Agent can apply that decision when it submits the passing result. Otherwise, it waits for your acceptance. You can specify delivery at the same time, for example “Accept the result, archive the change, and commit it to the current branch without pushing.”
+- If you spot anything else to fix, tell the Agent in chat to revise the implementation and return to Build;
+- If requirements or acceptance criteria need to change, describe the new requirement to return to Shape and reconfirm;
+- If you explicitly told the Agent "accept and archive automatically once everything passes" (or enabled `native.archive_confirmation: automatic` in project configuration and all safety conditions hold), the Runtime accepts and advances into Archive automatically after a passing verdict.
 
-## Check readiness and archive
+You can specify your Git delivery scope when accepting, for example: "Accept this result, archive it, and commit to the current branch without pushing yet."
 
-After accepting the result, inspect the outcome if the Runtime says Archive is complete. If an Archive action is pending, the Agent runs the current command in the returned workspace. Use `--dry-run` to check readiness. For example, check whether `login-error-message` is ready.
+## Check prerequisites and execute Archive in the background
 
-```bash
-comet native archive login-error-message --dry-run --json
-```
+After you accept the result, the Agent advances the archive pipeline automatically in the background (archive preflight, Spec merge, and directory move):
 
-Read `ready` and `blockers` in the response. The command can succeed while `ready: false` indicates the change is still waiting for a prerequisite. Address the causes listed in the response, such as pending acceptance, a workspace mismatch, or a conflict with the project Spec. The preview does not apply Spec changes or move the change.
+- **Preflight fails (`ready: false`)**: The Runtime lists the exact blockers—such as unaccepted verification, a workspace binding mismatch, or a conflict with the project's official Spec—without modifying any Specs or directories. Resolve the blockers before retrying.
+- **Preflight passes**: The Runtime merges the confirmed Spec changes into your project's official Specs (for example, `docs/comet/specs/authentication/spec.md`) and moves the change directory—along with `brief.md`, `comet-state.yaml`, and `verification.md`—into the archive directory under `docs/comet/archive/` (or your configured custom artifact root).
 
-During Archive, the Runtime checks the current Run, accepted result, formal artifacts, and destination. When those checks pass, it applies the project Spec changes, moves the active change directory, and records the archive result. For example, the Runtime applies requirements from the `login-error-message` target Spec to `docs/comet/specs/authentication/spec.md` and moves the brief and verification report with the change to the returned directory under `docs/comet/archive/`. If the project uses a custom artifact root, use the returned paths.
-
-If another change updated the same capability, read the latest project Spec and the conflict details. After aligning the requirements, have the Agent check which approvals and evidence still apply and follow the returned instructions for any additional verification. See [Parallel changes and conflict control](/en/native/multi-change-and-conflicts) for archive conflicts across worktrees.
+If another parallel change recently updated the same capability Spec, Archive pauses and flags the conflict. Sync with the latest project Spec and rerun affected checks before archiving. See [Parallel changes and conflict control](/en/native/multi-change-and-conflicts).
 
 ## Verify the archive result
 
-After Archive completes, status should show that the Run has ended. Verify that the archive directory is readable and that the project Specs include the approved changes. Check that the report and state file moved with the change. To see how a particular behavior was checked, open `verification.md` in the archive directory returned by the Runtime.
+When Archive finishes, the Run status becomes `completed` and the workflow status becomes `done`. Confirm three things:
 
-If the command is interrupted, inspect the original change and its archive destination, then follow the returned recovery command to continue the original transaction. The Runtime checks completed steps against their records so it can avoid applying the same Spec changes or creating a second archive. See [Task progress and interruption recovery](/en/native/continuation-and-checkpoints).
+- The archive directory is readable and contains `brief.md`, `comet-state.yaml`, and `verification.md`;
+- Your project's official Specs include the approved additions or updates;
+- If Archive was interrupted partway through, ask the Agent in chat to run diagnostics and recover the original transaction—completed writes are never repeated. See [Native task recovery](/en/native/recovery-playbook).
 
 ## Complete and verify Git delivery
 
-Before taking Git actions, the Agent checks the current branch, target branch, and files belonging to this change. Stage the implementation, updated project Specs, and formal archive artifacts for this change. Review the staged diff and follow the project's commit rules and Git hooks. Preserve unrelated uncommitted edits.
+Before running Git commands, the Agent checks the current branch, target branch, and files belonging to this change. Staging includes only this change's implementation code, updated project Specs, and formal archive artifacts. The Agent inspects the staged diff before committing and respects project commit conventions and Git hooks while leaving unrelated workspace edits untouched.
 
-| Delivery scope you approve | What to verify |
+| Delivery scope you confirm | What to verify |
 | --- | --- |
-| Archive and keep the workspace | The archive path and the edits that remain in the workspace. |
-| Commit to the current branch | The commit SHA, branch, and commit contents. |
-| Merge into the target branch | The target branch includes the delivered changes. If you used a squash merge or similar method, check the resulting commit. |
-| Push to the remote | The remote, destination branch, and remote commit match the intended delivery. |
-| Open a pull request | The pull request URL, head branch, base branch, and included commits. |
+| Archive only; keep workspace | Confirm the archive path and that workspace edits remain intact. |
+| Commit to the current branch | Confirm the commit SHA, branch name, and commit contents. |
+| Merge locally into the target branch | Confirm the target branch contains the delivered changes (or the resulting commit if squashed). |
+| Push to remote | Confirm the remote name, target branch, and remote commit match expectations. |
+| Create a pull request | Confirm the PR link, head branch, base branch, and included commits. |
 
-For example, if you ask for `login-error-message` to be committed and pushed to the change branch, verify both the local commit and remote branch. If the push is interrupted, check what the remote branch actually points to before completing the remaining Git work.
+If pushing or opening a pull request is interrupted, check the actual remote branch and PR state first to see which steps already succeeded before completing the rest—do not blindly re-commit.
+
+Everyday archiving is handled automatically by the Agent in the background. If you want to inspect archive readiness yourself in a terminal beforehand, you can run the read-only preview command below; it does not modify any files.
+
+<Accordion title="Terminal read-only preview command (normally run by the Agent; optional for manual readiness checks)">
+
+```bash
+# Run a read-only preflight check showing ready, blockers, and pending Spec changes without writing files
+comet native archive <change-name> --dry-run --json
+```
+
+</Accordion>

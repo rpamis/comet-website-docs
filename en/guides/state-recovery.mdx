@@ -1,11 +1,11 @@
 ---
-title: 'State Damage and Recovery'
-description: 'How to diagnose and restore using comet status/comet doctor when the Classic route is incorrect,.comet.yaml is missing or the format is abnormal, or the evidence is missing. '
+title: 'State damage and recovery'
+description: 'How to diagnose and recover with comet status and comet doctor when Classic routing is wrong, .comet.yaml is missing or malformed, or evidence is missing.'
 ---
 
-To restore Classic normally, only the unified entry `/comet` is required (see [Restoring Interrupted Work](/en/guides/resuming-workflow)). After configuring and entering Classic, the internal `/comet-classic` will read the file status and select the stage; this page only handles this internal routing exception or status damage.
+For normal Classic interruptions, invoke `/comet` (see [Resuming interrupted work](/en/guides/resuming-workflow)). Once Classic is active, the internal `/comet-classic` router reads file state and selects the right phase. This page covers internal routing discrepancies and damaged state.
 
-When the state is damaged, first restore the repository's actual state, and then allow the process to continue based on the correct state. Do not forcibly modify the fields just to understand the lock process.
+When state is damaged, restore the repository's real file state first, then let the workflow continue from verified evidence. Do not hand-edit fields just to bypass workflow checks.
 
 <p align="center">
   <img
@@ -31,70 +31,71 @@ When the state is damaged, first restore the repository's actual state, and then
 | `.comet.yaml` missing or malformed                           | Corrupted state                     | Run `comet doctor` for diagnostics                                                        |
 | Declared artifacts/evidence missing from disk                | Missing evidence                    | Run `comet status` and inspect `runtime_eval`                                             |
 
-## Diagnostic command
+## Diagnostic commands
+
+For everyday recovery, enter `/comet` in conversation. When you suspect corrupted state files or environment issues and want to inspect them in a terminal, run these read-only diagnostic commands:
 
 ```bash
-comet resume-probe . --utterance "Continue with the work just now"  # Only read to determine whether it should be restored
-comet status        # Look at the phase, task completion degree, and runtime_eval of the active change
-comet doctor        # Diagnose installation, environment, Skill integrity, and the validity of.comet.yaml
+comet status        # Inspect each active change's phase, task completion, and runtime_eval
+comet doctor        # Diagnose installation, environment, Skill integrity, and .comet.yaml validity
 ```
 
-Adding `--json` is suitable for reading to Agents or automated tools. Ordinary users first look at the text output.
+Add `--json` for Agents or automation scripts. If you also want to inspect why natural-language recovery probing matched or paused, you can run `comet resume-probe . --utterance "Continue the previous work"` in a terminal (read-only; it modifies no state).
 
 The recovery probe decides whether to enter a workflow. An `ask_user` result may confirm whether a new session should continue a related change, choose a target, establish edit ownership, or handle a user decision. It does not by itself indicate damaged state. See the [recovery probe command](/en/cli/resume-probe).
 
-### What to watch on comet status
+### What comet status reports
 
-Each active change reports: `phase`, task `done/total`, `workflow | build_mode`, `run_step`, `runtime_mode`, `runtime_eval` (whether the declared step evidence is truly on the disk), `design`, `plan`, `verify_result`, and `next:` prompt.
+Each active change reports: `phase`, task `done/total`, `workflow | build_mode`, `run_step`, `runtime_mode`, `runtime_eval` (whether the declared step evidence actually exists on disk), `design`, `plan`, `verify_result`, and a `next:` hint.
 
-When `runtime_eval` fails, Comet prints `run <command> or restore missing evidence (...)`. Follow the prompt: run the command, or restore the missing evidence.
+When `runtime_eval` fails, Comet prints `run <command> or restore missing evidence (...)`. Follow the prompt to run the command or restore the missing evidence.
 
-### What does comet doctor watch
+### What comet doctor checks
 
-Checks the Comet CLI version, the OpenSpec CLI, Superpowers, the working directories (`docs/superpowers/specs` and `docs/superpowers/plans`), the integrity of the installed Skills on each platform, whether the scripts exist, CodeGraph, and whether each change's `.comet.yaml` and `runtime_eval` are valid. Common repair commands: `npm install -g @fission-ai/openspec@latest`, `comet init`, `comet update --scope ...`.
+`comet doctor` checks the Comet CLI version, OpenSpec CLI, Superpowers, working directories (`docs/superpowers/specs` and `docs/superpowers/plans`), installed Skill integrity on each platform, bundled scripts, CodeGraph, and each change's `.comet.yaml` and `runtime_eval`. Common repair commands include `npm install -g @fission-ai/openspec@latest`, `comet init`, and `comet update --scope ...`.
 
-## Common symptoms and management
+## Common symptoms and fixes
 
-| Symptoms                                                     | Possible reasons                                                      | What to do first?                                                                                                   |
+| Symptom                                                      | Possible cause                                                        | First step                                                                                                          |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `comet status` has no next step                              | `.comet.yaml` is missing or has an abnormal format                    | `comet doctor`                                                                                                      |
-| build cannot enter verify                                    | Missing `build_mode`/`isolation`/`tdd_mode`                           | Re-call `/comet` to route Classic back to build for supplementary selection                                         |
-| verify passed but cannot archive                             | Missing verification reports, branch binding drift or abnormal status | Supplement the verification report, switch back to the bound branch, and keep verify guard `branch_status: pending` |
-| After archiving, it still shows "active"                     | Manual movement of directories or status is not synchronized          | Check with `openspec status`, then re-run the archive command to finish archiving (idempotent)                      |
-| `/comet-classic` reports an abnormal format of `.comet.yaml` | The document was manually corrupted                                   | `comet doctor`;" In severe cases, restore `.comet.yaml` from git                                                    |
+| `comet status` shows no next step                            | `.comet.yaml` is missing or malformed                                 | Run `comet doctor`                                                                                                  |
+| build cannot enter verify                                    | Missing `build_mode`, `isolation`, or `tdd_mode`                      | Invoke `/comet` again so Classic routes back to build to select the missing options                                 |
+| verify passed but cannot archive                             | Missing verification report, branch drift, or invalid state           | Restore the verification report, switch back to the bound branch, and keep `branch_status: pending` through verify  |
+| After archiving, the change still shows as active            | Manual directory move or unsynchronized state                         | Check with `openspec status`, then re-run archive to finish (idempotent)                                            |
+| `/comet-classic` reports a malformed `.comet.yaml`           | The file was damaged by manual edits                                  | Run `comet doctor`; in severe cases, restore `.comet.yaml` from Git                                                 |
 
-## Restoration principle
+## Recovery principles
 
-- **With documents as evidence**: OpenSpec artifacts, Design Doc, Plan, test results, and the actual working tree are the only trusted source of state.
-- **Do not manually write the machine-owned Run field** (`.comet/run-state.json` etc., maintained automatically by Comet).
-- Don't mistake `build_pause` for `build_mode` - they are different fields.
-- **Do not skip the verify failure decision point** - It is up to you to choose to fix or accept the bias.
-- **Do not manually forge the archive status** - Archiving is completed by `/comet-archive` or `comet archive`.
-- **Do not edit `.comet.yaml` to advance the phase by hand**; use `comet guard --apply` or `comet state transition`.
+- **Use files as evidence**: OpenSpec artifacts, Design Doc, Plan, test results, and the actual working tree are the only trusted source of state.
+- **Do not manually edit machine-owned Run fields** (such as `.comet/run-state.json`, maintained automatically by Comet).
+- **Do not confuse `build_pause` with `build_mode`** — they are separate fields.
+- **Do not skip the verify-failure decision point** — you choose whether to fix or accept a non-blocking deviation.
+- **Do not forge archive state by hand** — archiving must go through `/comet-archive` (where the Agent runs `comet archive` in the background; you can also run it in a terminal when troubleshooting).
+- **Do not edit `.comet.yaml` to advance the phase by hand** — phase advancement must go through `comet guard --apply` or `comet state transition` (run by the Agent in the background, or in a terminal during troubleshooting).
 
-## What should I do if.comet.yaml is missing or broken
+## What to do if .comet.yaml is missing or broken
 
-`/comet-classic` has compatible paths for bad states:
+`/comet-classic` has recovery fallbacks for damaged state:
 
-- When `.comet.yaml` is missing, roll back to the `openspec status --json` + `tasks.md` + `docs/superpowers/` file to check the reconstruction status.
-- When the format is abnormal, the file status shall prevail. Correct it with `comet state set` and then continue.
-- When proposal/design/tasks are complete, guard `--apply` to correct the status first and then make a judgment.
+- When `.comet.yaml` is missing, Comet falls back to `openspec status --json`, `tasks.md`, and `docs/superpowers/` files to reconstruct state.
+- When the format is damaged, disk files are the source of truth; the Agent corrects state in the background with `comet state set` (or you can run it in a terminal during troubleshooting) before continuing.
+- When proposal, design, and tasks are complete while `phase` is still `open`, the Agent runs `comet guard --apply` in the background (or you can run it in a terminal during troubleshooting) to repair and advance state.
 
-If `/comet-classic` cannot be repaired by itself (for example, if the file is severely damaged), restore `.comet.yaml` from git and then run `comet doctor` to confirm.
+If `/comet-classic` cannot repair the file automatically (for example, severe corruption), restore `.comet.yaml` from Git and run `comet doctor` to verify.
 
-## Recommended processing flow
+## Recommended troubleshooting flow
 
 ```mermaid
 flowchart TD
-  A["/comet-classic routing is incorrect or the status is abnormal"] --> B["comet status check runtime_eval"]
-  B --> C["comet doctor diagnoses the environment/status"]
-  C --> D{"Is it an installation/environment issue?"}
-  D -->|is| E["Fix <br/>comet init/update/install openspec as prompted by doctor"]
-  D -->|no| F["Check the OpenSpec artifacts"]
-  F --> G["Check the Superpowers design/plan"]
-  G --> H["Check the work tree and verify the evidence"]
-  H --> I["Use the Comet command to restore <br/> without manually modifying the machine-owned field"]
-  I --> J["Re-call /comet"]
+  A["/comet-classic routing is wrong or state is abnormal"] --> B["Run comet status and check runtime_eval"]
+  B --> C["Run comet doctor to diagnose environment and state"]
+  C --> D{"Installation or environment issue?"}
+  D -->|yes| E["Fix as prompted by doctor<br/>comet init / update / install openspec"]
+  D -->|no| F["Check OpenSpec artifacts"]
+  F --> G["Check Superpowers design and plan"]
+  G --> H["Check worktree and verification evidence"]
+  H --> I["Repair with Comet CLI commands<br/>without hand-editing machine-owned files"]
+  I --> J["Invoke /comet again"]
 ```
 
 ## Next step

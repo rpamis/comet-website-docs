@@ -101,13 +101,17 @@ Load `openspec-new-change` (without the long `openspec-explore` exploration) and
 | tasks.md | Fix task list |
 | delta spec | **Usually not needed** (only when the fix changes an existing spec acceptance scenario, and only `## MODIFIED Requirements`) |
 
-Initialize the hotfix state (the defaults `init` writes are listed below):
+The Agent initializes and advances the hotfix state in the background (the defaults written by `init` are listed below).
+
+<Accordion title="Background Agent command reference">
 
 ```bash
-node "$COMET_STATE" init <name> hotfix
-node "$COMET_STATE" check <name> open
-node "$COMET_GUARD" <change-name> open --apply
+comet state init <name> hotfix
+comet state check <name> open
+comet guard <change-name> open --apply
 ```
+
+</Accordion>
 
 The open guard does **not** require `design.md` for hotfix (only full does), so open jumps straight to build and **skips the design phase**.
 
@@ -152,11 +156,7 @@ This step exists only in hotfix (tweak does not have it). It runs before the bui
 2. Search and verify that the problem code no longer exists.
 3. If the root cause is not removed, go back to Step 2 and keep fixing (still in build; no state rollback is needed).
 
-This step is also a source of escalation signals: if the root-cause check finds a **deep architecture issue**, or the fix needs **extra interface changes**, a qualitative signal hits and Comet pauses for your decision.
-
-```bash
-node "$COMET_GUARD" <change-name> build --apply
-```
+This step is also a source of escalation signals: if the root-cause check finds a **deep architecture issue**, or the fix needs **extra interface changes**, a qualitative signal hits and Comet pauses for your decision. Once root-cause elimination passes, the Agent runs `comet guard <change-name> build --apply` in the background to advance to verify.
 
 ### Step 4: Verification (preset verify)
 
@@ -167,11 +167,7 @@ Reuse `/comet-verify`; the scale assessment decides between light and full:
 | Small hotfix with no delta spec | Usually light (6 checks; `review_mode: off` means no automatic review) |
 | A delta spec was created | Full, per the scale-assessment rules |
 
-To add review, set it manually before verifying:
-
-```bash
-node "$COMET_STATE" set <name> review_mode standard
-```
+To enable code review for a hotfix, tell the Agent before verification (the Agent runs `comet state set <name> review_mode standard` in the background).
 
 ### Step 5: Archive (preset archive)
 
@@ -209,7 +205,7 @@ When the number of changed files crosses the hint threshold (for example **more 
 
 ### 3. Verification level (decided by scale)
 
-`comet-state scale` only sets `verify_mode`; it does not gate the flow or trigger escalation.
+`comet state scale` only sets `verify_mode`; it does not gate the flow or trigger escalation.
 
 ### The escalation decision (a pause point)
 
@@ -220,11 +216,7 @@ When an escalation signal or the file-count threshold hits, Comet **pauses and l
 | **A. Continue hotfix** | You confirm the scope is contained; continue open → build → verify → archive |
 | **B. Escalate to full** | You decide deep design is needed |
 
-After choosing B, use the legal escalation channel (**do not hand-edit `.comet.yaml`**):
-
-```bash
-node "$COMET_STATE" transition <name> preset-escalate
-```
+After you choose B, the Agent runs `comet state transition <name> preset-escalate` in the background (**do not hand-edit `.comet.yaml`**).
 
 It sets `workflow: full` and `classic_profile: full` in one shot, rolls `phase` back to `design`, and clears `design_doc`; then it loads `/comet-design` to fill in the Design Doc. You can continue using the completed code, tasks, tests, and OpenSpec artifacts after adding the Design Doc. `preset-escalate` can only fire from a hotfix/tweak in `phase: build`; any other situation reports an error.
 
@@ -248,11 +240,11 @@ With `auto_transition: false`, execution degrades to manual per-phase advancemen
 - The bug is fixed and tests pass.
 - The change is archived.
 - If the spec changed, it is synced into the main spec.
-- Phase guards: run `comet-guard <name> build --apply` before build → verify, and `comet-guard <name> verify --apply` before verify → archive.
+- Phase guards: the Agent runs `comet guard <name> build --apply` before build → verify, and `comet guard <name> verify --apply` before verify → archive.
 
 ### Recovery
 
-Hotfix is idempotent. After an interruption, resume with `/comet`; once the configuration enters Classic, the internal `/comet-classic` reads the `workflow` field of `.comet.yaml` and routes back to `/comet-hotfix` while the change is in `phase: build`. `comet-state check <name> build --recover` prints recovery context, and work continues from the first unfinished task in tasks.md.
+Hotfix is idempotent. After an interruption, resume with `/comet`; once the configuration enters Classic, the internal `/comet-classic` reads the `workflow` field of `.comet.yaml` and routes back to `/comet-hotfix` while the change is in `phase: build`. The Agent runs `comet state check <name> build --recover` in the background to load recovery context, and work continues from the first unfinished task in `tasks.md`.
 
 ## Next steps
 

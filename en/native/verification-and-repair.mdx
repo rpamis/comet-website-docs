@@ -1,44 +1,101 @@
 ---
 title: 'Verification and repair'
-description: 'Learn how to evaluate every acceptance criterion, reuse check results that still apply, and handle implementation failures and verification blockers.'
+description: 'Learn how Native Verify checks every acceptance criterion against your original request, how to choose current-session or independent review, how checks and evidence are reused, and how repair loops and failure limits work.'
 ---
 
-Verify checks the current implementation against the original request, confirmed `brief.md`, relevant Specs, and all acceptance criteria. It looks for missing requirements and unapproved reductions in scope, and checks that required file locations, sections, and formats match what you agreed to.
+Unit tests can be all green while the delivery is still wrong—an edge case was quietly dropped, a document ended up in the wrong path or format, or a fix introduced a regression.
 
-## Choose the review session
+Native's **Verify** stage looks beyond test exit codes. It checks the implementation against **your original request**, the confirmed `brief.md`, target Specs, and **every acceptance criterion** so that what ships matches what you agreed to. The Agent and Runtime handle the verification and repair loop automatically; you only decide at key checkpoints whether to request independent review, accept the result, or revise requirements.
 
-Verify can run in the current session. The Agent decides whether to request independent review based on the remaining uncertainties and your requirements. If you explicitly require independent review, the Verifier must claim the task in a separate read-only session and submit its own verdict. The report records the review method used.
+## What Verify actually checks
 
-## Run necessary checks and evaluate each criterion
+When a change enters Verify, the verifier evaluates four dimensions in order:
 
-1. **Read the Builder handoff.** Review the implementation, change scope, checks already run, and known limitations. Use the current candidate as the basis for Verify.
-2. **Collect missing evidence.** The Agent runs necessary tests, builds, or static checks with platform tools and records commands, working directories, results, and available log references. If an earlier result still applies to the current code and environment, cite the original execution. Run checks affected by the change or missing evidence. Record checks that were skipped, failed, or have an unknown outcome.
-3. **Record a verdict for each criterion.** Mark every acceptance criterion as `passed`, `failed`, or `blocked` and explain the evidence. A passing test command establishes only the behavior it covers. Check the remaining criteria with the evidence each one requires.
+1. **Prevent drift against your original request**: When a task is created, the Agent saves your original prompt verbatim in the Run and hands it directly to the Verifier. The Verifier reads the original request first, then compares it with the Specs and code to catch missing requirements, unapproved scope reductions, or interface drift.
+2. **Evaluate every acceptance criterion**: Covers every confirmed acceptance ID for the change, giving each item an individual verdict and verifiable evidence.
+3. **Check agreed artifact paths and formats**: If `brief.md` requires specific file paths, sections, or formats, Verify inspects the file at that exact location rather than accepting similar content elsewhere. Missing sections or wrong paths cannot pass.
+4. **Treat Builder handoff as clues, not conclusions**: The Builder's summary, check records, and known limitations help orient the review, but the Verifier independently confirms the actual code and results.
 
-### Example: Read the evidence for each criterion
+## Choosing a review method: current session or independent review
 
-This example shows how the Agent might report the first Verify result for `login-error-message`. The second item fails the candidate, so the Agent takes that evidence back to Build.
+Choose the review method based on change risk—just tell the Agent in chat without typing CLI flags manually:
 
-| Acceptance criterion | Evidence | Result |
+| Review method | What you say in chat | Background mechanism and best fit |
 | --- | --- | --- |
-| A1: Show “Invalid username or password” for incorrect credentials. | A UI test simulated a 401 response. The page displayed the agreed message. | `passed` |
-| A2: Show “Too many attempts. Try again later” when rate-limited. | A UI test simulated a 429 response. The page still displayed the incorrect-credentials message. | `failed` |
+| **Current-session read-only review (default)** | Continue normally; no extra instruction needed. | Uses `--review current-session` in the background; the current session switches to a read-only role and marks the report `self-reviewed`. Fits clear, low-risk changes. |
+| **Independent-session read-only review** | Say "Please run an independent review for this change." | Uses `--review independent` in the background; leaves the Verify task open to be claimed and judged by a separate read-only session different from the Builder. Fits complex changes or critical modules. |
 
-After the repair, the Agent checks the new 429 behavior and whether the shared error handler affected the 401 message. It can cite API test results that still apply and state which checks it ran again against the new candidate.
+Two strict rules keep reviews trustworthy:
 
-## Act on the result
+- **Independent review cannot be quietly dropped**: Once you explicitly ask for independent review—or the Builder submits with the independent-review flag—the Runtime persists that requirement in the Run record. Even if later steps omit the flag, an independent read-only session must still claim verification.
+- **Verify is strictly read-only**: Whether in the current session or an independent session, editing application code during Verify is forbidden (and blocked by Hook Guard). Any defect must return to Build to be fixed and resubmitted as a new candidate.
 
-| Verification outcome | What happens next |
+## Running checks, reusing evidence, and status values
+
+### 1. Running commands directly with Agent platform tools
+
+Builds, unit tests, type checks, linters, and end-to-end tests are executed directly by the Agent via platform tools. The Runtime does not re-run ordinary commands on the Agent's behalf, does not track command PIDs, and does not skip tests mechanically based on file hashes. If Project Knowledge or repository policies inject active verification commands (`<verification command="...">`), the Agent includes them in Verify as well.
+
+Each check recorded in `checks` includes three fields:
+
+- `name`: Check name;
+- `result`: Observed outcome;
+- `note`: Command run, working directory, exit status, and log reference.
+
+If an earlier check still applies to the current code and runtime environment, the Agent can cite the existing result. Checks affected by code edits, not yet run, or impacted by environment changes must be executed again.
+
+### 2. Allowed status values
+
+The Runtime strictly validates enum values in submissions so unrun or unknown checks can never be reported as passing:
+
+| Field | Allowed values | Rules |
+| --- | --- | --- |
+| Builder check records (`checks[].result`) | `passed`, `failed`, `not-run` | Failures, timeouts, skipped checks, and unknown outcomes cannot be reported as passing. |
+| Per-item acceptance (`acceptance[].result`) | `passed`, `failed`, `blocked` | Every acceptance ID appears exactly once; `failed` and `blocked` must state the reason. |
+| Overall Verifier verdict (`verdict`) | `pass`, `fail`, `blocked` | Must agree with per-item results: any `failed` or `blocked` item prevents an overall `pass`. |
+
+Note: **Passing unit tests only prove the behaviors those tests cover.** Acceptance criteria outside test coverage—such as UI copy, error-code mappings, required document sections, or config compatibility—must still be backed by code inspection or observed execution evidence.
+
+### 3. Example: a failed round and repair re-verification
+
+Consider round 1 of Verify for `login-error-message`:
+
+| Acceptance criterion | Observed evidence | Verdict |
+| --- | --- | --- |
+| A1: Display "Invalid username or password" on wrong password. | UI test mocked HTTP 401; rendered message matches the Spec. | `passed` |
+| A2: Display "Too many attempts. Try again later" when rate-limited. | UI test mocked HTTP 429; page still fell into the default wrong-password branch. | `failed` |
+
+Because A2 failed, the overall verdict is `fail`, and the Runtime sends the failed item back to Build. After the Builder adds the 429 branch and submits round 2, the Verifier checks the 429 behavior and confirms the shared error handler did not break the 401 message. Unaffected API tests can cite their earlier record, while frontend UI tests rerun against the new candidate.
+
+## Do existing checks stay valid after editing code or docs?
+
+When manual edits occur during Build, Verify, or pre-Archive, Comet does not wipe approvals and check records just because file bytes changed. Instead, the Agent inspects the Git diff, edited text, and affected call paths to judge impact:
+
+| Edit type | Impact on approvals and checks |
 | --- | --- |
-| All criteria pass | Read the item-by-item verdicts, check evidence, and known limitations in `verification.md`. Accept the current result to enter Archive. |
-| The implementation falls short | If failures are below the limit, return to Build and repair the failed items. Submit the revised implementation and verify every acceptance criterion again. |
-| A prerequisite is missing | Identify the specific missing permission, input, or environment requirement. Once it is available, follow the current instructions to continue verification. |
-| Requirements or acceptance criteria need to change | Update the Shape proposal and ask you to confirm the affected decisions before proceeding. |
+| Formatting, comments, or doc wording tweaks that leave behavior and acceptance meaning unchanged | Keeps the Run, approvals, and valid check evidence; no unnecessary Build or Verify rerun. |
+| Edits touching code logic, test inputs, dependency config, or runtime environment | Reruns only affected checks and updates affected acceptance verdicts. |
+| Rerun checks produce a failure, timeout, or unknown outcome | Always honors the latest result and records the failure—never overwrites a new failure with an older pass or misreports an old run as fresh. |
 
-If you explicitly delegated acceptance and archiving on a pass, the Agent can apply that decision when submitting a passing result. Otherwise, the Runtime waits for you to accept the current result. If the verification session is lost or exits unexpectedly, check the original task first and follow [Task progress and interruption recovery](/en/native/continuation-and-checkpoints).
+## Repair loop, failure limits, and post-verification actions
 
-## Decide which results still apply after edits
+Once Verify submits a verdict, the Agent shares the result and you decide the next step in natural language (the Agent runs the corresponding commands in the background):
 
-After a repair, the Agent reviews the actual edits to determine which checks still apply. Formatting or comment changes that leave requirements and behavior intact can retain the original approval and valid evidence. Changes to behavior, check inputs, or the execution environment require updated conclusions where affected. If a check later fails, use the newer result and keep a record of the failure.
+| Verdict | What happens next |
+| --- | --- |
+| **All passed (`pass`)** | The Runtime generates or updates `verification.md`. If `native.archive_confirmation: automatic` is enabled and all four safety conditions hold (verdict is `pass`, acceptance confirmation is the only pending wait, no pending evidence waits exist, and no `running` or `unknown` actions exist—see [Native configuration](/en/native/configuration)), or if you pre-authorized archive-on-pass, Comet enters Archive automatically; otherwise it waits for your confirmation. |
+| **Implementation falls short (`fail`)** | Below the failure limit, automatically returns to Build to repair (`iteration` increments by 1); the next Verify still covers every acceptance item. |
+| **Missing external prerequisite (`blocked`)** | The Agent explains the missing environment, permission, credential, or external input; once you provide it, tell the Agent to continue verification while keeping the current candidate and valid checks. |
+| **Verifier platform error or unavailability** | Keeps the candidate and valid checks; tell the Agent to retry verification (increments `attempt` without consuming an implementation iteration). |
+| **Requirements or acceptance criteria need to change** | Describe the change in chat; the Agent returns to Shape, shows a diff summary of changes, and asks you to reconfirm before continuing. |
 
-Use `verification.md` to review the result. When verification passes, the Runtime generates or updates the report from the submitted results. Editing the report cannot change the verdict. See [Archive and delivery](/en/native/archive-and-delivery) for the archive workflow.
+### Failure limits and progress handling
+
+- **Failure budget**: `native.max_verify_failures` in `.comet/config.yaml` limits how many real Verify failures are allowed for the same confirmed acceptance target (default `5`). Reaching the limit pauses the automatic repair loop so you can decide whether to try another approach, narrow scope, or cancel.
+- **No mechanical progress penalty**: Across repair rounds, even if the set of failing acceptance IDs stays the same temporarily, the Runtime does not force a stop solely for non-shrinking ID sets; the Agent uses the actual diff and error output to guide repair.
+
+### About `verification.md`
+
+`verification.md` is a human-readable view generated by the Runtime from structured verification results. Editing this Markdown file directly **does not alter** the verdict stored in the Runtime. If writing the report file fails, the submitted structured verdict is still preserved and the report regenerates automatically on the next step.
+
+See [Archive and delivery](/en/native/archive-and-delivery) for archiving and Git delivery details, and [Native task recovery](/en/native/recovery-playbook) for troubleshooting.

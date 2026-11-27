@@ -1,108 +1,133 @@
 ---
-title: "Clarification of Sequential and Batch"
-description: "Understand how Native organizes clarification rounds, saves issues, and enters the Build after the final requirements are confirmed."
+title: 'Sequential and batch clarification'
+description: 'Learn how Native decides what to ask during Shape, organizes clarification rounds in batch or sequential mode, and handles final confirmation and requirement-change reviews before Build.'
 ---
 
-After Native identifies the user choices that require your decision, it will organize clarification rounds based on the dependencies between the questions. `native.clarification_mode` controls how many questions are raised in each round; Both modes write the same formal artifacts and both need to complete the requirement confirmation before entering the Build.
+Native runs a **Shape clarification phase** before Build to turn verbal requirements into well-bounded, verifiable behavior specifications and acceptance criteria, locking in edge cases, failure fallbacks, and scope constraints before coding begins.
 
-The new project uses Batch by default. When the requirements are still changing rapidly or one answer may rewrite the subsequent questions, you can switch to Sequential.
+The `native.clarification_mode` setting controls questioning cadence and supports `batch` (default) and `sequential`. Regardless of the mode you choose, both produce the same formal artifacts and require your explicit final confirmation before entering Build.
 
-The criteria for user selection points and the rules for source document coverage can be found in [Which decisions Need Your confirmation](/en/native/decision-ownership)
+## Separate what to ask from what not to ask
 
-## Sequential and Batch
+Native does not turn every detail into a multiple-choice question. Instead, it sorts information into three categories (see [Which decisions need your confirmation](/en/native/decision-ownership) for full boundaries):
 
-Set the clarification mode in `.comet/config.yaml`:
+1. **Investigatable facts**: Current repository state, existing interfaces, tool capabilities, dependency defaults, and runtime environment. The Agent inspects the codebase directly or dispatches parallel read-only investigations without interrupting you.
+2. **User decisions**: Choices that materially change outputs, default behavior, failure outcomes, delivery scope, or irreversible effects and cannot be reliably inferred from existing documentation or project rules. Only these are presented to you.
+3. **Implementation choices**: Algorithms, internal structure, and code organization that do not affect user-visible outcomes. The Agent decides these on its own.
+
+If you supply a PRD, local file, attachment, or external link as a requirements source, the Agent first inventories the full set of source items under the source-document coverage rules, then asks you about ambiguities, omissions, or unstated constraints. If a material is only provided for troubleshooting, evidence, or implementation reference, it does not trigger full source-document coverage.
+
+## Batch vs. sequential mode
+
+Switch modes in `.comet/config.yaml`:
 
 ```yaml
 native:
-  clarification_mode: batch
+  clarification_mode: batch # Options: batch (default) | sequential
 ```
 
-| Mode | How questions are asked | Suits |
+| Clarification mode | How questions are asked | Best suited for |
 | --- | --- | --- |
-|`batch` (default)|Asks every question that is independent and fully specified in one round|The choices are loosely related and you want fewer conversation rounds|
-| `sequential` |Asks one question per round and recalculates the following questions from your answer|One answer may change the later scope, the options, or the order of questions|
+| **`batch` (default)** | Asks all independent questions in one round once their prerequisite facts and upstream decisions are settled. | Requirements whose overall direction is clear and decision points are loosely coupled, when you want fewer round trips. |
+| **`sequential`** | Asks one high-impact question per round, updates dependencies from your answer, and then derives the next question. | Exploratory requirements where an earlier answer directly reshapes downstream options or eliminates later questions. |
 
-Switching modes only affects the pace of the next round of questions. The `[blocking]` questions that have been saved in `brief.md` remain valid. Unanswered questions are still awaiting your decision.
+Changing this setting mid-task only affects the next round of questions. Confirmed decisions already recorded in `brief.md` and unanswered `[blocking]` questions remain intact.
 
-## Problems arise from the decision tree
+## Question ordering and dynamic dependency management
 
-Native will establish a decision tree during the working process. Each node records a user decision, the upstream decision it depends on, the fact that needs to be investigated, and the current status. The decision tree remains in the working process of the Agent, and the Runtime only saves the actual unsolved problems.
+For straightforward requirements, the Agent lists pending items and necessary dependencies directly without forcing a complex node structure. When multiple decisions interact and earlier choices change downstream branches, the Agent maintains a dynamic dependency decision tree in working memory (without creating extra Runtime state files).
 
-When a question meets the following conditions, it enters the set of answerable questions for this round:
+A question enters the current askable set only when all three conditions hold:
 
-1. The decision of the upstream user has been determined.
-2. The facts of the repository or environment required for the answer have been clarified.
-3. It does not rely on other unanswered questions in this round.
+1. All upstream user decisions it depends on are settled;
+2. All codebase facts needed to answer it have been investigated;
+3. It does not depend on any other unanswered question in the current round.
 
-Sequential selects a question from this collection. When multiple issues are ready simultaneously, prioritize handling those that affect more downstream branches and have a greater impact on the visible results for users. Batch collects the entire set and presents them together in one round. Independent fact-finding investigations can be carried out in parallel. When the platform lacks parallel capabilities, the current Agent will complete each item one by one. Each time Native receives an answer or a new survey result, it recalculates the decision tree, so subsequent questions will change along with the confirmed requirements.
+While waiting on a codebase investigation, only branches that depend on that fact pause; independent questions and investigations continue normally. After each answer you provide, the Agent immediately recalculates affected downstream branches to avoid asking questions already ruled out by earlier choices.
 
 <p align="center">
   <img
     src="/assets/native-illustrations/09-clarification-decision-tree.png"
-alt=" Little Fish compiles the verified facts, the current round of issues, and the next round of issues, and writes the confirmed results into the requirements summary."
+    alt="Little Fish organizes verified facts, current-round questions, and next-round questions, then writes confirmed results into the requirement brief"
   />
 </p>
 
-## Each question explains the actual impact
+## Question format and interactive tool fallback
 
-Native converts ambiguous expressions into executable behaviors, such as "Input → output" or "trigger condition → processing result". Each question consists of three parts:
+To make trade-offs obvious at a glance, every question turns abstract requirements into concrete "input → output" or "trigger → outcome" cases with three elements: **the decision difference**, **a recommended option with rationale**, and **the practical impact of each option**.
 
-- **Question**: The visible user behavior that needs to be determined currently;
-- **Recommendation**: Suggestions given in combination with existing goals, constraints and trade-offs;
-- **Impact**: How each option will change the range, outcome or risk.
+- **Prefer structured questioning components**: When there are two or more clear options and your Agent platform provides a structured questioning tool such as `AskUserQuestion`, the Agent uses it first. Single-select options are strictly mutually exclusive; multi-select is used only when multiple compatible features can be combined. Once the component call succeeds, the Agent waits directly without repeating the questions as plain text.
+- **Automatic fallback to numbered text**: For open-ended questions, platforms without a questioning component, component call errors, or `batch` rounds exceeding the component's item limit, the Agent **falls back as a whole batch to numbered text** instead of splitting one round into fragmented prompts to work around component limits.
 
-When the platform provides a structured questioning tool, Native will use it when the option boundaries are clear and can be directly executed. Sequential: Submit one question each time; Batch places the complete problem set of this round in the same request. When the entire set of questions exceeds the tool's capacity, Native will uniformly switch to numbered text, retaining the original options, recommendations, and impacts.
+Batch text questions use stable `Q1`, `Q2` labels (marked single-select, multi-select, or open-ended). If you answer only part of a round, unanswered items keep their original numbers in the next round instead of renumbering:
 
-Single choice is used for mutual exclusion options. Use multiple selection only when the same decision allows the combination of multiple compatible options. After a structured call fails, the subsequent rounds of this session will directly use text, maintaining the stability of question numbers and response methods.
+```markdown
+💬 **Q1 | Page behavior when avatar upload fails (single-select)**
 
-## Your answer is written to the official artifacts immediately
+When the upload API returns an error, determine how the avatar area should behave.
 
-The conversation is only for interaction; recovery relies on what is written to disk. Upon receiving the answer, Native will immediately update the **Decisions** of `brief.md`, the complete target Spec and the corresponding acceptance items. Ambiguous, omitted or still subject to decision contents remain in the **Open questions**.
+| Option | Approach | Practical impact |
+| --- | --- | --- |
+| A | Keep the existing avatar and show an error | Users do not lose their current avatar and can retry right away. |
+| B | Clear the avatar preview | Visually more direct, but users must pick a file again. |
 
-Sequential saves the current issue:
+💡 **Recommended answer: A (Keep the existing avatar and show an error)**
+
+Rationale: Prevents temporary network hiccups from making users think their existing avatar was deleted.
+```
+
+For open-ended questions that lack sufficient facts, the Agent explains what information or format you need to provide rather than inventing a recommended option. For questions with fixed choices—such as Supervisor coordination mode or workspace isolation—the Agent keeps the original option identifiers and complete impact descriptions.
+
+## Answers are written to formal artifacts immediately
+
+Chat history is only for communication; files in the project are the basis for interruption recovery. As soon as you reply, the Agent writes confirmed conclusions into the **Decisions** section of `brief.md`, updates target Specs and acceptance criteria, and removes resolved items. Partially answered or still ambiguous items stay in **Open questions** (an answer only confirms what you explicitly specified).
+
+`sequential` mode records the current pending item:
 
 ```markdown
 ## Open questions
 
-- [blocking] When the avatar upload fails, should the original avatar be kept or cleared?
+- [blocking] When avatar upload fails, should the existing avatar be kept or cleared?
 ```
 
-Batch uses stable numbers to save the problems of this round:
+`batch` mode preserves stable question numbers:
 
 ```markdown
 ## Open questions
 
-- [blocking] Q1: When the avatar upload fails, should the original avatar be kept or cleared?
-- [blocking] Q2: Are users allowed to delete their existing avatars?
+- [blocking] Q1: When avatar upload fails, should the existing avatar be kept or cleared?
+- [blocking] Q2: Can users delete their existing avatar?
 ```
 
-Some answers only address the corresponding questions. The remaining items will retain their original numbers, and the next round will continue the calculation based on the latest decision.
+Even when the open-questions list is empty, clarification does not end automatically—the Agent still checks for missed implicit assumptions, edge cases, and failure branches before initiating final confirmation.
 
-## Confirm the requirements before entering the Build
+## Final confirmation before Build and re-review on requirement changes
 
-After all the issues have been resolved, Native will recheck the facts, decisions, default behaviors, boundaries, failure paths, and implicit assumptions, and present you with the final requirements summary. Abstract coverage
+Final confirmation begins once all decisions affecting visible outcomes are settled, implicit assumptions are verified, `brief.md` has no remaining `[blocking]` items, affected directory structures are documented, and acceptance criteria are concrete, verifiable, and non-duplicated.
 
-- Objectives and Scope;
-- Key decision;
-- Acceptance item;
-- Non-target.
+1. **Submit acceptance criteria**: The Agent extracts acceptance criteria and a summary from the formal documents and submits them to the Runtime, where the CLI assigns stable acceptance IDs (for large requirements, it evaluates splitting into a [Supervisor Change](/en/native/supervisor-change) beforehand).
+2. **Present the complete Shape for confirmation**: The Agent presents the full proposal—**goals and scope**, **key decisions**, **itemized acceptance criteria**, and **non-goals**—and waits for your explicit agreement. Final confirmation itself is never written as an ordinary `[blocking]` question.
+3. **Advance to Build with guard parameters**: After you explicitly approve in conversation, the Agent automatically runs the confirmation command in the background (carrying state-version and expected-action guard parameters, plus the selected coordination mode for multi-child Supervisors) to advance into Build.
 
-The final confirmation is not written as a `[blocking]` question in `brief.md`. Native asks the Runtime to persist the Shape confirmation boundary and returns `await-user`; the Agent presents the complete summary and waits for your explicit confirmation.
+Your initial requirement prompt cannot substitute for this final confirmation. If you add details or overturn a decision at this final step, the Agent updates the documents and requests confirmation again, immediately invalidating the previous proposal.
 
-Only after you confirm will Native enter Build through the current continue command with `--confirmed`. The Runtime applies the same check to Sequential and Batch. When the final requirements confirmation is missing, the change remains in Shape. If you add to or revise the summary, the previous confirmation becomes invalid and Native prepares it again.
+### Re-confirming after mid-flight requirement changes
 
-## Continue clarification across sessions
+If a requirement change sends a task back to Shape from Build, Verify, or archive-ready, the Agent first compares against the last approved proposal and presents a **change summary**:
 
-When opening a project again or continuing a change, Native will automatically read `.comet/config.yaml` and `brief.md`, restoring the current clarification mode, confirmed decisions, and questions still awaiting answers. You just need to continue explaining your choice, and the recovery process will be handled by Native.
+- Which behaviors were added, removed, or modified;
+- Which acceptance criteria are affected;
+- Which existing code and checks remain valid, and which steps must be redone.
 
-If you want to view the current record, you can run:
+After reviewing the change summary, you still confirm the **complete current Shape**. If no reliable previous proposal exists for comparison, the Agent states clearly that an item-by-item comparison is unavailable instead of fabricating differences or claiming "everything else is unchanged."
+
+## Resuming clarification after an interruption
+
+If you close the conversation or switch windows mid-clarification, reopen the project and simply continue the task in conversation. Native restores the current clarification mode, recorded decisions, and pending questions with their original numbers from `.comet/config.yaml` and `brief.md`. You do not need to enter commands manually in daily use; if you want to inspect the current documents and status offline in your terminal, run these two read-only commands:
 
 ```bash
 comet native show <change-name>
 comet native status <change-name> --details
 ```
 
-Native will match your answers to questions such as Q1 and Q2 in `brief.md`, write them back to the official artifacts, and then work out the next round. Modifying the clarification mode in the middle will only change the rhythm of subsequent questions, while the current blocking item and its number remain unchanged.
-
-Continue reading: [User Selection Points and Requirements Clarification Protocol](/en/native/decision-ownership), [Native Configuration](/en/native/configuration) and [Recovery and Troubleshooting](/en/native/recovery-playbook)
+Further reading: [Which decisions need your confirmation](/en/native/decision-ownership), [Native configuration](/en/native/configuration), and [Native recovery playbook](/en/native/recovery-playbook).

@@ -1,9 +1,9 @@
 ---
 title: 'comet resume-probe'
-description: '判断一句自然语言是否在说某个已有的 Comet change，帮 Agent 在新会话、换机器后接回原来的工作流。'
+description: '判断自然语言指令是否指向已有的 Comet change，协助 Agent 在新会话或切换设备后恢复原有工作流。'
 ---
 
-`comet resume-probe` 解决的是“用自然语言接着说”的问题：会话被压缩、新开了对话窗口或换了开发机后，新接手的 Agent 没有之前的聊天记录，你可能也没输入 `/comet`。恢复探测只读地比较你这句话和进行中的 change，判断要不要接回 Native 或 Classic，避免 Agent 把“继续刚才的用户系统重构”当成一个全新的任务。
+`comet resume-probe` 用于在未输入 `/comet` 的情况下识别自然语言恢复意图：当会话被压缩、新建对话窗口或更换开发机后，新启动的 Agent 没有历史对话记录。恢复探测会以只读方式比对你的输入与进行中的 change，判断是否需要恢复到对应的 Native 或 Classic 工作流，避免 Agent 将“继续刚才的用户系统重构”误判为全新任务。
 
 <Note>
   本页命令由 Agent 在后台调用，你不需要手动运行。日常开发只需在对话中输入 <code>/comet</code> 提需求、回答 Agent 的提问，或说“继续”。本页供你在终端排查问题、编写脚本或接入其他 Agent 平台时查阅。
@@ -41,10 +41,6 @@ description: '判断一句自然语言是否在说某个已有的 Comet change�
 
 输入 `/comet` 时按项目配置直接进入对应工作流，不依赖探测。通过 Agent 平台调用的**非 Comet 原生**斜杠命令同样不触发探测，因为这条命令已经明确了任务。把 `ambient_resume` 设为 `false` 后，普通自然语言不再触发探测，`/comet` 入口照常可用。
 
-<Note>
-  整个探测过程由 Agent 在后台完成。下面的命令行参数面向 Agent 框架、Hook 插件和自动化脚本，日常恢复不需要你手动执行。
-</Note>
-
 ## 供 Agent 和脚本调用
 
 脚本或上层 Agent 可以直接传入要判断的文本：
@@ -71,10 +67,10 @@ echo "继续刚才的用户系统重构" | comet resume-probe . --stdin --json
 
 | `action` | 含义 | 下一步 |
 | --- | --- | --- |
-| `auto_resume` | 你要恢复指定的 change，且当前状态允许 | Agent 按 `nextCommand` 进入对应入口：Native 用 `/comet-native`，Classic 用 `/comet-classic` |
-| `ask_user` | 需要你确认，或有多个候选、状态异常、等待人工决策 | 把候选和依据给你看，等你答复；确认后直接加载 `skill`，不再重新扫描 |
-| `out_of_scope` | 你明确不继续、当前已在流程中，或只是咨询 | 按普通会话回答，不启动 Comet 工作流 |
-| `none` | 项目里没有进行中的 Comet change | 不做恢复；如果是要提新需求，引导你输入 `/comet` |
+| `auto_resume` | 用户明确要求恢复指定的 change，且当前状态允许 | Agent 按 `nextCommand` 进入对应入口：Native 用 `/comet-native`，Classic 用 `/comet-classic` |
+| `ask_user` | 需要用户确认，或存在多个候选、状态异常、等待人工决策 | 向用户展示候选和依据并等待答复；用户确认后直接加载 `skill`，不再重新扫描 |
+| `out_of_scope` | 用户明确不继续、当前已在流程中，或只是咨询 | 按普通会话回答，不启动 Comet 工作流 |
+| `none` | 项目里没有进行中的 Comet change | 不做恢复；如果用户要提新需求，引导其输入 `/comet` |
 
 输出遵循 `comet.resume_probe.v2`，包含 `workflow`、`skill`、`entrySource`、`reasonCode`、`candidates`、`changeName`、`phase`、`nextCommand` 和判断依据。Native 无论处于哪个阶段，都通过 `/comet-native` 恢复；`comet native next` 是内部推进指令，不能当作恢复入口。Classic 模式下顶层 CLI 同样返回 v2 格式。
 
@@ -90,7 +86,7 @@ echo "继续刚才的用户系统重构" | comet resume-probe . --stdin --json
 Native 模式下，工作区有未提交改动只作为恢复时的提示，不会因此阻止强模型进入 `/comet-native` 查看实际情况；Classic 模式则继续严格校验工作树归属。
 
 <Warning>
-  <code>ask_user</code> 表示当前信息还不够，或状态机在等你决定，属于正常的停顿。调用方应说明原因并等待你的答复；重复探测无法补出缺少的信息。
+  <code>ask_user</code> 表示当前信息还不够，或状态机在等待用户决定，属于正常的停顿。调用方应说明原因并等待用户答复；重复探测无法补出缺少的信息。
 </Warning>
 
 ## 几个命令的职责边界

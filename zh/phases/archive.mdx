@@ -17,7 +17,7 @@ archive 阶段负责将已通过全量验证的变更合并到 OpenSpec 主 Spec
 - `branch_status: pending`；
 - 若工作区基于 Git 管理，当前所在分支必须与变更绑定的 `bound_branch` 保持一致。
 
-Verify 阶段只负责生成测试通过凭证，分支交付状态 `branch_status` 会始终保持 `pending`，直至在归档阶段根据你的明确授权完成收尾。
+Verify 阶段只负责生成测试通过凭证，分支交付状态 `branch_status` 会始终保持 `pending`，直至在归档阶段经你归档批准完成收尾。
 
 ## 阶段执行全流程
 
@@ -64,7 +64,7 @@ archive 阶段不额外加载冗余的大模型 Skill，所有的状态校验、
 确认之后，Agent 会在后台依次完成四个受保护步骤：
 
 1. **执行归档与合并主 Spec**：调用 `comet archive`（自带断点检查点机制），合并增量 Spec、搬迁 change 目录、复核主 Spec 一致性、为 Design Doc 和 Plan 写入归档标记，并在归档目录的 `.comet.yaml` 中标记 `archived: true`。
-2. **更新交付状态并通过守卫校验**：将 `branch_status` 更新为 `handled`，并通过 `comet guard archive` 校验全部归档文件完整。
+2. **更新交付状态并通过守卫校验**：将 `branch_status` 更新为 `handled`，并通过 `comet guard <change-name> archive` 校验全部归档文件完整。
 3. **只暂存本次归档相关文件并提交**：Agent 只逐项暂存原活跃变更路径、归档目录路径、合并后的主 Spec、带归档标记的 Design Doc 与 Plan，以及最终 `.comet.yaml`，生成独立的归档提交（禁用 `git add -A`，避免混入你工作区中其他未提交文件）。
 4. **按所选方式完成远端交付与收尾**：仅留本地、推送分支，或推送并创建 PR；随后校验远端交付完成（`verification.status: complete`）并清理当前工作区的任务选中，不残留临时未提交文件。
 
@@ -95,7 +95,11 @@ git add -- <逐项核验后的归档路径...>
 git diff --cached --stat
 git commit -m "chore: archive <change-name>"
 
-# 5. 核对远端交付结果并清除当前选中
+# 5. 如已选择远端交付，推送分支并按需创建 PR（仅本地归档时跳过本步）
+git push -u origin <bound-branch>
+# 若选择了“确认归档、推送并自动创建 PR”，在此执行创建 PR（如 gh pr create）
+
+# 6. 核对远端交付结果；仅在 --verify 返回 verification.status: complete 后才执行 clear-selection
 comet state delivery <change-name> --verify
 comet state clear-selection
 ```

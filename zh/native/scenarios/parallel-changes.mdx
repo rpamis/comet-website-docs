@@ -14,7 +14,7 @@ description: '通过完整实战了解如何在一份仓库中同时规划和并
 
 ![小鱼把两个独立 Change 放在各自工作区中推进，并分别完成交付](/assets/parallel-changes-illustrations/01-isolated-worktrees.png)
 
-## 一、先确认：独立 Change 还是 Supervisor Change
+## 先确认：独立 Change 还是 Supervisor Change
 
 | 考量维度 | 多个独立 Native Change | Supervisor Change |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ description: '通过完整实战了解如何在一份仓库中同时规划和并
 
 哪怕两个需求出自同一场评审会，只要它们能各自独立验收、独立上线，就优先拆成独立 Change。
 
-## 二、两种并行启动方式
+## 两种并行启动方式
 
 ### 方式 A：先在同一分支规划两个 Shape，开工时自动切 worktree
 
@@ -47,7 +47,7 @@ description: '通过完整实战了解如何在一份仓库中同时规划和并
 
 如果你打算立刻开两个窗口让两个 Agent 同时从 Shape 做到 Archive，直接在对话里告诉 Agent“用独立 worktree 创建这个需求”（或者当当前目录已有未提交改动/已有其他活跃任务时，在 Agent 弹出的隔离方式单选题里选 C `worktree`）。Runtime 会自动建好 `.worktrees/session-retry-policy` 和 `.worktrees/dashboard-export` 以及对应分支。
 
-## 三、两个窗口并行开发，互不干扰
+## 两个窗口并行开发，互不干扰
 
 目录准备好后，直接开两个独立的 Agent 会话窗口分别推进：
 
@@ -68,14 +68,14 @@ description: '通过完整实战了解如何在一份仓库中同时规划和并
 3. **Hook Guard 防跨目录误写**：如果 `session-retry-policy` 已经交接到 `.worktrees/session-retry-policy`，却有人在原主目录继续修改它的代码，Hook Guard 会立即拦截并指出正确目录。
 4. **保留主目录无关改动**：worktree 隔离只作用于对应 change，不会清理你在主仓库里留着的个人调试文件。
 
-## 四、在错误目录或错误分支操作时如何处理
+## 在错误目录或错误分支操作时如何处理
 
 为了防止跨目录误操作，普通状态查询和诊断只检查当前所在工作区，**不会自动扫描本机所有 worktree**。
 
 - 如果在 `.worktrees/dashboard-export` 里误推进 `session-retry-policy`，Runtime 会因为目录和分支绑定不匹配直接拦截，并提示预期的路径和分支。切回 `.worktrees/session-retry-policy` 继续即可，不要在错误目录新建同名任务。
 - 如果在某个 worktree 里不小心切了别的分支，切回原分支就能恢复；确实要在当前分支接管同一个空闲 Run 时，告诉 Agent 在当前分支重绑即可（后台会在确认无运行中或结果未知动作后调用 `--rebind`）。
 
-## 五、处理同一能力 Spec 的归档冲突
+## 处理同一能力 Spec 的归档冲突
 
 `session-retry-policy`（修改 `authentication`）和 `dashboard-export`（修改 `dashboard`）涉及不同能力，可以完全独立地一路归档。
 
@@ -86,7 +86,7 @@ description: '通过完整实战了解如何在一份仓库中同时规划和并
 在修改已有能力时，change 通过 `delta.yaml` 记录需求级变更操作（`add`、`modify`、`remove`、`rename`）及前置哈希：
 
 - 如果两个任务修改的是 `authentication` 里**互不影响的独立需求条目**，Runtime 能基于基线快照安全合并；
-- 如果两个任务修改了**同一个需求条目**或存在并发同伴冲突，Archive 预检（`archive.prepare`）会暂停，列出冲突的同伴 Change（`capabilityPeers`，如 `session-device-limit`）或具体冲突的需求 ID，等待你在对话中决定先后顺序。
+- 如果两个任务修改了**同一个需求条目**或存在并发冲突，Archive 预检会暂停，列出冲突的并行 Change（如 `session-device-limit`）或具体冲突的需求 ID，等待你在对话中决定先后顺序。
 
 ### 2. 先归档一方确认顺序
 
@@ -104,13 +104,13 @@ description: '通过完整实战了解如何在一份仓库中同时规划和并
 3. 按最新基线调整受影响的代码实现，通过平台工具补跑相关测试；
 4. 重新通过 Verify 验收，再完成归档。
 
-## 六、多任务下的中断恢复与跨设备切换
+## 多任务下的中断恢复与跨设备切换
 
 - **本机恢复指定任务**：进入对应 worktree 目录，在对话中直接说明任务名称（如“继续 `dashboard-export`”）。
 - **新会话自然语言恢复**：当同一工作区存在多个活跃 change 且你只说“继续刚才的”时，后台只读恢复探针 `comet resume-probe` 会返回候选项让你明确选择，绝不会猜一个去改别的任务。
-- **跨设备继续**：在旧设备停下推进，提交并推送各自分支上的代码、`.comet/config.yaml` 以及 change 目录下的 `comet-state.yaml`（内含 `run_checkpoint`）、`brief.md` 和目标 Specs。在新设备拉取后，回到对话让 Agent 诊断并从检查点恢复原 Run（详见 [Native 任务恢复](/zh/native/recovery-playbook#四本机-run-丢失与跨设备恢复)）。
+- **跨设备继续**：在旧设备停下推进，提交并推送各自分支上的代码、`.comet/config.yaml` 以及 change 目录下的 `comet-state.yaml`（内含 `run_checkpoint`）、`brief.md` 和目标 Specs。在新设备拉取后，回到对话让 Agent 诊断并从检查点恢复原 Run（详见 [Native 任务恢复](/zh/native/recovery-playbook#本机-run-丢失与跨设备恢复)）。
 
-## 七、独立归档与 Git 交付
+## 独立归档与 Git 交付
 
 每个独立 Change 的归档与 Git 交付互不影响：你可以把 `session-retry-policy` 推送并提 PR，同时把 `dashboard-export` 留在本地分支暂不推送。
 

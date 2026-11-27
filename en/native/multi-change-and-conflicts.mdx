@@ -1,120 +1,143 @@
 ---
-title: 'Multi-Change Parallelism and Conflict Control'
-description: 'Learn how Native enables multiple changes to run stably in parallel through independent Worktrees, workspace bindings, and Spec archive sequences.'
+title: 'Multi-change parallelism and conflict control'
+description: 'Learn how to plan multiple independent changes on a shared branch, code safely in parallel with deferred worktree creation, and resolve requirement-level Delta Spec conflicts during Archive.'
 ---
 
-Native supports multiple independent changes, each with its own requirements, acceptance criteria, and approvals. Built-in Native v4 Runs can share a branch and planning workspace during Shape. Execution workspaces are prepared when implementation starts. Use independent worktrees when multiple Agents write code in parallel.
+Development teams frequently advance several requirements at once—adjusting login retry policies while adding report exports. Mixing them in one branch or conversation tangles code edits, test results, and requirement documents together.
 
-Parallel protection is divided into two layers: worktree isolates uncommitted code, and Spec conflict checking protects formal requirements. The former addresses "where the code is written", while the latter addresses "in what order should multiple changes update the same Spec simultaneously".
+Native lets you maintain multiple independent changes in the same repository. You can direct the entire daily workflow in natural language through Agent conversation, backed by two isolation layers:
 
-## Change organizational mode
+1. **Git worktrees isolate code**: Concurrent Agents write to separate directories and branches so uncommitted changes never overwrite each other.
+2. **Requirement-level Spec conflict detection and archive conflict handling**: Before updating formal project specs, Comet checks conflicts by capability and Requirement ID, settling the evolution order of business contracts before code integration.
 
-The relationship between the goals determines how the Change is organized:
+## Choose the right structure first
 
-| Target relationship                                                                    | Organizational mode                                                                            |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| A product goal encompasses multiple outcomes that need to be delivered collaboratively | Use [Supervisor Change](/en/native/supervisor-change) to uniformly split, integrate and verify |
-| Multiple product goals can be achieved and delivered separately                        | Create independent changes for each target                                                     |
+| Relationship between requirements | Recommended approach |
+| --- | --- |
+| Part of one overarching goal that splits into submodules needing coordinated integration and unified end-to-end verification | Use [Supervisor Change](/en/native/supervisor-change) so the parent manages dependency scheduling, serial integration, and final verification. |
+| Independent business goals that can be coded, tested, and shipped separately | Create an independent Native change for each goal. |
 
-Supervisor Change is responsible for child splitting and integration within a large target. This page focuses on how multiple independent changes can advance in parallel within the same repository.
+The rest of this page explains how to plan and develop multiple independent Native changes in parallel.
 
-## Plan multiple Shapes in one workspace
+## Plan multiple Shapes on a shared branch and defer Build
 
-Shared Shape planning requires a Git branch. Non-Git projects retain the single-change workflow in the current directory.
+In a Git project, you do not need to create a separate worktree for every early idea. You can have the Agent create Shapes sequentially on the same branch for clarification and review (non-Git projects keep the single-change current-workspace workflow). Compatibility mode (Compat) and pinned SDK applications continue to follow their own isolation rules.
 
-For independently deliverable goals, create Native v4 Shapes on one branch. One Agent can switch between their materials while reviewers review and approve each separately:
+For example, propose your first requirement in chat with `/comet Adjust login retry and account lockout policy`, and once planned, propose the second with `/comet Add asynchronous CSV export to the dashboard`. Each change keeps its own `brief.md`, drafted Specs, acceptance criteria, and approval records. To switch back and add details to an earlier change, simply say: "Switch back to `session-retry-policy` and continue planning."
+
+Only one Agent writes to a shared planning directory at a time. When you want multiple Agents to author materials or code concurrently, tell the Agent to use an independent worktree for each task.
+
+### Approve Shape while deferring Build
+
+If you want to confirm several proposals first and implement them in batches later, tell the Agent at final confirmation: "Confirm this proposal, but don't start writing code yet."
+
+The Agent automatically attaches `--defer-build` along with state-version and expected-action guard parameters in the background (passing `--defer-build` alone has no effect without your explicit approval). The approval is saved, while creating the execution workspace and entering Build are deferred until you ask to start implementation.
+
+## Automatic Build worktree preparation at kickoff
+
+When you are ready to implement an approved change, tell the Agent: "Start implementing `session-retry-policy`." The Agent triggers kickoff in the background, and the Runtime checks whether other active changes remain in the planning workspace:
+
+- **No other active changes**: Continues directly into Build in the current workspace without creating an extra worktree.
+- **Other active changes remain**: The Runtime automatically performs a handoff and returns the new workspace path (`executionCwd`):
+  1. Creates an independent branch (`comet/<change-name>` by default; appends `-build`, `-build-2`, etc. if already taken) and an independent worktree (`.worktrees/<change-name>`);
+  2. Transfers the original Run, formal change materials, and confirmed Shape approval intact to the new worktree;
+  3. Runs all subsequent coding in the new worktree. Hook Guard automatically protects the original planning directory against edits to the handed-off task, while still allowing you to check its status or switch to another Shape to keep planning.
+
+### Four baseline guards before handoff
+
+Automatic Build worktree preparation branches from committed code (`HEAD`) on the current branch. Handoff itself **never** commits or pushes on your behalf, preventing half-finished work from leaking into a new branch:
+
+1. **Tracked code changes must be committed first**: If uncommitted tracked edits exist outside the change artifact directory and `.comet/config.yaml`, the Runtime pauses and asks you to commit the implementation baseline before continuing.
+2. **Untracked files stay in the original directory**: Untracked temporary files are not copied into the new worktree automatically.
+3. **Reused branches or worktrees must be clean and match the baseline**: If the target branch already exists, it must point to the same commit as the current `HEAD`. If a reused worktree contains uncommitted edits or already holds Runtime ownership records for the change, the Runtime preserves both sides and refuses to overwrite.
+4. **Interrupted handoffs can be retried directly**: Keep the target directory intact and ask the Agent to continue; the Runtime completes the remaining handoff steps without duplicating Builders or overwriting finished steps.
+
+## Isolate development from the start
+
+If you know upfront that you will run concurrent windows, or the current directory already has uncommitted changes or another active change, simply say "develop this requirement in an independent worktree" when proposing it.
+
+If you do not specify an isolation mode:
+
+- When the current directory is clean and has no other active changes, Native proceeds directly in the current directory (`current`).
+- When the current directory has uncommitted work, another active change, or you mention needing isolation or parallelism, the Agent automatically shows a single-select prompt for **A (current directory `current`)**, **B (new branch `branch`)**, or **C (independent `worktree`)**, and creates the corresponding branch and directory in the background.
+
+## Workspace binding and branch verification
+
+The Runtime persists each change's isolation mode, change branch, target branch, and workspace directory, checking them before every write and advancement to prevent three common mistakes:
+
+- Accidentally editing code in the main directory for a task owned by an independent worktree;
+- Manually switching Git branches locally and continuing an earlier change's state on the wrong branch;
+- Copying context from an old conversation and running Build or Archive in the wrong directory.
+
+Standard status queries and diagnostics inspect only the current workspace and do not automatically scan every worktree on disk. To work on a task inside an independent worktree, switch your Agent window to that directory. If you simply switched branches by mistake, switch back to the bound branch to continue. If you intentionally want to take over an idle task (with no running actions) on the current branch, tell the Agent to rebind it to the current branch (the Agent confirms there are no unreconciled executions before calling `--rebind` in the background).
+
+## Requirement-level Delta Spec merging and archive conflict handling
+
+In Native, each product capability's formal specification lives in `specs/<capability>/spec.md`. When modifying an existing capability, the change directory records requirement-level operations (`add`, `modify`, `remove`, `rename`) in `delta.yaml`, along with each target requirement's prior hash (`expected_hash`) and complete baseline snapshot (`base_requirements`).
+
+This fine-grained design makes parallel archiving both safe and flexible:
+
+```mermaid
+flowchart LR
+  C1["Change A modifies authentication"] --> P{"Archive precheck: parallel changes and requirement hashes"}
+  C2["Change B modifies billing"] --> OK1["No conflict: archive independently"]
+  C3["Change C also modifies authentication"] --> P
+  P -->|"Independent requirement items"| RB["Safely rebase and merge using baseline snapshot"]
+  P -->|"Same requirement item or concurrent conflict"| ARB["Pause and list conflicts for manual archive ordering"]
+  ARB --> S1["First change confirms order and merges into canonical Spec"]
+  S1 --> S2["Later change reads latest Spec, syncs, re-verifies, and archives"]
+```
+
+Three scenarios apply:
+
+1. **Modifying different capabilities** (for example, `authentication` and `billing`): Build, Verify, and Archive run independently in parallel; code merging follows standard Git workflows.
+2. **Modifying the same capability without semantic conflict**: Using requirement prior hashes and independence checks, the Runtime identifies non-overlapping requirement items and merges them safely.
+3. **Modifying the same requirement item or hitting a concurrent conflict**:
+   - Archive precheck detects the conflict early and pauses, listing conflicting parallel changes or specific Requirement IDs—**never overwriting the canonical Spec**;
+   - You decide in conversation which change archives first, and the Agent attaches `--serial-first <change-name>` in the background to confirm order and merge the first change into the canonical Spec;
+   - The later change pulls the latest canonical Spec, reconciles both intents using its `brief.md`, updates its target specification, runs the Runtime-provided sync action, re-runs affected verification against the new baseline, and then continues archiving.
+
+## Requirement-scope consistency check before Archive
+
+Archive also verifies that the change's declared target Specs and acceptance criteria still match the baseline confirmed during Shape:
+
+- Internal code refactoring or implementation cleanup that leaves requirements unchanged archives normally.
+- Unconfirmed drift in target Spec scope or acceptance criteria returns the workflow to Shape for re-confirmation so formal specification changes never bypass your approval.
+
+## Decisions you make during parallel development
+
+The Agent and Runtime handle routine branch creation, worktree handoff, binding checks, and prechecks automatically. You typically only make decisions at four points:
+
+1. When proposing a new requirement, decide whether to create an independent change or split it with Supervisor Change;
+2. When the current directory already has uncommitted changes or an active change, choose `current`, `branch`, or `worktree`;
+3. When the branch or workspace disagrees with the binding record, decide whether to switch back to the original branch or rebind on the current branch;
+4. When multiple parallel changes modify the same capability Spec with conflicts, decide the archive order and review the later change's reconciled specification.
+
+<Accordion title="Underlying commands for terminal troubleshooting (run automatically by the Agent in daily use)">
+
+These are the public commands the Agent calls for shared planning, deferred Build, worktree creation, and branch rebinding, provided for deeper understanding or manual troubleshooting:
 
 ```bash
+# Plan multiple Shapes on the current branch and switch the active task
 comet native new session-retry-policy --isolation current --json
 comet native new dashboard-export --isolation current --json
 comet native select session-retry-policy
+
+# Approve Shape while deferring execution workspace creation and Build
+comet native next session-retry-policy --summary "Shape confirmed" \
+  --confirmed --defer-build --expected-state-version <n> --expected-action confirm-shape
+
+# Kick off Build to trigger automatic worktree creation and return executionCwd
+comet native next session-retry-policy --session <session-id> --json
+
+# Specify a new branch or independent worktree at creation time (optional --change-branch / --worktree-path)
+comet native new session-timeout --isolation branch --target-branch main
+comet native new session-timeout --isolation worktree --target-branch main
+
+# Explicitly rebind an idle Run to the current branch
+comet native select <change-name> --rebind --json
 ```
 
-Each change keeps its own brief, Specs, acceptance criteria, and approval. Keep one Agent writing in the shared planning directory. Use independent worktrees when multiple Agents write materials or code concurrently.
+</Accordion>
 
-To approve without starting implementation, append `--defer-build` to the current Shape confirmation command returned by Runtime. Preserve `--confirmed`, the state version, and the expected action; do not reconstruct an old confirmation command. Approval is saved and the task waits for a later `next`. `--defer-build` alone does not approve Shape.
-
-## Start Build in its execution workspace
-
-When ready to implement, the actual receiving session runs:
-
-```bash
-comet native next session-retry-policy --session <actual-session> --json
-```
-
-If other active requirements remain in the planning workspace, Runtime prepares an independent branch and worktree and transfers the original Run, materials, and valid approval. Otherwise, the change can stay in the current workspace. Run subsequent commands and development in the returned `executionCwd`. The planning directory still shows the task and lets you select another Shape.
-
-The new worktree uses committed code from the current branch. Prepare the implementation baseline first: commit tracked code changes outside the planning directory before retrying; untracked code is not automatically copied. Handoff does not commit or push changes.
-
-When reusing an existing worktree, its branch must match the current committed baseline and the target must have no uncommitted local changes. Preserve the workspace when blocked, reconcile the baseline and local work, then retry the original command.
-
-If handoff is interrupted, preserve the target directory and retry the original `next` command. Runtime resumes the original Run and current target progress without creating another Builder or overwriting a completed transfer. The planning directory cannot implement a transferred task. Reconcile unknown execution using the current recovery instructions. If requirements or acceptance scope change, revise the original Run and reconfirm Shape.
-
-Compat changes and pinned SDK applications retain their own isolation rules.
-
-## Change Workspace binding
-
-The Runtime will save the isolation method, Change branch, target branch and working directory binding for Change. This information will be rechecked before subsequent writing. When the current branch, directory type, or project root does not match the record, Change enters a waiting state and returns the correct working directory.
-
-This binding can prevent several common types of errors:
-
-- Continue to modify the changes that originally belonged to the linked worktree in the main workspace;
-- After switching to another branch, the state of the old Change is continued.
-- Copy the command from the old dialogue and continue building or archiving in the error directory;
-- Two working directories simultaneously claim to be valid locations for the same Change.
-
-Even if the platform still passes in the main directory of the repository, Native will recognize the current actual linked worktree and leave the operation in the corresponding directory. When there are multiple bindings that match each other, the Runtime will report ambiguity and allow the user to decide which source to retain.
-
-## Discovery and recovery across workspaces
-
-When restoring, Native will scan the Git registered worktree, read the project configuration and Change status in each directory, and then prioritize the results with consistent workspace bindings. You can start from any registered working directory in the repository. The Agent will find the actual location of the Change and then continue there.
-
-Therefore, when switching sessions or reopening a project, the Change status on the disk and the workspace binding jointly provide the basis for recovery. Users only participate in the selection when multiple candidates are reasonable, the binding has drifted, or the original branch affiliation has changed.
-
-To view all changes and their actual directories, you can run:
-
-```bash
-comet native status
-comet native status <change-name> --details --json
-```
-
-These commands are used to check the status. Normal recovery is automatically completed by Native.
-
-## Spec Conflict Detection
-
-Each Spec describes a complete set of product behaviors, such as authentication, billing or notification. The certification Spec can be saved in `specs/authentication/spec.md`. Each Change will declare in `comet-state.yaml` which Spec it intends to create, modify or delete. Before archiving, the Runtime scans all active changes in the registered worktree to identify those that simultaneously modify the same Spec.
-
-This check focuses on product semantics. Even if two changes modify different code files, as long as both are ready to update the official Spec `authentication`, there will be a conflict in the archiving sequence. On the contrary, modifying the changes of `authentication` and `billing` respectively can continue to perform parallel Build and Verify, and then undergo normal Git integration checks upon final delivery.
-
-This enables conflicts to be exposed before canonical Spec updates, usually earlier than Git conflict tags. The team can first handle the sequence of product behaviors and then deal with code integration in the final delivery.
-
-## Spec archiving sequence
-
-When multiple active changes declare the same Spec, the Runtime will pause in the Archive and list the related changes. Please decide which one to archive first. This choice determines the sequence of Spec updates, and the work already completed by both parties remains in their respective changes.
-
-Update the canonical Spec with the first archived Change. The subsequent Change re-reads the latest Spec, aligns its own target with the new baseline, and then completes the required implementation and acceptance. The Verify result before the conflict only proves the behavior under the old baseline, while the result after re-alignment requires new evidence.
-
-For example, both `add-session-expiry` and `support-passkeys` modify `authentication`:
-
-1. The two changes are independently built and verified in their respective worktrees;
-2. Archive found that they jointly declared `authentication`;
-3. You choose to file `add-session-expiry` first;
-4. `support-passkeys` aligning based on the updated certification Spec and then continuing to Archive.
-
-## Requirements and acceptance drift protection
-
-Archive will also recalculate the target Spec and acceptance items currently declared by Change and compare them with the content saved at the time of Shape confirmation. When the Spec declaration, acceptance text, or coverage relationship changes, the Runtime will return the Change to the Shape, update the requirements, and reconfirm.
-
-This check distinguishes the requirement drift caused by parallel modifications from ordinary implementation changes. The code can continue to evolve, but changes in formal requirements and acceptance boundaries need to be reconfirmed. The old verification report should also be consistent with the current status version.
-
-## User decision boundary
-
-In daily parallel processes, Native handles worktree creation, reuse, state discovery, and binding checks. Users mainly make decisions at three locations:
-
-- When creating requirements, specify whether they belong to the same overall goal or several independent goals.
-- When there is a real ambiguity regarding the ownership of the workspace, confirm the correct directory or branch.
-- When multiple changes declare the same Spec, determine the Archive order.
-
-Git conflicts at the code level are still resolved based on the actual content of the repository. Native retains the requirements, status, and acceptance records of each Change, allowing for the return to the correct task to continue verification after conflict resolution is completed.
-
-Continue reading: [Supervisor Change](/en/native/supervisor-change), [Products and Status](/en/native/artifacts-and-state), [Safety and Recovery](/en/native/safety-and-recovery) and [Recovery and Fault Handling](/en/native/recovery-playbook).
+Further reading: [Supervisor Change](/en/native/supervisor-change), [Safety and recovery](/en/native/safety-and-recovery), and [Native recovery playbook](/en/native/recovery-playbook).

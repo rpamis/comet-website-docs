@@ -16,47 +16,35 @@ It first reads project `.comet/config.yaml` to determine Native or Classic, then
 
 The probe returns recognition and routing results without modifying a change or advancing phases. When a new session only finds a related change, it asks whether this request should continue it, even if the target is unique or the project already has a selection. After confirmation, the Agent loads the returned `skill`. An explicit request to resume a specified change can use `nextCommand` directly when its state permits.
 
-## Why is it necessary to restore the detection
+## Why recovery probing is needed
 
-Long-distance tasks do not necessarily always remain in the same complete context. The following situations may all cause the Agent to forget that the current job was originally managed by Comet:
+Long-running tasks rarely stay inside a single continuous context. The following situations can cause the Agent to lose track of an active Comet workflow:
 
-- The dialogue undergoes context compression, window switching, or starts a new session;
-- When switching devices to continue within the same repository and change;
-- When a new Agent can only see disk state and a vague instruction like "Continue with the previous work";
-- When a user naturally asks to continue without explicitly typing `/comet`.
+- Context compression, IDE window switching, or starting a new session;
+- Switching devices and cloning the same repository to continue;
+- A fresh Agent that sees only disk state and a vague instruction such as "continue the previous work";
+- Asking naturally to continue without typing `/comet`.
 
-Project initialization instructions allow the Agent to run the resume probe before handling such requests. The probe identifies candidate targets and explains its reasoning based on configuration, active changes, phase, selection, and request text. Pure semantic relevance only indicates candidate existence; a new session still requires confirmation before resuming, unless the user explicitly names a target change.
+Project initialization instructions guide the Agent to run a read-only resume probe before handling such requests. The probe identifies candidate targets and explains its reasoning based on configuration, active changes, phase, selection, and request text. Pure semantic relevance only indicates candidate existence; a new session still requires confirmation before resuming, unless you explicitly name a target change.
 
-<Note>
-  The resume probe does not require users to memorize an additional command. It is primarily invoked
-  by agents and project recovery instructions to bridge the gap between natural-language continuation
-  and the explicit <code>/comet</code> entry point.
-</Note>
-
-## How does automatic detection occur
+## How automatic probing works
 
 You can ask the Agent to continue in plain language without running `comet resume-probe` yourself:
 
 > Continue with the login refactoring just now.
 
-`comet init` and `comet update` will write the recovery instructions into the project's Agent instruction file. When `ambient_resume` is enabled, the Agent will automatically run a read-only recovery probe before processing natural language requests that may be long-term tasks:
+`comet init` and `comet update` write recovery instructions into the project's Agent instruction file. When `ambient_resume` is enabled, the Agent automatically runs a read-only recovery probe before processing natural-language requests that may belong to long-running work:
 
-1. Read the project configuration to determine whether Native or Classic should be checked.
-2. Compare user requests, active changes, current stage and selection;
+1. Read the project configuration to determine whether Native or Classic applies.
+2. Compare your request, active changes, current phase, and local selection.
 3. When only semantic relevance or a project selection identifies the target, show its name and phase and ask whether this request should continue it.
 4. After confirmation, enter the corresponding workflow without scanning again. Handle unrelated requests or declined recovery as ordinary tasks, preserving the original change, approvals, and phase write constraints.
 
-An ongoing session already in the Comet workflow reuses its prior confirmation; routine continuation, answering in-flow prompts, or context restoration will not prompt repeatedly. A new session that merely says "continue", mentions a change name, or broadly requests verification will prompt first; clear instructions like "continue cache-controls" or "commit the current change" directly identify the target.
+An ongoing session already in the Comet workflow reuses its prior confirmation; routine continuation, answering in-flow prompts, or context restoration will not prompt repeatedly. A new session that merely says "continue", mentions a change name, or broadly requests verification prompts first; clear instructions like "continue cache-controls" or "commit the current change" directly identify the target.
 
-An explicit `/comet` invocation enters the configured workflow without probing. An explicitly invoked **non-Comet** Skill or slash command also bypasses the probe: execute that Skill directly. With `ambient_resume: false`, ordinary natural-language requests do not trigger Ambient Resume; explicit `/comet` remains available.
+An explicit `/comet` invocation enters the configured workflow without probing. An explicitly invoked **non-Comet** Skill or slash command also bypasses the probe and executes directly. With `ambient_resume: false`, ordinary natural-language requests do not trigger Ambient Resume; explicit `/comet` remains available.
 
-<Note>
-  For users, the recovery detection is automatic. The following CLI parameters are used for Agent,
-  Hook, project instructions, and automation integration, and are not steps that must be manually
-  executed before restoring tasks.
-</Note>
-
-## Reference for Agent and Automation Integration
+## Agent and script invocation
 
 An Agent or integrator can directly pass in requests:
 
@@ -78,36 +66,35 @@ echo "Continue with the login refactoring just now" | comet resume-probe . --std
 | `--no-workflow-work`      | Mark the current request as an information query and skip workflow advancement                |
 | `--already-in-comet-flow` | When it is already within the Comet process, return `out_of_scope` to avoid duplicate routing |
 
-## How to understand the result
+## Handling return values
 
 | `action`       | Meaning                                                                                                                               | Next step                                                                                               |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `auto_resume`  | The user explicitly requests resuming a specified change, and its state permits recovery                                              | Use `nextCommand`: `/comet-native` or `/comet-classic`                                                  |
 | `ask_user`     | This request needs recovery confirmation, or its target is ambiguous, invalid, or waiting for a user decision                         | Show the target and reason, then wait; after recovery confirmation, load `skill` without scanning again |
 | `out_of_scope` | The user clearly does not want to restore, is currently in Comet, or the request is merely an information query unrelated to workflow | Answer the current request normally and do not enter Comet                                              |
-| `none`         | There is no active Comet Change                                                                                                       | Do not perform recovery; If you need to start a new job, you can explicitly run `/comet`                |
+| `none`         | There is no active Comet change                                                                                                       | Do not perform recovery; to start new work, enter `/comet` explicitly                                   |
 
-JSON uses `comet.resume_probe.v2`, including `workflow`, `skill`, `entrySource`, `reasonCode`, `candidates`, `changeName`, `phase`, `nextCommand` and judgment evidence. Native restores at any stage through `/comet-native`. `comet native next` is a status advancement command, not a recovery entry. The internal v1 probe of Classic's built-in runtime remains compatible, but the top-level CLI returns v2.
+JSON uses `comet.resume_probe.v2`, including `workflow`, `skill`, `entrySource`, `reasonCode`, `candidates`, `changeName`, `phase`, `nextCommand`, and judgment evidence. Native restores at any stage through `/comet-native`. `comet native next` is a state advancement command, not a recovery entry. The internal v1 probe of Classic's built-in runtime remains compatible, but the top-level CLI returns v2.
 
-## Under what circumstances will it definitely be suspended
+## When it returns ask_user
 
-- A new session only finds a related change without an explicit request to resume that target, even when it is unique or already selected.
+- A new session finds only a loosely related change without an explicit request to resume that target, even when it is unique or already selected.
+- Multiple active changes exist, and your request does not name the target.
+- Multiple active changes exist without a valid selection or explicit target name.
+- The active change lacks valid state files or the project configuration is corrupted.
+- The task is paused at a user decision point such as plan-ready confirmation, verification failure, or archive approval.
+- The request is unrelated to an existing change or is only an information query (in this case it returns `out_of_scope`).
 
-- Multiple active changes, but the user request did not name the target.
-- Multiple active changes without valid selection or user roll call.
-- The active change lacks a valid status or the project configuration is damaged.
-- Currently, it is at user decision points such as plan-ready, verification failure, and archive confirmation.
-- When the request is not related to an existing change or is merely an information query, it will not be restored but will return `out_of_scope`.
-
-The unsubmitted changes of Native are only used as recovery evidence and reminders, and will not separately block strong models from entering the `/comet-native` inspection site. Classic continues to retain the rule for confirming the ownership of the working tree.
+In Native mode, uncommitted changes serve only as recovery evidence and reminders and do not block strong models from entering `/comet-native` to inspect the workspace. Classic continues to enforce working-tree ownership checks.
 
 <Warning>
-  <code>ask_user</code> This result indicates insufficient evidence or that the process is waiting
-  for the user to make a choice. The caller should explain why the probe paused and wait for the
-  user's reply. Running the probe again does not supply the missing information.
+  <code>ask_user</code> indicates insufficient evidence or a state machine waiting for a user
+  choice. The caller should explain why the probe paused and wait for your reply. Running the probe
+  again does not supply the missing information.
 </Warning>
 
-## The difference from other commands
+## Command responsibilities
 
 | Command              | Purpose                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------- |

@@ -94,21 +94,25 @@ flowchart LR
 
 ### With several changes in parallel, pick the target first
 
-`.comet/current-change.json` stores the workflow and change you explicitly selected, removing write ambiguity when multiple active changes run in parallel. It does not replace `.comet.yaml`.
+`.comet/current-change.json` stores the workflow and change selected for the current workspace, removing write ambiguity when multiple active changes run in parallel. It does not replace `.comet.yaml`.
 
-The Agent uses these commands to select, inspect, and clear the selection. You can also run them yourself in a terminal:
+- With a single active change, attribution is automatic.
+- With several active changes, tell the Agent which change you want to work on in conversation and it selects that target in the background.
+- When the target is archived, the selection file is damaged, or the workflow does not match, the guard fails closed (it refuses to run rather than continue on bad state).
+- When `isolation` is `current`, `branch`, or `worktree`, the change is also pinned through `bound_branch` to the branch where isolation was set up. On branch drift, switch back to the original branch; the Agent rebinds only after you explicitly confirm that the current branch should take over the change.
+- Do not hand-edit `current-change.json`.
+
+<Accordion title="Background command reference (run automatically by the Agent; available for terminal troubleshooting)">
 
 ```bash
+# Explicitly select target change, inspect selection, clear selection, or rebind branch
 comet state select <change-name>
 comet state current
 comet state clear-selection
+comet state rebind <change-name>
 ```
 
-- With a single active change, attribution can be automatic.
-- With several active changes, you must explicitly `select` after entering the target change.
-- When the target is archived, the selection file is damaged, or the workflow does not match, the guard fails closed (it refuses to run rather than continue on bad state).
-- When `isolation` is `current`, `branch`, or `worktree`, the change is also pinned through `bound_branch` to the branch where the isolation was set up. On drift, switch back to the original branch; run `comet state rebind <change-name>` only after you explicitly confirm that the current branch should take over the change.
-- Do not hand-edit `current-change.json`.
+</Accordion>
 
 For the full commands on selecting and judging, see [comet state](/en/scripts/comet-state).
 
@@ -170,7 +174,7 @@ These fields are written by Comet to record runtime facts. You do not need to se
 Common examples:
 
 - `bound_branch`: records which branch this change is bound to, so execution does not continue on the wrong branch.
-- `verify_failures`: the consecutive verification-failure count. `verify-fail` increments it, and `verify-pass` or `archive-reopen` resets it to `0`. After it reaches 3, the next failure pauses and asks you to choose a retry-limit strategy.
+- `verify_failures`: the consecutive verification-failure count. `verify-fail` increments it, and `verify-pass` or `archive-reopen` resets it to `0`. The first 3 failures roll back to build automatically; on the 4th consecutive failure, Comet pauses and asks you to choose a retry-limit strategy.
 - `archive_confirmation`: Comet writes `pending` after verify passes; it becomes `confirmed` only after your confirmation before archive.
 - `currentStep`, `pending`, `artifacts`, and `trajectory` in `.comet/run-state.json`: written automatically by the Engine runtime.
 
@@ -257,7 +261,7 @@ Every active change includes the fields below in `.comet.yaml`. The body explain
 | --------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `verify_mode`         | `light` \| `full`             | Verification depth                                                                                                                                                                                                                                           |
 | `verify_result`       | `pending` \| `pass` \| `fail` | Verification result                                                                                                                                                                                                                                          |
-| `verify_failures`     | Integer (machine-owned)       | Consecutive verification-failure count. `verify-fail` increments it; `verify-pass` or `archive-reopen` resets it to `0`. After it reaches 3, the next failure pauses the workflow and you choose the retry-limit strategy                                    |
+| `verify_failures`     | Integer (machine-owned)       | Consecutive verification-failure count. `verify-fail` increments it; `verify-pass` or `archive-reopen` resets it to `0`. The first 3 failures roll back to build automatically; on the 4th consecutive failure, the workflow pauses and asks you to choose a retry-limit strategy |
 | `verification_report` | Relative path                 | Verification report path; before verify passes it must point to an existing file                                                                                                                                                                             |
 | `branch_status`       | `pending` \| `handled`        | Remote-delivery confirmation state. Stays `pending` through verify; after you confirm an immediate push or a push with PR before archive, archiving writes `handled` and includes it in the single archive commit. It does not mean the push or PR succeeded |
 | `verified_at`         | `YYYY-MM-DD` or `null`        | When verification passed                                                                                                                                                                                                                                     |

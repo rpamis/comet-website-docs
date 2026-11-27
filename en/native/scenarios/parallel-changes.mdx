@@ -1,159 +1,136 @@
 ---
-title: 'Parallel Advancement of Multiple Independent Native Changes'
-description: 'Advance multiple independent targets in an isolated worktree, manage write ownership, cross-session recovery, and capability archive conflicts.'
+title: 'Advancing multiple independent Native Changes in parallel'
+description: 'Walk through planning and implementing multiple independent Native Changes in one repository, managing workspace ownership, and resolving same-capability Spec conflicts during Archive.'
 ---
 
-<Note>
-  New changes use SDK Runs with local execution data in the user Comet data directory. References to
-  `.comet/runtime/native/`, standalone YAML recovery, and `--finish` apply only to Compat. For
-  default SDK operations, see [Runtime](/en/native/runtime) and [Archive
-  delivery](/en/native/archive-and-delivery).
-</Note>
+When you have two unrelated requirements on your plate, you do not need to wait for the first to finish before starting the second—nor cram both into one branch. You can direct the entire parallel planning, isolated implementation, conflict resolution, and archive flow in chat using natural language, while Comet manages branches, worktrees, and state bindings automatically.
 
-Native supports multiple independent changes, each with its own requirements, acceptance criteria, and approvals. Built-in Native v4 Runs can share a branch and planning workspace during Shape. Execution workspaces are prepared when implementation starts. Use independent worktrees when multiple Agents write code in parallel.
+This walkthrough follows two common product requirements:
 
-This page takes two goals as examples:
+- **`session-retry-policy`**: Lock an account for 15 minutes after 5 consecutive failed logins, reset the counter after a successful login, and keep frontend and backend lock status consistent;
+- **`dashboard-export`**: Let the operations dashboard export CSVs matching active filters, switch large exports to an async background job, and display progress with failure retry.
 
-- `session-retry-policy`: Adjust the retry and lock policies for login sessions;
-- `dashboard-export`: Add CSV export for the operation board.
-
-The two goals do not depend on each other and have no common end-to-end acceptance requirements, making this a typical scenario for independent parallel changes.
+Because these two goals do not depend on each other and can ship independently, they are best run as two **independent Native Changes** in parallel.
 
 ![Xiaoyu advances two independent Changes in isolated workspaces and delivers them separately](/assets/parallel-changes-illustrations/01-isolated-worktrees.png)
 
-## The choice between independent Change and Supervisor Change
+## First confirm: independent Changes or a Supervisor Change?
 
-| Judgment condition      | Independent Change                                                      | Supervisor Change                                                                       |
-| ----------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Product objective       | They can be released and accepted separately                           | It must be delivered as a whole                                                         |
-| Scope of acceptance     | Each has a complete set of acceptance items                            | The parent target has a complete acceptance, and the child covers part of it            |
-| Dependency relationship | There are no dependencies, or only dependencies on published behaviors | The Runtime needs to manage the dependencies and integration sequence of children       |
-| Ultimately Verify       | Each change is executed separately                                     | After all the children are integrated, the parent change conducts an overall acceptance |
-| Archiving               | File separately                                                        | Children are not archived separately; they are ultimately archived by the Supervisor    |
+| Criterion | Multiple independent Native Changes | Supervisor Change |
+| --- | --- | --- |
+| Delivery relationship | Ship independently without waiting on each other | Delivered together as one unified goal |
+| Acceptance boundary | Each Change archives once its own Verify passes | Children verify and merge into an integration branch; parent runs full final acceptance |
+| Dependencies | Independent, or only depend on already-shipped code | Clear upstream/downstream dependencies or cross-module integration between children |
+| Archiving | Each executes Archive and Git delivery independently | Children do not archive individually; parent archives and delivers once |
 
-Requirements coming from the same meeting or PRD do not necessarily have to be put into a change. The determining factors are whether the results can be delivered independently and whether there is a common final acceptance.
+Even if two requirements came out of the same planning meeting, keep them as separate independent Changes whenever they can be verified and shipped on their own.
 
-## Plan first, then isolate implementation
+## Two ways to start in parallel
 
-Create both Shapes on one branch and let one Agent switch between their materials. Review each independently and use `--defer-build` with approval to wait before implementation. When Build starts with other active requirements present, Runtime prepares an independent worktree. Continue development in the returned `executionCwd`.
+### Option A: Plan both Shapes on one branch, then split into worktrees at Build time
 
-See [Multi-change parallelism and conflict control](/en/native/multi-change-and-conflicts) for creation commands, deferred approval, code baseline requirements, and handoff recovery. Use independent worktrees from the start when multiple Agents write concurrently.
-
-## Each Change independently completes the Shape
-
-The two changes respectively confirm their own goals and acceptance scopes.
-
-`session-retry-policy` can include:
-
-- The account will be locked for 15 minutes after five consecutive failures.
-- Reset the number of failed attempts after successful login.
-- The lock status remains consistent in the API and the login page.
-
-`dashboard-export` can include:
-
-- The exported results follow the current filtering conditions;
-- Large data volume export for back-end task execution;
-- When export fails, display the reviewable status.
-
-Each change goes through Shape → Build → Verify → Archive separately. The confirmation, failure or pause of one change will not automatically advance another change.
-
-## The current selection determines the write attribution
-
-`.comet/current-change.json` records the selected workflow and change for the workspace. With no selection record and only one active change, Hook Router can infer ownership. Select the intended change explicitly when working with multiple changes. See [Status and selection](https://docs.comet.rpamis.com/en/cli/status) for independent edits.
-
-View all changes:
-
-```bash
-comet native status
-```
-
-Select the current change in the target worktree:
-
-```bash
-comet native select session-retry-policy
-```
-
-Choosing to only determine the current write ownership will not turn off other active changes, nor will it switch Git branches. When the selected change is archived, the state is unreadable, or the workspace binding does not match, the Runtime will refuse to write.
-
-## Multiple sessions are advanced separately
-
-One session can be used for each of the two Worktrees:
+If you prefer clarifying and confirming both specs before coding, propose them sequentially in chat on your current Git branch:
 
 ```text
-Conversation A
-  worktree: .worktrees/session-retry-policy
-  change: session-retry-policy
-
-Session B
-  worktree: .worktrees/dashboard-export
-  change: dashboard-export
+/comet Adjust login retry policy: lock for 15 minutes after 5 consecutive failures, reset on successful login. Plan on the current branch first.
 ```
 
-Each session only reads its own latest `continuation`, and submits Builder handoff, runs Runtime check and starts Verifier respectively. The status version, candidate ID, and execution reference prevent the late result of one change from being written to another change.
+After finalizing the first plan, confirm it while telling the Agent "Confirm this plan, but do not start coding yet" (the Agent passes `--defer-build` in the background to save your approval), then introduce the second requirement:
 
-When uncommitted files in the main directory belong to users or other tasks, they should remain as they are. worktree isolation can reduce directory conflicts, but it does not automatically clean up modifications unrelated to the current task.
+```text
+/comet Add async CSV export by active filters to the operations dashboard, with progress tracking and failure retry. Plan on the current branch first.
+```
 
-## Return the correct directory when the workspace does not match
+To jump back to the first one, simply say "Switch back to `session-retry-policy`." When you are ready to build and tell the Agent "Start implementing `session-retry-policy`", because another active Change (`dashboard-export`) exists in the planning directory, the Runtime automatically creates a dedicated branch `comet/session-retry-policy` and worktree `.worktrees/session-retry-policy`, hands off the original Run, formal artifacts, and approval, and returns the new execution directory (`executionCwd`). Ensure tracked code edits outside the planning directory are committed before handoff; handoff itself never auto-commits or pushes.
 
-If you attempt to advance `session-retry-policy` in the worktree of `dashboard-export`, the Runtime will compare:
+### Option B: Create dedicated worktrees from the start
 
-- Current project root directory;
-- change branch;
-- worktree type;
-- The workspace binding saved by `comet-state.yaml`.
+If you want to open two windows right away and let two Agents run Shape through Archive concurrently, tell the Agent in chat "Create this change in a dedicated worktree" (or select Option C `worktree` when prompted for an isolation mode because uncommitted changes or another active change already exist). The Runtime provisions `.worktrees/session-retry-policy`, `.worktrees/dashboard-export`, and their branches automatically.
 
-When the binding is inconsistent, the recovery result is `await-user`, and the expected branch or worktree is returned. Just re-read the status after entering the correct directory. Do not recreate the change with the same name in the wrong directory, nor bypass the binding by manually modifying the YAML.
+## Developing in two windows without interference
 
-## capability conflicts may still occur for independent targets
+Once the worktrees are ready, open two separate Agent sessions:
 
-The product goals of two changes can be independent, but the same canonical capability may be modified during implementation. For example:
+```text
+Session A
+  Workspace: .worktrees/session-retry-policy
+  Change: session-retry-policy
 
-- `session-retry-policy` modify `authentication` Spec;
-- Another parallel change, `session-device-limit`, also modifies the `authentication` Spec.
+Session B
+  Workspace: .worktrees/dashboard-export
+  Change: dashboard-export
+```
 
-Archive will check the current project and other active changes in the registered Git worktree. When the same capability owner is found, the current change cannot be directly archived, and the Runtime will return `capabilityPeers` and serial processing requirements.
+Both changes move through Shape → Build → Verify → Archive independently, protected against cross-talk by four layers:
 
-## First, file a Change
+1. **Isolated Run storage**: Local SDK Runs live in your user Comet data directory, strictly isolated by workspace—submissions in Session A can never write to Session B's Run.
+2. **Explicit task ownership**: Each workspace's `.comet/current-change.json` tracks the selected change. If you need to make a quick unrelated edit in the main directory, tell the Agent "Step out of the current task selection so I can edit an unrelated file" (runs `select --none` in the background, permitting ordinary code edits while still protecting workflow files); tell it to resume when you return.
+3. **Hook Guard against cross-directory miswrites**: Once `session-retry-policy` has handed off to `.worktrees/session-retry-policy`, any attempt to edit its files from the old main directory is blocked immediately with the right path.
+4. **Main directory edits preserved**: Worktree isolation scopes only to the change itself and never wipes personal debug files left in your main checkout.
 
-Suppose the user decides to archive `session-retry-policy` first:
+## Handling the wrong directory or branch
 
-1. Confirm the archiving sequence according to the latest `continuation`.
-2. The Runtime checks the conflict list and state version again;
-3. `session-retry-policy` updates canonical `authentication` Spec;
-4. The change finishes Archive and the workspace finish you confirmed.
+To prevent cross-directory mistakes, ordinary status checks and diagnostics inspect only the current workspace and **do not automatically scan every worktree on your machine**.
 
-Serial decisions must point to the change that is currently being archived. When the conflict list or status has changed, the old decision will be rejected.
+- If you accidentally try to advance `session-retry-policy` from `.worktrees/dashboard-export`, the Runtime detects the directory and branch mismatch, blocks the action, and reports the expected path and branch. Switch back to `.worktrees/session-retry-policy` instead of creating a duplicate change in the wrong directory.
+- If you accidentally switch branches inside a worktree, switch back to the bound branch. If you intentionally want to take over the same idle Run on the current branch, tell the Agent to rebind it to the current branch (the Agent calls `--rebind` in the background after confirming no `running` or `unknown` actions exist).
 
-## The subsequent Change will be re-aligned and accepted
+## Resolving same-capability Spec conflicts at Archive
 
-`session-device-limit` then reads the latest canonical Spec. It needs to realign its complete target specifications with the new baseline and then check whether the implementation still meets the merged behavior.
+`session-retry-policy` (modifying `authentication`) and `dashboard-export` (modifying `dashboard`) touch different capabilities and archive completely independently.
 
-After realignment:
+Suppose a third parallel task `session-device-limit` (concurrent device cap) **also modifies `specs/authentication/spec.md`**. When either one reaches Archive, Native protects the official Spec from silent overwrites:
 
-- Update the complete target Spec of the current change;
-- Revised and implemented based on the latest behavior;
-- Re-run the necessary checks;
-- The acceptance will be completed by the new Verifier.
-- Enter the Archive using the new results.
+### 1. Requirement-level detection and conflict pause
 
-The pass result before the conflict cannot be directly reused because it verifies the old canonical Spec.
+When modifying an existing capability, each change records requirement-level operations (`add`, `modify`, `remove`, `rename`) and baseline hashes in `delta.yaml`:
 
-## Cross-session and cross-device recovery
+- If the two changes touch **disjoint requirements** inside `authentication`, the Runtime can merge them safely against the baseline snapshot;
+- If both modify the **same requirement** or have concurrent conflicts, Archive preflight pauses, lists the conflicting parallel Change (such as `session-device-limit`) or requirement IDs, and waits for you to choose the archive order in chat.
 
-When restoring a single change, first specify the name:
+### 2. Confirm the first Change to archive
+
+Once you decide to archive `session-retry-policy` first:
+
+1. The Agent confirms the order in the background with `--serial-first session-retry-policy` (bound to the current state version so stale instructions are rejected if state changes);
+2. `session-retry-policy` merges its updates into the project's official `specs/authentication/spec.md` and archives its directory.
+
+### 3. Realign the second Change to the new baseline and re-verify
+
+When advancing `session-device-limit` next, tests run against the old baseline cannot be carried straight into Archive. The Agent walks through four steps with you:
+
+1. Pull and re-read the updated official `specs/authentication/spec.md`;
+2. Combine it with your `brief.md` to preserve both intentions, update the change's target Spec (or `delta.yaml`), and run the sync action returned by the Runtime;
+3. Adjust affected implementation code to match the new baseline and rerun relevant tests via platform tools;
+4. Pass Verify again before completing Archive.
+
+## Interruption recovery and cross-device switching with multiple tasks
+
+- **Resume a specific task locally**: Open the target worktree directory and name the task in chat (for example, "Continue `dashboard-export`").
+- **Natural-language resume in a fresh session**: When multiple active changes exist in the same workspace and you simply say "continue what I was working on", the read-only `comet resume-probe` returns the candidate list for you to choose instead of guessing.
+- **Continue on another device**: Stop advancing on the old device, commit and push each branch's code, `.comet/config.yaml`, and the change directory's `comet-state.yaml` (containing `run_checkpoint`), `brief.md`, and target Specs. On the new device, pull the branch and ask the Agent to run diagnostics and restore the original Run from the checkpoint (see [Native task recovery](/en/native/recovery-playbook#missing-local-run-and-cross-device-recovery)).
+
+## Independent Archive and Git delivery
+
+Archive and Git delivery are completely independent per Change: you can push `session-retry-policy` and open a pull request while keeping `dashboard-export` on a local branch without pushing yet.
+
+Once SDK Archive finishes (Run status `completed`, workflow status `done`), verify local commits, merges, pushes, or pull requests against each change's confirmed delivery scope (see [Archive and delivery](/en/native/archive-and-delivery)). After archiving, clean up clean temporary worktrees with Git once you confirm they are no longer needed; directories with uncommitted edits are always preserved.
+
+<Accordion title="Underlying command reference (normally run by the Agent; optional for terminal troubleshooting)">
 
 ```bash
+# Plan two Shapes on a shared branch and switch ownership
+comet native new session-retry-policy --isolation current --task "..." --json
+comet native new dashboard-export --isolation current --task "..." --json
+comet native select session-retry-policy
+
+# Create a dedicated worktree directly
+comet native new session-retry-policy --isolation worktree --target-branch main --task "..." --json
+
+# Inspect detailed status read-only inside the target worktree
 comet native status dashboard-export --details --json
 ```
 
-Users who need to synchronize project codes, `.comet/config.yaml` and change across devices can carry the artifacts. `.comet/runtime/native/` is in the local execution state and is reconstructed by the target device.
+</Accordion>
 
-When multiple active changes exist simultaneously and there is no explicit name or valid selection, environmental awareness recovery will return `ask_user`. It does not guess the target based on the chat content, nor does it scan and modify the Runtime of other changes.
-
-## Complete the delivery and clearance respectively
-
-Each independent change Archive has its own delivery options: retaining the workspace, local merging, pushing branches, or creating a PR (see [Archive and delivery](/en/native/archive-and-delivery) for the options). The delivery choice of one change does not apply to another change.
-
-Runtime only cleans up Worktrees that have been archived, have no uncommitted modifications, and are no longer in use. Directories that are still running, have user modifications, or have been blocked at the end of Git will be retained and returned to the next step via `workspaceFinishResult` and `recoveryArgs`.
-
-Continue reading: [Multiple Changes and Specification Conflicts](/en/native/multi-change-and-conflicts), [Runtime Protection and Fault Recovery](/en/native/safety-and-recovery) and [Task progress and interruption recovery](/en/native/continuation-and-checkpoints).
+Continue reading: [Parallel changes and conflict control](/en/native/multi-change-and-conflicts), [Native Runtime protection and recovery](/en/native/safety-and-recovery), and [Native task recovery](/en/native/recovery-playbook).

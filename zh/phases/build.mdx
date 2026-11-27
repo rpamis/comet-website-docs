@@ -9,9 +9,9 @@ build 阶段先起草实施计划，再和你一起确定执行方式、TDD 策�
   日常开发直接输入 <code>/comet</code> 即可。项目用 Classic 时，系统会读取状态，在 design 阶段结束后自动进入 <code>/comet-build</code>。
 </Tip>
 
-## 什么时候进入这个阶段
+## 进入方式
 
-`/comet-build` 一般由系统自动进入。
+通常由工作流自动进入 build 阶段（由 `/comet` 自动调用 `/comet-build`）。
 
 ### 默认：从 /comet 自动进入
 
@@ -44,7 +44,7 @@ flowchart TD
     SpecPause --> TaskLoop
     TaskLoop --> Done{"任务是否全部完成？"}
     Done -->|否| Exec
-    Done -->|是| Exit["运行 comet-guard build --apply<br/>进入 verify"]
+    Done -->|是| Exit["运行 comet guard <name> build --apply<br/>进入 verify"]
 ```
 
 <p align="center">
@@ -79,18 +79,19 @@ base-ref: <git rev-parse HEAD> # 编码前的基准 commit，verify 据此核算
 | **B：暂停切换模型** | 记录 `build_pause: plan-ready` 并结束会话；切换到更强的模型后输入 `/comet` 继续，计划原样保留 |
 
 <Tip>
-  选项 B 专为<strong>“高阶模型做规划、高性价比模型做实现”</strong>而设计。恢复时系统会精准识别 plan-ready 状态，<strong>不重复生成计划</strong>，直接唤起后续工作模式选择。
+  选项 B 专为<strong>“高阶模型做规划、高性价比模型做实现”</strong>而设计。恢复时系统会精准识别 plan-ready 状态，<strong>不重复生成计划</strong>，直接进入后续工作模式选择。
 </Tip>
 
 #### 一次性敲定三项核心工作参数
+
 选定继续后，在同一决策面板里确定下面三项（工作区隔离方式在 open 阶段的停顿点 3 已经确定，这里不再问）：
 
 1. **执行方式（build_mode）**：
-   - `subagent-driven-development`：主会话负责调度，后台启动只读子代理逐项编码，由 `review_mode` 决定审查（适合复杂、有 3 个以上任务的变更）；
+   - `subagent-driven-development`：主会话负责调度，后台启动隔离子代理逐项编码，由 `review_mode` 决定审查（适合复杂、有 3 个以上任务的变更）；
    - `executing-plans`：轻量模式，直接在当前主会话中按顺序编码（适合 1–2 个任务的小改动）；
    - `direct`：直接实现（hotfix / tweak 默认使用；full 流程需要开启覆盖参数）。
 2. **TDD 测试策略（tdd_mode）**：
-   - `tdd`：先写失败的测试再实现，每个任务都这样（涉及核心业务逻辑时推荐）；
+   - `tdd`：每个任务均按“先写失败测试、再实现代码”的顺序推进（涉及核心业务逻辑时推荐）；
    - `direct`：直接写业务代码，不强制先写失败用例，但仍要补相关测试和回归证据。
 3. **审查严格度（review_mode）**：
    - `off`：不做自动审查（适合文案、文档等低风险改动）；
@@ -101,7 +102,7 @@ base-ref: <git rev-parse HEAD> # 编码前的基准 commit，verify 据此核算
 
 | 关键点       | `executing-plans` 模式                                                              | `subagent-driven-development` 模式                                                    |
 | ------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **谁写代码** | 当前主会话按顺序写                                                                   | 主会话**只负责协调和核查**，由后台隔离子代理写代码                                    |
+| **谁写代码** | 在当前主会话中按顺序实现                                                             | 主会话**只负责协调和核查**，由后台隔离子代理写代码                                    |
 | **推进节奏** | 顺序完成，逐项打勾                                                                   | 每项任务派一个子代理，核验通过后自动开始下一项，**不会频繁打断你**                    |
 | **审查机制** | standard 模式在 build 阶段不做全量审查；thorough 模式每 3 个任务做一次分段审查       | 按 `review_mode` 即时派任务级审查和独立修复 Agent                                     |
 | **模型选择** | 主会话统一执行                                                                       | **每次派子任务都要指定合适的模型**                                                    |
@@ -111,7 +112,7 @@ base-ref: <git rev-parse HEAD> # 编码前的基准 commit，verify 据此核算
   在 <code>subagent-driven-development</code> 模式下，子任务核验通过后会<strong>立即开始下一个子任务</strong>。只有审查重修达到上限（BLOCKED）、出现明确的技术分歧，或平台无法在后台调度时，才会暂停。
 </Tip>
 
-### 第三步：出错时的调试流程
+### 第三步：异常调试流程
 
 执行中遇到**进程崩溃、测试报错、构建失败或逻辑异常**时，Comet **加载 `systematic-debugging`**：
 
@@ -119,7 +120,7 @@ base-ref: <git rev-parse HEAD> # 编码前的基准 commit，verify 据此核算
 2. 确认是业务代码的问题后，先补一个最小化的失败测试复现问题，再改源码。
 3. 改完后运行相关测试和构建命令，确认都通过。
 
-#### 多个互不相关的报错怎么排查
+#### 多个独立报错的并行排查
 
 遇到多项报错时，系统先判断它们是否独立：
 - **串行排查**：报错不超过 2 个，或各报错之间有依赖、共享状态、涉及同一批文件时，逐个排查；
@@ -142,23 +143,25 @@ base-ref: <git rev-parse HEAD> # 编码前的基准 commit，verify 据此核算
 
 ### 第五步：核验打勾与提交
 
-每个子任务完成后都要验证：按约定实现 → 执行审查（如果开了）→ **主会话核验后打勾** → 提交到 Git。Agent 用下面的命令校验勾选是否有效：
-
-```bash
-node "$COMET_STATE" task-checkoff "$PLAN_FILE" "$PLAN_TASK_TEXT"
-```
+每个子任务完成后都要验证：按约定实现 → 执行代码审查（如已启用）→ **主会话核验后打勾** → 提交到 Git。任务勾选校验由 Agent 在后台自动执行，无需手动操作。
 
 ### 阶段结束：进入 verify
 
-所有子任务都打勾、构建通过后，Agent 运行阶段检查：
+所有子任务都打勾且构建通过后，Agent 会在后台运行阶段检查并推进状态机，将状态更新为 `phase: verify`，同时把 `verify_result` 标记为 `pending`。
+
+<Accordion title="Agent 后台调用命令参考">
 
 ```bash
-node "$COMET_GUARD" <change-name> build --apply
+# 校验单个任务的勾选是否有效
+comet state task-checkoff "$PLAN_FILE" "$PLAN_TASK_TEXT"
+
+# 全部任务完成后运行阶段守卫并推进至 verify
+comet guard <change-name> build --apply
 ```
 
-状态机进入 `phase: verify`，`verify_result` 标记为 `pending`。
+</Accordion>
 
-## 用到的 Skill
+## 调用的核心 Skill
 
 | Skill | 作用 | 触发条件 |
 | ----------------------------- | ---------------------- | ------------------------------------------------------------- |
@@ -169,7 +172,7 @@ node "$COMET_GUARD" <change-name> build --apply
 | `dispatching-parallel-agents` | 并发排查多个故障       | 出现 3 个及以上互不相关的问题时触发（只用于排查）             |
 | `brainstorming`               | 较大 Spec 变更时重新确认 | 发现接口或组件架构有重大偏差时触发                          |
 
-## 什么时候算完成
+## 阶段完成条件
 
 - `tasks.md` 中的任务全部勾选；
 - 业务代码已提交到 Git；

@@ -1,51 +1,103 @@
 ---
 title: 'Task progress and interruption recovery'
-description: 'Find the next step for a Native change and resume the same task after a session interruption, workspace switch, or device change.'
+description: 'Learn how Native advances workflows in the background through the unified task protocol and continuation mechanism, prevents stale submissions, and writes protected recovery checkpoints.'
 ---
 
-After a session interruption, have the Agent continue the same change. The Runtime keeps the current stage, user decisions, and task results in the Run. Check the workspace and pending action first, then follow the latest command response.
+Long-running development tasks face two common hazards: closing a session or compacting context causes the Agent to forget earlier decisions, re-ask settled requirements, or overwrite existing edits; or a background task is still running while a new session assumes it crashed and dispatches a duplicate, producing double commits or conflicting changes.
 
-## Inspect progress and the next step
+Native stores the full execution history in the local SDK Run and writes a recovery checkpoint (`run_checkpoint`) to `comet-state.yaml` in the project repository. **In everyday use, just return to the project conversation and say "continue" or state your next request.** The Agent automatically reads the latest `continuation` directive returned by the Runtime in the background instead of guessing progress from chat memory.
 
-Return to the change's workspace and run `comet native status <change-name> --json`. If you don't know the name, use `comet native status --json` to list changes in the current workspace. If the change uses a separate Git worktree, switch to that worktree before querying. Add `--details` to a named query for the complete record of actions and decisions.
+## How the Runtime tells the Agent what to do next
 
-Use `status` to inspect the change. The Agent follows the next step from the response and uses the new response after each operation. If the state changed, query it again before submitting a decision. If the response supplies a state version, expected action, or proposal identifier, keep those arguments in the confirmation command.
+Whenever entering a workspace or resuming a session, the Agent performs a read-only background status query (modifying no files and never silently restoring missing Runs). By default, the query returns all `pending`, `running`, and `unknown` actions in full while including only the most recent 12 items of each completed history collection—keeping context overhead low without missing active work. Earlier rounds can be inspected on demand with `--details`, and long tasks support `--compact` to compress repeated structures.
 
-| `continuation.mode` | Current situation | How to proceed |
+The Runtime communicates the next step explicitly through `continuation.mode` in its response so the Agent never has to guess the current phase:
+
+| `continuation.mode` | Current state | What happens next |
 | --- | --- | --- |
-| `execute` | The next action is ready. | The Agent runs the returned operation in the specified workspace. |
-| `ask` | The workflow is waiting for your input. | Review the current proposal and confirm it, request a revision, or provide missing information. |
-| `wait` | The original task was claimed and has yet to return a result. | Check or wait for the original task, then submit its result with the original claim. |
-| `reconcile` | The Runtime needs an outcome confirmed or a blocker resolved. | Inspect the original task, path, or transaction as directed, then follow the returned recovery action. |
-| `done` | The workflow has ended. | Check the final state. If the change was archived, verify the agreed Git delivery. |
+| `execute` | The next step is clear and ready to run. | The Agent executes the next piece of work automatically in the specified workspace and reports the result. |
+| `ask` | Paused at a human decision point (such as Shape confirmation, verification acceptance, or failure recovery). | The Agent presents the current proposal or verdict and waits for your explicit reply before advancing. |
+| `wait` | A task has been claimed by an executor and is still running. | The Agent tracks the original execution session and waits for the original claimer to return its result. |
+| `reconcile` | An action has an unknown outcome, a branch drifted, or a transaction was interrupted. | The Agent inspects the original execution, directory, or transaction state first, then follows the returned recovery instructions. |
+| `done` | The workflow has ended (archived or canceled). | Verify the final state; if archived, separately confirm whether the agreed Git delivery completed. |
 
-For example, if you were working on `login-error-message`, reopen the Agent and say “Continue `login-error-message`. First tell me what it's waiting for.” The Agent can run this command in the original workspace.
+For example, if you closed the window while working on `login-error-message`, reopen the Agent and say: "Continue `login-error-message` and tell me where it is paused." If background status reports `phase: "verify"` and `continuation.mode: "wait"`, the Agent checks the original verification session's progress instead of dispatching a new Verifier.
+
+## Background advancement protocol and staleness protection
+
+Both standard and Supervisor tasks advance in the background through the unified task protocol (`comet native next`) to claim work and report results: before Shape confirmation it submits structured acceptance criteria; after Shape confirmation it covers implementation, independent verification, child build and verify, integration fixes, and parent fixes. This protocol provides four underlying guarantees:
+
+1. **One submission chains internal steps**: After the Agent submits a round's business outcome, the Runtime strictly validates the payload (accepting only valid statuses and schema fields, rejecting typos or extra fields), automatically runs all approved internal steps in sequence, and returns the next pending task or human confirmation point directly.
+2. **Automatic context injection**: When claiming a task, the Runtime automatically attaches relevant personal preferences and project knowledge for the current phase and task so you do not have to repeat team conventions at every stage.
+3. **Idempotent retries prevent double-accounting**: If a network hiccup prevents the Agent from receiving a receipt, resubmitting from the original claimer with the same task identifier, session, and payload is recognized as an idempotent confirmation rather than recording the round twice; submissions from a different session or with different content are rejected.
+4. **Three concurrency guard parameters block stale approvals**: When you confirm Shape, accept verification results, or request a revision, the background command automatically carries three validation flags:
+   - `--expected-state-version <n>`: Checks the state version and immediately rejects stale commands if another session has already advanced the state.
+   - `--expected-action <action>`: Binds the expected action so a confirmation cannot land on the wrong step.
+   - `--proposal-hash <hash>`: Binds the specific proposal or verification verdict digest awaiting confirmation; any edit to the proposal immediately invalidates older approvals.
+
+## Tool timeouts, running tasks, and pausing monitoring
+
+An Agent platform wait-tool timeout or an unexpected local terminal disconnect **does not mean** that a running test, build, or Verifier has failed. Native does not track or force-kill tasks using OS PIDs. It applies the following rules:
+
+| Situation | How the Agent handles it |
+| --- | --- |
+| The session closed while Runtime paused at `ask` waiting for Shape or verification approval. | Re-presents the current proposal or verification report; previously confirmed decisions stay valid, and only the pending decision is handled. |
+| A wait tool timed out while the original Verifier or child task is still running on the platform. | Checks that session's progress on the original platform; keeps waiting if still running, without reclaiming or starting a duplicate task. |
+| The platform explicitly reports the task never started, errored, or timed out with no result. | Preserves completed valid checks, follows the Runtime's returned recovery path, and starts a new execution only when retry is permitted. |
+| The original task may have edited files or called external APIs without returning a result (`unknown`). | Inspects the original session, local edits, and external system state first; preserves the workspace until confirmed and does not replay operations with potential external side effects. |
+
+### Pausing periodic monitoring while waiting for external input
+
+When a task is only waiting for your reply or external information—with **no** runnable child tasks, **no** running background tasks, and **no** external jobs requiring periodic polling (such as CI)—the Agent may pause periodic monitoring for that task while keeping monitors for other independent tasks active. When first entering the wait, the Agent explains once why it is blocked, what information is missing, which monitors are paused, and what condition resumes work; once new input arrives, it re-reads Runtime state and resumes.
+
+## Checkpoint write boundaries and safety mechanisms
+
+Understanding the split between the local Run and the repository checkpoint clarifies what is preserved automatically across interruptions or machine switches:
+
+- **Local Run**: Stored in the Comet data directory under your home directory (isolated by workspace), recording every advancement, claim receipt, and internal event in real time.
+- **Repository checkpoint (`run_checkpoint`)**: Saved in `comet-state.yaml` inside the project repository, committed and synced alongside code.
+
+### When checkpoints are written
+
+The Runtime writes `run_checkpoint` only at stable boundaries—**before waiting for user confirmation**, **at Agent task handoffs**, **before external command execution**, and **when the workflow finishes**. Purely internal, side-effect-free intermediate steps do not frequently rewrite `comet-state.yaml`, avoiding noisy Git diffs. Do not manually edit the checkpoint to try to advance a workflow.
+
+### Three layers of checkpoint protection
+
+1. **One-way session token redaction**: Before writing to the repository checkpoint, the local `claimToken` is hashed into `portable-<sha256>` so local execution tokens are never committed to Git.
+2. **In-flight tasks automatically downgrade to `unknown`**: When writing a checkpoint, any `running` action is downgraded to `unknown`. Restoring on another machine will never treat a task still running on the old machine as an idle action safe to replay.
+3. **Tamper-evident hashes and history compression**: Checkpoints verify both an overall content hash (`hash`) and a `sourceHash` bound to the original local version. Long-task `v2` checkpoints also compress repeated history with a shared value pool and attach a `storageHash`, blocking manual tampering or file truncation during recovery.
+
+During normal progression, the Agent queries task status automatically in the background—you do not need to run commands manually. If you want to inspect a change's current state and next step yourself, you can run these read-only queries in your terminal.
+
+<Accordion title="Optional read-only terminal commands">
+
+If the change lives in an independent Git worktree, switch into that worktree directory before running:
 
 ```bash
-comet native status login-error-message --json
+# List active changes in the current workspace
+comet native status --json
+
+# View a specific change's phase and next step (includes the latest 12 history records by default)
+comet native status <change-name> --json
+
+# View complete business state and full Action and Wait history
+comet native status <change-name> --details --json
+
+# Compress repeated structures to reduce JSON size (request templates remain complete)
+comet native status <change-name> --json --compact
 ```
 
-If `phase` is `verify` and `continuation.mode` is `wait`, an executor has already claimed the task. Locate the original review before attempting to start Verify again. If the current workspace or branch differs from the response, return to the reported `workspace.projectRoot` and check the branch before proceeding. If the change is missing in the current directory, locate its original worktree.
+</Accordion>
 
-## Resume a task that was running
+The Agent claims tasks and reports results in the background via `comet native next`; you do not need to run this manually.
 
-In the new session, check whether the original task was claimed and whether the original execution session is still running. After a wait tool times out, check progress on the original platform. If the task is still running, keep waiting for that execution. If it has ended, retrieve its actual result and submit it with the original claim.
+<Accordion title="Command reference (run by the Agent; for terminal troubleshooting only)">
 
-If the outcome is unknown, inspect the original execution and any files or external results it produced before repeating an operation that may have already taken effect. Follow the Runtime's next step for failure or retry after confirming the task failed, was lost, timed out during execution, or ended without a usable result. See [SDK failure recovery and unknown results](/en/sdk/recovery).
+```bash
+comet native next <change-name> --session <session-id> --json
+comet native next <change-name> --session <session-id> --action <action-id> --result <json-file|-> --json
+```
 
-| What you see | What to check |
-| --- | --- |
-| The session closed while the Runtime waited for Shape approval or result acceptance. | Read the current proposal. Recorded decisions still apply. Act on the decision that is pending. |
-| A wait tool timed out while the original Verifier or background command kept running. | Track the original task and keep its result and execution identity. |
-| The Agent platform confirmed that the review execution failed. | Keep completed checks that still apply. Follow the returned failure action and start a new review only when the Runtime permits a retry. |
-| The original task may have written a file or submitted an external operation, but its result was never saved. | Check the original execution and its actual effects. If the result cannot be confirmed, preserve the workspace and report what evidence is missing. |
+</Accordion>
 
-## Restore a missing local Run
-
-If the local records are missing, inspect the diagnostics with `comet native doctor <change-name> --json`. The Runtime can restore the original Run using a valid checkpoint in `comet-state.yaml` and the accompanying materials. Run the recovery command returned by Doctor. If the checkpoint is missing or materials disagree, preserve the workspace and check the available original records.
-
-Before changing devices, stop workflow activity on the original device and synchronize the current code, `comet-state.yaml`, `brief.md`, relevant Specs, referenced artifacts, and project configuration. The checkpoint preserves recorded progress. Recover unsynced code from the original workspace. Check the original task for any unknown outcomes. An active Supervisor child also requires handling its child and integration worktrees separately. See [Native Runtime components](/en/native/runtime) and [Supervisor Change](/en/native/supervisor-change) for storage and recovery boundaries.
-
-## Recover interrupted archiving
-
-If Archive is still running in the background, wait for the original command to return. If the command was interrupted, inspect current status and diagnostics, then follow the Runtime's instructions to resume the original archive transaction. After archiving, independently check whether the Git commit, push, or pull request was completed. See [Archive and delivery](/en/native/archive-and-delivery).
+For full troubleshooting of missing local Runs, cross-device migration, Builder failures, branch drift, and interrupted archiving, see [Native recovery playbook](/en/native/recovery-playbook). For the underlying protocol, see [SDK failure recovery and unknown results](/en/sdk/recovery).

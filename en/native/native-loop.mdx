@@ -1,50 +1,110 @@
 ---
 title: 'Native Loop: From implementation to trusted delivery'
-description: 'Learn how Native moves from confirmed requirements to implementation, handles verification failures, and determines when to archive a change.'
+description: 'Learn how Native connects requirement confirmation, candidate implementation, full verification, incremental repair, and archiving into a controlled loop—and how it handles mid-flight requirement changes, failure limits, and cancellation.'
 ---
 
-The Native Loop starts after you confirm Shape. The Builder submits an implementation for the confirmed requirements, and the Verifier checks the current implementation against every acceptance criterion. When the implementation falls short, Native returns the failed criteria to Build to guide the next round of repairs. The Runtime archives the change after verification passes and the current result is accepted.
+In day-to-day AI-assisted coding, the most common problems are rarely that the model cannot write code—they are drifting from the original requirement mid-conversation, declaring completion without running full checks, or fixing one bug while breaking another feature.
+
+The **Native Loop** organizes each development change into four well-bounded phases: **Shape** (clarify requirements and lock in acceptance criteria), **Build** (implement code and submit check results), **Verify** (evaluate every acceptance criterion against your original request), and **Archive** (apply Spec changes and archive). In daily use, you interact with the Agent in natural language while the Agent calls the Runtime in the background for all state transitions and validation checks—pausing only when your decision is needed, an external blocker arises, or the failure limit is reached.
 
 ```mermaid
 flowchart TD
-  Shape["Shape: Confirm requirements, scope, and criteria"] --> Build["Build: Submit implementation and check results"]
-  Build --> Verify["Verify: Evaluate every acceptance criterion"]
-  Verify -->|"Failed, below the failure limit"| Repair["Repair the failed items"]
+  Shape["Shape: Clarify requirements and lock acceptance criteria"] --> Build["Build: Implement code and submit candidate with checks"]
+  Build --> Verify["Verify: Evaluate all criteria against original request"]
+  Verify -->|"Failed, below failure limit"| Repair["Return to Build to fix failed items"]
   Repair --> Build
-  Verify -->|"Blocked or at the failure limit"| Pause["Pause and explain why"]
-  Verify -->|"All criteria pass"| Accept["Accept the current verification result"]
-  Accept --> Archive["Archive: Apply Spec changes and archive the change"]
+  Verify -->|"Missing prerequisites or failure limit reached"| Pause["Pause with exact cause and recovery options"]
+  Verify -->|"All criteria pass"| Accept["Accept verification verdict (manual, automatic, or pre-delegated)"]
+  Accept --> Archive["Archive: Precheck, merge Specs, and archive directory"]
 ```
 
-## Confirm Shape before implementation
+## Shape: Turn verbal ideas into verifiable acceptance criteria
 
-The Shape proposal lists the change's goals, scope, key decisions, and acceptance criteria. Before confirming, check which behaviors the change must deliver and which are outside its scope. The `brief.md` and related Specs record these decisions for Build and Verify. See [Which decisions need your confirmation](/en/native/decision-ownership).
+Start a task by typing `/comet <your request>` directly in Agent chat—no manual CLI commands needed. The Agent automatically runs the creation command in the background and stores your **verbatim original request** (via `--task`) inside the Run. Later during Verify, the reviewer can cross-check directly against your exact words so requirements are never quietly dropped while organizing documents.
 
-To approve the proposal and write the code later, defer Build when approving Shape. Comet keeps the approval and prepares the workspace when implementation begins. See [Parallel changes and conflict control](/en/native/multi-change-and-conflicts).
+During Shape, the Agent inspects the codebase first, then clarifies ambiguities that affect visible outcomes according to your settings (see [Sequential and batch clarification](/en/native/clarification-modes) and [Which decisions need your confirmation](/en/native/decision-ownership)). After drafting `brief.md` and target Specs, Shape completes in two steps:
 
-## Example: Show different sign-in error messages
+1. **Extract structured acceptance criteria**: The Agent extracts itemized, verifiable acceptance criteria from the formal documents and submits them to the Runtime, which assigns stable IDs (such as `A1`, `A2`). Native does not force rigid document templates, but submitted criteria must be clear, verifiable, and non-duplicated.
+2. **Confirm explicitly before entering Build**: The Agent presents the complete Shape—goals and scope, key decisions, all acceptance criteria, and non-goals. The Runtime permits Build only after you explicitly confirm in conversation.
 
-Suppose you want the sign-in page to display “Invalid username or password” for incorrect credentials and “Too many attempts. Try again later” when the request is rate-limited. This change updates the messages and keeps the server's response codes and rate-limiting rules as they are.
+If you want to finalize several proposals first and write code later, simply tell the Agent at confirmation: "Confirm the proposal, but don't start writing code yet." The Agent attaches `--defer-build` in the background to save the approval and defer workspace creation and Build until you ask to start (see [Multi-change parallelism and conflict control](/en/native/multi-change-and-conflicts)).
 
-| Progress | What the Agent does | What you see |
+## Walkthrough example: From round 1 repair to Archive
+
+Take a concrete change named `login-error-message`: display "Invalid username or password" when login credentials are wrong, and "Too many attempts. Try again later." when rate-limited; update only frontend copy and branch handling without changing server status codes or rate-limiting rules.
+
+| Phase | What the Agent and Runtime do behind the scenes | Your involvement and visible result |
 | --- | --- | --- |
-| Shape awaits confirmation | Define the scope in `brief.md` and give incorrect credentials and rate limiting separate acceptance criteria. | Review both messages and the behaviors that stay as they are. Confirm Shape to allow Build. |
-| First Build and Verify | The Builder submits the implementation. The Verifier sees the correct message for invalid credentials but finds that rate-limited requests still show that same message. | The first criterion passes and the second fails. Native keeps Shape approval and returns the failed item to Build. |
-| Build and Verify after repair | The Builder adds the rate-limit branch. The Verifier checks the rate-limit message and confirms the repair preserved the incorrect-credentials behavior. | After both criteria pass, review the evidence and accept the current result. |
-| Archive | The Runtime applies the approved Spec changes to the project Specs and archives the change. | The Agent reports the archive location and verifies Git delivery within the scope you specified. |
+| **Shape** | Records scope, two acceptance criteria (`A1` invalid credentials, `A2` rate-limit message), and the "do not change backend" non-goal in `brief.md`, then submits criteria to the Runtime. | Review the full proposal and confirm in conversation; the Runtime saves approval and enters Build. |
+| **Build (round 1)** | The Builder reads requirements and context (including automatically injected personal preferences and project knowledge), edits frontend code, runs UI tests, and submits the candidate implementation and test results in one background call. | No manual step needed; after validating the submission, the Runtime advances straight to Verify. |
+| **Verify (round 1)** | The Verifier reviews in a read-only role against your original request and all criteria: simulated `401` shows the right message (`A1` `passed`), but simulated `429` still shows the wrong-password message (`A2` `failed`). | Round 1 verdict is `fail`. The Runtime preserves the confirmed Shape and sends `A2`'s failure evidence back to Build (`iteration` increments). |
+| **Build + Verify (round 2)** | The Builder adds the `429` branch, re-runs affected UI tests, and submits round 2. The Verifier confirms `A2` passes, verifies `A1` has no regressions, and reuses still-valid API check results. | Both `A1` and `A2` are `passed`, and the Runtime generates the updated `verification.md`. |
+| **Archive** | After acceptance, runs archive prechecks, merges Specs, and archives the change directory. | Receive the archive location summary; complete Git commit, push, or PR according to the delivery scope you confirm in conversation. |
 
-To correct the approved rate-limit message, continue repairing the implementation. If you want to display the number of seconds remaining, that adds a display rule. Update and confirm Shape first. See [Native artifacts and state](/en/native/artifacts-and-state) for the related files.
+Fixing the approved rate-limit message in round 2 is an implementation repair and stays inside the Build ↔ Verify loop. If you decide mid-way that "rate-limited errors should also show a countdown in seconds," that changes user-visible behavior—the Agent takes you back to Shape to update and re-confirm the proposal first.
 
-## Iterate between Build and Verify
+## How Build ↔ Verify advances
 
-The Builder implements the confirmed requirements, runs the necessary checks, and submits the results. The Verifier compares the implementation with the original request, formal requirements, and acceptance criteria. For how the Agent runs and reuses checks and when it uses independent review, see [Verification and repair](/en/native/verification-and-repair).
+### 1. One background submission chains internal steps
 
-When the implementation needs repair, the next Build round focuses on the failed items and checks other behaviors the repair may affect. The next Verify round still covers every acceptance criterion for the change. If addressing the issue requires changing the goals, scope, or acceptance criteria, the Agent updates the Shape proposal and asks you to confirm the affected decisions.
+After modifying code and running builds, tests, or static checks through platform tools, the Builder submits the round's work as a **candidate implementation**, reporting the summary, check results, and known limitations to the Runtime in a single background call. The Runtime strictly validates the payload, automatically executes all approved internal steps in sequence, and returns the next pending task or human confirmation point directly, avoiding unnecessary back-and-forth.
 
-When verification failures reach the configured limit, the Runtime pauses automatic repair and returns the cause and next available action. See [Native configuration](/en/native/configuration) for the failure limit.
+If you want an independent pair of eyes on a critical change, tell the Agent in conversation: "Please run an independent review for this change." The Agent enables the independent-review flag (`--review independent`) in the background; this requirement persists in the Run and must be claimed and verified by a read-only session distinct from the Builder. Routine tasks default to switching into a read-only role within the current session (recorded as `self-reviewed`).
 
-## Accept the verification result and archive
+### 2. Round counters, incremental repair, and failure limits
 
-When every acceptance criterion passes, the Agent shows the current implementation's verdict, check results, and known limitations. You can accept the result or request further repairs. If you explicitly delegated acceptance and archiving on a pass, the Agent can proceed when that condition is met.
+The Runtime tracks two separate counters so platform retries are never miscounted as failed code fixes:
 
-After archiving, Git commits, pushes, and pull requests follow the delivery scope you approved. See [Archive and delivery](/en/native/archive-and-delivery).
+- **`iteration`**: The Builder's candidate implementation round. Increments by 1 each time code is repaired and resubmitted.
+- **`attempt`**: The number of Verifier runs for the same candidate (for example, increments when retrying a Verifier after a platform error without consuming an implementation round).
+
+Three practical rules govern the repair loop:
+
+1. **Focus repairs on failed items, but verify everything**: The Runtime carries the previous round's failed criteria into Build as the repair focus, while the next formal Verify still evaluates every acceptance criterion to catch regressions.
+2. **No mechanical cutoffs**: If a criterion ID fails two rounds in a row, the Runtime does not abruptly halt just because the failure list did not shrink—it lets the Agent inspect actual code changes to determine whether repairs are making real progress.
+3. **Failure limit**: `native.max_verify_failures` in `.comet/config.yaml` (default `5`) caps real Verify failures for the same confirmed acceptance target. When reached, the Runtime stops the automatic loop, lists prior failure records, and lets you decide whether to try a different approach, adjust requirements, or cancel the task.
+
+For complete details on check reuse, evidence requirements, and independent review, see [Verification and repair](/en/native/verification-and-repair).
+
+## Editing code, docs, or requirements mid-loop
+
+During Build, Verify, or archive-ready, if you or the Agent edit files directly, Native **does not blindly invalidate existing approvals or all tests** just because files changed. Instead, the Agent inspects the Git diff and original text and handles the edit by category:
+
+| Edit type | Actual handling |
+| --- | --- |
+| Comments, formatting, or wording tweaks (behavior and acceptance meaning unchanged) | Preserves the current phase, confirmed approval, and valid check evidence, then continues directly. |
+| Missing implementation detail found while requirement scope is unchanged | Ask to keep fixing in conversation; the Agent takes the implementation revision path back to Build while keeping Shape approval. |
+| User-visible behavior, goals, or acceptance criteria changed | Describe the new requirement in conversation; the Agent returns to Shape in the background, explains the impact first, and asks you to re-confirm the full Shape. |
+| New requirement unrelated to the current change | Create a separate independent change so unrelated edits do not mix into the current delivery. |
+
+## Accepting verification, archiving, and canceling tasks
+
+Once all acceptance criteria pass, Archive begins through one of three paths:
+
+1. **Manual acceptance (`native.archive_confirmation: required`)**: The Agent presents itemized verdicts, check evidence, and known limitations; Archive runs after you explicitly agree in conversation.
+2. **Project automatic archive policy (`native.archive_confirmation: automatic`)**: Even with automatic archiving enabled, the Runtime checks four conditions together—(1) the verdict is `pass`, (2) accepting verification is the only pending wait, (3) no evidence waits are pending, and (4) no `running` or `unknown` actions exist—and automatically accepts and archives only when all four hold.
+3. **One-time pre-delegation**: If you explicitly tell the Agent at kickoff or during repair "accept and archive automatically once everything passes," the Agent binds this delegation (`--accept-on-pass`) when submitting the passing result. This delegation covers only acceptance and local archiving—it does not auto-approve Git merge, push, PR creation, or workspace cleanup.
+
+### Canceling an unfinished task
+
+If you decide mid-flight that a task is no longer needed, tell the Agent "cancel the current task" and state the reason. The Agent marks the task canceled in the background so it no longer counts as an active change and creates no false archive record. Your written code, Git commits, branches, and workspace directory stay intact—you decide whether to delete branches or clean up worktrees. Completed changes cannot be canceled.
+
+<Accordion title="Underlying commands for terminal troubleshooting (run automatically by the Agent in daily use)">
+
+These are the public CLI entry points the Agent calls in the background while advancing the Native Loop, provided only for offline terminal troubleshooting or manual inspection:
+
+```bash
+# Create a change and save your verbatim original request (called automatically when starting /comet)
+comet native new <change-name> --task "<your original request>" --json
+
+# Claim work and report implementation plus check results in one call (--review: current-session or independent)
+comet native next <change-name> --session <session-id> --action <action-id> --result <json-file|-> --review current-session --json
+
+# Preview and cancel an unfinished change (preserves code, branches, and workspace)
+comet native cancel <change-name> --dry-run
+comet native cancel <change-name> --reason "Requirement merged into another plan"
+```
+
+</Accordion>
+
+For archiving and Git delivery verification, see [Archive and delivery](/en/native/archive-and-delivery). For configuration options, see [Native configuration](/en/native/configuration).

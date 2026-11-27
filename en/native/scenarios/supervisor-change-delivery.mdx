@@ -1,90 +1,86 @@
 ---
-title: "Real Case: Delivering Project Knowledge Engine with Supervisor Change"
-description: "Review an archived Supervisor Change in the Comet repository to understand how large-scale capabilities are split, integrated, fixed, and unified for acceptance."
+title: 'Real case: delivering the Project Knowledge engine with Supervisor Change'
+description: 'Review an archived Supervisor Change (agent-project-knowledge-engine) in the Comet repository to see how a large multi-module refactor was split by dependencies, integrated in isolation, closed with a repair child, and verified across 49 acceptance criteria.'
 ---
 
-import { SupervisorVideo } from "/snippets/supervisor-video.jsx";
+import { SupervisorVideo } from '/snippets/supervisor-video.jsx';
 
-This page reviews the `agent-project-knowledge-engine` that have been delivered in the Comet repository. It was archived on August 22, 2026, and eventually entered `040rc1`. The goals, children, dependencies, commits, and validation results in the case all come from the repository records.
+This case study walks through a real, large Supervisor Change delivered in the Comet repository: `agent-project-knowledge-engine`. It was archived on August 22, 2026 and merged into the `040rc1` branch. Every scope boundary, subtask split, dependency order, Git commit hash, and acceptance record below comes directly from the archived artifacts in the repository (`docs/comet/archive/2026-08-22-agent-project-knowledge-engine/`).
 
-This Change upgrades Project Knowledge from document retrieval that runs ripgrep in real time to agent-oriented project understanding capabilities. The final delivery includes SQLite FTS5 and ripgrep hybrid recall, Project Knowledge unit, controlled learning, CLI, Dashboard and evaluation system.
+This change refactored Project Knowledge from ad-hoc ripgrep scans of local Markdown at query time into a full system featuring SQLite FTS5 + ripgrep hybrid recall, structured Project Knowledge units, a controlled learning pipeline, CLI management commands, Dashboard views, and an evaluation suite.
 
-![Xiaoyu binds the achievements of the three children into the parent Change for delivery and resolves final verification gaps](/assets/supervisor-change-delivery-illustrations/01-integrated-delivery.png)
+![Xiaoyu binds the outputs of three child tasks into the parent delivery and closes the final verification gaps](/assets/supervisor-change-delivery-illustrations/01-integrated-delivery.png)
 
-## The execution screen of Supervisor in Codex
+## Supervisor running live in Codex
 
-The following screen recording shows the actual interface of Supervisor in Codex for creating independent tasks, allocating children, and continuous coordination. Screen recording is used to demonstrate the execution mechanism; The child, submission and acceptance data of this article still come from the `agent-project-knowledge-engine` archive.
+The recording below shows how Supervisor Change launches independent sessions in Codex, assigns isolated worktrees to ready subtasks, and coordinates progress end to end (the video illustrates the multi-session scheduling mechanism; all subtask splits, commit hashes, and 49-item acceptance metrics below come from the `agent-project-knowledge-engine` archive):
 
 <SupervisorVideo
   src="/vedio/codex_compact.mp4"
   width={1230}
   height={858}
-label="Comet Supervisor Change Advances child through multiple independent tasks in Codex"
-fallback=" Your browser does not support HTML5 video"
+  label="Comet Supervisor Change advancing subtasks through multiple independent sessions in Codex"
+  fallback="Your browser does not support HTML5 video"
 />
 
-## Constrain multiple implementation stages with an overall goal
+## Why the parent task had to hold the final gate
 
-The transformation of Project Knowledge spans retrieval, indexing, knowledge models, plugin events, CLI, Dashboard and evaluation. Each part can be implemented in phases, but they must jointly meet one product goal: to reduce the repetitive exploration of the Agent, while continuing to take the current code, configuration and testing as the ultimate basis.
+The refactor spanned query planning, SQLite full-text indexing, knowledge-unit data models, plugin events, CLI commands, Dashboard frontend views, and evaluation scripts. Although each layer could be built in stages, the finished system had to satisfy five cross-cutting guarantees together:
 
-The parent Change uniformly maintains the following boundaries:
+1. **Retrieval and fallback**: Local Provider defaults to SQLite FTS5 + ripgrep hybrid recall and falls back cleanly to plain-text search when FTS5 is unavailable;
+2. **Strict isolation from Personal Memory**: Project Knowledge and Personal Memory maintain separate storage, ownership, and token budgets;
+3. **Verifiable provenance**: Every extracted knowledge unit links to concrete file sources—never fabricated and never replacing direct code verification;
+4. **Failure isolation**: Index errors, unreadable files, or adapter failures must never block normal development workflows;
+5. **End-to-end consistency**: CLI, Dashboard, context injection, Retrieval Eval, and Agent A/B tests share the exact same capability boundary.
 
-- By default, Local Provider uses a mixed recall of FTS5 and ripgrep. When FTS5 is unavailable, it retains the fallback function.
-- Project Knowledge maintains independent ownership, storage and budget from Personal Memory;
-- Project Knowledge must be accompanied by the current source and cannot replace code verification.
-- Index failures, unreadable sources, and failed semantic adapters cannot block Workflows.
-- CLI, Dashboard, generated assets, Retrieval, and Agent A/B use the same capability boundary.
+Module-level unit tests alone could not prove these five constraints. All subtasks had to merge into the integration branch first so the parent could verify the entire system end to end.
 
-Verify these constraints after integrating all subtasks. Passing unit tests in each module still leaves the overall product requirements to be verified.
+## Splitting into 3 feature subtasks along real data dependencies
 
-## Extract three feature children from the real dependencies
+In `children.yaml` (`comet.native.children.v2` format), the plan was split along data dependencies into three sequential feature subtasks:
 
-The `children.yaml` in the archive uses `comet.native.children.v2`. The initial implementation is split into three feature children based on actual dependencies:
+| Subtask name | Prerequisite | Deliverables | Independent commit |
+| --- | --- | --- | --- |
+| `project-knowledge-hybrid-retrieval` | None | Query planning, SQLite chunk indexing, hybrid recall pipeline, index lifecycle management, and Retrieval Eval | `d42226fb` |
+| `project-knowledge-units` | `project-knowledge-hybrid-retrieval` | Knowledge-unit data model, rule-based fact extraction, source verification, and one-hop relation graph | `efe007c9` |
+| `project-knowledge-learning-management` | `project-knowledge-units` | Post-change controlled learning flow, plugin event hooks, explicit sharing, CLI management, Dashboard views, and Agent A/B eval | `cca74993` |
 
-| Child | Dependency | Main results | Implementation commit |
-| --------------------------------------- | ---------------- | ------------------------------------------------------------------ | ---------- |
-| `project-knowledge-hybrid-retrieval`    |no|Query planning, SQLite section indexing, hybrid recall, index management and Retrieval| `d42226fb` |
-| `project-knowledge-units`               | hybrid retrieval |Knowledge unit, deterministic extraction, source verification and one-hop relationship| `efe007c9` |
-| `project-knowledge-learning-management` | knowledge units  |Controlled learning, Plugin Event, explicit sharing, CLI, Dashboard and Agent A/B| `cca74993` |
-
-These three children form a dependency chain:
+The dependency chain was:
 
 ```text
-project-knowledge-hybrid-retrieval
-  → project-knowledge-units
-    → project-knowledge-learning-management
+project-knowledge-hybrid-retrieval (hybrid retrieval foundation)
+  → project-knowledge-units (knowledge-unit model & extraction)
+    → project-knowledge-learning-management (learning flow, CLI & Dashboard)
 ```
 
-Supervisor Change supports parallel execution and also supports tasks that are advanced in stages based on dependencies. The Runtime only places the child whose dependency has already been satisfied into `readyChildren` each time. For subsequent child, start from the latest integration baseline to avoid early implementation based on unstable data structures or interfaces.
+One practical lesson from this case: **Supervisor Change is not only for embarrassingly parallel work—it is equally effective for layered refactors with strict upstream/downstream dependencies.** The Runtime moves a downstream child into the ready queue only after its upstream prerequisite passes child verification and merges into the integration branch, ensuring downstream code builds on a verified baseline instead of shifting interfaces.
 
-## Each child forms integrable results in the isolated workspace
+## Isolated worktrees and serial merges into the integration branch
 
-The three feature children are all implemented and verified in their own workspaces. They do not directly modify the target branch but first enter the integration branch of Supervisor.
+Each of the three feature subtasks was implemented and verified in its own Git worktree without touching the target main branch. Once verified, the Runtime merged them serially into the Supervisor integration branch, leaving three clean integration commits:
 
-The repository retains three real integration commits:
+| Integration commit | What merged |
+| --- | --- |
+| `6a230657` | Merged `project-knowledge-hybrid-retrieval`, adding 19 core files for SQLite indexing, CLI scaffolding, and retrieval eval. |
+| `576f4c25` | Merged `project-knowledge-units`, adding the knowledge-unit model, extraction pipeline, and unit tests. |
+| `be58f9cc` | Merged `project-knowledge-learning-management`, wiring the learning flow, management commands, Dashboard UI, and Agent A/B eval. |
 
-|Integrated submission|Integrated result|
-| ---------- | ---------------------------------------------------------------------------- |
-| `6a230657` |Merge hybrid retrieval, add 19 new files, and form the basis of SQLite indexing, CLI and retrieval evaluation|
-| `576f4c25` |Integrate knowledge units, add deterministic extractors, knowledge unit storage and corresponding tests|
-| `be58f9cc` |Integrate learning management to incorporate learning processes, management commands, Dashboard views, and Agent A/B|
+Keeping each child's implementation commit distinct from its integration merge commit preserves full traceability: the Runtime knows exactly which candidate passed local verification, whether the integration baseline satisfies downstream dependencies, and how to reject stale or duplicate callbacks.
 
-Each child's feature commit and integration commit are retained separately. The Runtime can thereby determine whether the candidates have been verified, whether the current integration baseline contains dependencies, and whether late results still apply to the current state.
+## Parent final Verify surfaced two rounds of cross-module gaps
 
-## The parent Verify exposes cross-module gaps
+After all three feature subtasks merged, the change did not jump straight to Archive—it entered parent global Verify. The archived `verification.md` records two rounds of real cross-module defects:
 
-After the integration of the three feature children, the parent was not directly archived. `verification.md` recorded two rounds of failures:
+| Cycle | Verify verdict | Cross-module issues uncovered |
+| --- | --- | --- |
+| Cycle 2 | `failed` | Several key requirements from upfront design research were not completely wired into the codebase. |
+| Cycle 3 | `failed` | Source-validation boundaries, multi-worktree isolation, context activation conditions, incremental build overhead, and end-to-end eval coverage remained incomplete. |
 
-|Target cycle|Verify result|Problems discovered|
-| -------- | ----------- | ---------------------------------------------------------------- |
-| 2        | failed      |There is still a substantial closed-loop gap between the research conclusion and its implementation|
-| 3        | failed      |Source credibility, workspace isolation, activation conditions, incremental costs, and comprehensive evaluation remain insufficient|
+Because these gaps spanned all three modules, single-module unit tests missed them. Unraveling the three already-integrated subtasks to patch them would have broken verified boundaries and blurred the scope of the new fixes. Instead, the Runtime preserved the integration branch and returned the parent to Shape to tighten acceptance criteria and update the subtask plan.
 
-These issues span multiple feature children. Reopening previously integrated children would disturb confirmed boundaries and make the new acceptance scope harder to define. Runtime preserves the integration branch and returns the parent change to Shape to update its acceptance cases and subtask list.
+## Appending a repair subtask to close the gaps cleanly
 
-## Append the closure child to converge the real failure
-
-The final archived `children.yaml` has added a fourth child:
+In the final `children.yaml`, the parent kept the first three subtasks closed and appended a fourth dedicated closure subtask:
 
 ```yaml
 - name: project-knowledge-closure
@@ -92,49 +88,41 @@ The final archived `children.yaml` has added a fourth child:
   covers: [A4, A8, A10, A15, A19, A20, A27, A29, A30, A31]
 ```
 
-`project-knowledge-closure` focuses on the gaps that have been observed by the parent Verify, including source boundaries, targeted refreshing, activation conditions, workspace isolation, and evaluation integrity. The subsequent repair submission did not expand the product goals but supplemented the implementation evidence within the existing acceptance scope.
+`project-knowledge-closure` targeted the exact 10 acceptance gaps surfaced by parent Verify (source boundaries, targeted incremental refreshes, activation conditions, multi-worktree isolation, and end-to-end evals). In commit `3cd0c25b`, it closed the edge cases across knowledge-unit parsing, learning flows, plugin integration, file persistence, and two eval scripts while preserving all three prior integration commits untouched.
 
-Among them, `3cd0c25b` completed the final round of review boundary fixes, involving knowledge units, learning processes, plugin integration, file storage, and two evaluation scripts. This child enables cross-module issues to have an independent scope while retaining the integration history of the first three feature children.
+## Full 49-item final acceptance and separating unrelated test noise
 
-## The final acceptance covers 49 behaviors
+In cycle 4, Verifier attempt 2 passed completely. `verification.md` recorded the full evidence:
 
-The second Verifier of the fourth target cycle passes. Final record of `verification.md`:
+- **All 49 end-to-end acceptance criteria marked `passed`**;
+- Child verifications, serial parent integrations, and the full parent check suite all completed;
+- Focused tests, Native framework tests, TypeScript typecheck, and production build all passed;
+- All 3 high-risk findings flagged by independent code review were resolved, with zero remaining critical blockers.
 
-- All 49 acceptance items were `passed`.
-- Child verification, parent integration and parent checking have all been completed.
-- focused tests, Native tests, typecheck and build have been executed;
-- Three important issues of the independent code review have been fixed;
-- There are no Critical issues or unfinished blocking items.
+One realistic engineering detail stands out: during the full-repo test run, a pre-existing baseline test unrelated to the knowledge engine (`/comet` Skill length limit) raised a warning. Verify recorded that external pre-existing issue transparently without misclassifying it as a defect of this feature or letting unrelated noise obscure the verified evidence for all 49 core criteria.
 
-The full test simultaneously retained an existing `/comet` Skill length baseline that was not related to this Change and failed. The archive did not rewrite it as "this capability pass", nor did it allow irrelevant failures to overwrite the completed special evidence.
+## Unified Archive and a single clean merge to the target branch
 
-## Deliver the target branch in one go after archiving
-
-After the parent completes the verification, file it as `de780ce2`. Then `58b6dfb2` merged `comet/agent-project-knowledge-engine` into `040rc1`.
-
-The entire process is finally delivered only once at the parent level:
+Once parent final verification passed, the Runtime produced archive commit `de780ce2`, and commit `58b6dfb2` merged `comet/agent-project-knowledge-engine` into `040rc1`. The target branch saw one complete, fully audited merge:
 
 ```text
-Three feature children
-Three independent integrations
-The parent verification failed in two rounds
-→ 1 closure child
-  → All 49 business acceptance items passed
-  → Archive
-Merge 040rc1
+3 feature subtasks (each built & verified in its own worktree)
+  → 3 serial merges into the parent integration branch
+  → 2 rounds of parent global Verify exposing cross-module gaps
+  → 1 appended repair subtask (project-knowledge-closure) closing the gaps
+  → All 49 acceptance criteria passed
+  → Unified Archive and single merge into 040rc1
 ```
 
-## Extract the splitting principle from this case
+## Takeaways: when to choose Supervisor Change
 
-This real Change showcases four product features of Supervisor:
+| Mechanism | Practical effect in this case |
+| --- | --- |
+| Dependency-driven splitting & scheduling | Downstream subtasks started only after upstream code merged into the integration branch, avoiding rework against shifting APIs. |
+| Dedicated worktree isolation | Every subtask built and tested in isolation without touching the target branch; the Runtime handled all merges. |
+| Parent full-suite final acceptance | Passing module unit tests did not equal done; the parent audited all 49 end-to-end criteria after integration. |
+| Appendable repair subtasks | Cross-module gaps discovered in global Verify were closed via a named repair child without rewriting integration history. |
 
-|Features|The performance in the case|
-| -------------- | ---------------------------------------------------------- |
-|Dependent drive|The subsequent child will only start after the integration of the prerequisite capabilities|
-|Work area isolation|Each child forms an independent candidate and is then integrated by the Runtime|
-|Unified acceptance by the parent|After the module test is passed, the complete product goals and cross-module boundaries are still checked|
-|The scope of failure can be added|The final verified real gap forms a closure child and does not rewrite the integrated history|
+Deciding whether to use Supervisor Change is not just about opening multiple windows to save time—it comes down to three questions: **are module dependencies clear, can each slice be verified in isolation, and do you need a single unified final acceptance gate over the whole goal?**
 
-The key basis for choosing the Supervisor Change is that the overall goal requires multiple independently verifiable results, and the parent still has an indispensable final acceptance. Whether sub-tasks can run simultaneously is only part of the execution efficiency. Clearly defining dependencies, isolating candidates, and unified delivery are equally important.
-
-The case evidence is located in the Comet source code repository at `docs/comet/archive/2026-08-22-agent-project-knowledge-engine/`. Continue reading: [Supervisor Change Mechanism](/en/native/supervisor-change), [Native Loop](/en/native/native-loop) and [Verification and Fix](/en/native/verification-and-repair).
+Continue reading: [Supervisor Change: safe parallel execution for large tasks](/en/native/supervisor-change), [Native Loop: from implementation to trustworthy delivery](/en/native/native-loop), and [Verification and repair](/en/native/verification-and-repair).

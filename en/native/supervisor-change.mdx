@@ -1,101 +1,87 @@
 ---
-title: 'Supervisor Change: Safe Parallel Execution for Large Tasks'
-description: 'Decompose complex targets into independent subtasks, execute them in parallel across isolated workspaces, and unify integration with full-suite acceptance and delivery.'
+title: 'Supervisor Change: safe parallel execution for large tasks'
+description: 'Split large cross-module requirements into independently verifiable subtasks, develop and verify them in isolated Git worktrees, integrate serially, and run full final acceptance.'
 ---
 
 import { SupervisorVideo } from '/snippets/supervisor-video.jsx';
 
-When tackling large, composite requirements (such as "Refactoring the authentication system: token issuance, frontend login page, and audit logs"), having a single Agent work through one long conversation often leads to context exhaustion, missed changes, or code regression.
+When a requirement spans multiple subsystems or sequential migration steps (such as refactoring an authentication token API, a frontend login page, and audit logging together), having a single Agent work end to end in one long session often fills the context window, misses edge cases, or introduces regressions.
 
-**Supervisor Change is Native workflow's parallel delivery architecture for complex multi-module requirements**:
+**Supervisor Change** is Native's parallel orchestration architecture for large tasks:
 
-1. **Precision Decomposition by Acceptance Criteria**: Breaks large goals into a topologically ordered directed acyclic graph (DAG) of subtasks (child changes), where each subtask owns concrete acceptance items;
-2. **Workspace Isolation**: Each subtask runs in its own dedicated Git worktree, allowing multiple agents to code in parallel without concurrent modification conflicts;
-3. **Verify First, Integrate Second**: Subtask code is only merged into the integration branch by the Runtime after passing its own independent Verify stage;
-4. **Unified Global Final Acceptance**: After all subtasks are integrated, the main task triggers a 100% comprehensive end-to-end regression verification against the complete system goal.
+1. **Split by independently verifiable outcomes**: During Shape, the parent requirement is split into subtasks with explicit dependency order (stored in `children.yaml`). Each child owns concrete acceptance criteria, while cross-module end-to-end acceptance stays with the parent.
+2. **Physical isolation via dedicated branches and worktrees**: The parent owns a dedicated integration branch and integration worktree; each ready child runs on its own branch (`comet/supervisor/<parent>/<child>`) and worktree so concurrent edits never collide.
+3. **Verify each child before serial integration**: After a child passes Verify in its own worktree, the Runtime merges it serially into the integration branch and runs integration checks. If integration fails, repair happens in the integration worktree without touching the project's main branch.
+4. **Full final verification after complete integration**: Once every child is integrated, the parent runs final Verify in the integration worktree against all acceptance criteria from the original request, then delivers, archives, and safely cleans up temporary worktrees.
 
 ```mermaid
 flowchart TD
-  M["High-Level Requirements"] --> S["Shape: Decompose Subtasks & DAG"]
-  S --> C1["Subtask A: Core Auth API<br/>(Dedicated worktree)"]
-  S --> C2["Subtask B: Audit Logs<br/>(Dedicated worktree)"]
-  C1 --> C3["Subtask C: Frontend Login<br/>(Depends on A; unlocked when ready)"]
-  C2 --> C3
-  C1 -->|Verified individually| I["Integration Branch<br/>Runtime serial merge"]
-  C2 -->|Verified individually| I
-  C3 -->|Verified individually| I
-  I --> V["Global Final Verify Acceptance"]
-  V -->|All pass| A["Unified Archive & Delivery"]
+  M["Large composite requirement"] --> S["Shape: confirm plan, children.yaml, and coordination mode"]
+  S --> P["Runtime creates parent integration branch & worktree"]
+  P --> C1["Child A: Core auth API<br/>(comet/supervisor/parent/A)"]
+  P --> C2["Child B: Audit logging<br/>(comet/supervisor/parent/B)"]
+  C1 -->|"Child Verify passes → serial merge to integration branch"| C3["Child C: Frontend login page<br/>(Depends on A; unlocked after merge)"]
+  C2 -->|"Child Verify passes → serial merge to integration branch"| I["Integration checks<br/>(Integration repair if failed)"]
+  C3 -->|"Child Verify passes → serial merge to integration branch"| I
+  I --> V["Parent final Verify (covers all acceptance criteria)"]
+  V -->|"All pass"| D["Delivery → Archive → Clean up clean temp worktrees"]
+  V -->|"Failed or rejected"| F["Repair in integration worktree<br/>or append named repair child"]
+  F --> V
 ```
 
-## Core Engineering Guarantees
+## When to split and when not to split
 
-| Core Feature | Practical Engineering Value |
-| --- | --- |
-| Decomposed by Acceptance Criteria | Each subtask maps to explicit test cases, eliminating ambiguous divisions of labor |
-| Dependency Topology Scheduling | Runtime only activates subtasks whose prerequisites have passed, preventing downstream tasks from jumping the gun |
-| Workspace Isolation | Each subtask works exclusively inside its own Git worktree, preventing conflicts between concurrent agents |
-| Tamper-Proof Cryptographic Receipts | Task packages, integration baseline commits, and `runId` tokens form a strict receipt, rejecting stale or foreign callbacks |
-| Global Regression Acceptance | Conducts full-system verification after all subtasks are merged, ensuring the entire product functions cohesively |
+After confirming scope and acceptance criteria in Shape, Comet evaluates whether to recommend upgrading to a Supervisor Change:
 
-## Task Decomposition Criteria
+- **Good fit for splitting**: The work splits into at least two subtasks that can be coded and verified independently (for example, distinct subsystems or phased migrations with clear handoff interfaces), dependencies are clear, and parallel execution or staged handoff provides real benefit. When these conditions hold, the Agent recommends Supervisor Change as the preferred option.
+- **Keep as a single Change**: Edits are concentrated in the same core files or tightly coupled modules where splitting creates higher merge and coordination overhead, or you explicitly ask for a single Native Change. **A long PRD or a high number of acceptance items alone does not trigger splitting.**
 
-Comet evaluates whether a task warrants decomposition before finalizing the Shape phase. Supervisor Change is only recommended when all of the following conditions are met:
+## Confirming the split plan and choosing a coordination mode
 
-- The overall goal naturally decouples into two or more independently implementable and testable subtasks;
-- Every acceptance item in the original requirement can be assigned to a designated subtask without gaps;
-- Input/output dependencies between subtasks can be modeled as a clear DAG;
-- Parallel execution or phased delivery genuinely reduces the end-to-end delivery cycle.
+Before final Shape confirmation, the Agent displays the subtask plan from `children.yaml`—each child's goal, dependency order (`depends_on`), assigned acceptance criteria (`covers`), and the integration criteria retained by the parent—and asks you to choose one of two coordination modes:
 
-If all changes modify the exact same hotspot file, or if coordination costs outweigh the benefits of concurrency, Comet keeps the change as a single sequential Native Change.
+| Option | Coordination mode | Execution model | Concurrency limit |
+| --- | --- | --- | --- |
+| **A** | **Multi-session / Agent Teams (Recommended)** (`multi-session`) | The current session acts as coordinator—dispatching work, tracking progress, integrating results, and running final verification—and launches independent sessions or Agent Teams members for ready children (falling back to subagents if the platform does not support them). | Defaults to `2`; configurable via `native.max_parallel_children` in `.comet/config.yaml` (takes effect on the next dispatch). |
+| **B** | **Single-session sequential** (`single-session`) | Uses the same split scope, dependency order, and verification gates, advancing children one at a time in the current session. | Fixed at `1`. |
 
-## Reviewing the Plan and Selecting a Coordination Mode
+Key notes:
 
-Before finalizing the Shape phase, Comet displays the subtask decomposition matrix, dependency flow, and acceptance mapping. When approving the plan, you can select the coordination mode:
+- You can confirm the complete plan and pick a coordination mode in a single reply (for example, "Confirm the plan, choose A"). Replying "Confirm" without picking a mode, or picking a mode without confirming the plan, will not start Build yet.
+- If your initial prompt already specified "use multi-session" or "use Agent Teams", Comet treats that as Option A without asking again.
+- Once selected, the Runtime saves `coordination_mode` in `comet-state.yaml` and reuses it automatically on resume without asking again.
 
-| Coordination Mode | Execution Mechanism | Ideal Environment |
-| --- | --- | --- |
-| **A. Multi-Session Collaboration (Recommended)** | The primary session serves as coordinator, scheduling independent sessions or Agent Teams in parallel | Platforms supporting concurrent sessions (such as Codex or Claude Code Agent Teams); falls back to subagents otherwise |
-| **B. Single-Session Advancement** | In the current terminal session, the agent advances through subtasks sequentially along the dependency topological order | Resource-constrained environments or when stepping through subtasks sequentially |
+## Dependency-based batch scheduling and workspace isolation
 
-Once selected, the Runtime records your choice in the state file and reuses it upon resume.
+After full Shape confirmation, the Runtime creates the parent integration branch and integration worktree, then schedules children in batches according to the DAG:
 
-## Exclusively bound workspaces
+- **No jumping ahead of unmet dependencies**: A downstream child enters the ready queue only after **all** prerequisites in its `depends_on` list reach `integrated`.
+- **Bounded concurrency**: Each round dispatches at most `max_parallel_children - active_children` new subtasks.
+- **Clear task ownership**: Each ready child's pending task specifies its child name, scope, dedicated worktree path, current integration baseline commit, and assigned acceptance items.
 
-Once the Shape plan is approved, the Runtime creates a dedicated integration branch and integration worktree for the main task, and prepares isolated Git worktrees for ready subtasks.
+In multi-session mode, Hook Guard prevents the parent session from editing application source code directly during Build. Child executors write only in the worktree assigned by the Runtime and hand results back to the primary session, which submits them in order while preserving the original Action, child session identity, and result structure. Children cannot directly mutate parent state or the project's target branch.
 
-Each dispatched task package contains:
-- The subtask's assigned acceptance criteria and responsibilities;
-- Its exclusive working directory path;
-- The baseline commit hash of the integration branch;
-- A tamper-proof `runId` credential;
-- Clear exit criteria and constraints.
+## Running concurrently across platforms
 
-In multi-session mode, a maximum of 2 child tasks run concurrently by default (configurable via Dashboard or `native.max_parallel_children`). Single-session mode runs subtasks sequentially.
+### Codex: multiple independent sessions
 
-## Live Platform Concurrency Demos
-
-### Multi-Session Parallel Execution in Codex
-
-In Codex, selecting multi-session mode elevates the current session into the Supervisor. It dispatches subtasks, polls progress, orchestrates code integration, and runs final acceptance. Each subtask executes in an isolated visible session:
+When you select multi-session mode in Codex, the current session acts as coordinator and opens an independent session for each ready child inside the child worktree created by the Runtime (do not let Codex create a separate set of worktrees):
 
 <SupervisorVideo
   src="/vedio/codex_compact.mp4"
   width={1230}
   height={858}
-  label="Comet Supervisor Change coordinating multiple independent sessions in Codex"
+  label="Comet Supervisor Change executing subtasks through multiple independent sessions in Codex"
   fallback="Your browser does not support HTML5 video"
 />
 
-### Concurrency via Agent Teams in Claude Code
+### Claude Code: Agent Teams
 
-In Claude Code, you can leverage Agent Teams to run subtasks in parallel. Enable the experimental flag in your terminal:
+After enabling Agent Teams in an interactive Claude Code terminal, the current session acts as Team Lead and assigns a Teammate to each ready child in its designated worktree:
 
 ```bash
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1"
 ```
-
-The primary session acts as Team Lead, assigning teammates to ready subtasks. Teammates code strictly within their assigned subtask worktrees without touching the main branch:
 
 <SupervisorVideo
   src="/vedio/claude%20code_compact.mp4"
@@ -105,36 +91,37 @@ The primary session acts as Team Lead, assigning teammates to ready subtasks. Te
   fallback="Your browser does not support HTML5 video"
 />
 
-## Verify first, integrate second
+If a platform does not support independent sessions or Agent Teams—or if external sessions are lost after recovery—Comet falls back to subagents under `multi-session` instead of silently switching to `single-session`.
 
-Each subtask strictly follows a complete lifecycle:
+## Child verification, serial integration, and integration repair
 
-```text
-active (coding) → verified (acceptance passed) → integrated (merged into integration branch)
-```
+Every child runs through four steps in order:
 
-1. **Subtask Coding**: The Builder implements the feature in the subtask's dedicated worktree;
-2. **Subtask Verification**: The Verifier audits code commits and verifies that subtask's specific acceptance criteria;
-3. **Receipt Validation and Merge**: After verification passes, the Runtime merges the subtask's commit into the integration branch and executes integration build checks;
-4. **Unlocking Downstream Tasks**: Once a subtask reaches `integrated`, dependent downstream tasks move into the `readyChildren` pool.
+1. **Child Build**: Implements the feature in its dedicated worktree, runs checks, and submits a candidate commit.
+2. **Child Verify**: Evaluates every acceptance item owned by that child with per-item verdicts of `passed`, `failed`, or `blocked` (and an overall verdict of `pass`, `fail`, or `blocked`, using either current-session or independent review). Failed children are fixed and resubmitted in the same worktree.
+3. **Validation and serial merge into the integration branch**: After confirming the branch path, candidate commit hash, and bound passing Verifier record all match, the Runtime merges children one by one into the parent integration branch in Run order. Children are never archived individually and never merge directly into the target main branch.
+4. **Integration checks and integration repair**: If post-merge integration or extended checks fail, the workflow does not roll back to the main branch or break apart completed children. Instead, it creates an integration repair task in the parent integration worktree. After the fix is committed, the Runtime verifies ancestry (`git merge-base --is-ancestor`) to confirm the new commit builds on the failed merge commit, checks that the worktree is clean and all checks pass, and then unlocks downstream children.
 
-Subtasks never trigger final archival individually and cannot merge directly into the project main branch.
+## Parent final verification, delivery, and safe cleanup
 
-## Global Final Verify Acceptance After Full Integration
+Once every child is integrated, the Runtime automatically starts **global final Verify** in the parent integration worktree against all acceptance criteria from the original request (reusing still-valid child checks and adding cross-module integration tests):
 
-When all subtasks achieve `integrated` status, the Runtime triggers the **global final Verify phase** inside the integration worktree, running the complete test suite against 100% of the initial requirements.
+- **All criteria pass**: Enters the delivery, archive, and cleanup pipeline:
+  1. **Cleanup preflight**: Before parent delivery modifies the target branch, the Runtime runs a cleanup preflight across all temporary child worktrees and the integration worktree to surface any uncommitted changes (`dirty worktree`) or unexpected state early.
+  2. **Delivery and Archive**: Delivers the verified integration commit to the target branch, merges confirmed Specs, and archives the change directory.
+  3. **Safe cleanup**: Deletes temporary child worktrees, the integration worktree, and temporary branches only after confirming that Archive succeeded, the target branch points to the exact verified integration commit, and every temporary worktree created for this Run is clean and unoccupied. If uncommitted files or active locks are found, the Runtime preserves the workspace and reports the blocker rather than force-deleting.
+- **Parent verification fails or is rejected**: Previously integrated children are not reopened. The Runtime creates a parent repair task in the integration worktree to submit a new candidate commit and re-verify; if an isolated patch is cleaner, you can also append a uniquely named repair child covering valid acceptance IDs. If the issue requires changing overall requirements or the split plan, the Agent initiates a requirement revision in the background and returns to Shape for reconfirmation.
 
-- **All Tests Pass**: The change unlocks the Archive phase to merge into the main branch or generate a pull request;
-- **Acceptance Fails**: The Runtime preserves the integration branch state without unrolling completed subtasks. It appends a dedicated "repair subtask" addressing the failed test cases, guides you through confirming the fix scope, and re-verifies before archival.
+## Interruption recovery and cross-checkout transfer
 
-## Breakpoint Recovery and State Restoration
+The Supervisor's child dependency graph, coordination mode, task claims, and integration progress are persisted continuously. If your session disconnects, return to the original workspace and type `/comet continue`; the Agent reads the full state in the background and resumes scheduling:
 
-Subtask DAG topologies, ready queues, and integration progress are continuously persisted to local files. If your session disconnects or you restart your terminal, prompt your Agent:
+- If external sessions or Agent Teams members disappear, the Agent first checks the original platform to verify whether subtasks are still running rather than assuming a disconnect means completion.
+- If you need to move an in-progress Supervisor Child Build (including the parent checkpoint, multiple branches, worktrees, and uncommitted code) to another machine or local checkout, confirm all related Agents have stopped and run the transfer commands in your terminal:
+  ```bash
+  comet native transfer export <change-name> --output <new-private-directory> --confirmed-stopped
+  comet native transfer import --input <export-directory>
+  ```
+  See [Native task recovery](/en/native/recovery-playbook#transfer-in-progress-supervisor-subtasks) for full verification checks and recovery rules.
 
-```text
-/comet continue
-```
-
-Comet restores the exact state from disk. If original external session processes or team agents are lost, Comet automatically rescans and switches to subagents to continue, preserving all completed code and verification receipts.
-
-Further reading: [Native Loop Core Cycle](/en/native/native-loop), [Multi-Change Concurrency and Conflict Control](/en/native/multi-change-and-conflicts), and [Recovery Playbook](/en/native/recovery-playbook).
+Continue reading: [Native Loop: from implementation to trustworthy delivery](/en/native/native-loop), [Parallel changes and conflict control](/en/native/multi-change-and-conflicts), and [Native configuration](/en/native/configuration).

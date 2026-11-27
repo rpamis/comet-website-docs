@@ -1,145 +1,220 @@
 ---
-title: 'Native Task Recovery'
-description: 'Learn how Native continues tasks from the nearest secure node after a session interruption, device switch, workspace change, or Archive interruption.'
+title: 'Native task recovery'
+description: 'Troubleshoot and recover from session interruptions, unknown-outcome actions, Builder or Verifier failures, branch mismatches, missing local Runs, cross-device switches, and interrupted Archives.'
 ---
 
-When investigating an interruption, do not modify files first: preserve all uncommitted changes and state files, then have the Agent read `comet native status <change-name> --details --json` and `comet native doctor <change-name> --json`. New tasks recover through their SDK Run and valid portable checkpoint. Local records live in the user Comet data directory, isolated by workspace.
+When a Native task stops because of a crashed session, dropped connection, reboot, accidental branch switch, or interrupted Archive, **preserve the current state first: do not delete state files and do not recreate a change with the same name**.
 
-## Recover an SDK task
+For day-to-day recovery, return to the Agent chat in the original workspace and describe what happened (for example, type `/comet continue` or say "Check where that task stopped without editing code first"). The Agent runs read-only diagnostics in the background, verifies the current stage, pending actions, and blockers, and tells you how to proceed—**you do not need to memorize or type long recovery commands yourself**.
 
-1. Identify the original project, worktree, change, and application version.
-2. Read current Actions and the next step. Continue pending work under its existing identity; reconcile running or unknown work with the original session, processes, and actual side effects.
-3. Repeat only missing or invalid checks, retaining applicable results and decisions. Reconfirm Shape when requirements change.
-4. Execute only recovery operations offered by Runtime. Do not delete the original Run, rewrite checkpoints, or submit invented success.
+Native recovers reliably across interruptions because of its **two-layer persistence design**:
 
-After manual changes to requirements or implementation, have the Agent inspect the edits and follow the path provided by Runtime. Changed requirements need reconfirmation; affected checks and checks that cannot be proven valid must run again. Recovery of an interrupted Archive does not repeat completed checks or Spec updates.
+- **Complete local Run record (`Run`)**: Stored in the Comet data directory under your home directory and isolated per workspace. It records every action claim, submission receipt, pending confirmation, and archive step.
+- **Git-synced recovery checkpoint (`run_checkpoint`)**: Stored in `comet-state.yaml` inside the repository and synced alongside `brief.md`, target Specs, and code. Even if you switch machines or clear the local data directory, you can restore the original task from the repository checkpoint without leaking local session tokens or carrying over in-flight actions.
 
-`native archive --recover` handles only recognized Archive, integration-delivery, or cleanup interruptions. It does not establish the outcome of unknown operations. If all local records are missing and no valid checkpoint exists, retain the code and follow Doctor's decision path; do not claim that previous verification remains valid. See [SDK recovery](/en/sdk/recovery).
+## Quick recovery lookup by symptom
 
-<Note>
-  The automatic rebuilding and legacy local directories below apply to Compat. They do not allow SDK
-  execution evidence to be recreated arbitrarily from a report or YAML.
-</Note>
+Match your situation in the table below to see what to tell the Agent in chat and what Comet handles in the background.
 
-<Accordion title="Compat: legacy task reference">
+| Symptom | Root cause | What you do (handled with the Agent) |
+| --- | --- | --- |
+| Chat closed, window restarted, or context compacted | Chat context was lost, while the on-disk Run and pending state remain intact | Return to the original directory and ask the Agent to continue; it reads the latest state and resumes from `continuation`. |
+| Tool timeout while waiting on background tests or Verifier | A tool timeout does not mean the task failed; the original session may still be running | Ask the Agent to check the original session on its platform first: keep waiting if it is still running, or submit its result if it finished. |
+| Diagnostics report an action with an `unknown` outcome | The action was dispatched but interrupted before reporting back, and may have produced file or remote side effects | Check the original session plus actual workspace/remote state before reporting back; do not blindly redispatch. |
+| Builder failed partway through editing code (`failed`) | Partial edits exist in the workspace and the failure record is preserved | Review the diff and error, then tell the Agent either "continue fixing from the existing edits" or "revise the requirements and reconfirm". |
+| Verifier failed to start, errored, or hit an external blocker | The current candidate and valid check evidence remain intact | Ask the Agent to retry verification for platform errors, or supply the missing environment/permissions and resume verification. |
+| Switched to the wrong branch or opened the wrong directory | Current branch or directory does not match the Run's workspace binding | Switch back to the original branch or worktree, or ask the Agent to rebind an idle Run to the current branch. |
+| Switched computers, re-cloned the repo, or lost the local data directory | The repository contains a `comet-state.yaml` checkpoint, but the local Run is missing | Pull the code and ask the Agent to run diagnostics; once the checkpoint is confirmed valid, restore the original Run from it. |
+| Need to move an in-progress Supervisor child task to another checkout | Involves a parent checkpoint, multiple child branches, worktrees, and uncommitted edits | Confirm all relevant Agents have stopped, then run `comet native transfer export/import` in your terminal. |
+| Archive, delivery, or temporary worktree cleanup was interrupted | An archive pipeline step stopped in `unknown` or failed preflight | Confirm the original process has stopped, then ask the Agent to inspect the state and recover the unfinished archive transaction. |
+| After upgrading, old completed/canceled Runs report pending storage closure | Workflow work already ended; only historical storage partition migration remains | Upgrade both the CLI and platform Hooks, then have the Agent (or run in terminal) execute the historical storage migration once. |
+| Moving the artifact root directory was interrupted | `.comet/config.yaml` still holds an unfinished root-migration marker | Follow the prompt to continue or roll back the directory migration. |
 
-Native will automatically resume most interrupts. It retains the provable requirements, implementation progress and acceptance results in the repository, and only re-executes the lost native processes or verification evidence. You can directly continue with the original Change. The Runtime will read the current state, check the working directory, and return to a safe next step.
+## Handling `running` or `unknown` actions
 
-The recovery basis is stored in repository files: `brief.md`, the capability Specs, `comet-state.yaml` and `verification.md` fully record all confirmed deliverables; `.comet/runtime/native/` only keeps temporary execution records on the current machine and can be rebuilt as needed.
+When diagnostics report a `running` or `unknown` action, external work was dispatched and the Runtime has not yet received a confirmed outcome.
 
-## Automatic recovery mechanism
+Native **does not rely on OS PIDs or process trees to judge whether a task is alive**, nor does it kill processes by historical PID or automatically rerun commands. PIDs can be reused after a reboot or container rebuild, and killing a process cannot undo half-written files or already-sent remote requests.
 
-Each time the Change continues, Native will compare the repository status with the local execution record:
+In these cases, the Agent works through three steps with you:
 
-1. Find the actual branch or worktree where the Change is located;
-2. Read the most recent complete write of `comet-state.yaml`;
-3. Check whether the running task, test or Verifier has been interrupted;
-4. Rebuild the missing or expired local execution records;
-5. Proceed to the current stage based on the existing evidence or return to the position that requires re-verification.
+1. **Check the original platform session**: Inspect the Agent platform where the task was dispatched to see whether the session or subtask is still running. If it is, keep waiting instead of reclaiming or dispatching a duplicate.
+2. **Verify actual side effects**: If the session has exited, check `git status`, modified files, test logs, and any remote commits, pushed branches, or pull requests.
+3. **Advance based on verified facts**:
+   - **Confirmed outcome**: Have the original claimant report the result using its original claim identity (submitting the same result again is idempotent and will not double-advance the Run).
+   - **Sole `unknown` action in archive, delivery, or cleanup**: After confirming the original process has stopped, use the archive recovery path (see [Archive transaction recovery](#archive-transaction-recovery) below).
+   - **Outcome cannot be confirmed**: Preserve the workspace, note the missing evidence, and wait for manual verification rather than replaying operations with potential external side effects.
 
-When the Native records of Shape and Build are lost, Native will continue in the original stage, and the confirmed requirements and acceptance items remain unchanged. Verify or Archive relies on local execution evidence. When relevant records are lost, the current implementation will be re-verified.
+For the underlying protocol, see [SDK failure recovery and unknown results](/en/sdk/recovery).
 
-## Session interruption recovery
+## Recovering from Builder failures and Verifier errors
 
-Losing session context does not mean a background task has ended. On the same machine, the Agent first checks whether the original check or Verifier process is still running in the background and keeps waiting while the task is still executing. It retries only after confirming execution failure, a lost task, or an ended task with no usable result. After switching machines or when the local records are corrupted, recovery is based on the files committed in Git.
+### 1. Builder fails after partial edits
 
-| Interrupt location                                            | The processing method of Native                                                                                                                 |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Shape                                                         | Restore the saved issues and decisions and continue with the requirement confirmation                                                           |
-| Build                                                         | Retain the current requirements and implementation scope and continue from the existing code                                                    |
-| Verify at `verify-ready`                                      | Reuse the candidate and check information that are still valid, re-run the necessary checks, and start a new Verifier                           |
-| Verify is waiting for a result                                | Recover and wait for the original Verifier. Restart verification from the current candidate only after confirming that task was lost or failed. |
-| Archive is ready.                                             | Return to Verify and reconfirm the synchronized implementation and all acceptance items                                                         |
-| The repeatable check is running                               | Re-execute this check                                                                                                                           |
-| Tests that contain side effects and cannot be safely repeated | Return to Build, generate a new implementation candidate and then verify it                                                                     |
+When a Builder edits part of the codebase and submits `failed` due to an error, environment issue, or interruption, the Runtime preserves both the workspace code and the failure record. **Do not** discard the task to start over, and do not reset state manually.
 
-Revalidation caused by recovery is included in the execution of recovery, and the counts of implementation failure and continuous no progress remain unchanged. When a new Verifier is actually started, the number of Verifier attempts will increase normally.
+The Agent shows you which files changed, why the Builder failed, and the risk of continuing. Choose one of two paths in chat:
 
-## Continue across devices
+- **Continue from existing edits**: Tell the Agent you reviewed the changes and want to finish from the current code. In the background, the Agent submits the continue decision with the current proposal hash and state version. The Runtime creates a new Builder task tied to the original failure record in the same workspace, then runs checks and verification after completion.
+- **Revise requirements or narrow scope**: If the failure reveals an issue with the plan or acceptance criteria, describe the requirement adjustments in chat. The Agent returns the change to Shape for reconfirmation.
 
-Before switching machines, synchronize the following first:
+### 2. Verifier errors, blockers, or failed verification
 
-- Project code
-- `brief.md`, the target Specs, and `comet-state.yaml` in the Change
-- The generated `verification.md`
-- The matching `.comet/config.yaml` when a custom artifact directory is in use
+| Issue | What you do in chat | Background mechanism and preserved state |
+| --- | --- | --- |
+| Verifier platform error or unavailability | Ask the Agent to retry verification. | Retries verification in the background, keeping the current candidate and valid checks while creating a new verification task. |
+| Missing test environment, permissions, or external input (`blocked`) | Provide the missing prerequisite, then tell the Agent to resume verification. | Clears the verification blocker in the background, keeping the current candidate and valid checks (a completed Supervisor child resumes by creating a new Builder task). |
+| Verification finds code defects (`fail`) | Confirm fixing the failed items. | Triggers an implementation revision in the background, preserving the confirmed Shape and scope and returning to Build. |
+| Goals or acceptance criteria need to change | Describe the requirement changes. | Triggers a requirement revision in the background, keeping existing code and returning to Shape to update and reconfirm. |
 
-Once you open the same repository on the new machine, Native rebuilds local execution records from these files. Old processes, Agent sessions, and subagent tasks stay on the original machine. The new machine creates new execution tasks from the verifiable state in the repository.
+## Missing local Run and cross-device recovery
 
-Completed Shape and Build results are kept. When the Change is verifying or already waiting for Archive, the new machine re-verifies the synchronized code. Across recovery, the acceptance-failure count, the implementation-failure count, and the no-progress count stay unchanged.
+Complete local Runs are stored in the Comet data directory under your home directory and are never committed to Git. If you switch computers, re-clone the repository, or clear local caches, the repository still holds the change artifacts and `comet-state.yaml`, allowing you to restore progress from the checkpoint.
 
-Code that was never synchronized cannot be restored from the Change state. When the synchronized implementation does not satisfy the acceptance items, the new Verifier points out the unmet parts and returns the Change to Build.
+When writing `run_checkpoint`, the Runtime one-way redacts local session tokens, downgrades in-flight actions to `unknown`, and attaches tamper-evident hashes and history checks so cross-device recovery never leaks credentials or replays unfinished work. See [Task progress and interruption recovery](/en/native/continuation-and-checkpoints) for details.
 
-## Workspace restoration
+### Standard steps for switching devices
 
-Native will scan the worktree registered by Git and give priority to the working directory that is bound to the Change branch. Even if you start from the main directory of the repository, the Runtime can find the actual location of the Change and allow the Agent to continue in that directory.
+**On the old device**:
 
-When the current branch, worktree type, or project root does not match the Change record, the Runtime will pause the write and return to the expected directory. When the original directory still exists, the Agent will switch to the correct location. When worktree has been removed but the branch is still valid, Native can rebuild worktree.
+1. Stop advancing the task; if any action is still running, wait for it to finish or verify its outcome.
+2. Commit and push the following to the remote branch:
+   - Current code changes and the change branch;
+   - `comet-state.yaml`, `brief.md`, target Specs, and referenced artifacts under the change directory;
+   - `.comet/config.yaml` if you configured a custom artifact root.
 
-The following situations require you to confirm the workspace:
+**On the new device (or in a checkout missing the local Run)**:
 
-- The original branch has been renamed or taken over by other work.
-- There are multiple working directories that match exactly.
-- The original directory and branch have been lost.
-- The same "Change" status appears in different versions at two locations.
+1. Pull the repository, check out the branch, and tell the Agent in chat to continue the change (for example, "Continue `<change-name>` and check its status first").
+2. The Agent runs read-only diagnostics, confirms that the local Run is missing and the repository checkpoint is valid, and—after your confirmation—restores the original Run from `run_checkpoint`.
+3. The Runtime restores the stage, confirmed Shape, approvals, and history **without redoing completed Shape or Build work**. The Agent then checks for any `unknown` actions left unreported on the old device and reruns only checks that are invalid or missing on the new machine.
 
-You can choose a trusted directory, restore from a backup, or stop the Change. The Runtime will retain the existing files and wait for a clear decision.
+> Code that was never committed to Git cannot be restored from state files alone. If `git pull` produces merge conflicts or two conflicting versions of the same state version exist, resolve the Git conflict manually first—do not hand-edit `comet-state.yaml`.
 
-## Archive transaction recovery
+### Transfer in-progress Supervisor subtasks
 
-Archive will update the official Spec, final status and verification report in sequence, and then move the Change into the archive directory. Runtime uses transactions to record each step, so when a process exits halfway, it can resume from a completed step.
-
-When continuing with the same Archive again, Native will check the transaction and the actual file:
-
-- When the transaction is consistent with the file, proceed from the next step.
-- When the Change has been archived and the workspace closure fails, retain the archived result and return to the Git recovery action.
-- When both the active and archive directories exist simultaneously, retain the contents on both sides and wait for diagnosis.
-- When multiple changes modify the same Spec, wait for you to determine the archiving sequence.
-
-The failure to wrap up the workspace occurred after Archive. Change might have completed the archiving or Git commit. At this point, check the actual Git status according to the returned `recoveryArgs`, and then continue with the merge, push or PR process.
-
-If a project `commit-msg` hook rejects a message, the Agent keeps the hook enabled, corrects the unfinished step with `--commit-message` or `--merge-message`, and runs the current recovery command. Completed commits and Spec publication are preserved, and the delivery choice does not need confirmation again. Status and Doctor identify the unfinished step rather than trying to migrate an already archived Change as a missing directory.
-
-If you already completed a local commit or merge manually under the project conventions, run `doctor` for guidance. `doctor --repair` clears the local finish record only when the Runtime can prove that archive contents, the commit, and the selected finish conditions match. Archive still verifies remote push and PR results. An archive directory alone does not prove Git delivery is complete.
-
-## Verification report restoration
-
-`verification.md` is a readable projection of `comet-state.yaml`. When the report is missing, the write is interrupted, or the version is outdated, Native will regenerate the report based on the current state.
-
-If the report is missing but the state metadata and local execution records still corroborate each other, Comet rebuilds the report. If those execution records are also missing before Archive, Native returns to Verify to rerun checks and record the results.
-
-This distinction can preserve proven results while ensuring that the Archive uses reliable evidence on current devices and current code.
-
-## Situations that require user handling
-
-Native will pause when it automatically determines that it may cause error overwriting, duplicate side effects, or incorrect archiving. Common situations are as follows:
-
-| Status | What you need to decide or do |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| The workspace is not bound to Change                               | Confirm the correct branch or worktree                                              |
-| The same Spec has been modified by multiple changes                | Determine the Archive sequence                                                      |
-| Git synchronization causes conflicts                               | Merge the actual code and documentation content, and then continue the verification |
-| The execution result of the external operation cannot be confirmed | Check the remote status and then select Retry or continue                           |
-| Reach the upper limit of consecutive failures                      | Choose to continue with the current goal, adjust the requirements or stop           |
-| The active and archive directories report conflicting states | Preserve the directories and runtime state and run `comet native doctor`. |
-| The old version of Change needs to be migrated                     | Upgrade the status according to the migration actions provided by the Runtime       |
-
-`await-user` indicates that your choice is needed for the next step. `blocked` indicates that the current status lacks a safe advancement path. The Runtime will simultaneously return the cause, the party responsible for handling, and the actions allowed to be executed.
-
-## Status viewing and diagnosis
-
-Normal recovery is automatically completed by Native. When you want to view the current record or troubleshoot blockages, you can run:
+If a Supervisor Change has already provisioned its integration worktree and child worktrees and is currently in Child Build (before final parent Verify, integration, or parent repair), and you need to move all branches and uncommitted work to another machine or local checkout, run the transfer commands in your terminal. This is one of the few operations meant to be run directly in the terminal:
 
 ```bash
-comet native show <change-name>
-comet native status <change-name> --details --json
-comet native doctor <change-name>
+# 1. In the source checkout: confirm all child Builders and the Supervisor Agent have stopped, then export
+comet native transfer export <change-name> --output <new-private-directory> --confirmed-stopped
+
+# 2. In the destination checkout (must be on the same target baseline commit): import
+comet native transfer import --input <export-directory>
 ```
 
-`show` and `status` present the official artifacts, work areas, acceptance progress and next steps. `doctor` checks migration, transaction, directory and state consistency. `doctor --repair` is only used in cases where the diagnostic results clearly provide repair actions.
+The transfer bundle generates a manifest with SHA-256 hashes for all tracked files, untracked files, Git bundles, patches, and checkpoints. On import, Comet verifies the target branch, baseline commit, and every file hash, and rejects path traversal or symbolic links. Any Builder that was still running at export time is automatically marked `unknown` on import and must be reconciled before continuing.
 
-During the recovery process, let the Runtime manage `comet-state.yaml`, local execution records, locks, and transactions. Continuing according to the actions returned by `continuation`, `recoveryArgs` or `doctor` can preserve the confirmed progress and the fault scene.
+## Workspace and branch mismatch recovery
 
-Continue reading: [Task advancement and interruption recovery](/en/native/continuation-and-checkpoints), [Native Security Boundary](/en/native/safety-and-recovery), [Multi-Change Parallelism and Conflict Control](/en/native/multi-change-and-conflicts) and [Native artifacts and state](/en/native/artifacts-and-state).
+To prevent cross-directory mistakes, ordinary status checks and diagnostics inspect only the current workspace and **do not automatically scan every Git worktree on your machine**.
+
+- **Cannot find a worktree change from the main directory**: Switch your terminal or Agent to that change's worktree directory before continuing. Do not create a duplicate change with the same name in the main directory.
+- **Switched to the wrong local branch**:
+  - If the branch switch was accidental, switch back to the originally bound branch.
+  - If you intentionally want to take over the same idle Run on the current branch, tell the Agent "Take over this task on the current branch." After verifying there are no `running` or `unknown` actions, the Agent performs an explicit workspace rebind in the background while preserving existing edits and approvals. Rebinding is rejected if any action has an unverified outcome.
+
+## Recovering interrupted Archive, delivery, and cleanup
+
+The Native SDK archive pipeline runs in a fixed sequence:
+
+```text
+Parent delivery (Supervisor only) → Archive preflight → Apply Specs → Archive finalization & directory move → Temporary worktree cleanup (Supervisor only)
+```
+
+If power fails or a process exits mid-archive, ask the Agent to run diagnostics first, then recover safely based on where it stopped:
+
+| Interruption point / symptom | Handling and built-in safeguards |
+| --- | --- |
+| Archive preflight failed (for example, candidate code changed or directory/config mismatch) | Preflight is an idempotent read-only check. Fix the blocker (if candidate code changed, revise implementation and re-verify first), then resume archiving. |
+| Candidate code changed before archive finalization wrote changes | Restore the confirmed implementation and artifacts before resuming; the Runtime continues the original Spec transaction without reapplying Specs. |
+| Delivery, archive, or cleanup is the sole `unknown` action | After confirming the original process has stopped, the Agent runs archive recovery in the background to reconcile on-disk state and finish cleanly. |
+
+### Archive transaction recovery
+
+During archive recovery, the Runtime verifies on-disk evidence step by step instead of blindly replaying operations:
+
+- **Recovering parent delivery (Supervisor only)**: Marks the original action complete only if the target branch points to the exact verified integration commit. If the target branch has not advanced or has diverged, recovery refuses without re-running a fast-forward merge.
+- **Recovering Spec application and archive finalization**: Verifies the original Run, transaction log, candidate implementation, applied Specs, and verification report. Already-moved directories are not moved again; already-completed finalization is recorded solely from complete persisted evidence. If recovery only records or finishes archiving a previously verified candidate, the response explicitly notes that later edits were not re-verified.
+- **Recovering temporary worktree cleanup (Supervisor only)**: Proceeds only when temporary child worktrees and the integration worktree are completely clean and their branches are merged into the target commit. Any uncommitted changes preserve the worktree and reject deletion.
+- **Legacy compatibility mode (Compat) commit or merge message rejected by project Hooks**: When archiving with `--commit-message` or `--merge-message`, if a Git Hook rejects the message text, already-written Spec transactions and local code are preserved. Adjust the message according to the Hook output and rerun the unfinished archive or delivery step—Specs are not applied a second time.
+
+Note: `doctor --repair` does **not** execute SDK archive transactions. When an archive transaction is unfinished, resolve any environment issues first and then run archive recovery. Once archiving finishes, verify Git push, merge, or pull request state separately against the remote; see [Archive and delivery](/en/native/archive-and-delivery).
+
+## When you must stop for manual intervention
+
+`comet native doctor` strictly separates read-only diagnosis from explicit repair so troubleshooting never alters state unexpectedly. In the following high-risk situations, the Runtime stops and waits for manual inspection—**never delete directories or edit YAML files to bypass them**:
+
+- The same change exists in both the active and archive directories;
+- Configuration, `brief.md`, Spec, or checkpoint files are corrupted with no trusted source;
+- Active and history Run ownership records conflict and cannot be reconciled automatically;
+- The transaction log contradicts the files on disk.
+
+### Terminal read-only diagnostic commands (safe to run anytime)
+
+If you want to inspect status, blockers, and diagnostic codes outside chat, run these read-only commands in the project (or target worktree) root. They do not modify any files or state:
+
+```bash
+comet status
+comet native status <change-name> --details --json
+comet native doctor <change-name> --json
+```
+
+The mutating recovery and repair commands below are normally run by the Agent in the background and are listed for offline terminal troubleshooting:
+
+<Accordion title="Agent background recovery and offline repair command reference">
+
+### 1. Common recovery and repair commands
+
+| Command | Purpose | Boundary |
+| --- | --- | --- |
+| `comet native doctor <change> --repair --confirmed --json` | Restore a missing local Run from `run_checkpoint` in `comet-state.yaml` | Use only after read-only `doctor` returns `runtime-recovery-required`. |
+| `comet native doctor <change> --repair --json` | Finish remaining storage cleanup for an already completed or canceled Run | Does not execute SDK archive transactions and does not delete unfinished transactions. |
+| `comet native doctor --repair --strategy <continue\|rollback> --json` | Recover an interrupted `comet native root move` artifact root migration | Use only when a root migration was interrupted and config retains the unfinished marker. |
+| `comet native doctor --migrate-history --json` | Validate and close historical storage partitions for finished Runs whose workflow cleanup is complete | Cannot be combined with other mutating flags; upgrade CLI and platform Hooks first. |
+| `comet native select <change> --rebind --json` | Explicitly rebind an idle SDK Run to the current Git branch | Resolves `native-workspace-branch-mismatch`; allowed only when no actions are `running` or `unknown`. |
+| `comet native archive <change> --recover --json` | Reconcile and recover a sole `unknown` archive, delivery, or cleanup action | Confirm the original execution process has stopped first. |
+
+### 2. Builder / Verifier recovery commands (invoked by the Agent with current protection parameters)
+
+```bash
+# Continue in the original workspace after a partial Builder failure
+comet native next <change-name> --continue-builder --summary "<summary>" \
+  --proposal-hash <hash> --expected-state-version <n> --expected-action continue-builder
+
+# Retry a failed Verifier / resume after resolving an external blocker
+comet native next <change-name> --retry-verifier --summary "<summary>" \
+  --proposal-hash <hash> --expected-state-version <n> --expected-action retry-verifier
+comet native next <change-name> --resolve-verifier-blocker --summary "<summary>" \
+  --proposal-hash <hash> --expected-state-version <n> --expected-action resolve-verifier-blocker
+```
+
+### 3. Legacy archive transaction missing original Spec Git versions (`--legacy-spec-backup`)
+
+When recovering an older archive transaction that already wrote Specs, the Runtime first tries read-only hash matching against the Git index and `HEAD`. Only if an error explicitly reports missing Git versions for original Specs do you provide a pre-archive backup JSON (stored **outside the project directory** as a regular, non-symlink file) for the Agent to pass during recovery:
+
+```json
+{
+  "schema": "comet.native.archive-originals.v1",
+  "runId": "my-change",
+  "transactionId": "<original archive transaction ID>",
+  "files": [
+    {
+      "ref": "docs/comet/specs/example/spec.md",
+      "content": "# Example\nComplete Spec prior to archiving.\n"
+    }
+  ]
+}
+```
+
+```bash
+comet native archive my-change --legacy-spec-backup /absolute/path/original-specs.json
+# When the original action is unknown and you confirmed the original process has stopped
+comet native archive my-change --recover --legacy-spec-backup /absolute/path/original-specs.json
+```
+
+The Runtime validates `schema`, `runId`, `transactionId`, path ownership, original file hashes, and the complete candidate summary. The backup can only recover the originally verified candidate—it cannot approve new code edits or fabricate missing verification evidence.
 
 </Accordion>
+
+Continue reading: [Task progress and interruption recovery](/en/native/continuation-and-checkpoints), [Native Runtime protection and recovery](/en/native/safety-and-recovery), and [Parallel changes and conflict control](/en/native/multi-change-and-conflicts).

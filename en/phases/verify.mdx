@@ -28,7 +28,7 @@ flowchart TD
     Checks -->|Pass| Drift{"Spec drift?"}
     Drift -->|Needs correction| Repair
     Drift -->|Handled or absent| Report["Save verification_report"]
-    Report --> Guard["comet guard verify --apply"]
+    Report --> Guard["comet guard <name> verify --apply"]
     Guard --> Archive["phase: archive<br/>branch_status: pending"]
 ```
 
@@ -58,23 +58,26 @@ When spec drift needs realignment, verify does not load `brainstorming` directly
 - CRITICAL and IMPORTANT findings cannot be waived.
 - `verify-fail` preserves existing field values, but `branch_status` should remain `pending` throughout the normal Verify flow.
 
-## Save verification evidence
+## Save verification evidence and advance
 
-After verification passes, the Agent records the report path:
+After all checks pass, the Agent finishes two steps in the background (you do not need to run commands manually):
+
+1. Write the verification report and record its path (`verification_report`), while keeping `branch_status` set to `pending` (never mark the branch as handled during Verify).
+2. Run the phase guard to verify that the report exists on disk, then advance to `phase: archive` and record `verify_result: pass` and `verified_at`, leaving branch delivery for your confirmation in Archive.
+
+<Accordion title="Background command reference (run automatically by /comet-verify)">
 
 ```bash
+# Record the verification report path
 comet state set <change-name> verification_report docs/superpowers/reports/YYYY-MM-DD-<name>-verify.md
-```
 
-Do not write `branch_status: handled` in Verify, and do not set `verify_result: pass` by hand.
-
-The Agent then runs the phase guard, which moves the change into archive:
-
-```bash
+# Run the verify phase guard and advance to archive
 comet guard <change-name> verify --apply
 ```
 
-The guard requires the report to exist, then advances to `phase: archive` and records `verify_result: pass` and `verified_at`. `branch_status` stays `pending`; Archive handles it after the user confirms immediate remote delivery.
+Do not set `verify_result: pass` by hand, and do not write `branch_status: handled` during Verify.
+
+</Accordion>
 
 ## Spec drift
 
